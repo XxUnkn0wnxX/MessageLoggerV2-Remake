@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.0.7
+ * @version 2.8.0.0.8
  * @author Lighty, Davilarek, NightBirde
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
  * @invite NYvWdN5
@@ -366,7 +366,10 @@ module.exports = class MessageLoggerV2 {
       {
         title: 'Fixed',
         type: 'fixed',
-        items: ['Plugins has been completely refactored and is now purely BdApi based. Currently in open Beta testing phase. Please report bugs.']
+        items: [
+          'Squashed a few bugs and improved compatibility.',
+          'Plugins has been completely refactored and is now purely BdApi based. Currently in open Beta testing phase. Please report bugs.'          
+        ]
       }
     ];
   }
@@ -1904,12 +1907,14 @@ module.exports = class MessageLoggerV2 {
         setting.value = this.settings[config.parent][config.id];
         setting.onChange = val => {
           this.settings[config.parent][config.id] = val;
+          this.saveSettings();
         };
       }
       else if (config.customValue) {
         setting.value = this.settings[config.id];
         setting.onChange = val => {
           this.settings[config.id] = val;
+          this.saveSettings();
         };
       }
       else if (config.validator === 'number') {
@@ -1919,6 +1924,7 @@ module.exports = class MessageLoggerV2 {
           if (config.action && actions[config.action]) {
             actions[config.action](Number.parseInt(val));
           }
+          this.saveSettings();
         };
       }
       else if (!setting.onChange) {
@@ -2001,7 +2007,19 @@ module.exports = class MessageLoggerV2 {
       } catch { }
       if (loadedData) for (const k in data) loadedData[k] = data[k];
       const filePath = this.nodeModules.path.join(this.pluginDir, `${name}.config.json`);
-      await this.nodeModules.fs.promises.writeFile(filePath, JSON.stringify({ [key]: data }));
+      const serializedData = JSON.stringify({ [key]: data });
+      const fs = this.nodeModules.fs;
+      if (fs?.promises?.writeFile) {
+        await fs.promises.writeFile(filePath, serializedData, "utf8");
+      } else if (typeof fs?.writeFile === "function") {
+        await new Promise((resolve, reject) =>
+          fs.writeFile(filePath, serializedData, "utf8", err => (err ? reject(err) : resolve()))
+        );
+      } else if (typeof fs?.writeFileSync === "function") {
+        fs.writeFileSync(filePath, serializedData, "utf8");
+      } else {
+        throw new TypeError("No supported filesystem write method");
+      }
       if (callback) callback(null);
     } catch (e) {
       UI.showToast('There has been an error saving the data file', { type: "error" });
@@ -2553,8 +2571,10 @@ module.exports = class MessageLoggerV2 {
    */
   _sortMessagesById(messages) {
     messages.sort((a, b) => {
-      if (a.id > b.id) return -1;
-      if (a.id < b.id) return 1;
+      const aId = BigInt(a.id);
+      const bId = BigInt(b.id);
+      if (aId > bId) return -1;
+      if (aId < bId) return 1;
       return 0;
     });
   }
@@ -2900,8 +2920,10 @@ module.exports = class MessageLoggerV2 {
         return [];
       }
       const sorted = [...ids].sort((a, b) => {
-        if (a > b) return 1;
-        if (a < b) return -1;
+        const aId = BigInt(a);
+        const bId = BigInt(b);
+        if (aId > bId) return 1;
+        if (aId < bId) return -1;
         return 0;
       });
       cache.set(channelId, sorted);
