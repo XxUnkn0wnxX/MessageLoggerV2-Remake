@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.0.8
+ * @version 2.8.0.0.9
  * @author Lighty, Davilarek, NightBirde
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
  * @invite NYvWdN5
@@ -2955,11 +2955,11 @@ module.exports = class MessageLoggerV2 {
     return result;
   }
   reAddDeletedMessages(messages, deletedMessages, channelStart, channelEnd) {
-    if (!messages.length || !deletedMessages.length) return;
+    if (!deletedMessages.length) return;
     const DISCORD_EPOCH = 14200704e5;
     const existingMessageIds = new Set(messages.map(e => e.id));
-    const lowestTime = (Number(messages[messages.length - 1].id) / 4194304) + DISCORD_EPOCH;
-    const highestTime = (Number(messages[0].id) / 4194304) + DISCORD_EPOCH;
+    const lowestTime = messages.length ? (Number(messages[messages.length - 1].id) / 4194304) + DISCORD_EPOCH : Infinity;
+    const highestTime = messages.length ? (Number(messages[0].id) / 4194304) + DISCORD_EPOCH : 0;
     const ensureUserCleaned = (record) => {
       if (record._usersCleaned) return;
       const message = record.message;
@@ -3541,8 +3541,19 @@ module.exports = class MessageLoggerV2 {
         const deletedMessages = this.deletedMessageRecord[channel.id];
         const purgedMessages = this.purgedMessageRecord[channel.id];
         if ((!deletedMessages && !purgedMessages) || (!this.settings.showPurgedMessages && !this.settings.showDeletedMessages)) return callDefault(...args);
+        const wasEmpty = dispatch.messages.length === 0;
         if (this.settings.showDeletedMessages && deletedMessages) this.reAddDeletedMessages(dispatch.messages, deletedMessages, !dispatch.hasMoreAfter && !dispatch.isBefore, !dispatch.hasMoreBefore && !dispatch.isAfter);
         if (this.settings.showPurgedMessages && purgedMessages) this.reAddDeletedMessages(dispatch.messages, purgedMessages, !dispatch.hasMoreAfter && !dispatch.isBefore, !dispatch.hasMoreBefore && !dispatch.isAfter);
+        if (wasEmpty && dispatch.messages.length > 0) {
+          if (!this._refreshedEmptyChannels) this._refreshedEmptyChannels = new Set();
+          if (!this._refreshedEmptyChannels.has(channel.id)) {
+            this._refreshedEmptyChannels.add(channel.id);
+            setImmediate(() => {
+              this.invalidateChannelCache(channel.id);
+              this.cacheChannelMessages(channel.id);
+            });
+          }
+        }
         return callDefault(...args);
       }
       const notificationsBlacklisted = this.settings.notificationBlacklist.includes(channel.id) || (guild && this.settings.notificationBlacklist.includes(guild.id));
