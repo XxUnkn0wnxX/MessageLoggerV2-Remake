@@ -1,9 +1,10 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.0.9
+ * @version 2.8.0.0.10
  * @author Lighty, Davilarek, NightBirde
+ * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
- * @invite NYvWdN5
+ * @invite e66JbKte2P
  * @source https://git.slowb.ro/NightBirde/MessageLoggerV2-Remake/src/branch/main/MessageLoggerV2.plugin.js
  * @updateUrl https://git.slowb.ro/NightBirde/MessageLoggerV2-Remake/raw/branch/main/MessageLoggerV2.plugin.js
  */
@@ -367,6 +368,7 @@ module.exports = class MessageLoggerV2 {
         title: 'Fixed',
         type: 'fixed',
         items: [
+          `Addedd an option to limit maximum cache file size to settings. Set to 0 to disable limit.`,
           'Squashed a few bugs and improved compatibility.',
           'Plugins has been completely refactored and is now purely BdApi based. Currently in open Beta testing phase. Please report bugs.'          
         ]
@@ -599,6 +601,7 @@ module.exports = class MessageLoggerV2 {
         showContextMenu: false
       },
       imageCacheDir: this.pluginDir + '/MLV2_IMAGE_CACHE',
+      maxCacheFileSize: 0,
       flags: 0,
       autoUpdate: true,
       versionInfo: ''
@@ -1336,16 +1339,16 @@ module.exports = class MessageLoggerV2 {
                       max-width: 85vw;
                     }
                     .${this.style.menuRoot} .markup-eYLPri {
-                      color: var(--text-normal) !important;
+                      color: var(--text-default) !important;
                     }
                     .${this.style.menuRoot} .username-h_Y3Us {
-                      color: var(--header-primary) !important;
+                      color: var(--mobile-text-heading-primary) !important;
                     }
                     .${this.style.menuRoot} .timestamp-p1Df1m {
                       color: var(--text-muted) !important;
                     }
-                    .${this.style.toolbarButton} { color: var(--interactive-normal); cursor: pointer; }
-                    .${this.style.toolbarButton}:hover { color: var(--interactive-hover); }
+                    .${this.style.toolbarButton} { color: var(--interactive-text-default); cursor: pointer; }
+                    .${this.style.toolbarButton}:hover { color: var(--interactive-text-hover); }
                     #${this.style.filter} {
                       opacity: 1;
                     }
@@ -1364,9 +1367,9 @@ module.exports = class MessageLoggerV2 {
                       box-sizing: border-box;
                       width: 100%;
                       border-radius: 3px;
-                      color: var(--text-normal);
-                      background-color: var(--deprecated-text-input-bg);
-                      border: 1px solid var(--deprecated-text-input-border);
+                      color: var(--text-default);
+                      background-color: var(--background-surface-high);
+                      border: 1px solid var(--border-subtle);
                       -webkit-transition: border-color .2s ease-in-out;
                       transition: border-color .2s ease-in-out;
                       display: -webkit-box;
@@ -1410,10 +1413,10 @@ module.exports = class MessageLoggerV2 {
                       padding: 0;
                       min-width: 0;
                       min-height: 0;
-                      background-color: var(--brand-experiment);
+                      background-color: var(--brand-500);
                     }
                     .${this.style.tabBarContainer} {
-                      border-bottom: 1px solid var(--background-modifier-accent);
+                      border-bottom: 1px solid var(--background-accent);
                       padding-left: 20px;
                     }
                     .${this.style.tabBar} {
@@ -1757,6 +1760,12 @@ module.exports = class MessageLoggerV2 {
             customValue: true
           },
           {
+            name: 'Max cache file size (MB, 0 = no limit)',
+            note: 'Files larger than this will not be cached',
+            id: 'maxCacheFileSize',
+            type: 'textbox'
+          },
+          {
             name: 'Display open logs button next to the search box top right in channels',
             id: 'showOpenLogsButton',
             type: 'switch',
@@ -1957,9 +1966,7 @@ module.exports = class MessageLoggerV2 {
       })
     );
     div.appendChild(
-      this.createButton('Support server', () => {
-        UI.showToast("This doesn't work on purpose.", { type: "info" });
-      })
+      this.createButton('Support server', () => UI.showInviteModal('e66JbKte2P'))
     );
     div.appendChild(this.createButton('Help', () => this.showLoggerHelpModal()));
     let button = div.firstElementChild;
@@ -3221,7 +3228,7 @@ module.exports = class MessageLoggerV2 {
         return setTimeout(() => this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts), 1000);
       }
       const arrayBuffer = await response.arrayBuffer();
-      const finalData = Buffer.from(arrayBuffer);
+      const finalData = new Uint8Array(arrayBuffer);
       let match = new URL(url).pathname.match(/\.[0-9a-z]+$/i);
       if (match == null) {
         match = [this.contentTypeToExtension(response.headers.get("content-type"))];
@@ -3271,6 +3278,11 @@ module.exports = class MessageLoggerV2 {
       const embeds = message.embeds || [];
       for (let i = 0; i < attachments.length; i++) {
         const attachment = attachments[i];
+        const maxSize = this.settings.maxCacheFileSize * 1024 * 1024;
+        if (maxSize > 0 && attachment.size && attachment.size > maxSize) {
+          console.log(`[${this.getName()}]`, `Skipping cache for ${attachment.filename}: ${(attachment.size / 1024 / 1024).toFixed(2)}MB exceeds limit`);
+          continue;
+        }
         if (this.isImage(attachment.url) || this.settings.newSaveAllFileTypes) {
           this.cacheImage(attachment.url, i, attachment.id, message.id, message.channel_id, this.settings.newCacheAllImages === true ? message.guild_id : undefined);
         }
@@ -4986,7 +4998,7 @@ module.exports = class MessageLoggerV2 {
       const confirmMessage = `Are you sure you want to delete all ${type}${filterSuffix}?`;
       const modalChildren = Text ?
         React.createElement(Text, { variant: "text-md/normal", children: [confirmMessage] }) :
-        React.createElement('div', { style: { color: 'var(--text-normal)' } }, confirmMessage);
+        React.createElement('div', { style: { color: 'var(--text-default)' } }, confirmMessage);
       this.createModal({
         header: 'Clear log',
         children: modalChildren,
@@ -5363,7 +5375,7 @@ module.exports = class MessageLoggerV2 {
               const responseBuffer = await response.arrayBuffer();
               cb({
                 statusCode: response.status,
-                chunksArr: Buffer.from(responseBuffer),
+                chunksArr: new Uint8Array(responseBuffer),
               });
             } catch (error) {
               console.error('[MLV2] Image fetch failed:', error);
