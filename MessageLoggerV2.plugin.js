@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.0.10
+ * @version 2.8.0.1.0
  * @author Lighty, Davilarek, NightBirde
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -9,7 +9,7 @@
  * @updateUrl https://git.slowb.ro/NightBirde/MessageLoggerV2-Remake/raw/branch/main/MessageLoggerV2.plugin.js
  */
 const REPO_MAIN_URL = "https://git.slowb.ro/NightBirde/MessageLoggerV2-Remake/raw/branch/main/";
-const { React, ReactDOM, Webpack, UI, Plugins, DOM, Patcher, Components, ContextMenu, Utils, Hooks, ReactUtils } = new BdApi('MessageLoggerV2');
+const { React, ReactDOM, Webpack, UI, Plugins, DOM, Patcher, Components, ContextMenu, Utils, Hooks, ReactUtils, Logger } = new BdApi('MessageLoggerV2');
 const { Data } = BdApi;
 const { Filters } = Webpack;
 const DiscordModules = (() => {
@@ -18,7 +18,7 @@ const DiscordModules = (() => {
     get() {
       if (cache[key] === undefined) {
         try { cache[key] = getter() ?? null; }
-        catch (e) { console.error(`[MLV2] Failed to load module: ${key}`, e); cache[key] = null; }
+        catch (e) { Logger.error(`Failed to load module: ${key}`, e); cache[key] = null; }
       }
       return cache[key];
     },
@@ -37,7 +37,6 @@ const DiscordModules = (() => {
     HistoryUtils: lazyGet('HistoryUtils', () => Webpack.getByKeys('getHistory')),
     HttpModule: lazyGet('HttpModule', () => Webpack.getByKeys('get', 'post', 'put', 'delete')),
     Endpoints: lazyGet('Endpoints', () => Webpack.getByKeys('Endpoints', 'ActionTypes')),
-    ImageErrorClasses: lazyGet('ImageErrorClasses', () => Webpack.getByKeys('imageError')),
     ClickableClasses: lazyGet('ClickableClasses', () => Webpack.getByKeys('clickable')),
     ColorClasses: lazyGet('ColorClasses', () => Webpack.getByKeys('colorDanger', 'colorPremium')),
     ButtonClasses: lazyGet('ButtonClasses', () => Webpack.getByKeys('button', 'colorBrand', 'lookFilled')),
@@ -248,7 +247,7 @@ module.exports = class MessageLoggerV2 {
           this.initialize();
         }
       } catch (err) {
-        console.error(`[${this.getName()}] Failed to start!`, err);
+        Logger.error('Failed to start!', err);
         this.stop();
         UI.showToast(`[**${this.getName()}**] Failed to start!`, { type: 'error', timeout: 0 });
       }
@@ -331,20 +330,20 @@ module.exports = class MessageLoggerV2 {
               unpatch();
             }
           } catch (err) {
-            console.error(`[${this.getName()}] Error unpatching:`, err);
+            Logger.error('Error unpatching:', err);
           }
         }
         this.unpatches = [];
       }
       Patcher.unpatchAll();
-      console.log('[MessageLoggerV2] All patches removed, forcing UI update to clear...');
+      Logger.log('All patches removed, forcing UI update to clear...');
       this.forceUpdateUI();
       if (this.menu) {
         this.menu.open = false;
         this.menu.deleteKeyDown = false;
       }
     } catch (err) {
-      console.error(`[${this.getName()}] Error during cleanup:`, err);
+      Logger.error('Error during cleanup:', err);
     }
   }
   checkVersionNewer(current, remote) {
@@ -365,30 +364,34 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
+        title: 'Added',
+        type: 'added',
+        items: [
+          'Video attachments now display with play button overlay and can be played in modal viewer',
+          `Added an option to limit maximum cache file size to settings. Set to 0 to disable limit.`
+        ]
+      },
+      {
         title: 'Fixed',
         type: 'fixed',
         items: [
-          `Addedd an option to limit maximum cache file size to settings. Set to 0 to disable limit.`,
-          'Squashed a few bugs and improved compatibility.',
-          'Plugins has been completely refactored and is now purely BdApi based. Currently in open Beta testing phase. Please report bugs.'          
+          'Squashed a few bugs and improved BdApi usage.',
+          'Plugin has been completely refactored and is now purely BdApi based. Currently in open Beta testing phase. Please report bugs.'          
         ]
       }
     ];
   }
+  
   async checkNewUpdate(showNoUpdateNotice = false) {
     if (this.alreadyTestedForUpdate) return;
     this.alreadyTestedForUpdate = true;
-
     try {
       const updateUrl = `${REPO_MAIN_URL}${this.getName()}.plugin.js`;
-      console.log(`[${this.getName()}] Checking for updates at:`, updateUrl);
-
+      Logger.log('Checking for updates at:', updateUrl);
       const response = await BdApi.Net.fetch(updateUrl, {
         headers: { 'User-Agent': 'BetterDiscord' }
       });
-
-      console.log(`[${this.getName()}] Update check response:`, response.status, response.statusText);
-
+      Logger.log('Update check response:', response.status, response.statusText);
       if (!response.ok) {
         if (showNoUpdateNotice) {
           UI.showToast(`[${this.getName()}] Failed to check for updates (${response.status})`, {
@@ -398,11 +401,9 @@ module.exports = class MessageLoggerV2 {
         }
         return;
       }
-
       const remoteContent = await response.text();
       const remoteVersion = this.getVersionFromContent(remoteContent);
       const currentVersion = this.getVersion();
-
       if (this.checkVersionNewer(currentVersion, remoteVersion)) {
         UI.showNotification({
           title: `${this.getName()} Update Available`,
@@ -425,7 +426,7 @@ module.exports = class MessageLoggerV2 {
         });
       }
     } catch (error) {
-      console.error(`[${this.getName()}] Update check failed:`, error);
+      Logger.error('Update check failed:', error);
       if (showNoUpdateNotice) {
         UI.showToast(`[${this.getName()}] Failed to check for updates`, {
           type: "error",
@@ -459,7 +460,7 @@ module.exports = class MessageLoggerV2 {
               Plugins.reload(this.getName());
             }, 1000);
           } catch (error) {
-            console.error(`[${this.getName()}] Update failed:`, error);
+            Logger.error('Update failed:', error);
             UI.showToast(`[${this.getName()}] Update failed! Check console for details.`, {
               type: "error",
               timeout: 0
@@ -474,17 +475,17 @@ module.exports = class MessageLoggerV2 {
   }
   forceUpdateUI() {
     try {
-      console.log('[MessageLoggerV2] Forcing UI update...');
+      Logger.log('Forcing UI update...');
       const rootElement = document.getElementById("app-mount");
       if (!rootElement) {
-        console.error('[MessageLoggerV2] Could not find app-mount element');
+        Logger.error('Could not find app-mount element');
         return;
       }
       const containerKey = Object.keys(rootElement).find((k) =>
         k.startsWith("__reactContainer$")
       );
       if (!containerKey) {
-        console.error('[MessageLoggerV2] Could not find React container key');
+        Logger.error('Could not find React container key');
         return;
       }
       const target = Utils.findInTree(
@@ -493,22 +494,22 @@ module.exports = class MessageLoggerV2 {
         { walkable: ["child"] }
       );
       if (!target || !target.stateNode) {
-        console.error('[MessageLoggerV2] Could not find React component');
+        Logger.error('Could not find React component');
         return;
       }
       const { render } = target.stateNode;
       if (render.toString().includes("null")) {
-        console.log('[MessageLoggerV2] Render already null, skipping');
+        Logger.log('Render already null, skipping');
         return;
       }
       target.stateNode.render = () => null;
       target.stateNode.forceUpdate(() => {
         target.stateNode.render = render;
         target.stateNode.forceUpdate();
-        console.log('[MessageLoggerV2] UI force update completed');
+        Logger.log('UI force update completed');
       });
     } catch (e) {
-      console.error('[MessageLoggerV2] Failed to force UI update:', e);
+      Logger.error('Failed to force UI update:', e);
     }
   }
   initialize() {
@@ -528,7 +529,7 @@ module.exports = class MessageLoggerV2 {
       UI.showToast(`[**${this.getName()}**] Using **SuppressUserMentions** with **${this.getName()}** is completely unsupported and will cause issues. Please either disable **SuppressUserMentions** or delete it to avoid issues.`, { type: "warning" });
     const missingCritical = DiscordModules._validateCritical();
     if (missingCritical.length) {
-      console.error(`[${this.getName()}] Critical Discord modules missing:`, missingCritical);
+      Logger.error('Critical Discord modules missing:', missingCritical);
       UI.showToast(`[**${this.getName()}**] Warning: Some Discord modules failed to load (${missingCritical.join(', ')}). Some features may not work correctly.`, { type: 'warning', timeout: 10000 });
     }
     const defaultSettings = {
@@ -647,7 +648,7 @@ module.exports = class MessageLoggerV2 {
       path: require('path')
     };
     const guildStore_ = DiscordModules.GuildStore;
-    this.missingImagePlaceholder = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    this.missingImagePlaceholder = this.errorImage;
     this.imageCacheServerSimulator = {
       "cached": {},
       "getMissingPlaceholder": () => this.missingImagePlaceholder,
@@ -682,9 +683,10 @@ module.exports = class MessageLoggerV2 {
             if (!this.nodeModules.fs.existsSync(pathname))
               pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId})` + parsedFile.ext);
             if (!this.nodeModules.fs.existsSync(pathname))
-              pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId}${this.settings.addUserIdToSavedMediaFilename === true ? (" by " + this.messageRecord[messageId].message.author.id) : ""})` + parsedFile.ext);
+              pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId}${(this.settings.addUserIdToSavedMediaFilename && this.messageRecord[messageId]?.message?.author?.id) ? (" by " + this.messageRecord[messageId].message.author.id) : ""
+              })` + parsedFile.ext);
             if (!this.nodeModules.fs.existsSync(pathname)) {
-              console.warn(`[MLV2] Cached image not found: ${attachmentId}`);
+              Logger.warn(`Cached image not found: ${attachmentId}`);
               this.imageCacheServerSimulator.cached[path] = this.missingImagePlaceholder;
               return this.imageCacheServerSimulator.cached[path];
             }
@@ -698,7 +700,7 @@ module.exports = class MessageLoggerV2 {
             this.imageCacheServerSimulator.cached[path] = dataUri;
           }
           catch (e) {
-            console.warn(`[MLV2] Error loading cached image:`, e.message);
+            Logger.warn('Error loading cached image:', e.message);
             this.imageCacheServerSimulator.cached[path] = this.missingImagePlaceholder;
             return this.imageCacheServerSimulator.cached[path];
           }
@@ -992,7 +994,7 @@ module.exports = class MessageLoggerV2 {
                 );
                 if (openerFunc) {
                   this._nativeMediaModal = { openMediaModal: openerFunc, module };
-                  console.log('[MLV2] Found native media modal');
+                  Logger.log('Found native media modal');
                   return this._nativeMediaModal;
                 }
               }
@@ -1000,7 +1002,7 @@ module.exports = class MessageLoggerV2 {
             }
           }
         } catch (e) {
-          console.error('[MLV2] Error finding native media modal:', e);
+          Logger.error('Error finding native media modal:', e);
         }
         return null;
       },
@@ -1020,13 +1022,13 @@ module.exports = class MessageLoggerV2 {
               const ImageModal = Object.values(module).find(filterFunc);
               if (ImageModal) {
                 this._imageModal = ImageModal;
-                console.log(`[MLV2] Found ImageModal using pattern: ${pattern}`);
+                Logger.log(`Found ImageModal using pattern: ${pattern}`);
                 return this._imageModal;
               }
             }
           }
         } catch (e) {
-          console.error("[MLV2] Error getting image modal", e);
+          Logger.error('Error getting image modal', e);
           this._imageModal = null;
         }
         return this._imageModal;
@@ -1245,6 +1247,7 @@ module.exports = class MessageLoggerV2 {
     this.style.menuRoot = this.obfuscatedClass('MLv2-menu-root');
     this.style.toolbarButton = this.obfuscatedClass('MLv2-toolbar-button');
     this.style.imageRoot = this.obfuscatedClass('MLv2-image-root');
+    this.style.imageError = this.obfuscatedClass('MLv2-image-error');
     this.style.inputWrapper = this.obfuscatedClass('MLv2-input-wrapper');
     this.style.multiInput = this.obfuscatedClass('MLv2-input');
     this.style.multiInputFirst = this.obfuscatedClass('MLv2-input-first');
@@ -1507,15 +1510,15 @@ module.exports = class MessageLoggerV2 {
       })
     );
     this.patchContextMenus();
-    console.log('[MessageLoggerV2] All patches applied, forcing UI update...');
+    Logger.log('All patches applied, forcing UI update...');
     setTimeout(() => {
       this.forceUpdateUI();
       setTimeout(() => {
         this.__fullyInitialized = true;
-        console.log('[MessageLoggerV2] Fully initialized, dispatcher patch now active');
+        Logger.log('Fully initialized, dispatcher patch now active');
       }, 500);
     }, 100);
-    console.log('[MessageLoggerV2] initialize() about to return...');
+    Logger.log('initialize() about to return...');
     if (!(this.settings.flags & Flags.STARTUP_HELP)) {
       this.settings.flags |= Flags.STARTUP_HELP;
       this.showLoggerHelpModal(true);
@@ -1551,7 +1554,7 @@ module.exports = class MessageLoggerV2 {
             this.noTintIds = new Set();
             this.editModifiers = {};
           }
-          if (!this.selectedChannel) return console.warn(`[${this.getName()}]`, 'Chat was loaded but no text channel is selected');
+          if (!this.selectedChannel) return Logger.warn('Chat was loaded but no text channel is selected');
           if (isTitle && !isChat) return;
           const showStuff = (map, name) => {
             if (map[this.selectedChannel.id]) {
@@ -1568,7 +1571,7 @@ module.exports = class MessageLoggerV2 {
           if (this.settings.showDeletedCount) showStuff(this.deletedChatMessagesCount, 'deleted');
           if (this.settings.showEditedCount) showStuff(this.editedChatMessagesCount, 'edited');
         } catch (e) {
-          console.error(`[${this.getName()}] ${'Error in observer'}`, e);
+          Logger.error('Error in observer', e);
         }
         break;
       }
@@ -1990,7 +1993,7 @@ module.exports = class MessageLoggerV2 {
     const callback = err => {
       if (err) {
         UI.showToast('There has been an error saving the data file', { type: "error" });
-        console.error(`[${this.getName()}] ${'There has been an error saving the data file'}`, err);
+        Logger.error('There has been an error saving the data file', err);
       }
       if (this.settings.autoBackup) {
         if (this.saveBackupTimeout) this.autoBackupSaveInterupts++;
@@ -2030,7 +2033,7 @@ module.exports = class MessageLoggerV2 {
       if (callback) callback(null);
     } catch (e) {
       UI.showToast('There has been an error saving the data file', { type: "error" });
-      console.error(`[${this.getName()}] Error saving data file`, e);
+      Logger.error('Error saving data file', e);
       if (callback) callback(e);
     }
   }
@@ -2038,7 +2041,7 @@ module.exports = class MessageLoggerV2 {
     const callback = err => {
       if (err) {
         UI.showToast('There has been an error saving the data file', { type: "error" });
-        console.error(`[${this.getName()}] Error saving backup file`, err);
+        Logger.error('Error saving backup file', err);
       }
       this.saveBackupTimeout = 0;
       this.autoBackupSaveInterupts = 0;
@@ -2181,7 +2184,7 @@ module.exports = class MessageLoggerV2 {
     try {
       const markup = document.createElement('div');
       if (!this.tools.parse) {
-        console.warn('[MessageLoggerV2] Parse function not available, using fallback');
+        Logger.warn('Parse function not available, using fallback');
         markup.textContent = content;
         return markup;
       }
@@ -2209,7 +2212,7 @@ module.exports = class MessageLoggerV2 {
             markup.__react_root.unmount();
             markup.__react_root = null;
           }
-        } catch (e) { console.error('[MessageLoggerV2] cleanup error:', e) }
+        } catch (e) { Logger.error('cleanup error:', e) }
         if (observer) observer.disconnect();
       };
       const observer = new MutationObserver((mutations) => {
@@ -2229,7 +2232,7 @@ module.exports = class MessageLoggerV2 {
       });
       return child;
     } catch (e) {
-      console.error('[MessageLoggerV2] formatMarkup error:', e);
+      Logger.error('formatMarkup error:', e);
       const fallback = document.createElement('div');
       fallback.textContent = content;
       return fallback;
@@ -2616,6 +2619,18 @@ module.exports = class MessageLoggerV2 {
   }
   isImage(url) {
     const regexForTest = /\.(jpe?g|png|gif|bmp|webp)$/i;
+    const asUrl = (() => {
+      try {
+        return new URL(url);
+      }
+      catch {
+        return { pathname: "nope" };
+      }
+    })();
+    return regexForTest.test(url) || regexForTest.test(asUrl.pathname);
+  }
+  isVideo(url) {
+    const regexForTest = /\.(mp4|webm|mov|avi|mkv)$/i;
     const asUrl = (() => {
       try {
         return new URL(url);
@@ -3109,6 +3124,42 @@ module.exports = class MessageLoggerV2 {
     const ModalActions = this.ModalStack;
     if (options.size)
       options.size = this.getKeyByValue(this.createModal.confirmationModal.Sizes, options.size).toLowerCase();
+    const item = options.items?.[0] || options;
+    const isVideo = item.type === "VIDEO";
+    if (isVideo) {
+      ModalActions.openModal(props =>
+        React.createElement(
+          this.tools.resolvedModalStuff.ModalRoot,
+          {
+            ...props,
+            size: this.tools.resolvedModalStuff.ModalSize.LARGE,
+            style: { padding: 0, backgroundColor: 'transparent' }
+          },
+          React.createElement('div', {
+            style: {
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              backgroundColor: 'rgba(0, 0, 0, 0.85)',
+              borderRadius: '8px',
+              padding: '8px'
+            }
+          },
+            React.createElement('video', {
+              src: item.url || item.src,
+              controls: true,
+              autoPlay: true,
+              style: {
+                maxWidth: '90vw',
+                maxHeight: '80vh',
+                borderRadius: '4px'
+              }
+            })
+          )
+        ), { modalKey: name }
+      );
+      return;
+    }
     if (image) {
       const nativeModal = this.tools.getNativeMediaModal();
       if (nativeModal?.openMediaModal) {
@@ -3131,10 +3182,9 @@ module.exports = class MessageLoggerV2 {
         this.createModal.imageModal = this.tools.findImageModal() ?? this.createModal.imageModal;
       }
       if (!this.createModal.imageModal) {
-        console.error("[MLV2] Image modal not found, cannot display image");
+        Logger.error('Image modal not found, cannot display image');
         return;
       }
-      const item = options.items?.[0] || options;
       const imageProps = {
         src: item.url || item.src,
         original: item.original || item.url || item.src,
@@ -3217,12 +3267,12 @@ module.exports = class MessageLoggerV2 {
       const response = await fetch(url);
       if (!response.ok) {
         if (response.status === 404 || response.status === 403) {
-          console.warn(`[${this.getName()}]`, `Image ${attachmentId} unavailable (${response.status}), skipping cache`);
+          Logger.warn(`Image ${attachmentId} unavailable (${response.status}), skipping cache`);
           return;
         }
         attempts++;
         if (attempts > 3) {
-          console.warn(`[${this.getName()}]`, `Failed to get image ${attachmentId} for caching, error code ${response.status}`);
+          Logger.warn(`Failed to get image ${attachmentId} for caching, error code ${response.status}`);
           return;
         }
         return setTimeout(() => this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts), 1000);
@@ -3235,23 +3285,24 @@ module.exports = class MessageLoggerV2 {
       }
       const fileExtension = match[0];
       if (!fileExtension) {
-        console.warn(`[${this.getName()}]`, `Could not determine file extension for ${attachmentId}, skipping cache`);
+        Logger.warn(`Could not determine file extension for ${attachmentId}, skipping cache`);
         return;
       }
       if (!Number(attachmentId)) attachmentId = messageId;
       if (this.settings.newCacheAllImages === true) {
         const filePath = this.imageCacheServerSimulator.resolveNewCachePath({ channelId: channelId, serverId: serverId });
         this.nodeModules.fs.mkdirSync(filePath, { recursive: true });
-        this.nodeModules.fs.writeFileSync(filePath + `/${attachmentId} (${messageId}${this.settings.addUserIdToSavedMediaFilename === true ? (" by " + this.messageRecord[messageId].message.author.id) : ""})${fileExtension}`, finalData, { encoding: null });
+        this.nodeModules.fs.writeFileSync(filePath + `/${attachmentId} (${messageId}${(this.settings.addUserIdToSavedMediaFilename && this.messageRecord[messageId]?.message?.author?.id) ? (" by " + this.messageRecord[messageId].message.author.id) : ""
+        })${fileExtension}`, finalData, { encoding: null });
       }
       else {
         this.nodeModules.fs.writeFileSync(this.settings.imageCacheDir + `/${attachmentId}${fileExtension}`, finalData, { encoding: null });
       }
-      console.log(`[${this.getName()}]`, `Cached image: ${attachmentId}${fileExtension}`);
+      Logger.log(`Cached image: ${attachmentId}${fileExtension}`);
     } catch (e) {
       attempts++;
       if (attempts > 3) {
-        console.error(`[${this.getName()}]`, `Failed to cache image ${attachmentId}:`, e.message);
+        Logger.error(`Failed to cache image ${attachmentId}:`, e.message);
         return;
       }
       setTimeout(() => this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts), 1000);
@@ -3280,7 +3331,7 @@ module.exports = class MessageLoggerV2 {
         const attachment = attachments[i];
         const maxSize = this.settings.maxCacheFileSize * 1024 * 1024;
         if (maxSize > 0 && attachment.size && attachment.size > maxSize) {
-          console.log(`[${this.getName()}]`, `Skipping cache for ${attachment.filename}: ${(attachment.size / 1024 / 1024).toFixed(2)}MB exceeds limit`);
+          Logger.log(`Skipping cache for ${attachment.filename}: ${(attachment.size / 1024 / 1024).toFixed(2)}MB exceeds limit`);
           continue;
         }
         if (this.isImage(attachment.url) || this.settings.newSaveAllFileTypes) {
@@ -3392,7 +3443,7 @@ module.exports = class MessageLoggerV2 {
       if (!this.settings.cacheAllImages) return;
       for (let id in this.editHistoryAntiSpam) if (Date.now() - this.editHistoryAntiSpam[id].times[0] < 10 * 60 * 1000) delete this.editHistoryAntiSpam[id];
     } catch (e) {
-      console.error(`[${this.getName()}] ${'Error clearing out data'}`, e);
+      Logger.error('Error clearing out data', e);
     }
   }
   onDispatchEvent(args, callDefault) {
@@ -3742,7 +3793,7 @@ module.exports = class MessageLoggerV2 {
         return callDefault(...args);
       } else return callDefault(...args);
     } catch (err) {
-      console.error(`[${this.getName()}] ${'Error in onDispatchEvent'}`, err);
+      Logger.error('Error in onDispatchEvent', err);
     }
     return ret;
   }
@@ -3933,7 +3984,7 @@ module.exports = class MessageLoggerV2 {
         if (!hasDeletedInChannel && !hasPurgedInChannel) return;
         this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' });
       } catch (e) {
-        console.warn(`[${this.getName()}] Could not force reload messages:`, e);
+        Logger.warn('Could not force reload messages:', e);
       }
     });
   }
@@ -3964,17 +4015,17 @@ module.exports = class MessageLoggerV2 {
       const args = arg.split(' ');
       const module = Webpack.getByKeys(...args);
       if (!module) {
-        console.warn(`[MessageLoggerV2] getDiscordClass: No module found for keys: ${args.join(', ')}`);
+        Logger.warn(`getDiscordClass: No module found for keys: ${args.join(', ')}`);
         return '';
       }
       const result = module[args[args.length - 1]] || '';
       if (!result) {
-        console.warn(`[MessageLoggerV2] getDiscordClass: Module found but key '${args[args.length - 1]}' is empty. Available keys:`, Object.keys(module));
+        Logger.warn(`getDiscordClass: Module found but key '${args[args.length - 1]}' is empty. Available keys:`, Object.keys(module));
       }
       return result;
     } catch (e) {
       if (thrw) throw e;
-      console.warn(`Failed to get class with props ${arg}`, e);
+      Logger.warn(`Failed to get class with props ${arg}`, e);
       return '';
     }
   }
@@ -3983,7 +4034,7 @@ module.exports = class MessageLoggerV2 {
       return this.getDiscordClass(arg, thrw).split(' ')[0];
     } catch (e) {
       if (thrw) throw e;
-      console.warn(`Failed to get single class with props ${arg}`, e);
+      Logger.warn(`Failed to get single class with props ${arg}`, e);
       return '';
     }
   }
@@ -4285,10 +4336,10 @@ module.exports = class MessageLoggerV2 {
     }
     const messageContext = e => {
       let target = e.target;
-      if (!target.classList.contains('mention') || (target.tagName == 'DIV' && target.classList.contains(DiscordModules.ImageErrorClasses?.imageError.split(/ /g)[0]))) {
+      if (!target.classList.contains('mention') || (target.tagName == 'IMG' && target.classList.contains(this.style.imageError))) {
         let isMarkup = false;
         let isEdited = false;
-        let isBadImage = target.tagName == 'DIV' && target.classList == DiscordModules.ImageErrorClasses?.imageError;
+        let isBadImage = target.tagName == 'IMG' && target.classList.contains(this.style.imageError);
         if (!isBadImage) {
           while (target && !target.classList) {
             if (target.classList && target.classList.contains(this.style.edited)) isEdited = target;
@@ -4451,7 +4502,7 @@ module.exports = class MessageLoggerV2 {
       let target = e.target;
       let isMarkup = false;
       let isEdited = false;
-      let isBadImage = target.tagName == 'DIV' && target.classList == DiscordModules.ImageErrorClasses?.imageError;
+      let isBadImage = target.tagName == 'IMG' && target.classList.contains(this.style.imageError);
       if (!isBadImage) {
         isMarkup = target.classList.contains(this.classes.markup);
         while (!target.classList.contains('message-2qnXI6') && !isMarkup) {
@@ -4515,7 +4566,7 @@ module.exports = class MessageLoggerV2 {
           }
         }
         if (!markup) {
-          console.error('[MessageLoggerV2] No markup element found in messageGroup', {
+          Logger.error('No markup element found in messageGroup', {
             markupClass: this.classes.markup,
             multiMarkupClass: this.multiClasses.markup,
             messageGroup,
@@ -4529,7 +4580,7 @@ module.exports = class MessageLoggerV2 {
           try {
             return this.formatMarkup(content, channelId);
           } catch (e) {
-            console.error('[MessageLoggerV2] formatMarkup failed, using fallback', e);
+            Logger.error('formatMarkup failed, using fallback', e);
             const fallbackDiv = document.createElement('div');
             fallbackDiv.textContent = content;
             fallbackDiv.className = this.multiClasses.markup || 'markup-eYLPri';
@@ -4607,7 +4658,7 @@ module.exports = class MessageLoggerV2 {
             });
             img.onerror = () => {
               const imageErrorDiv = document.createElement('img');
-              imageErrorDiv.classList = DiscordModules.ImageErrorClasses?.imageError;
+              imageErrorDiv.classList = this.style.imageError;
               imageErrorDiv.messageId = messageId;
               imageErrorDiv.src = this.errorImage;
               img.replaceWith(imageErrorDiv);
@@ -4615,11 +4666,131 @@ module.exports = class MessageLoggerV2 {
             contentDiv.appendChild(img);
             return true;
           };
+          const attemptToUseCachedVideo = (attachmentId, attachmentIdx, hidden, filename, width, height) => {
+            const container = document.createElement('div');
+            container.style.position = 'relative';
+            container.style.display = 'inline-block';
+            container.style.cursor = 'pointer';
+            container.classList = DiscordModules.ClickableClasses?.clickable || '';
+            const video = document.createElement('video');
+            video.messageId = messageId;
+            video.idx = attachmentIdx;
+            const existingElement = document.getElementById(attachmentId);
+            if (existingElement) {
+              existingElement.id = "og-" + attachmentId;
+            }
+            video.id = attachmentId;
+            video.width = 256;
+            video.style.borderRadius = '8px';
+            video.style.display = 'block';
+            video.preload = 'metadata';
+            if (!hidden) {
+              video.src = this.imageCacheServerSimulator.get('http://localhost:7474/' + attachmentId + filename.match(/\.[0-9a-z]+$/i)[0] + `#${record.message.channel_id},${video.id},${video.messageId}`);
+            }
+            const playButton = document.createElement('div');
+            playButton.innerHTML = '<svg width="48" height="48" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>';
+            playButton.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.6);border-radius:50%;width:48px;height:48px;display:flex;align-items:center;justify-content:center;pointer-events:none;';
+            container.appendChild(video);
+            container.appendChild(playButton);
+            container.addEventListener('click', () => {
+              if (this.menu.deleteKeyDown) {
+                this.deleteMessageFromRecords(messageId);
+                this.refilterMessages();
+                this.saveData();
+                return;
+              }
+              const videoUrl = video.src.startsWith('blob:') ? video.src : (video.src + '?ML2=true');
+              this.createModal(
+                {
+                  items: [
+                    {
+                      type: "VIDEO",
+                      url: videoUrl,
+                      width: width,
+                      height: height,
+                    }
+                  ],
+                  className: this.style.imageRoot
+                },
+                false
+              );
+            });
+            video.onerror = () => {
+              const videoErrorDiv = document.createElement('img');
+              videoErrorDiv.classList = this.style.imageError;
+              videoErrorDiv.messageId = messageId;
+              videoErrorDiv.src = this.errorImage;
+              container.replaceWith(videoErrorDiv);
+            };
+            contentDiv.appendChild(container);
+            return true;
+          };
           const handleCreateImage = (attachment, idx) => {
             const isCached = attachment.url == 'ERROR' ||
               this.imageCacheServerSimulator.exists(attachment.id, attachment.filename, record?.message?.channel_id, messageId);
-            if (isCached) {
+            const isVideoFile = this.isVideo(attachment.filename || attachment.url);
+            if (isCached && isVideoFile) {
+              attemptToUseCachedVideo(attachment.id, idx, attachment.hidden, attachment.filename, attachment.width, attachment.height);
+            } else if (isCached) {
               attemptToUseCachedImage(attachment.id, idx, attachment.hidden, attachment.filename, attachment.width, attachment.height);
+            } else if (this.isVideo(attachment.url)) {
+              const container = document.createElement('div');
+              container.style.position = 'relative';
+              container.style.display = 'inline-block';
+              container.style.cursor = 'pointer';
+              container.classList = DiscordModules.ClickableClasses?.clickable || '';
+              const video = document.createElement('video');
+              video.messageId = messageId;
+              video.id = attachment.id;
+              video.idx = idx;
+              video.width = this.clamp(attachment.width, 200, 400);
+              video.style.borderRadius = '8px';
+              video.style.display = 'block';
+              video.preload = 'metadata';
+              if (!attachment.hidden) {
+                video.src = attachment.url;
+              }
+              const playButton = document.createElement('div');
+              playButton.innerHTML = '<svg width="48" height="48" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>';
+              playButton.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.6);border-radius:50%;width:48px;height:48px;display:flex;align-items:center;justify-content:center;pointer-events:none;';
+              container.appendChild(video);
+              container.appendChild(playButton);
+              if (record) {
+                container.addEventListener('click', () => {
+                  if (this.menu.deleteKeyDown) {
+                    this.deleteMessageFromRecords(messageId);
+                    this.refilterMessages();
+                    this.saveData();
+                    return;
+                  }
+                  this.createModal(
+                    {
+                      items: [
+                        {
+                          type: "VIDEO",
+                          url: attachment.url,
+                          width: attachment.width,
+                          height: attachment.height,
+                        }
+                      ],
+                      className: this.style.imageRoot
+                    },
+                    false
+                  );
+                });
+              }
+              video.onerror = () => {
+                if (video.triedCache) {
+                  const videoErrorDiv = document.createElement('img');
+                  videoErrorDiv.classList = this.style.imageError;
+                  videoErrorDiv.messageId = messageId;
+                  videoErrorDiv.src = this.errorImage;
+                  container.replaceWith(videoErrorDiv);
+                }
+                video.triedCache = true;
+                attemptToUseCachedVideo(attachment.id, idx, attachment.hidden, attachment.filename, attachment.width, attachment.height);
+              };
+              contentDiv.appendChild(container);
             } else if (this.isImage(attachment.url)) {
               const img = document.createElement('img');
               img.classList = DiscordModules.ClickableClasses?.clickable || '';
@@ -4659,8 +4830,8 @@ module.exports = class MessageLoggerV2 {
               }
               img.onerror = () => {
                 if (img.triedCache) {
-                  const imageErrorDiv = document.createElement('div');
-                  imageErrorDiv.classList = DiscordModules.ImageErrorClasses?.imageError;
+                  const imageErrorDiv = document.createElement('img');
+                  imageErrorDiv.classList = this.style.imageError;
                   imageErrorDiv.messageId = messageId;
                   imageErrorDiv.src = this.errorImage;
                   img.replaceWith(imageErrorDiv);
@@ -4683,7 +4854,7 @@ module.exports = class MessageLoggerV2 {
         if (!contentDiv && !message.content.length) return;
         parent.appendChild(messageGroup);
       } catch (err) {
-        console.error(`[${this.getName()}] ${'Error in populateParent'}`, err);
+        Logger.error('Error in populateParent', err);
       }
     };
     let i = 0;
@@ -4986,7 +5157,7 @@ module.exports = class MessageLoggerV2 {
     const Text = textModule ? Object.values(textModule)[0] : null;
     const onClearLog = e => {
       if (!Text) {
-        console.warn('[MessageLoggerV2] Could not find Text component, using fallback');
+        Logger.warn('Could not find Text component, using fallback');
       }
       if (document.getElementById(this.style.filter).parentElement.parentElement.className.includes(this.createTextBox.classes.focused[0])) return;
       let type = this.menu.selectedTab;
@@ -5071,7 +5242,7 @@ module.exports = class MessageLoggerV2 {
       } catch (e) {
         if (loadAttempts > 4) {
           UI.showToast(`Couldn't load menu messages! Report this issue to NightBirde, error info is in console`, { type: "error", timeout: 0 });
-          console.error(`[${this.getName()}] ${'Failed loading menu'}`, e);
+          Logger.error('Failed loading menu', e);
           return;
         }
         setTimeout(loadMessages, 100);
@@ -5207,7 +5378,7 @@ module.exports = class MessageLoggerV2 {
             { className: DiscordModules.ColorClasses?.colorDanger }
           );
         } catch (err) {
-          console.error('[MLV2 Debug] Error in record handling:', err);
+          Logger.error('Error in record handling:', err);
         }
       }
       menu.push(ContextMenu.buildMenuChildren([{
@@ -5378,7 +5549,7 @@ module.exports = class MessageLoggerV2 {
                 chunksArr: new Uint8Array(responseBuffer),
               });
             } catch (error) {
-              console.error('[MLV2] Image fetch failed:', error);
+              Logger.error('Image fetch failed:', error);
               cb({ statusCode: 0, error });
             }
           },
@@ -5389,7 +5560,7 @@ module.exports = class MessageLoggerV2 {
             localRequest.get(element.src, {}, (data) => {
               if (data.statusCode != 200) {
                 this.showToast('Failed to copy. Details in the console.', { type: 'error' });
-                console.error(data);
+                Logger.error(data);
               }
               DiscordNative.clipboard.copyImage(data.chunksArr, "image.png");
             });
