@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.1.0
+ * @version 2.8.0.1.1
  * @author Lighty, Davilarek, NightBirde
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -68,11 +68,10 @@ const DiscordModules = (() => {
     RenderUserPopout: lazyGet('RenderUserPopout', () => Webpack.getByStrings('"SENDING"===', 'renderUserGuildPopout: channel should never be')),
     ChannelListModule: lazyGet('ChannelListModule', () => Webpack.getByKeys('getChannels')),
     ModernModalModule: lazyGet('ModernModalModule', () => Webpack.getModule(Filters.combine(Filters.not(Filters.byKeys('k')), Filters.not(Filters.byKeys('ConfirmModal')), m => Object.values(m).some(x2 => x2 && !x2.defaultLocale && x2.DYNAMIC && x2.LARGE)))),
-    ModernModalApiModule: lazyGet('ModernModalApiModule', () => Webpack.getModule(Filters.byKeys('openModalLazy'))),
     MessageContentComponent: lazyGet('MessageContentComponent', () => Webpack.getModule(e => e?.type?.toString()?.includes('.isCommandType()') && !e?.type?.toString()?.includes('.isFirstMessageInForumPost'))),
     I18nModule: lazyGet('I18nModule', () => Webpack.getModule(m => Object.values(m).some(x => x != null && Object.getPrototypeOf(x)?.withFormatters != null))),
     TextModule: lazyGet('TextModule', () => Webpack.getBySource('case"always-white"', { searchExports: true })),
-    HeadingModule: lazyGet('HeadingModule', () => { const filter = t => t?.render?.toString?.().includes('"h".concat(Math.min('); const mod = Webpack.getModule(x => Object.keys(x).find(x2 => filter(x[x2]))); return mod ? Object.values(mod).find(filter) : null; }),
+    HeadingModule: lazyGet('HeadingModule', () => DiscordModules.ModernModalModule?.Heading),
     GetSrcModule: lazyGet('GetSrcModule', () => Webpack.getBySource('sourceMetadata:', 'getSrc', { searchExports: true })),
     UserContextMenuModule: lazyGet('UserContextMenuModule', () => Webpack.getBySource('isGroupDM', 'moderationAlertId', { searchExports: true })),
     _cache: { value: cache, writable: false },
@@ -228,12 +227,6 @@ module.exports = class MessageLoggerV2 {
   getVersion() {
     return this.meta.version;
   }
-  getAuthor() {
-    return this.meta.author;
-  }
-  getDescription() {
-    return this.meta.description;
-  }
   start() {
     if (this.__started) return;
     if (this.updateTimeout) clearTimeout(this.updateTimeout);
@@ -253,6 +246,14 @@ module.exports = class MessageLoggerV2 {
       }
     };
     this.pluginDir = Plugins.folder || (globalThis.ContentManager && globalThis.ContentManager.pluginsFolder) || Plugins.folder;
+    try {
+      const settings = Data.load(this.getName(), 'settings') || {};
+      if (settings.autoUpdate !== false) {
+        setTimeout(() => this.checkNewUpdate(false), 5000);
+      }
+    } catch (e) {
+      Logger.error('Early update check failed:', e);
+    }
     onLoaded();
   }
   stop() {
@@ -375,8 +376,8 @@ module.exports = class MessageLoggerV2 {
         title: 'Fixed',
         type: 'fixed',
         items: [
-          'Squashed a few bugs and improved BdApi usage.',
-          'Plugin has been completely refactored and is now purely BdApi based. Currently in open Beta testing phase. Please report bugs.'          
+          'Fixed opening logger modal crashing Discord',
+          'Code improvements and optimizations'          
         ]
       }
     ];
@@ -1034,9 +1035,7 @@ module.exports = class MessageLoggerV2 {
         return this._imageModal;
       },
       modernModalModule: DiscordModules.ModernModalModule,
-      modernModalApiModule: DiscordModules.ModernModalApiModule,
       resolvedModalStuff: {},
-      resolvedModalApi: {},
       headingModule: null,
       mapModuleByRegex(input, mapping, result) {
         const inputKeys = Object.keys(input);
@@ -1076,12 +1075,7 @@ module.exports = class MessageLoggerV2 {
       ModalCloseButton: /hideOnFullscreen.*withCircleBackground/,
     }, this.tools.resolvedModalStuff);
     this.tools.resolvedModalStuff.ModalSize = Object.values(this.tools.modernModalModule).find(x => x.LARGE && x.DYNAMIC);
-    this.tools.mapModuleByRegex(this.tools.modernModalApiModule, {
-      openModal: /,instant:/,
-      closeModal: /\.onCloseCallback\(\)/,
-      hasModalOpen: /return\s*[A-Za-z]+\([A-Za-z]+\.getState\(\),\s*[A-Za-z]+,\s*[A-Za-z]+\)/,
-      useModalsStore: /^[A-Za-z]+=>[A-Za-z]+\([A-Za-z]+,[A-Za-z]+\)$/,
-    }, this.tools.resolvedModalApi);
+    this.tools.resolvedModalApi = DiscordModules.ModalActions;
     this._modalsApiUnsubcribe_popoutManager = this.tools.resolvedModalApi.useModalsStore.subscribe(_ => {
       this.tools.popoutStack.forEach(x => this.tools.popoutManager.closePopout(x));
       this.tools.popoutStack.length = 0;
@@ -4671,6 +4665,7 @@ module.exports = class MessageLoggerV2 {
             container.style.position = 'relative';
             container.style.display = 'inline-block';
             container.style.cursor = 'pointer';
+            container.style.width = 'fit-content';
             container.classList = DiscordModules.ClickableClasses?.clickable || '';
             const video = document.createElement('video');
             video.messageId = messageId;
@@ -4738,6 +4733,7 @@ module.exports = class MessageLoggerV2 {
               container.style.position = 'relative';
               container.style.display = 'inline-block';
               container.style.cursor = 'pointer';
+              container.style.width = 'fit-content';
               container.classList = DiscordModules.ClickableClasses?.clickable || '';
               const video = document.createElement('video');
               video.messageId = messageId;
