@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.1.1
+ * @version 2.8.0.2.4
  * @author Lighty, Davilarek, NightBirde
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -9,6 +9,7 @@
  * @updateUrl https://git.slowb.ro/NightBirde/MessageLoggerV2-Remake/raw/branch/main/MessageLoggerV2.plugin.js
  */
 const REPO_MAIN_URL = "https://git.slowb.ro/NightBirde/MessageLoggerV2-Remake/raw/branch/main/";
+const DISCORD_EPOCH = 14200704e5;
 const { React, ReactDOM, Webpack, UI, Plugins, DOM, Patcher, Components, ContextMenu, Utils, Hooks, ReactUtils, Logger } = new BdApi('MessageLoggerV2');
 const { Data } = BdApi;
 const { Filters } = Webpack;
@@ -55,7 +56,6 @@ const DiscordModules = (() => {
     ContainerCompactClasses: lazyGet('ContainerCompactClasses', () => Webpack.getByKeys('container', 'containerCompactBounded')),
     ErrorPageClasses: lazyGet('ErrorPageClasses', () => Webpack.getByKeys('errorPage')),
     TabItemClasses: lazyGet('TabItemClasses', () => Webpack.getModule(Filters.byKeys('item', 'selected', 'topPill'))),
-    ModalImageClasses: lazyGet('ModalImageClasses', () => Webpack.getByKeys('modal', 'image')),
     CUser: lazyGet('CUser', () => Webpack.getModule(Filters.byPrototypeKeys('getAvatarSource', 'isLocalBot'))),
     DiscordUtils: lazyGet('DiscordUtils', () => Webpack.getByKeys('bindAll', 'debounce')),
     TimestampUtils: lazyGet('TimestampUtils', () => Webpack.getByKeys('relativeTimeRounding', 'locales') || Webpack.getByKeys('createFromInputFallback')),
@@ -67,11 +67,10 @@ const DiscordModules = (() => {
     ChannelMessages: lazyGet('ChannelMessages', () => Webpack.getModule(Filters.byKeys('_channelMessages'))),
     RenderUserPopout: lazyGet('RenderUserPopout', () => Webpack.getByStrings('"SENDING"===', 'renderUserGuildPopout: channel should never be')),
     ChannelListModule: lazyGet('ChannelListModule', () => Webpack.getByKeys('getChannels')),
-    ModernModalModule: lazyGet('ModernModalModule', () => Webpack.getModule(Filters.combine(Filters.not(Filters.byKeys('k')), Filters.not(Filters.byKeys('ConfirmModal')), m => Object.values(m).some(x2 => x2 && !x2.defaultLocale && x2.DYNAMIC && x2.LARGE)))),
+    ManaModule: lazyGet('ManaModule', () => Webpack.getByKeys('Modal', 'ConfirmModal')),
     MessageContentComponent: lazyGet('MessageContentComponent', () => Webpack.getModule(e => e?.type?.toString()?.includes('.isCommandType()') && !e?.type?.toString()?.includes('.isFirstMessageInForumPost'))),
     I18nModule: lazyGet('I18nModule', () => Webpack.getModule(m => Object.values(m).some(x => x != null && Object.getPrototypeOf(x)?.withFormatters != null))),
     TextModule: lazyGet('TextModule', () => Webpack.getBySource('case"always-white"', { searchExports: true })),
-    HeadingModule: lazyGet('HeadingModule', () => DiscordModules.ModernModalModule?.Heading),
     GetSrcModule: lazyGet('GetSrcModule', () => Webpack.getBySource('sourceMetadata:', 'getSrc', { searchExports: true })),
     UserContextMenuModule: lazyGet('UserContextMenuModule', () => Webpack.getBySource('isGroupDM', 'moderationAlertId', { searchExports: true })),
     _cache: { value: cache, writable: false },
@@ -245,15 +244,7 @@ module.exports = class MessageLoggerV2 {
         UI.showToast(`[**${this.getName()}**] Failed to start!`, { type: 'error', timeout: 0 });
       }
     };
-    this.pluginDir = Plugins.folder || (globalThis.ContentManager && globalThis.ContentManager.pluginsFolder) || Plugins.folder;
-    try {
-      const settings = Data.load(this.getName(), 'settings') || {};
-      if (settings.autoUpdate !== false) {
-        setTimeout(() => this.checkNewUpdate(false), 5000);
-      }
-    } catch (e) {
-      Logger.error('Early update check failed:', e);
-    }
+    this.pluginDir = Plugins.folder || globalThis.ContentManager?.pluginsFolder;
     onLoaded();
   }
   stop() {
@@ -262,8 +253,6 @@ module.exports = class MessageLoggerV2 {
     try {
       clearInterval(this.dataManagerInterval);
       clearInterval(this._autoUpdateInterval);
-      clearInterval(this.selfTestInterval);
-      clearTimeout(this.selfTestTimeout);
       clearTimeout(this.updateTimeout);
       clearTimeout(this.saveBackupTimeout);
       clearTimeout(this.requestedDataSave);
@@ -282,33 +271,23 @@ module.exports = class MessageLoggerV2 {
         DOM.removeStyle(this.stringHeldCaptive);
       }
       if (this.ModalStack?.closeModal && this.style?.menu) {
-        try {
-          this.ModalStack.closeModal(this.style.menu);
-        } catch { /* Ignore cleanup errors during stop */ }
+        this.ModalStack.closeModal(this.style.menu);
       }
       if (typeof this._modalsApiUnsubcribe === 'function') {
-        try {
-          this._modalsApiUnsubcribe();
-        } catch { /* Ignore cleanup errors during stop */ }
+        this._modalsApiUnsubcribe();
       }
       if (typeof this._modalsApiUnsubcribe_popoutManager === 'function') {
-        try {
-          this._modalsApiUnsubcribe_popoutManager();
-        } catch { /* Ignore cleanup errors during stop */ }
+        this._modalsApiUnsubcribe_popoutManager();
       }
       if (this.tools?.popoutManager?.closeAllPopouts) {
-        try {
-          this.tools.popoutManager.closeAllPopouts();
-        } catch { /* Ignore cleanup errors during stop */ }
+        this.tools.popoutManager.closeAllPopouts();
       }
       const toastsContainer = document.querySelector('.mlv2-toasts');
       if (toastsContainer) toastsContainer.remove();
       const toastStyles = document.querySelector('#mlv2-toast-styles');
       if (toastStyles) toastStyles.remove();
       if (this.imageCacheServerSimulator?.cleanUp) {
-        try {
-          this.imageCacheServerSimulator.cleanUp();
-        } catch { /* Ignore cleanup errors during stop */ }
+        this.imageCacheServerSimulator.cleanUp();
       }
       if (!this.settings?.dontSaveData && this.messageRecord) {
         this.saveData();
@@ -324,19 +303,14 @@ module.exports = class MessageLoggerV2 {
       if (this._messageUpdateRegistry) {
         this._messageUpdateRegistry.clear();
       }
-      if (Array.isArray(this.unpatches)) {
-        for (const unpatch of this.unpatches) {
-          try {
-            if (typeof unpatch === 'function') {
-              unpatch();
-            }
-          } catch (err) {
-            Logger.error('Error unpatching:', err);
-          }
+      for (const unpatch of this.unpatches) {
+        try {
+          unpatch();
+        } catch (err) {
+          Logger.error('Error unpatching:', err);
         }
-        this.unpatches = [];
       }
-      Patcher.unpatchAll();
+      this.unpatches = [];
       Logger.log('All patches removed, forcing UI update to clear...');
       this.forceUpdateUI();
       if (this.menu) {
@@ -382,7 +356,6 @@ module.exports = class MessageLoggerV2 {
       }
     ];
   }
-  
   async checkNewUpdate(showNoUpdateNotice = false) {
     if (this.alreadyTestedForUpdate) return;
     this.alreadyTestedForUpdate = true;
@@ -471,9 +444,6 @@ module.exports = class MessageLoggerV2 {
       }
     );
   }
-  automaticallyUpdate() {
-    this.checkNewUpdate(false);
-  }
   forceUpdateUI() {
     try {
       Logger.log('Forcing UI update...');
@@ -494,7 +464,7 @@ module.exports = class MessageLoggerV2 {
         (c) => c?.stateNode?.isReactComponent,
         { walkable: ["child"] }
       );
-      if (!target || !target.stateNode) {
+      if (!target?.stateNode) {
         Logger.error('Could not find React component');
         return;
       }
@@ -516,17 +486,11 @@ module.exports = class MessageLoggerV2 {
   initialize() {
     if (this.__started) return UI.showToast(`[**${this.getName()}**] Tried to start twice..`, { timeout: 0 }, { type: "warning" });
     this.__started = true;
-    this.unpatches = [];
-    const _zerecantcode_path = require('path');
-    const theActualFileNameZere = _zerecantcode_path.join(__dirname, _zerecantcode_path.basename(__filename));
-    (() => { })(theActualFileNameZere, 'MessageLoggerV2');
-    try {
-      DiscordModules.ModalActions?.closeModal(`${this.getName()}_DEP_MODAL`);
-    } catch { /* Modal may not exist */ }
-    if (globalThis.PluginUpdates && globalThis.PluginUpdates.plugins) delete PluginUpdates.plugins['https://gitlab.com/_Lighty_/bdstuff/raw/main/public/plugins/MessageLoggerV2.plugin.js'];
-    if (Plugins && Plugins.get('NoDeleteMessages') && Plugins.isEnabled('NoDeleteMessages'))
+    DiscordModules.ModalActions.closeModal(`${this.getName()}_DEP_MODAL`);
+    if (globalThis.PluginUpdates?.plugins) delete PluginUpdates.plugins['https://gitlab.com/_Lighty_/bdstuff/raw/main/public/plugins/MessageLoggerV2.plugin.js'];
+    if (Plugins.get('NoDeleteMessages') && Plugins.isEnabled('NoDeleteMessages'))
       UI.showToast(`[**${this.getName()}**] Using **NoDeleteMessages** with **${this.getName()}** is completely unsupported and will cause issues. Please either disable **NoDeleteMessages** or delete it to avoid issues.`, { type: "warning" });
-    if (Plugins && Plugins.get('SuppressUserMentions') && Plugins.isEnabled('SuppressUserMentions'))
+    if (Plugins.get('SuppressUserMentions') && Plugins.isEnabled('SuppressUserMentions'))
       UI.showToast(`[**${this.getName()}**] Using **SuppressUserMentions** with **${this.getName()}** is completely unsupported and will cause issues. Please either disable **SuppressUserMentions** or delete it to avoid issues.`, { type: "warning" });
     const missingCritical = DiscordModules._validateCritical();
     if (missingCritical.length) {
@@ -570,7 +534,6 @@ module.exports = class MessageLoggerV2 {
       },
       useNotificationsInstead: true,
       blockSpamEdit: false,
-      disableKeybind: false,
       cacheAllImages: true,
       newCacheAllImagesPath: '',
       newCacheAllImages: false,
@@ -584,7 +547,6 @@ module.exports = class MessageLoggerV2 {
       hideNewerEditsFirst: true,
       displayDates: true,
       deletedMessageColor: '',
-      editedMessageColor: '',
       useAlternativeDeletedStyle: false,
       showEditedMessages: true,
       showDeletedMessages: true,
@@ -595,13 +557,6 @@ module.exports = class MessageLoggerV2 {
       alwaysLogDM: true,
       restoreDeletedMessages: true,
       contextmenuSubmenuName: 'Message Logger',
-      streamSafety: {
-        showEdits: false,
-        showDeletes: false,
-        showButton: false,
-        showNotifications: false,
-        showContextMenu: false
-      },
       imageCacheDir: this.pluginDir + '/MLV2_IMAGE_CACHE',
       maxCacheFileSize: 0,
       flags: 0,
@@ -609,17 +564,12 @@ module.exports = class MessageLoggerV2 {
       versionInfo: ''
     };
     const Flags = {
-      STOLEN: 1,
       STARTUP_HELP: 1 << 1
     };
     this.settings = (Data.load(this.getName(), 'settings') || defaultSettings);
     let settingsChanged = false;
     if (!this.settings || !Object.keys(this.settings).length) {
       UI.showToast(`[${this.getName()}] Settings file corrupted! All settings restored to default.`, { type: "error", timeout: 0 });
-      this.settings = defaultSettings;
-      settingsChanged = true;
-    }
-    if (this.settings.versionInfo === '1.7.55') {
       this.settings = defaultSettings;
       settingsChanged = true;
     }
@@ -641,34 +591,36 @@ module.exports = class MessageLoggerV2 {
       settingsChanged = false;
     }
     if (settingsChanged) this.saveSettings();
-    this.imageRegex = /https:\/\/(?:cdn|media)\.discordapp\.(?:net|com)\/attachments\/\d+\/\d+\/[\w-]+\.\w+/g
-    this.errorImage = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="104" viewBox="0 0 200 104"%3E%3Crect width="200" height="104" fill="%23f0f0f0"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%23999" font-family="Arial" font-size="14"%3EImage Error%3C/text%3E%3C/svg%3E';
+    this.errorImage = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="104" viewBox="0 0 200 104"%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%23666" font-family="Arial" font-size="14"%3EImage Error%3C/text%3E%3C/svg%3E';
     this.nodeModules = {
       electron: require('electron'),
       fs: require('fs'),
       path: require('path')
     };
     const guildStore_ = DiscordModules.GuildStore;
-    this.missingImagePlaceholder = this.errorImage;
     this.imageCacheServerSimulator = {
       "cached": {},
-      "getMissingPlaceholder": () => this.missingImagePlaceholder,
+      "_getBaseCachePath": () => {
+        return this.settings.newCacheAllImagesPath && this.nodeModules.fs.existsSync(this.settings.newCacheAllImagesPath) ? this.settings.newCacheAllImagesPath : this.settings.imageCacheDir;
+      },
+      "_resolveImagePath": (attachmentId, ext, channelId, messageId) => {
+        let pathname = this.nodeModules.path.join(this.settings.imageCacheDir, attachmentId + ext);
+        if (this.nodeModules.fs.existsSync(pathname)) return pathname;
+        const joinBase = this.imageCacheServerSimulator.resolveNewCachePath({ channelId }) + "/";
+        pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId})` + ext);
+        if (this.nodeModules.fs.existsSync(pathname)) return pathname;
+        const record = this.messageRecord[messageId];
+        if (record && this.settings.addUserIdToSavedMediaFilename) {
+          pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId} by ${record.message.author.id})` + ext);
+          if (this.nodeModules.fs.existsSync(pathname)) return pathname;
+        }
+        return null;
+      },
       "exists": (attachmentId, filename, channelId, messageId) => {
         try {
           const ext = filename.match(/\.[0-9a-z]+$/i)?.[0] || '.png';
-          let pathname = this.nodeModules.path.join(this.settings.imageCacheDir, attachmentId + ext);
-          if (this.nodeModules.fs.existsSync(pathname)) return true;
-          const joinBase = this.imageCacheServerSimulator.resolveNewCachePath({ channelId: channelId }) + "/";
-          pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId})` + ext);
-          if (this.nodeModules.fs.existsSync(pathname)) return true;
-          const record = this.messageRecord[messageId];
-          if (record && this.settings.addUserIdToSavedMediaFilename) {
-            pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId} by ${record.message.author.id})` + ext);
-            if (this.nodeModules.fs.existsSync(pathname)) return true;
-          }
-          return false;
+          return !!this.imageCacheServerSimulator._resolveImagePath(attachmentId, ext, channelId, messageId);
         } catch {
-          /* File existence check failed */
           return false;
         }
       },
@@ -677,18 +629,13 @@ module.exports = class MessageLoggerV2 {
           try {
             const parsedUrl = new URL(path);
             const parsedFile = this.nodeModules.path.parse(parsedUrl.pathname);
-            let pathname = this.nodeModules.path.join(this.settings.imageCacheDir, parsedFile.base);
             const messageId = parsedUrl.hash.split(",")[2];
             const attachmentId = parsedUrl.hash.split(",")[1];
-            const joinBase = this.imageCacheServerSimulator.resolveNewCachePath({ channelId: parsedUrl.hash.split(",")[0].split("#")[1] }) + "/";
-            if (!this.nodeModules.fs.existsSync(pathname))
-              pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId})` + parsedFile.ext);
-            if (!this.nodeModules.fs.existsSync(pathname))
-              pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId}${(this.settings.addUserIdToSavedMediaFilename && this.messageRecord[messageId]?.message?.author?.id) ? (" by " + this.messageRecord[messageId].message.author.id) : ""
-              })` + parsedFile.ext);
-            if (!this.nodeModules.fs.existsSync(pathname)) {
+            const channelId = parsedUrl.hash.split(",")[0].split("#")[1];
+            const pathname = this.imageCacheServerSimulator._resolveImagePath(attachmentId, parsedFile.ext, channelId, messageId);
+            if (!pathname) {
               Logger.warn(`Cached image not found: ${attachmentId}`);
-              this.imageCacheServerSimulator.cached[path] = this.missingImagePlaceholder;
+              this.imageCacheServerSimulator.cached[path] = this.errorImage;
               return this.imageCacheServerSimulator.cached[path];
             }
             const image = this.nodeModules.fs.readFileSync(pathname, "");
@@ -702,7 +649,7 @@ module.exports = class MessageLoggerV2 {
           }
           catch (e) {
             Logger.warn('Error loading cached image:', e.message);
-            this.imageCacheServerSimulator.cached[path] = this.missingImagePlaceholder;
+            this.imageCacheServerSimulator.cached[path] = this.errorImage;
             return this.imageCacheServerSimulator.cached[path];
           }
         }
@@ -711,7 +658,7 @@ module.exports = class MessageLoggerV2 {
       "getSettings": () => { return this.settings; },
       "getMessageRecord": () => { return this.messageRecord; },
       "resolveNewCachePath": (options) => {
-        const savePath = this.settings.newCacheAllImagesPath && this.settings.newCacheAllImagesPath != '' && this.nodeModules.fs.existsSync(this.settings.newCacheAllImagesPath) ? this.settings.newCacheAllImagesPath : this.settings.imageCacheDir;
+        const savePath = this.imageCacheServerSimulator._getBaseCachePath();
         let { channelId, serverId } = options;
         let channelData = DiscordModules.ChannelStore?.getChannel(channelId);
         if (!channelData) {
@@ -736,27 +683,22 @@ module.exports = class MessageLoggerV2 {
         }
         if (!serverId)
           serverId = channelData.guild_id ?? null;
-        const getGuildInfo = () => {
-          return guildStore_.getGuild(serverId);
-        };
         let serverNameRaw;
         if (serverId == null) {
           serverNameRaw = "DMs";
-        } else if (getGuildInfo()) {
-          serverNameRaw = getGuildInfo().name;
         } else {
-          serverNameRaw = this.imageCacheServerSimulator.tryToGuessName(serverId).split(serverId)[1].slice(2, -1);
+          const guildInfo = guildStore_.getGuild(serverId);
+          if (guildInfo) {
+            serverNameRaw = guildInfo.name;
+          } else {
+            serverNameRaw = this.imageCacheServerSimulator.tryToGuessName(serverId).split(serverId)[1].slice(2, -1);
+          }
         }
         let channelNameRaw;
         if (serverId == null) {
-          channelNameRaw = channelData.recipients && channelData.recipients.length == 1 ? channelData.rawRecipients[0].username : "Unknown DM";
+          channelNameRaw = channelData.recipients?.length == 1 ? channelData.rawRecipients[0].username : "Unknown DM";
         } else {
           channelNameRaw = channelData.name;
-        }
-        if (!channelData) {
-          if (!serverId)
-            serverNameRaw = "Unknown Server";
-          channelNameRaw = "Unknown Channel";
         }
         const serverName = serverNameRaw.normalize("NFD").replaceAll(/[\u0300-\u036f]/g, "").replaceAll(/[^a-zA-Z0-9_. -]/g, "");
         const channelName = channelNameRaw.normalize("NFD").replaceAll(/[\u0300-\u036f]/g, "").replaceAll(/[^a-zA-Z0-9_. -]/g, "");
@@ -773,7 +715,7 @@ module.exports = class MessageLoggerV2 {
       },
       "tryToGuessNameDeep": (id, base) => {
         if (!base)
-          base = this.settings.newCacheAllImagesPath && this.settings.newCacheAllImagesPath != '' && this.nodeModules.fs.existsSync(this.settings.newCacheAllImagesPath) ? this.settings.newCacheAllImagesPath : this.settings.imageCacheDir;
+          base = this.imageCacheServerSimulator._getBaseCachePath();
         const stuffInBase = this.nodeModules.fs.readdirSync(base);
         const results = [];
         for (const element of stuffInBase) {
@@ -787,7 +729,7 @@ module.exports = class MessageLoggerV2 {
       },
       "tryToGuessName": (id, base) => {
         if (!base)
-          base = this.settings.newCacheAllImagesPath && this.settings.newCacheAllImagesPath != '' && this.nodeModules.fs.existsSync(this.settings.newCacheAllImagesPath) ? this.settings.newCacheAllImagesPath : this.settings.imageCacheDir;
+          base = this.imageCacheServerSimulator._getBaseCachePath();
         const stuffInBase = this.nodeModules.fs.readdirSync(base);
         const filtered = stuffInBase.filter(x => x.startsWith(id));
         switch (filtered.length) {
@@ -819,7 +761,7 @@ module.exports = class MessageLoggerV2 {
       data = defaultConstruct();
     } else {
       data = (Data.load(this.getName() + 'Data', 'data') || defaultConstruct());
-      const isBad = map => !(map && map.messageRecord && map.editedMessageRecord && map.deletedMessageRecord && map.purgedMessageRecord && typeof map.messageRecord == 'object' && typeof map.editedMessageRecord == 'object' && typeof map.deletedMessageRecord == 'object' && typeof map.purgedMessageRecord == 'object');
+      const isBad = map => !(map?.messageRecord && map.editedMessageRecord && map.deletedMessageRecord && map.purgedMessageRecord && typeof map.messageRecord == 'object' && typeof map.editedMessageRecord == 'object' && typeof map.deletedMessageRecord == 'object' && typeof map.purgedMessageRecord == 'object');
       if (isBad(data)) {
         if (this.settings.autoBackup) {
           data = (Data.load(this.getName() + 'DataBackup', 'data') || defaultConstruct());
@@ -847,7 +789,7 @@ module.exports = class MessageLoggerV2 {
             record.delete_data.time = record.deletedata.deletetime;
           }
           delete record.deletedata;
-        } else if (record.delete_data && record.delete_data.rel_ids !== undefined) delete record.delete_data.rel_ids;
+        } else if (record.delete_data?.rel_ids !== undefined) delete record.delete_data.rel_ids;
         if (record.editHistory) {
           record.edit_history = [];
           for (let b in record.editHistory) {
@@ -894,7 +836,6 @@ module.exports = class MessageLoggerV2 {
     for (const [channelId, ids] of Object.entries(this.purgedMessageRecord)) {
       this.purgedMessageSet.set(channelId, new Set(ids));
     }
-    this.cleanedUserCache = new Map();
     this.sortedDeletedMessageIds = new Map();
     this.sortedPurgedMessageIds = new Map();
     this._messageUpdateRegistry = new Map();
@@ -903,9 +844,10 @@ module.exports = class MessageLoggerV2 {
     this.tempEditedMessageRecord = {};
     this.editHistoryAntiSpam = {};
     this.localDeletes = [];
-    this.settings.imageCacheDir = this.pluginDir + '/MLV2_IMAGE_CACHE';
+    const defaultImageCacheDir = this.pluginDir + '/MLV2_IMAGE_CACHE';
+    this.settings.imageCacheDir = defaultImageCacheDir;
     const imageCacheDirFailure = () => {
-      this.settings.imageCacheDir = this.pluginDir + '/MLV2_IMAGE_CACHE';
+      this.settings.imageCacheDir = defaultImageCacheDir;
       UI.showToast(`[**${this.getName()}**] Failed to access custom image cache dir. It has been reset to plugins folder!`, { type: "error" });
     };
     if (this.settings.cacheAllImages && !this.nodeModules.fs.existsSync(this.settings.imageCacheDir)) {
@@ -915,9 +857,6 @@ module.exports = class MessageLoggerV2 {
         imageCacheDirFailure();
       }
     }
-    this._imageCacheServer = {
-      "stop": () => { },
-    };
     const CUser = DiscordModules.CUser;
     const userRecord = {};
     const lastSeenUser = {};
@@ -931,15 +870,9 @@ module.exports = class MessageLoggerV2 {
         lastSeenUser[userObj.id] = date;
       }
     }
-    this.Patcher = {
-      before: (moduleToPatch, functionName, callback, options = {}) => Patcher.before(moduleToPatch, functionName, callback, options),
-      instead: (moduleToPatch, functionName, callback, options = {}) => Patcher.instead(moduleToPatch, functionName, callback, options),
-      after: (moduleToPatch, functionName, callback, options = {}) => Patcher.after(moduleToPatch, functionName, callback, options),
-      unpatchAll: () => Patcher.unpatchAll()
-    };
     this.unpatches = [];
     this.unpatches.push(
-      this.Patcher.after(this.UserStore, 'getUser', (_this, args, ret) => {
+      Patcher.after(this.UserStore, 'getUser', (_this, args, ret) => {
         if (!ret && !args[1]) {
           const userId = args[0];
           const users = this.UserStore.getUsers();
@@ -952,16 +885,11 @@ module.exports = class MessageLoggerV2 {
     );
     const RenderUserPopout_mod = DiscordModules.RenderUserPopout
     this.tools = {
-      openUserContextMenu: null,
       getMessage: this.messageStore.getMessage,
-      fetchMessages: DiscordModules.MessageActions?.fetchMessages,
-      transitionTo: null,
       getChannel: this.ChannelStore.getChannel,
-      copyToClipboard: globalThis.copy,
       getServer: DiscordModules.GuildUtils?.getGuild,
       getUser: this.UserStore.getUser,
       parse: DiscordModules.Parser?.parse,
-      getUserAsync: () => Promise.resolve(),
       isBlocked: DiscordModules.RelationshipStore?.isBlocked,
       createMomentObject: DiscordModules.TimestampUtils,
       isMentioned: (e, id) => {
@@ -975,7 +903,6 @@ module.exports = class MessageLoggerV2 {
       },
       DiscordUtils: DiscordModules.DiscordUtils,
       parserNew: DiscordModules.ParserNew?.parse,
-      timestampCreator: DiscordModules.TimestampUtils,
       buttonColors: Components.Button.Colors,
       _nativeMediaModal: null,
       getNativeMediaModal() {
@@ -1034,19 +961,8 @@ module.exports = class MessageLoggerV2 {
         }
         return this._imageModal;
       },
-      modernModalModule: DiscordModules.ModernModalModule,
+      manaModule: DiscordModules.ManaModule,
       resolvedModalStuff: {},
-      headingModule: null,
-      mapModuleByRegex(input, mapping, result) {
-        const inputKeys = Object.keys(input);
-        const mappingKeys = Object.keys(mapping);
-        for (const inputKey of inputKeys) {
-          const foundKey = mappingKeys.find(x => mapping[x].test(input[inputKey].toString()));
-          if (foundKey) {
-            result[foundKey] = input[inputKey];
-          }
-        }
-      },
       createWrappedElement(elements) {
         if (Array.isArray(elements)) {
           const tmp = document.createElement("div");
@@ -1058,8 +974,8 @@ module.exports = class MessageLoggerV2 {
       },
       popoutStack: [],
       popoutManager: new PopoutManager(),
-      showUserPopout(hookTo, user) {
-        const content = RenderUserPopout_mod(null, { type: 1, author: user, channel_id: "1113372777639067780" });
+      showUserPopout(hookTo, user, channelId) {
+        const content = RenderUserPopout_mod(null, { type: 1, author: user, channel_id: channelId || DiscordModules.SelectedChannelStore?.getChannelId() });
         const newPopout = this.popoutManager.showPopout(hookTo, content, {
           position: 'right',
           align: 'top'
@@ -1067,20 +983,12 @@ module.exports = class MessageLoggerV2 {
         this.popoutStack.push(newPopout);
       },
     };
-    this.tools.mapModuleByRegex(this.tools.modernModalModule, {
-      ModalRoot: /fullscreenOnMobile.*hideShadow/,
-      ModalHeader: /headerIdIsManaged.*useContext/,
-      ModalContent: /scrollerRef.*scrollbarType/,
-      ModalFooter: /HORIZONTAL_REVERSE.*separator/,
-      ModalCloseButton: /hideOnFullscreen.*withCircleBackground/,
-    }, this.tools.resolvedModalStuff);
-    this.tools.resolvedModalStuff.ModalSize = Object.values(this.tools.modernModalModule).find(x => x.LARGE && x.DYNAMIC);
-    this.tools.resolvedModalApi = DiscordModules.ModalActions;
-    this._modalsApiUnsubcribe_popoutManager = this.tools.resolvedModalApi.useModalsStore.subscribe(_ => {
+    this.tools.resolvedModalStuff.ModalSize = Object.values(this.tools.manaModule).find(x => x?.LARGE && x?.DYNAMIC) ?? { SMALL: 'sm', MEDIUM: 'md', LARGE: 'lg', DYNAMIC: 'dynamic' };
+    this.ModalStack = DiscordModules.ModalActions;
+    this._modalsApiUnsubcribe_popoutManager = this.ModalStack.useModalsStore.subscribe(_ => {
       this.tools.popoutStack.forEach(x => this.tools.popoutManager.closePopout(x));
       this.tools.popoutStack.length = 0;
     });
-    this.tools.headingModule = DiscordModules.HeadingModule;
     this.createButton.classes = {
       button: (() => {
         const buttonData = DiscordModules.ButtonClasses;
@@ -1099,46 +1007,11 @@ module.exports = class MessageLoggerV2 {
     };
     this.multiClasses = {
       defaultColor: DiscordModules.DefaultColorClasses?.defaultColor || '',
-      item: DiscordModules.TabItemClasses?.item || '',
-      tabBarContainer: 'MLv2-tab-bar-container',
-      tabBar: DiscordModules.TabBarClasses?.tabBar || '',
       edited: this.joinClassNames(
         this.getDiscordClass('separator timestamp'),
         this.getDiscordClass('separator timestampInline')
       ),
-      markup: DiscordModules.MarkupClasses?.markup || '',
-      message: {
-        cozy: {
-          containerBounded: this.safeGetClass(
-            () => DiscordModules.ContainerClasses?.containerCozyBounded,
-            'containerCozyBounded'
-          ),
-          header: this.safeGetClass(
-            () => DiscordModules.ContainerClasses?.headerCozy,
-            'headerCozy'
-          ),
-          avatar: this.safeGetClass(
-            () => DiscordModules.ContainerClasses?.avatar,
-            'avatar'
-          ),
-          headerMeta: this.safeGetClass(
-            () => DiscordModules.ContainerClasses?.headerCozyMeta,
-            'headerCozyMeta'
-          ),
-          username: this.safeGetClass(
-            () => DiscordModules.ContainerClasses?.username,
-            'username'
-          ),
-          timestamp: this.safeGetClass(
-            () => DiscordModules.ContainerClasses?.timestampCozy,
-            'timestampCozy'
-          ),
-          content: this.safeGetClass(
-            () => DiscordModules.ContainerClasses?.contentCozy,
-            'contentCozy'
-          )
-        }
-      }
+      markup: DiscordModules.MarkupClasses?.markup || ''
     };
     const spoilerModule = DiscordModules.SpoilerClasses
     this.classes = {
@@ -1152,77 +1025,47 @@ module.exports = class MessageLoggerV2 {
       avatar: this.safeGetClass(
         () => this.getSingleDiscordClass('header avatar'),
         'avatar-MLV2'
-      )
+      ),
+      username: Webpack.getByKeys('username')?.username?.split(/ /g)[0] || '',
+      timestamp: Webpack.getByKeys('timestamp')?.timestamp?.split(/ /g)[0] || '',
+      selected: Webpack.getByKeys('selected', 'message')?.selected?.split(/ /g)[0] || '',
+      container: Webpack.getByKeys('container', 'content')?.container?.split(/ /g)[0] || '',
+      message: DiscordModules.MessageWrapperClasses?.message?.split(/ /g)[0] || '',
+      messageContent: Webpack.getByKeys('messageContent')?.messageContent?.split(/ /g)[0] || ''
     };
     this.muteModule = DiscordModules.MuteModule;
     this.menu = {};
     this.menu.classes = {};
     this.menu.filter = '';
     this.menu.open = false;
-    const ImageModalClasses = DiscordModules.ModalImageClasses;
     const ImageModal = this.tools.findImageModal() ?? (() => React.createElement("div", undefined, "Image Modal failed!"));
     const MaskedLink = DiscordModules.MaskedLink || {};
     const renderLinkComponent = props => React.createElement(MaskedLink, props);
     this.tools.renderLinkComponent = renderLinkComponent;
-    this.tools.ImageModalClasses = ImageModalClasses;
     this.createModal.imageModal = ImageModal;
     const chatContent = DiscordModules.ChatContentClasses;
-    this.observer.chatContentClass = ((chatContent && chatContent.chatContent) || 'chat-3bRxxu').split(/ /g)[0];
-    this.observer.chatClass = 'chat-3bRxxu';
+    this.observer.chatContentClass = (chatContent?.chatContent || '').split(/ /g)[0];
+    this.observer.chatClass = chatContent?.chat?.split(/ /g)[0] || '';
     this.observer.titleClass = chatContent ? DiscordModules.TitleClasses?.title?.split(/ /g)[0] : 'ERROR-CLASSWTF';
     this.observer.containerCozyClass = this.safeGetClass(() => DiscordModules.ContainerClasses.containerCozyBounded.split(/ /g)[0], 'containerCozyBounded');
-    this.localUser = this.UserStore.getCurrentUser();
     this.deletedChatMessagesCount = {};
     this.editedChatMessagesCount = {};
     this.channelMessages = DiscordModules.ChannelMessages?._channelMessages;
     this.autoBackupSaveInterupts = 0;
     this.dispatcher = DiscordModules.Dispatcher;
     this.unpatches.push(
-      this.Patcher.instead(
+      Patcher.instead(
         this.dispatcher,
         'dispatch',
         (_, args, original) => this.onDispatchEvent(args, original)
       ),
-      this.Patcher.instead(DiscordModules.MessageActions, 'startEditMessage', (_, args, original) => {
+      Patcher.instead(DiscordModules.MessageActions, 'startEditMessage', (_, args, original) => {
         const channelId = args[0];
         const messageId = args[1];
         if (this.deletedMessageSet.get(channelId)?.has(messageId)) return;
         return original(...args);
       })
     );
-    this.handleAttachmentDeletion = (_, args) => {
-      const channelId = args[0];
-      const messageId = args[1];
-      const newAttachments = args[2];
-      const cachedMessage = this.getCachedMessage(messageId, channelId);
-      const guildId = cachedMessage.guild_id;
-      let generatedContent = "";
-      const logged_attachments = this.messageRecord[messageId]?.logged_attachments ?? [];
-      const changedAttachments = cachedMessage.attachments.filter(item => {
-        return !newAttachments.some(modifiedItem => modifiedItem.id === item.id);
-      });
-      for (let i = 0; i < changedAttachments.length; i++) {
-        if (logged_attachments.includes(changedAttachments[i].id))
-          continue;
-        generatedContent += "`Attachment Deleted: `" + changedAttachments[i].url + "\n";
-        if (this.settings.cacheAllImages) {
-          this.cacheImage(changedAttachments[i].url, i, changedAttachments[i].id, messageId, channelId, this.settings.newCacheAllImages === true ? guildId : undefined);
-        }
-        logged_attachments.push(changedAttachments[i].id);
-      }
-      const createdMessage = {
-        ...cachedMessage,
-        content: "\n" + generatedContent,
-        edited_timestamp: this.tools.timestampCreator(Date.now())
-      };
-      this.onDispatchEvent([{
-        type: "MESSAGE_UPDATE",
-        guildId: guildId,
-        message: createdMessage,
-      }], (...args) => {
-      });
-      this.messageRecord[messageId].logged_attachments = logged_attachments;
-    };
     this.noTintIds = new Set();
     this.editModifiers = {};
     this.style = {};
@@ -1269,13 +1112,13 @@ module.exports = class MessageLoggerV2 {
       DOM.addStyle(
         this.style.css,
         `
-                    .${this.style.deleted} .${this.classes.markup}, .${this.style.deleted} .${this.classes.markup} .hljs, .${this.style.deleted} .container-1ov-mD *{
+                    .${this.style.deleted} .${this.classes.markup}, .${this.style.deleted} .${this.classes.markup} .hljs, .${this.style.deleted} .${this.classes.container} *{
                         color: #f04747 !important;
                     }
                     html #app-mount .${this.style.deletedAlt} {
                       background-color: ${this.settings.deletedMessageColor ? hexToRgb(this.settings.deletedMessageColor, 0.15) : "rgba(240, 71, 71, 0.15)"} !important;
                     }
-                    html #app-mount .${this.style.deletedAlt}:hover, html #app-mount .${this.style.deletedAlt}.selected-2P5D_Z {
+                    html #app-mount .${this.style.deletedAlt}:hover, html #app-mount .${this.style.deletedAlt}.${this.classes.selected} {
                       background-color: ${this.settings.deletedMessageColor ? hexToRgb(this.settings.deletedMessageColor, 0.1) : "rgba(240, 71, 71, 0.1)"} !important;
                     }
                     .theme-dark .${this.classes.markup}.${this.style.edited} .${this.style.edited} {
@@ -1335,13 +1178,19 @@ module.exports = class MessageLoggerV2 {
                       min-width: 85vw;
                       max-width: 85vw;
                     }
-                    .${this.style.menuRoot} .markup-eYLPri {
+                    .${this.style.menuRoot} main {
+                      overflow: visible !important;
+                    }
+                    .${this.style.menuRoot} :has(> main) {
+                      flex: 1 1 auto !important;
+                    }
+                    .${this.style.menuRoot} .${this.classes.markup} {
                       color: var(--text-default) !important;
                     }
-                    .${this.style.menuRoot} .username-h_Y3Us {
+                    .${this.style.menuRoot} .${this.classes.username} {
                       color: var(--mobile-text-heading-primary) !important;
                     }
-                    .${this.style.menuRoot} .timestamp-p1Df1m {
+                    .${this.style.menuRoot} .${this.classes.timestamp} {
                       color: var(--text-muted) !important;
                     }
                     .${this.style.toolbarButton} { color: var(--interactive-text-default); cursor: pointer; }
@@ -1425,7 +1274,6 @@ module.exports = class MessageLoggerV2 {
                     }
                     .${this.style.tabBarItem} {
                       display: flex;
-                      font-size: 14px;
                       margin-right: 40px;
                       border-bottom: 2px solid transparent;
                       align-items: center;
@@ -1456,7 +1304,6 @@ module.exports = class MessageLoggerV2 {
       var keys = Object.keys(channels);
       return channels[keys[Math.trunc(keys.length * Math.random())]];
     })();
-    this.menu.userRequestQueue = [];
     this.menu.deleteKeyDown = false;
     this.keydownListener = e => {
       if (e.repeat) return;
@@ -1472,28 +1319,28 @@ module.exports = class MessageLoggerV2 {
     this.Tooltip = Components.Tooltip;
     this.addOpenLogsButton();
     this.unpatches.push(
-      this.Patcher.instead(DiscordModules.MessageActions, 'deleteMessage', (_, args, original) => {
+      Patcher.instead(DiscordModules.MessageActions, 'deleteMessage', (_, args, original) => {
         const messageId = args[1];
-        if (this.messageRecord[messageId] && this.messageRecord[messageId].delete_data) return;
+        if (this.messageRecord[messageId]?.delete_data) return;
         this.localDeletes.push(messageId);
         if (this.localDeletes.length > 10) this.localDeletes.shift();
         return original(...args);
       }),
-      this.Patcher.instead(this.messageStore, 'getLastEditableMessage', (_this, [channelId]) => {
-        const me = DiscordModules.UserStore?.getCurrentUser()?.id;
+      Patcher.instead(this.messageStore, 'getLastEditableMessage', (_this, [channelId]) => {
+        const me = this.localUser.id;
         return _this
           .getMessages(channelId)
           .toArray()
           .reverse()
-          .find(iMessage => iMessage.author.id === me && iMessage.state === 'SENT' && (!this.messageRecord[iMessage.id] || !this.messageRecord[iMessage.id].delete_data));
+          .find(iMessage => iMessage.author.id === me && iMessage.state === 'SENT' && (!this.messageRecord[iMessage.id]?.delete_data));
       })
     );
     const getSrc_filter = m => typeof m === 'function' && ['sourceMetadata:', 'getSrc'].every(s => m.toString().includes(s));
-    const getSrcModule = Webpack.getModule(m => Object.values(m).some(getSrc_filter));
+    const getSrcModule = DiscordModules.GetSrcModule;
     const getSrc = [getSrcModule, Object.keys(getSrcModule).find(key => getSrc_filter(getSrcModule[key]))];
     const old_getSrc = getSrc[0][getSrc[1]].prototype.getSrc;
     this.unpatches.push(
-      this.Patcher.instead(getSrc[0][getSrc[1]].prototype, "getSrc", (_, args, original) => {
+      Patcher.instead(getSrc[0][getSrc[1]].prototype, "getSrc", (_, args, original) => {
         try {
           if (_.props?.src?.startsWith?.('blob:'))
             return _.props.src;
@@ -1507,10 +1354,6 @@ module.exports = class MessageLoggerV2 {
     Logger.log('All patches applied, forcing UI update...');
     setTimeout(() => {
       this.forceUpdateUI();
-      setTimeout(() => {
-        this.__fullyInitialized = true;
-        Logger.log('Fully initialized, dispatcher patch now active');
-      }, 500);
     }, 100);
     Logger.log('initialize() about to return...');
     if (!(this.settings.flags & Flags.STARTUP_HELP)) {
@@ -1518,9 +1361,6 @@ module.exports = class MessageLoggerV2 {
       this.showLoggerHelpModal(true);
       this.saveSettings();
     }
-    if (this.selfTestInited) return;
-    this.selfTestFailures = 0;
-    this.selfTestInited = true;
   }
   observer({ addedNodes }) {
     let isChat = false;
@@ -1532,7 +1372,7 @@ module.exports = class MessageLoggerV2 {
       const matchesChatContentClass = isString && className.includes(this.observer.chatContentClass);
       const matchesTitleClass = isString && className.includes(this.observer.titleClass);
       const matchesContainerCozy = isString && className.includes(this.observer.containerCozyClass);
-      const matchesStyle = change.style && change.style.cssText === 'border-radius: 2px; background-color: rgba(114, 137, 218, 0);';
+      const matchesStyle = change.style?.cssText === 'border-radius: 2px; background-color: rgba(114, 137, 218, 0);';
       if (matchesChatClass) {
         isTitle = true;
         isChat = true;
@@ -1646,7 +1486,7 @@ module.exports = class MessageLoggerV2 {
             name: 'Display dates with timestamps',
             id: 'displayDates',
             type: 'switch',
-            action: 'refreshChannel'
+            action: 'refreshCache'
           },
           {
             name: 'Display deleted messages in chat',
@@ -1856,12 +1696,6 @@ module.exports = class MessageLoggerV2 {
       }
     ];
     const actions = {
-      refreshChannel: () => {
-        if (this.selectedChannel) {
-          this.invalidateAllChannelCache();
-          this.cacheChannelMessages(this.selectedChannel.id);
-        }
-      },
       refreshCache: () => {
         this.invalidateAllChannelCache();
         if (this.selectedChannel) this.cacheChannelMessages(this.selectedChannel.id);
@@ -1900,8 +1734,8 @@ module.exports = class MessageLoggerV2 {
       },
       toggleAutoUpdate: (val) => {
         if (val) {
-          this._autoUpdateInterval = setInterval(_ => this.automaticallyUpdate(), 1000 * 60 * 15);
-          this.automaticallyUpdate();
+          this._autoUpdateInterval = setInterval(_ => this.checkNewUpdate(false), 1000 * 60 * 15);
+          this.checkNewUpdate(false);
         } else {
           clearInterval(this._autoUpdateInterval);
         }
@@ -1980,7 +1814,7 @@ module.exports = class MessageLoggerV2 {
   handleDataSaving() {
     if (!this.handleDataSaving.errorPageClass) {
       const errorPageModule = DiscordModules.ErrorPageClasses;
-      this.handleDataSaving.errorPageClass = errorPageModule && errorPageModule.errorPage ? ('.' + errorPageModule.errorPage) : '.error-page-not-found';
+      this.handleDataSaving.errorPageClass = errorPageModule?.errorPage ? ('.' + errorPageModule.errorPage) : '.error-page-not-found';
     }
     if (!this.messageRecord || document.querySelector(this.handleDataSaving.errorPageClass)) return;
     if (!Object.keys(this.messageRecord).length) return Data.delete(this.getName() + 'Data', 'data');
@@ -2039,7 +1873,7 @@ module.exports = class MessageLoggerV2 {
       }
       this.saveBackupTimeout = 0;
       this.autoBackupSaveInterupts = 0;
-      if (!(Data.load(this.getName() + 'DataBackup', 'data') || {}).messageRecord) this.saveBackupTimeout = setTimeout(() => this.saveBackup(), 300);
+      if (!Data.load(this.getName() + 'DataBackup', 'data')?.messageRecord) this.saveBackupTimeout = setTimeout(() => this.saveBackup(), 300);
     };
     this.efficientlySaveData(this.getName() + 'DataBackup', 'data', this._getDataPayload(), callback);
   }
@@ -2067,10 +1901,10 @@ module.exports = class MessageLoggerV2 {
     let date;
     if (from) date = new Date(from);
     else date = new Date();
-    if ((this.settings.displayDates || forcedDate) && forcedDate !== -1) {
+    if ((this.settings.displayDates || forcedDate) && forcedDate != -1) {
       return `${date.toLocaleTimeString()}, ${date.toLocaleDateString()}`;
     }
-    if (forcedDate === -1) {
+    if (forcedDate == -1) {
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
     return date.toLocaleTimeString();
@@ -2119,7 +1953,7 @@ module.exports = class MessageLoggerV2 {
         if (!e.me) delete e.me;
         return e;
       }),
-      guild_id: message.guild_id || (this.ChannelStore.getChannel(message.channel_id) ? this.ChannelStore.getChannel(message.channel_id).guild_id : undefined),
+      guild_id: message.guild_id || this.ChannelStore.getChannel(message.channel_id)?.guild_id,
       content: message.content,
       type: message.type,
       embeds: message.embeds || [],
@@ -2127,7 +1961,7 @@ module.exports = class MessageLoggerV2 {
       mentions: (message.mentions || []).map(e => {
         if (typeof e === 'string') {
           const user = this.UserStore.getUser(e);
-          return user ? this.cleanupUserObject(user) : e;
+          return user ? this.cleanupUserObject(user) : { id: e, username: 'Unknown', discriminator: '0000', avatar: null };
         }
         return this.cleanupUserObject(e);
       }),
@@ -2142,8 +1976,9 @@ module.exports = class MessageLoggerV2 {
       if (ret.message_reference) {
         if (message.referenced_message) {
           ret.referenced_message = this.cleanupMessageObject(message.referenced_message);
-        } else if (this.messageStore.getMessage(ret.message_reference.channel_id, ret.message_reference.message_id)) {
-          ret.referenced_message = this.cleanupMessageObject(this.messageStore.getMessage(ret.message_reference.channel_id, ret.message_reference.message_id));
+        } else {
+          const refMsg = this.messageStore.getMessage(ret.message_reference.channel_id, ret.message_reference.message_id);
+          if (refMsg) ret.referenced_message = this.cleanupMessageObject(refMsg);
         }
       }
     }
@@ -2171,7 +2006,7 @@ module.exports = class MessageLoggerV2 {
     this.channelMessages[channelId].ready = false;
   }
   cacheChannelMessages(id, relative) {
-    DiscordModules.MessageActions?.fetchMessages({ channelId: id, limit: 50, jump: (relative && { messageId: relative, ML2: true }) || undefined });
+    DiscordModules.MessageActions.fetchMessages({ channelId: id, limit: 50, jump: (relative && { messageId: relative, ML2: true }) || undefined });
   }
   formatMarkup(content, channelId) {
     if (!content) return null;
@@ -2213,7 +2048,7 @@ module.exports = class MessageLoggerV2 {
         for (const mutation of mutations) {
           const nodes = Array.from(mutation.removedNodes);
           const directMatch = nodes.includes(child);
-          const parentMatch = nodes.some(parent => parent.contains && parent.contains(child));
+          const parentMatch = nodes.some(parent => parent.contains?.(child));
           if (directMatch || parentMatch) {
             cleanup();
             break;
@@ -2427,7 +2262,7 @@ module.exports = class MessageLoggerV2 {
   }
   _ensureChannelCached(channelId) {
     const channelMessages = this.channelMessages[channelId];
-    if (!channelMessages || !channelMessages.ready) {
+    if (!channelMessages?.ready) {
       this.cacheChannelMessages(channelId);
     }
   }
@@ -2436,7 +2271,7 @@ module.exports = class MessageLoggerV2 {
     this.cacheChannelMessages(channelId);
   }
   _openUserContextMenu(event, user, channel) {
-    const targetModule = Webpack.getBySource('isGroupDM', 'moderationAlertId', { searchExports: false });
+    const targetModule = DiscordModules.UserContextMenuModule;
     const filterFunc2 = x2 => x2?.toString?.().includes("isGroupDM") && x2?.toString?.().includes("targetIsUser");
     Object.values(targetModule).find(filterFunc2)(event, user, channel || this.menu.randomValidChannel);
   }
@@ -2483,16 +2318,10 @@ module.exports = class MessageLoggerV2 {
       });
     }
   }
-  /**
-   * Adds an ID to a channel-keyed Set Map, creating the Set if needed
-   */
   _addToChannelSet(setMap, channelId, id) {
     if (!setMap.has(channelId)) setMap.set(channelId, new Set());
     setMap.get(channelId).add(id);
   }
-  /**
-   * Returns the data payload object used for saving/backup
-   */
   _getDataPayload() {
     return {
       messageRecord: this.messageRecord,
@@ -2501,9 +2330,6 @@ module.exports = class MessageLoggerV2 {
       purgedMessageRecord: this.purgedMessageRecord
     };
   }
-  /**
-   * Checks if a toast notification should be shown for the given event type
-   */
   _shouldShowToast(channel, guild, toastType, isLocalUser = false) {
     if (!this.selectedChannel || this.selectedChannel.id !== channel.id) {
       const toggles = guild ? this.settings.toastToggles : this.settings.toastTogglesDMs;
@@ -2515,9 +2341,6 @@ module.exports = class MessageLoggerV2 {
     }
     return false;
   }
-  /**
-   * Unified notification handler for message events
-   */
   _notifyEvent(eventType, channel, guild, messageId, options = {}) {
     const configs = {
       deleted: {
@@ -2570,9 +2393,6 @@ module.exports = class MessageLoggerV2 {
     ] : [];
     this._showNotification(config.title, message, config.type, actions, timeout);
   }
-  /**
-   * Sorts messages array by ID in descending order (newest first)
-   */
   _sortMessagesById(messages) {
     messages.sort((a, b) => {
       const aId = BigInt(a.id);
@@ -2606,34 +2426,27 @@ module.exports = class MessageLoggerV2 {
   jumpToMessage(channelId, messageId, guildId) {
     if (this.menu.open) this.ModalStack.closeModal(this.style.menu);
     const historyModule = DiscordModules.HistoryUtils;
-    if (historyModule?.getHistory) {
+    if (historyModule) {
       const path = `/channels/${guildId || '@me'}/${channelId}${messageId ? '/' + messageId : ''}`;
       historyModule.getHistory().push(path);
     }
   }
+  _cacheIncomingMessage(message) {
+    if (this.cachedMessageIds.has(message.id)) return true;
+    this.cachedMessageRecord.push(message);
+    this.cachedMessageIds.add(message.id);
+    this.cachedMessagesMap.set(message.id, message);
+    return false;
+  }
+  _testUrlPattern(url, regex) {
+    if (regex.test(url)) return true;
+    try { return regex.test(new URL(url).pathname); } catch { return false; }
+  }
   isImage(url) {
-    const regexForTest = /\.(jpe?g|png|gif|bmp|webp)$/i;
-    const asUrl = (() => {
-      try {
-        return new URL(url);
-      }
-      catch {
-        return { pathname: "nope" };
-      }
-    })();
-    return regexForTest.test(url) || regexForTest.test(asUrl.pathname);
+    return this._testUrlPattern(url, /\.(jpe?g|png|gif|bmp|webp)$/i);
   }
   isVideo(url) {
-    const regexForTest = /\.(mp4|webm|mov|avi|mkv)$/i;
-    const asUrl = (() => {
-      try {
-        return new URL(url);
-      }
-      catch {
-        return { pathname: "nope" };
-      }
-    })();
-    return regexForTest.test(url) || regexForTest.test(asUrl.pathname);
+    return this._testUrlPattern(url, /\.(mp4|webm|mov|avi|mkv)$/i);
   }
   cleanupEmbed(embed) {
     if (!embed.id) return embed;
@@ -2681,9 +2494,6 @@ module.exports = class MessageLoggerV2 {
   }
   fixEmbeds(message) {
     message.embeds = message.embeds.map(this.cleanupEmbed);
-  }
-  isCompact() {
-    return false;
   }
   addOpenLogsButton() {
     if (this.toolbarButtonCleanup) {
@@ -2768,7 +2578,7 @@ module.exports = class MessageLoggerV2 {
     this.createModal({
       confirmText: 'OK',
       header: 'Logger help',
-      size: this.createModal.confirmationModal.Sizes.LARGE,
+      size: this.tools.resolvedModalStuff.ModalSize.LARGE,
       confirmButtonColor: this.tools.buttonColors.BRAND,
       children: [
         this.tools.createWrappedElement([
@@ -2918,20 +2728,12 @@ module.exports = class MessageLoggerV2 {
       if (callbacks.size === 0) this._messageUpdateRegistry.delete(msgId);
     }
   }
-  _findLastIndex(array, predicate) {
-    let l = array.length;
-    while (l--) {
-      if (predicate(array[l], l, array))
-        return l;
-    }
-    return -1;
-  }
   _getSortedMessageIds(channelId, isPurged = false) {
     const cache = isPurged ? this.sortedPurgedMessageIds : this.sortedDeletedMessageIds;
     const source = isPurged ? this.purgedMessageRecord : this.deletedMessageRecord;
     if (!cache.has(channelId)) {
       const ids = source[channelId];
-      if (!ids || !ids.length) {
+      if (!ids?.length) {
         cache.set(channelId, []);
         return [];
       }
@@ -2947,7 +2749,6 @@ module.exports = class MessageLoggerV2 {
     return cache.get(channelId);
   }
   _binarySearchSnowflakeIndex(sortedIds, targetTime, findLower = true) {
-    const DISCORD_EPOCH = 14200704e5;
     let left = 0;
     let right = sortedIds.length - 1;
     let result = findLower ? sortedIds.length : -1;
@@ -2972,7 +2773,6 @@ module.exports = class MessageLoggerV2 {
   }
   reAddDeletedMessages(messages, deletedMessages, channelStart, channelEnd) {
     if (!deletedMessages.length) return;
-    const DISCORD_EPOCH = 14200704e5;
     const existingMessageIds = new Set(messages.map(e => e.id));
     const lowestTime = messages.length ? (Number(messages[messages.length - 1].id) / 4194304) + DISCORD_EPOCH : Infinity;
     const highestTime = messages.length ? (Number(messages[0].id) / 4194304) + DISCORD_EPOCH : 0;
@@ -3038,9 +2838,9 @@ module.exports = class MessageLoggerV2 {
       const guildName = (guild ? guild.name : 'unknown-server');
       if (useTags && channel) return `${guildName}, <#${channel.id}>`;
       return `${guildName}, #${channelName}`;
-    } else if (channel && channel.name.length) {
+    } else if (channel?.name.length) {
       return `group ${channel.name}`;
-    } else if (channel && channel.type == 3) {
+    } else if (channel?.type == 3) {
       let finalGroupName = '';
       for (let i of channel.recipients) {
         const user = this.tools.getUser(i);
@@ -3056,7 +2856,7 @@ module.exports = class MessageLoggerV2 {
       } else {
         return 'unknown group';
       }
-    } else if (channel && channel.recipients) {
+    } else if (channel?.recipients) {
       const user = this.tools.getUser(channel.recipients[0]);
       if (!user) return 'DMs';
       if (useTags) return `<@${user.id}> DMs`;
@@ -3116,17 +2916,15 @@ module.exports = class MessageLoggerV2 {
   }
   createModal(options, image, name) {
     const ModalActions = this.ModalStack;
-    if (options.size)
-      options.size = this.getKeyByValue(this.createModal.confirmationModal.Sizes, options.size).toLowerCase();
     const item = options.items?.[0] || options;
     const isVideo = item.type === "VIDEO";
     if (isVideo) {
       ModalActions.openModal(props =>
         React.createElement(
-          this.tools.resolvedModalStuff.ModalRoot,
+          this.tools.manaModule.Modal,
           {
             ...props,
-            size: this.tools.resolvedModalStuff.ModalSize.LARGE,
+            size: 'lg',
             style: { padding: 0, backgroundColor: 'transparent' }
           },
           React.createElement('div', {
@@ -3192,7 +2990,7 @@ module.exports = class MessageLoggerV2 {
       };
       ModalActions.openModal(props =>
         React.createElement(
-          this.tools.resolvedModalStuff.ModalRoot,
+          this.tools.manaModule.Modal,
           { ...props, size: this.tools.resolvedModalStuff.ModalSize.DYNAMIC },
           React.createElement(this.createModal.imageModal,
             { ...imageProps, ...props, ...(options.onClose ? { onClose: options.onClose } : {}) }
@@ -3201,55 +2999,55 @@ module.exports = class MessageLoggerV2 {
       );
       return;
     }
-    const stuff = {
-      Button: Components.Button,
-      ModalStuff: this.tools.resolvedModalStuff,
-      Heading: this.tools.headingModule,
+    if (options.ml2Data) {
+      ModalActions.openModal(props => {
+        const actions = [];
+        if (options.confirmText) {
+          actions.push({
+            text: options.confirmText,
+            variant: options.confirmButtonColor === Components.Button.Colors.BRAND ? "primary" : "critical-primary",
+            onClick: () => { options.onConfirm?.(); },
+          });
+        }
+        if (options.cancelText) {
+          actions.push({
+            text: options.cancelText,
+            variant: "secondary",
+            onClick: () => { options.onCancel?.(); },
+          });
+        }
+        return React.createElement(this.tools.manaModule.Modal, {
+          ...props,
+          size: options.size,
+          title: options.header,
+          actions,
+          actionBarInput: false,
+          children: options.children,
+        });
+      }, { modalKey: name });
+      if (options.className) {
+        requestAnimationFrame(() => {
+          const containers = document.querySelectorAll('[data-mana-component="modal"]');
+          const container = containers[containers.length - 1];
+          if (container) container.classList.add(options.className);
+        });
+      }
+    } else {
+      const isCritical = !options.confirmButtonColor || options.confirmButtonColor === Components.Button.Colors.RED;
+      ModalActions.openModal(props => {
+        return React.createElement(this.tools.manaModule.ConfirmModal, {
+          ...props,
+          size: options.size,
+          title: options.header,
+          confirmText: options.confirmText,
+          cancelText: options.cancelText,
+          onConfirm: options.onConfirm,
+          onCancel: options.onCancel ?? props.onClose,
+          variant: isCritical ? "critical" : undefined,
+          children: options.children,
+        });
+      }, { modalKey: name });
     }
-    const final = p => {
-      const cancelButtonElement = React.createElement(stuff.Button, {
-        key: 'cancel-btn',
-        type: 'button',
-        look: stuff.Button.Looks.LINK,
-        color: stuff.Button.Colors.PRIMARY,
-        onClick: options.onCancel ?? p.onClose,
-        children: options.cancelText
-      });
-      const confirmButtonElement = React.createElement(stuff.Button, {
-        key: 'confirm-btn',
-        type: 'submit',
-        color: options.confirmButtonColor ?? stuff.Button.Colors.RED,
-        onClick: options.onConfirm ?? p.onClose,
-        children: options.confirmText
-      });
-      return React.createElement(stuff.ModalStuff.ModalRoot, {
-        className: options.className,
-        size: options.size,
-        ...p,
-        children: [
-          React.createElement(stuff.ModalStuff.ModalHeader, {
-            key: 'modal-header',
-            separator: false,
-            children: React.createElement(stuff.Heading, {
-              variant: 'heading-lg/semibold',
-              children: options.header
-            })
-          }),
-          React.createElement(stuff.ModalStuff.ModalContent, {
-            key: 'modal-content',
-            className: '',
-            children: options.children,
-          }),
-          React.createElement(stuff.ModalStuff.ModalFooter, {
-            key: 'modal-footer',
-            children: [confirmButtonElement, cancelButtonElement]
-          })
-        ]
-      })
-    };
-    ModalActions.openModal(props => {
-      return React.createElement(final, props);
-    }, { modalKey: name });
   }
   getMessageAny(id) {
     const record = this.messageRecord[id];
@@ -3273,7 +3071,7 @@ module.exports = class MessageLoggerV2 {
       }
       const arrayBuffer = await response.arrayBuffer();
       const finalData = new Uint8Array(arrayBuffer);
-      let match = new URL(url).pathname.match(/\.[0-9a-z]+$/i);
+      let match = /\.[0-9a-z]+$/i.exec(new URL(url).pathname);
       if (match == null) {
         match = [this.contentTypeToExtension(response.headers.get("content-type"))];
       }
@@ -3445,11 +3243,6 @@ module.exports = class MessageLoggerV2 {
     let ret = Promise.resolve();
     if (!dispatch) return callDefault(...args);
     try {
-      if (dispatch.type === 'MESSAGE_LOGGER_V2_SELF_TEST') {
-        clearTimeout(this.selfTestTimeout);
-        this.selfTestFailures = 0;
-        return ret;
-      }
       if (dispatch.type === 'CHANNEL_SELECT') {
         ret = callDefault(...args);
         this.selectedChannel = this.getSelectedTextChannel();
@@ -3461,18 +3254,18 @@ module.exports = class MessageLoggerV2 {
       const channel = this.tools.getChannel(dispatch.message ? dispatch.message.channel_id : dispatch.channelId);
       if (!channel) return callDefault(...args);
       const guild = channel.guild_id ? this.tools.getServer(channel.guild_id) : false;
-      let author = dispatch.message && dispatch.message.author ? this.tools.getUser(dispatch.message.author.id) : false;
-      if (!author) author = ((this.channelMessages[channel.id] || { _map: {} })._map[dispatch.message ? dispatch.message.id : dispatch.id] || {}).author;
+      let author = dispatch.message?.author ? this.tools.getUser(dispatch.message.author.id) : false;
+      if (!author) author = this.channelMessages[channel.id]?._map?.[dispatch.message?.id ?? dispatch.id]?.author;
       if (!author) {
         let message = this.getCachedMessage(dispatch.id);
         if (message) author = this.tools.getUser(message.author.id);
       }
       if (!author && !(dispatch.type == 'LOAD_MESSAGES_SUCCESS' || dispatch.type == 'MESSAGE_DELETE_BULK')) return callDefault(...args);
       const isLocalUser = author && author.id === this.localUser.id;
-      if (author && author.bot && this.settings.ignoreBots) return callDefault(...args);
+      if (author?.bot && this.settings.ignoreBots) return callDefault(...args);
       if (author && isLocalUser && this.settings.ignoreSelf) return callDefault(...args);
       if (author && this.settings.ignoreBlockedUsers && this.tools.isBlocked(author.id) && !isLocalUser) return callDefault(...args);
-      if (author && author.avatar === 'clyde') return callDefault(...args);
+      if (author?.avatar === 'clyde') return callDefault(...args);
       if (this.settings.ignoreLocalEdits && dispatch.type === 'MESSAGE_UPDATE' && isLocalUser) return callDefault(...args);
       if (this.settings.ignoreLocalDeletes && dispatch.type === 'MESSAGE_DELETE' && isLocalUser && this.localDeletes.includes(dispatch.id)) return callDefault(...args);
       let guildIsMutedReturn = false;
@@ -3515,12 +3308,12 @@ module.exports = class MessageLoggerV2 {
       }
       if (doReturn && this.settings.alwaysLogGhostPings) {
         if (dispatch.type === 'MESSAGE_DELETE') {
-          const deleted = (this.tempEditedMessageRecord[dispatch.id] && this.tempEditedMessageRecord[dispatch.id].message) || this.getCachedMessage(dispatch.id, dispatch.channelId);
+          const deleted = this.tempEditedMessageRecord[dispatch.id]?.message || this.getCachedMessage(dispatch.id, dispatch.channelId);
           if (!deleted || (deleted.type !== 0 && deleted.type !== 19 && deleted.type !== 20)) return callDefault(...args);
           if (deleted.flags == 64) return callDefault(...args);
           if (!this.tools.isMentioned(deleted, this.localUser.id)) return callDefault(...args);
           const record = this.messageRecord[dispatch.id];
-          if (this._shouldShowToast(channel, guild, 'ghostPings') && (!record || !record.ghost_pinged)) {
+          if (this._shouldShowToast(channel, guild, 'ghostPings') && !record?.ghost_pinged) {
             this._notifyEvent('ghostPing', channel, guild, dispatch.id);
           }
           this.saveDeletedMessage(deleted, this.deletedMessageRecord);
@@ -3583,18 +3376,14 @@ module.exports = class MessageLoggerV2 {
           if (this._shouldShowToast(channel, guild, 'ghostPings')) {
             this._notifyEvent('ghostPing', channel, guild, dispatch.id);
           }
-        } else if (dispatch.type == 'MESSAGE_CREATE' && dispatch.message && (dispatch.message.content.length || (dispatch.attachments && dispatch.attachments.length) || (dispatch.embeds && dispatch.embeds.length)) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20) && this.tools.isMentioned(dispatch.message, this.localUser.id)) {
-          if (this.cachedMessageIds.has(dispatch.message.id)) return callDefault(...args);
-          this.cachedMessageRecord.push(dispatch.message);
-          this.cachedMessageIds.add(dispatch.message.id);
-          this.cachedMessagesMap.set(dispatch.message.id, dispatch.message);
-          if (this.settings.cacheAllImages) this.cacheMessageImages(dispatch.message);
+        } else if (dispatch.type == 'MESSAGE_CREATE' && dispatch.message && (dispatch.message.content.length || dispatch.attachments?.length || dispatch.embeds?.length) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20) && this.tools.isMentioned(dispatch.message, this.localUser.id)) {
+          if (this._cacheIncomingMessage(dispatch.message)) return callDefault(...args);
         }
       }
       if (doReturn) return callDefault(...args);
       if (dispatch.type == 'LOAD_MESSAGES_SUCCESS') {
         if (!this.settings.restoreDeletedMessages) return callDefault(...args);
-        if (dispatch.jump && dispatch.jump.ML2) delete dispatch.jump;
+        if (dispatch.jump?.ML2) delete dispatch.jump;
         const deletedMessages = this.deletedMessageRecord[channel.id];
         const purgedMessages = this.purgedMessageRecord[channel.id];
         if ((!deletedMessages && !purgedMessages) || (!this.settings.showPurgedMessages && !this.settings.showDeletedMessages)) return callDefault(...args);
@@ -3635,13 +3424,10 @@ module.exports = class MessageLoggerV2 {
           this._notifyEvent('deleted', channel, guild, dispatch.id);
         }
         const record = this.messageRecord[dispatch.id];
-        if (this._shouldShowToast(channel, guild, 'ghostPings') && (!record || !record.ghost_pinged) && this.tools.isMentioned(deleted, this.localUser.id)) {
+        if (this._shouldShowToast(channel, guild, 'ghostPings') && !record?.ghost_pinged && this.tools.isMentioned(deleted, this.localUser.id)) {
           this._notifyEvent('ghostPing', channel, guild, dispatch.id);
         }
         this.saveDeletedMessage(deleted, this.deletedMessageRecord);
-        if (this.settings.showDeletedMessages && DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) {
-          this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: dispatch.id });
-        }
         if (!this.settings.showDeletedMessages) ret = callDefault(...args);
         else if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: dispatch.id });
         this.saveData();
@@ -3660,7 +3446,7 @@ module.exports = class MessageLoggerV2 {
           this.saveDeletedMessage(purged, this.purgedMessageRecord);
           if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: purged.id });
         }
-        if (failedMessage && this.aggresiveMessageCaching)
+        if (failedMessage && this.settings.aggresiveMessageCaching)
           this.cacheChannelMessages(channel.id);
         else if (this.settings.aggresiveMessageCaching) this._ensureChannelCached(channel.id);
         if (!notificationsBlacklisted && notificationsWhitelisted && (guild ? this.settings.toastToggles.deleted : this.settings.toastTogglesDMs.deleted)) {
@@ -3685,21 +3471,23 @@ module.exports = class MessageLoggerV2 {
         const lastEditedSaved = this.getEditedMessage(dispatch.message.id, channel.id);
         if (!last && !lastEditedSaved) return callDefault(...args);
         let ghostPinged = false;
-        if (lastEditedSaved) {
-          let loggedAttachmentsToAdd = [];
-          if (lastEditedSaved.message.content === dispatch.message.content) {
-            if (lastEditedSaved.message.attachments === dispatch.message.attachments) {
-              return callDefault(...args);
-            }
-            else {
-              const { content: generatedContent, logged_attachments } = this._getChangedAttachments(
-                last.attachments, dispatch.message.attachments,
-                dispatch.message.id, dispatch.message.channel_id, dispatch.message.guild_id
-              );
-              lastEditedSaved.message.content += "\n" + generatedContent;
-              loggedAttachmentsToAdd = logged_attachments;
-            }
+        const currentContent = lastEditedSaved ? lastEditedSaved.message.content : last.content;
+        let loggedAttachmentsToAdd = [];
+        if (currentContent === dispatch.message.content) {
+          if ((lastEditedSaved ? lastEditedSaved.message.attachments : last.attachments) === dispatch.message.attachments) {
+            return callDefault(...args);
           }
+          else {
+            const { content: generatedContent, logged_attachments } = this._getChangedAttachments(
+              last.attachments, dispatch.message.attachments,
+              dispatch.message.id, dispatch.message.channel_id, dispatch.message.guild_id
+            );
+            if (lastEditedSaved) lastEditedSaved.message.content += "\n" + generatedContent;
+            else last.content += "\n" + generatedContent;
+            loggedAttachmentsToAdd = logged_attachments;
+          }
+        }
+        if (lastEditedSaved) {
           lastEditedSaved.edit_history.push({
             content: lastEditedSaved.message.content,
             time: Date.now()
@@ -3710,20 +3498,6 @@ module.exports = class MessageLoggerV2 {
           ghostPinged = !lastEditedSaved.ghost_pinged && lastEditedSaved.local_mentioned && !this.tools.isMentioned(dispatch.message, this.localUser.id);
           if (ghostPinged) lastEditedSaved.ghost_pinged = true;
         } else {
-          let loggedAttachmentsToAdd = [];
-          if (last.content === dispatch.message.content) {
-            if (last.attachments === dispatch.message.attachments) {
-              return callDefault(...args);
-            }
-            else {
-              const { content: generatedContent, logged_attachments } = this._getChangedAttachments(
-                last.attachments, dispatch.message.attachments,
-                dispatch.message.id, dispatch.message.channel_id, dispatch.message.guild_id
-              );
-              last.content += "\n" + generatedContent;
-              loggedAttachmentsToAdd = logged_attachments;
-            }
-          }
           const data = this.createMiniFormattedData(last);
           data.edit_history = [
             {
@@ -3774,12 +3548,8 @@ module.exports = class MessageLoggerV2 {
         }
         this.saveData();
         return callDefault(...args);
-      } else if (dispatch.type == 'MESSAGE_CREATE' && dispatch.message && (dispatch.message.content.length || (dispatch.attachments && dispatch.attachments.length) || (dispatch.embeds && dispatch.embeds.length)) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20)) {
-        if (this.cachedMessageIds.has(dispatch.message.id)) return callDefault(...args);
-        this.cachedMessageRecord.push(dispatch.message);
-        this.cachedMessageIds.add(dispatch.message.id);
-        this.cachedMessagesMap.set(dispatch.message.id, dispatch.message);
-        if (this.settings.cacheAllImages) this.cacheMessageImages(dispatch.message);
+      } else if (dispatch.type == 'MESSAGE_CREATE' && dispatch.message && (dispatch.message.content.length || dispatch.attachments?.length || dispatch.embeds?.length) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20)) {
+        if (this._cacheIncomingMessage(dispatch.message)) return callDefault(...args);
         if (this.settings.aggresiveMessageCaching) this._ensureChannelCached(channel.id);
         if (!notificationsBlacklisted && this._shouldShowToast(channel, guild, 'sent')) {
           this._notifyEvent('sent', channel, guild, dispatch.message.id);
@@ -3791,11 +3561,10 @@ module.exports = class MessageLoggerV2 {
     }
     return ret;
   }
-  processUserRequestQueue() { return undefined; }
   patchMessages() {
     if (!this._globalUpdateCallbackMessage) {
       this._globalUpdateCallbackMessage = (e) => {
-        if (!e?.id) return;
+        if (!e.id) return;
         const callbacks = this._messageUpdateRegistry.get(e.id);
         if (callbacks) callbacks.forEach(cb => cb());
       };
@@ -3803,7 +3572,7 @@ module.exports = class MessageLoggerV2 {
     }
     if (!this._globalUpdateCallbackContent) {
       this._globalUpdateCallbackContent = (e) => {
-        if (e?.id) {
+        if (e.id) {
           const callbacks = this._messageUpdateRegistry.get(e.id);
           if (callbacks) callbacks.forEach(cb => cb());
         } else {
@@ -3835,11 +3604,11 @@ module.exports = class MessageLoggerV2 {
     const messageWrapperClass = messageWrapperModule.message || '';
     const findMessageElement = (tree, depth = 0) => {
       if (depth > 6 || !tree) return null;
-      if (tree?.props?.className && typeof tree.props.className === 'string') {
+      if (tree.props?.className && typeof tree.props.className === 'string') {
         if (messageWrapperClass && tree.props.className.includes(messageWrapperClass)) return tree;
         if (!messageWrapperClass && tree.props.className.split(' ').some(c => c.startsWith('message-'))) return tree;
       }
-      const children = tree?.props?.children;
+      const children = tree.props?.children;
       if (!children) return null;
       if (Array.isArray(children)) {
         for (const child of children) {
@@ -3856,7 +3625,7 @@ module.exports = class MessageLoggerV2 {
       Webpack.getBySource("Message must be a thread starter message") ||
       Webpack.getBySource("quotedChatMessage", "EMOJI_ADDED");
     const MemoMessage = MessageModule && Object.values(MessageModule).find(exp =>
-      exp && exp.$$typeof === Symbol.for('react.memo')
+      exp?.$$typeof === Symbol.for('react.memo')
     );
     if (!MessageContent || !MemoMessage) return UI.showToast('Failed to patch message components, edit history and deleted tint will not show!', { type: "error", timeout: 0 });
     const EditHistoryContent = ({ plugin, messageId, record, originalChildren, compact }) => {
@@ -3868,6 +3637,10 @@ module.exports = class MessageLoggerV2 {
         plugin._messageUpdateRegistry.get(messageId).add(forceUpdate);
         return plugin._unregisterMessageCallback.bind(plugin, messageId, forceUpdate);
       }, [messageId]);
+      const currentRecord = plugin.messageRecord[messageId];
+      if (!currentRecord || !currentRecord.edit_history || currentRecord.edits_hidden) {
+        return Array.isArray(originalChildren[0]) ? originalChildren[0] : originalChildren[1];
+      }
       const createEditedMessage = (edit, editNum, isSingular, noSuffix) =>
         React.createElement(
           plugin.Tooltip,
@@ -3922,11 +3695,11 @@ module.exports = class MessageLoggerV2 {
     };
     EditHistoryContent.displayName = 'EditHistoryContent';
     this.unpatches.push(
-      this.Patcher.after(MessageContent, 'type', (_, [props], ret) => {
+      Patcher.after(MessageContent, 'type', (_, [props], ret) => {
         if (!this.settings.showEditedMessages || (typeof props.className === 'string' && props.className.includes('repliedTextContent'))) return;
         if (!this.messageRecordIds.has(props.message.id)) return;
         const record = this.messageRecord[props.message.id];
-        if (!record || !record.edit_history || record.edits_hidden || !Array.isArray(ret.props.children)) return;
+        if (!record?.edit_history || record.edits_hidden || !Array.isArray(ret.props.children)) return;
         const newClassName = [ret.props.className, this.style.edited].filter(Boolean).join(' ');
         const originalChildren = ret.props.children;
         ret.props.className = newClassName;
@@ -3938,7 +3711,7 @@ module.exports = class MessageLoggerV2 {
           compact: props.compact
         });
       }),
-      this.Patcher.after(MemoMessage, 'type', (_, [props], ret) => {
+      Patcher.after(MemoMessage, 'type', (_, [props], ret) => {
         const messageId = props.message.id;
         const hasRecord = this.messageRecordIds.has(messageId);
         const record = hasRecord ? this.messageRecord[messageId] : null;
@@ -3950,7 +3723,7 @@ module.exports = class MessageLoggerV2 {
           this._messageUpdateRegistry.get(messageId).add(forceUpdate);
           return this._unregisterMessageCallback.bind(this, messageId, forceUpdate);
         }, [messageId, hasRecord]);
-        if (record && record.delete_data && !this.noTintIds.has(messageId)) {
+        if (record?.delete_data && !this.noTintIds.has(messageId)) {
           const message = findMessageElement(ret);
           if (message) {
             const deletedClass = this.settings.useAlternativeDeletedStyle ? this.style.deletedAlt : this.style.deleted;
@@ -3983,14 +3756,9 @@ module.exports = class MessageLoggerV2 {
     });
   }
   patchModal() {
-    this.createModal.confirmationModal = {};
-    this.createModal.confirmationModal.Sizes = this.tools.resolvedModalStuff.ModalSize;
-    this.ModalStack = this.tools.resolvedModalApi;
-    const modalUtils = this.ModalStack;
-    this.isModalOpen = modalUtils.hasModalOpen;
-    this._modalsApiUnsubcribe = modalUtils.useModalsStore.subscribe(_ => {
+    this._modalsApiUnsubcribe = this.ModalStack.useModalsStore.subscribe(_ => {
       setTimeout(() => {
-        let modalOpen = this.isModalOpen(this.style.menu);
+        let modalOpen = this.ModalStack.hasModalOpen(this.style.menu);
         if (this.menu.open && !modalOpen) {
           this.menu.filter = '';
           this.menu.open = false;
@@ -4007,7 +3775,9 @@ module.exports = class MessageLoggerV2 {
   getDiscordClass(arg, thrw) {
     try {
       const args = arg.split(' ');
-      const module = Webpack.getByKeys(...args);
+      const cacheKey = args.join(',');
+      this._classCache ??= {};
+      const module = this._classCache[cacheKey] ??= Webpack.getByKeys(...args);
       if (!module) {
         Logger.warn(`getDiscordClass: No module found for keys: ${args.join(', ')}`);
         return '';
@@ -4067,7 +3837,6 @@ module.exports = class MessageLoggerV2 {
     let timestamp = message.timestamp;
     let author = this.tools.getUser(message.author.id);
     let noUserInfo = false;
-    let userInfoBeingRequested = true;
     const isBot = message.author.bot;
     const record = this.messageRecord[message.id];
     if (record) {
@@ -4084,7 +3853,7 @@ module.exports = class MessageLoggerV2 {
         if (typeof record.edit_history[record.edit_history.length - 1].time !== 'string') timestamp = record.edit_history[record.edit_history.length - 1].time;
       }
     }
-    details += ` ${this.getLiteralName(message.guild_id || (channel && channel.guild_id), message.channel_id)} `;
+    details += ` ${this.getLiteralName(message.guild_id || channel?.guild_id, message.channel_id)} `;
     details += `at ${this.createTimeStamp(timestamp, true)}`;
     details = details.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
     if (!this.createMessageGroup.classes) {
@@ -4182,78 +3951,62 @@ module.exports = class MessageLoggerV2 {
         }
       };
       if (author) {
-        userInfoBeingRequested = false;
         verifyProfilePicture();
       } else {
         author = message.author;
-        if (this.menu.userRequestQueue.some(m => m.id === author.id)) {
-          const dt = this.menu.userRequestQueue.find(m => m.id === author.id);
-          dt.success.push(res => {
-            author = $.extend(true, {}, res);
-            verifyProfilePicture();
-            userInfoBeingRequested = false;
-          });
-          dt.fail.push(() => {
-            noUserInfo = true;
-            userInfoBeingRequested = false;
-          });
-        } else {
-          this.menu.userRequestQueue.push({
-            id: author.id,
-            username: author.username,
-            success: [
-              res => {
-                author = $.extend(true, {}, res);
-                verifyProfilePicture();
-                userInfoBeingRequested = false;
-              }
-            ],
-            fail: [
-              () => {
-                noUserInfo = true;
-                userInfoBeingRequested = false;
-              }
-            ]
-          });
-        }
+        noUserInfo = true;
       }
-      const profIcon = element.getElementsByClassName(classes.avatarImgSingle)[0];
-      profIcon.addEventListener('click', () => {
-        if (userInfoBeingRequested) return this.showToast('Internal error', { type: 'info', timeout: 5000 });
+      profImg.addEventListener('click', () => {
         if (noUserInfo) return this.showToast('Could not get user info!', { type: 'error' });
         setTimeout(() => {
-          this.tools.showUserPopout(profIcon, author);
+          this.tools.showUserPopout(profImg, author, message.channel_id);
         }, 0);
       });
-      profIcon.addEventListener('contextmenu', e => {
-        if (userInfoBeingRequested) return this.showToast('Internal error', { type: 'info', timeout: 5000 });
+      profImg.addEventListener('contextmenu', e => {
         if (noUserInfo) return this.showToast('Could not get user info! You can only delete or copy to clipboard!', { timeout: 5000 });
         this._openUserContextMenu(e, author, channel);
       });
       const nameLink = element.getElementsByClassName(classes.extra[10])[0];
       nameLink.addEventListener('click', () => {
-        if (userInfoBeingRequested) return this.showToast('Internal error', { type: 'info', timeout: 5000 });
         if (noUserInfo) return this.showToast('Could not get user info!', { type: 'error' });
         setTimeout(() => {
-          this.tools.showUserPopout(nameLink, author);
+          this.tools.showUserPopout(nameLink, author, message.channel_id);
         }, 0);
       });
       nameLink.addEventListener('contextmenu', e => {
-        if (userInfoBeingRequested) return this.showToast('Internal error', { type: 'info', timeout: 5000 });
         if (noUserInfo) return this.showToast('Could not get user info! You can only delete or copy to clipboard!', { type: 'error', timeout: 5000 });
         this._openUserContextMenu(e, author, channel);
       });
       const timestampEl = element.getElementsByClassName(classes.extra[11])[0];
-      timestampEl.addEventListener('contextmenu', e => {
+      const collectGroupMessageIds = () => {
         const messages = [element];
         let target = element.nextElementSibling;
-        while (target && target.classList && !target.classList.contains(DiscordModules.MessageWrapperClasses)) {
+        while (target?.classList && !target.classList.contains(DiscordModules.MessageWrapperClasses)) {
           messages.push(target);
           target = target.nextElementSibling;
         }
-        if (!messages.length) return;
+        if (!messages.length) return [];
         const messageIds = [];
-        for (const msg of messages) if (msg && msg.messageId) messageIds.push(msg.messageId);
+        for (const msg of messages) if (msg?.messageId) messageIds.push(msg.messageId);
+        return messageIds;
+      };
+      const removeGroupFromLog = (messageIds) => {
+        let invalidatedChannelCache = false;
+        for (let msgid of messageIds) {
+          const record = this.messageRecord[msgid];
+          if (!record) continue;
+          if ((record.edit_history && !record.edits_hidden) || (record.delete_data && !record.delete_data.hidden)) {
+            invalidatedChannelCache = record.message.channel_id;
+            this.invalidateChannelCache(invalidatedChannelCache);
+          }
+          this.deleteMessageFromRecords(msgid);
+        }
+        if (invalidatedChannelCache) this.cacheChannelMessages(invalidatedChannelCache);
+        this.refilterMessages();
+        this.saveData();
+      };
+      timestampEl.addEventListener('contextmenu', e => {
+        const messageIds = collectGroupMessageIds();
         if (!messageIds.length) return;
         ContextMenu.open(
           e,
@@ -4281,19 +4034,7 @@ module.exports = class MessageLoggerV2 {
                   label: 'Remove Group From Log',
                   action: () => {
                     ContextMenu.close();
-                    let invalidatedChannelCache = false;
-                    for (let msgid of messageIds) {
-                      const record = this.messageRecord[msgid];
-                      if (!record) continue;
-                      if ((record.edit_history && !record.edits_hidden) || (record.delete_data && !record.delete_data.hidden)) {
-                        invalidatedChannelCache = record.message.channel_id;
-                        this.invalidateChannelCache(invalidatedChannelCache);
-                      }
-                      this.deleteMessageFromRecords(msgid);
-                    }
-                    if (invalidatedChannelCache) this.cacheChannelMessages(invalidatedChannelCache);
-                    this.refilterMessages();
-                    this.saveData();
+                    removeGroupFromLog(messageIds);
                   }
                 }
               ]
@@ -4303,29 +4044,9 @@ module.exports = class MessageLoggerV2 {
       });
       timestampEl.addEventListener('click', e => {
         if (!this.menu.deleteKeyDown) return;
-        const messages = [element];
-        let target = element.nextElementSibling;
-        while (target && target.classList && !target.classList.contains(DiscordModules.MessageWrapperClasses)) {
-          messages.push(target);
-          target = target.nextElementSibling;
-        }
-        if (!messages.length) return;
-        const messageIds = [];
-        for (const msg of messages) if (msg && msg.messageId) messageIds.push(msg.messageId);
+        const messageIds = collectGroupMessageIds();
         if (!messageIds.length) return;
-        let invalidatedChannelCache = false;
-        for (let msgid of messageIds) {
-          const record = this.messageRecord[msgid];
-          if (!record) continue;
-          if ((record.edit_history && !record.edits_hidden) || (record.delete_data && !record.delete_data.hidden)) {
-            invalidatedChannelCache = record.message.channel_id;
-            this.invalidateChannelCache(invalidatedChannelCache);
-          }
-          this.deleteMessageFromRecords(msgid);
-        }
-        if (invalidatedChannelCache) this.cacheChannelMessages(invalidatedChannelCache);
-        this.refilterMessages();
-        this.saveData();
+        removeGroupFromLog(messageIds);
       });
     }
     const messageContext = e => {
@@ -4336,15 +4057,15 @@ module.exports = class MessageLoggerV2 {
         let isBadImage = target.tagName == 'IMG' && target.classList.contains(this.style.imageError);
         if (!isBadImage) {
           while (target && !target.classList) {
-            if (target.classList && target.classList.contains(this.style.edited)) isEdited = target;
+            if (target.classList?.contains(this.style.edited)) isEdited = target;
             target = target.parentElement;
           }
-          if (target && target.classList) {
+          if (target?.classList) {
             isMarkup = target.classList.contains(this.classes.markup);
             while (target && !isMarkup) {
-              if (target.classList && target.classList.contains(this.style.edited)) isEdited = target;
+              if (target.classList?.contains(this.style.edited)) isEdited = target;
               target = target.parentElement;
-              if (target && target.classList) {
+              if (target?.classList) {
                 isMarkup = target.classList.contains(this.classes.markup);
               }
             }
@@ -4391,7 +4112,7 @@ module.exports = class MessageLoggerV2 {
               }
             );
           }
-          if (record.delete_data && record.delete_data.hidden) {
+          if (record.delete_data?.hidden) {
             menuItems.push({
               type: 'item',
               label: 'Unhide Deleted Message',
@@ -4499,7 +4220,7 @@ module.exports = class MessageLoggerV2 {
       let isBadImage = target.tagName == 'IMG' && target.classList.contains(this.style.imageError);
       if (!isBadImage) {
         isMarkup = target.classList.contains(this.classes.markup);
-        while (!target.classList.contains('message-2qnXI6') && !isMarkup) {
+        while (!target.classList.contains(this.classes.message) && !isMarkup) {
           if (target.classList.contains(this.style.edited)) isEdited = target;
           target = target.parentElement;
           isMarkup = target.classList.contains(this.classes.markup);
@@ -4541,10 +4262,9 @@ module.exports = class MessageLoggerV2 {
         }
         if (!markup) {
           const possibleMarkupClasses = [
-            'markup-eYLPri',
-            'messageContent-2t3eCI',
-            'markup-2BOw-j'
-          ];
+            this.classes.markup,
+            this.classes.messageContent
+          ].filter(Boolean);
           for (const className of possibleMarkupClasses) {
             markup = messageGroup.getElementsByClassName(className)[0];
             if (markup) break;
@@ -4553,7 +4273,7 @@ module.exports = class MessageLoggerV2 {
         if (!markup) {
           const divs = messageGroup.querySelectorAll('div');
           for (const div of divs) {
-            if (div.className && div.className.includes('markup')) {
+            if (div.className?.includes('markup')) {
               markup = div;
               break;
             }
@@ -4577,15 +4297,16 @@ module.exports = class MessageLoggerV2 {
             Logger.error('formatMarkup failed, using fallback', e);
             const fallbackDiv = document.createElement('div');
             fallbackDiv.textContent = content;
-            fallbackDiv.className = this.multiClasses.markup || 'markup-eYLPri';
+            fallbackDiv.className = this.multiClasses.markup || this.classes.markup || '';
             return fallbackDiv;
           }
         };
-        if (record && record.edit_history) {
+        if (record?.edit_history) {
           markup.classList.add(this.style.edited);
           for (let ii = 0; ii < record.edit_history.length; ii++) {
             const hist = record.edit_history[ii];
             const editedMarkup = formatContent(hist.content, message.channel_id);
+            if (!editedMarkup) continue;
             editedMarkup.insertAdjacentHTML('beforeend', `<time class="${this.multiClasses.edited}">(${this.translatedEdited})</time>`);
             new this.Tooltip(editedMarkup, 'Edited at ' + (typeof hist.time === 'string' ? hist.time : this.createTimeStamp(hist.time)), { side: 'left' });
             editedMarkup.classList.add(this.style.edited);
@@ -4599,11 +4320,10 @@ module.exports = class MessageLoggerV2 {
         }
         if (!record) {
           const channel = this.tools.getChannel(message.channel_id);
-          const guild = this.tools.getServer(channel && channel.guild_id);
-          markup.addEventListener('click', () => this.jumpToMessage(message.channel_id, message.id, guild && guild.id));
+          const guild = this.tools.getServer(channel?.guild_id);
+          markup.addEventListener('click', () => this.jumpToMessage(message.channel_id, message.id, guild?.id));
         }
         if (contentDiv && message.attachments.length) {
-          const openHrefHandler = e => e.openHref();
           const attemptToUseCachedImage = (attachmentId, attachmentIdx, hidden, filename, width, height) => {
             const img = document.createElement('img');
             img.classList = DiscordModules.ClickableClasses?.clickable || '';
@@ -4644,7 +4364,7 @@ module.exports = class MessageLoggerV2 {
                       "srcIsAnimated": false,
                     }
                   ],
-                  onClickUntrusted: openHrefHandler,
+
                   className: this.style.imageRoot
                 },
                 true
@@ -4660,7 +4380,7 @@ module.exports = class MessageLoggerV2 {
             contentDiv.appendChild(img);
             return true;
           };
-          const attemptToUseCachedVideo = (attachmentId, attachmentIdx, hidden, filename, width, height) => {
+          const createVideoContainer = (videoId, videoIdx, videoWidth) => {
             const container = document.createElement('div');
             container.style.position = 'relative';
             container.style.display = 'inline-block';
@@ -4669,24 +4389,28 @@ module.exports = class MessageLoggerV2 {
             container.classList = DiscordModules.ClickableClasses?.clickable || '';
             const video = document.createElement('video');
             video.messageId = messageId;
-            video.idx = attachmentIdx;
-            const existingElement = document.getElementById(attachmentId);
-            if (existingElement) {
-              existingElement.id = "og-" + attachmentId;
-            }
-            video.id = attachmentId;
-            video.width = 256;
+            video.id = videoId;
+            video.idx = videoIdx;
+            video.width = videoWidth;
             video.style.borderRadius = '8px';
             video.style.display = 'block';
             video.preload = 'metadata';
-            if (!hidden) {
-              video.src = this.imageCacheServerSimulator.get('http://localhost:7474/' + attachmentId + filename.match(/\.[0-9a-z]+$/i)[0] + `#${record.message.channel_id},${video.id},${video.messageId}`);
-            }
             const playButton = document.createElement('div');
             playButton.innerHTML = '<svg width="48" height="48" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>';
             playButton.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.6);border-radius:50%;width:48px;height:48px;display:flex;align-items:center;justify-content:center;pointer-events:none;';
             container.appendChild(video);
             container.appendChild(playButton);
+            return { container, video };
+          };
+          const attemptToUseCachedVideo = (attachmentId, attachmentIdx, hidden, filename, width, height) => {
+            const existingElement = document.getElementById(attachmentId);
+            if (existingElement) {
+              existingElement.id = "og-" + attachmentId;
+            }
+            const { container, video } = createVideoContainer(attachmentId, attachmentIdx, 256);
+            if (!hidden) {
+              video.src = this.imageCacheServerSimulator.get('http://localhost:7474/' + attachmentId + filename.match(/\.[0-9a-z]+$/i)[0] + `#${record.message.channel_id},${video.id},${video.messageId}`);
+            }
             container.addEventListener('click', () => {
               if (this.menu.deleteKeyDown) {
                 this.deleteMessageFromRecords(messageId);
@@ -4729,28 +4453,10 @@ module.exports = class MessageLoggerV2 {
             } else if (isCached) {
               attemptToUseCachedImage(attachment.id, idx, attachment.hidden, attachment.filename, attachment.width, attachment.height);
             } else if (this.isVideo(attachment.url)) {
-              const container = document.createElement('div');
-              container.style.position = 'relative';
-              container.style.display = 'inline-block';
-              container.style.cursor = 'pointer';
-              container.style.width = 'fit-content';
-              container.classList = DiscordModules.ClickableClasses?.clickable || '';
-              const video = document.createElement('video');
-              video.messageId = messageId;
-              video.id = attachment.id;
-              video.idx = idx;
-              video.width = this.clamp(attachment.width, 200, 400);
-              video.style.borderRadius = '8px';
-              video.style.display = 'block';
-              video.preload = 'metadata';
+              const { container, video } = createVideoContainer(attachment.id, idx, this.clamp(attachment.width, 200, 400));
               if (!attachment.hidden) {
                 video.src = attachment.url;
               }
-              const playButton = document.createElement('div');
-              playButton.innerHTML = '<svg width="48" height="48" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>';
-              playButton.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.6);border-radius:50%;width:48px;height:48px;display:flex;align-items:center;justify-content:center;pointer-events:none;';
-              container.appendChild(video);
-              container.appendChild(playButton);
               if (record) {
                 container.addEventListener('click', () => {
                   if (this.menu.deleteKeyDown) {
@@ -4817,7 +4523,7 @@ module.exports = class MessageLoggerV2 {
                           "srcIsAnimated": false,
                         }
                       ],
-                      onClickUntrusted: openHrefHandler,
+    
                       className: this.style.imageRoot
                     },
                     true
@@ -4874,7 +4580,6 @@ module.exports = class MessageLoggerV2 {
     };
     if (this.settings.renderCap) addMore();
     else for (; i < messages.length; i++) populate(i);
-    this.processUserRequestQueue();
     if (!messages.length) {
       const strong = document.createElement('strong');
       strong.className = this.multiClasses.defaultColor;
@@ -4891,8 +4596,8 @@ module.exports = class MessageLoggerV2 {
       let timeB = new Date(recordB.message.timestamp).getTime();
       if (recordA.edit_history && typeof recordA.edit_history[recordA.edit_history.length - 1].time !== 'string') timeA = recordA.edit_history[recordA.edit_history.length - 1].time;
       if (recordB.edit_history && typeof recordB.edit_history[recordB.edit_history.length - 1].time !== 'string') timeB = recordB.edit_history[recordB.edit_history.length - 1].time;
-      if (recordA.delete_data && recordA.delete_data.time) timeA = recordA.delete_data.time;
-      if (recordB.delete_data && recordB.delete_data.time) timeB = recordB.delete_data.time;
+      if (recordA.delete_data?.time) timeA = recordA.delete_data.time;
+      if (recordB.delete_data?.time) timeB = recordB.delete_data.time;
       return Number.parseInt(timeB) - Number.parseInt(timeA);
     });
   }
@@ -4941,28 +4646,28 @@ module.exports = class MessageLoggerV2 {
           const message = this.getMessageAny(x);
           if (!message) return false;
           const channel = this.tools.getChannel(message.channel_id);
-          const guild = this.tools.getServer(message.guild_id || (channel && channel.guild_id));
-          return (message.guild_id || (channel && channel.guild_id)) == filter || (guild && guild.name.toLowerCase().includes(filter.toLowerCase()));
+          const guild = this.tools.getServer(message.guild_id || channel?.guild_id);
+          return (message.guild_id || channel?.guild_id) == filter || (guild?.name.toLowerCase().includes(filter.toLowerCase()));
         });
       if (filterType == 'channel')
         messages = messages.filter(x => {
           const message = this.getMessageAny(x);
           if (!message) return false;
           const channel = this.tools.getChannel(message.channel_id);
-          return message.channel_id == filter || (channel && channel.name.toLowerCase().includes(filter.replace('#', '').toLowerCase()));
+          return message.channel_id == filter || (channel?.name.toLowerCase().includes(filter.replace('#', '').toLowerCase()));
         });
       if (filterType == 'message' || filterType == 'content')
         messages = messages.filter(x => {
           const message = this.getMessageAny(x);
-          return x == filter || (message && message.content.toLowerCase().includes(filter.toLowerCase()));
+          return x == filter || (message?.content.toLowerCase().includes(filter.toLowerCase()));
         });
       if (filterType == 'user')
         messages = messages.filter(x => {
           const message = this.getMessageAny(x);
           if (!message) return false;
           const channel = this.tools.getChannel(message.channel_id);
-          const member = DiscordModules.GuildMemberStore?.getMember(message.guild_id || (channel && channel.guild_id), message.author.id);
-          return message.author.id == filter || message.author.username.toLowerCase().includes(filter.toLowerCase()) || (member && member.nick && member.nick.toLowerCase().includes(filter.toLowerCase()));
+          const member = DiscordModules.GuildMemberStore?.getMember(message.guild_id || channel?.guild_id, message.author.id);
+          return message.author.id == filter || message.author.username.toLowerCase().includes(filter.toLowerCase()) || (member?.nick?.toLowerCase().includes(filter.toLowerCase()));
         });
       if (filterType == 'has') {
         switch (filter) {
@@ -5014,15 +4719,13 @@ module.exports = class MessageLoggerV2 {
         this.createHeader.classes = {
           itemTabBarItem: this.style.tabBarItem,
           tabBarContainer: this.style.tabBarContainer,
-          tabBar: this.style.tabBar,
-          tabBarSingle: this.style.tabBar
+          tabBar: this.style.tabBar
         };
       } catch {
         this.createHeader.classes = {
           itemTabBarItem: 'tabBarItem' + ' ' + 'item',
           tabBarContainer: 'tabBarContainer',
           tabBar: 'tabBar',
-          tabBarSingle: 'tabBar',
           __errored: true
         };
       }
@@ -5034,7 +4737,7 @@ module.exports = class MessageLoggerV2 {
       return tab;
     };
     const tabBar = this.parseHTML(`<div class="${classes.tabBarContainer}"><div class="${classes.tabBar}" id="${this.style.menuTabBar}"></div></div>`);
-    const tabs = tabBar.getElementsByClassName(classes.tabBarSingle)[0];
+    const tabs = tabBar.getElementsByClassName(classes.tabBar)[0];
     tabs.appendChild(createTab('Sent', 'sent'));
     tabs.appendChild(createTab('Deleted', 'deleted'));
     tabs.appendChild(createTab('Edited', 'edited'));
@@ -5104,7 +4807,7 @@ module.exports = class MessageLoggerV2 {
       this.createModal({
         confirmText: 'OK',
         header: 'Filter help',
-        size: this.createModal.confirmationModal.Sizes.LARGE,
+        size: this.tools.resolvedModalStuff.ModalSize.LARGE,
         children: [
           this.tools.createWrappedElement([
             this.parseHTML(
@@ -5129,7 +4832,6 @@ module.exports = class MessageLoggerV2 {
   }
   openWindow(type) {
     if (this.menu.open) {
-      this.menu.scrollPosition = 0;
       if (type) this.openTab(type);
       return;
     }
@@ -5144,7 +4846,8 @@ module.exports = class MessageLoggerV2 {
       this.saveSettings();
       const sortBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Sort direction'));
       if (sortBtn) {
-        const textEl = sortBtn.querySelector('.bd-button-content') || sortBtn;
+        let textEl = sortBtn;
+        while (textEl.firstElementChild && textEl.children.length === 1) textEl = textEl.firstElementChild;
         textEl.textContent = 'Sort direction: ' + (this.settings.reverseOrder ? 'old - new' : 'new - old');
       }
       this.refilterMessages();
@@ -5207,7 +4910,7 @@ module.exports = class MessageLoggerV2 {
         confirmText: 'Clear log',
         cancelText: 'Sort direction: ' + (this.settings.reverseOrder ? 'old - new' : 'new - old'),
         header: this.tools.createWrappedElement([this.createTextBox(), this.createHeader()]),
-        size: this.createModal.confirmationModal.Sizes.LARGE,
+        size: this.tools.resolvedModalStuff.ModalSize.LARGE,
         children: [this.tools.createWrappedElement([messagesDIV])],
         onCancel: onChangeOrder,
         onConfirm: onClearLog,
@@ -5226,15 +4929,6 @@ module.exports = class MessageLoggerV2 {
         let tabBarHeader = tabBar.parentElement.parentElement.parentElement.parentElement;
         tabBarHeader.style.width = "100%";
         this.refilterMessages();
-        const scrollContainer = document.getElementById(this.style.menuMessages)?.parentElement?.parentElement?.parentElement;
-        if (scrollContainer) {
-          scrollContainer.addEventListener(
-            'scroll',
-            this.tools.DiscordUtils.debounce(() => {
-              this.scrollPosition = scrollContainer.scrollTop;
-            }, 100)
-          );
-        }
       } catch (e) {
         if (loadAttempts > 4) {
           UI.showToast(`Couldn't load menu messages! Report this issue to NightBirde, error info is in console`, { type: "error", timeout: 0 });
@@ -5247,9 +4941,10 @@ module.exports = class MessageLoggerV2 {
     setTimeout(loadMessages, 100);
   }
   patchContextMenus() {
+    const getNestedProp = (obj, path) => path.split('.').reduce((o, p) => o?.[p], obj);
     this.unpatches.push(ContextMenu.patch('message', (ret, props) => {
-      const menu = ((obj, path) => path.split('.').reduce((o, p) => o?.[p], obj))(
-        Utils.findInTree(ret, e => e && e.navId === 'message'),
+      const menu = getNestedProp(
+        Utils.findInTree(ret, e => e?.navId === 'message'),
         'children'
       );
       if (!Array.isArray(menu)) return;
@@ -5263,7 +4958,7 @@ module.exports = class MessageLoggerV2 {
         try {
           if (record.delete_data) {
             const options = menu.find(m => m?.props?.children && m.props.children.length > 10);
-            if (options && options.props && options.props.children) {
+            if (options?.props?.children) {
               options.props.children.splice(0, options.props.children.length);
             }
             addElement(
@@ -5303,7 +4998,7 @@ module.exports = class MessageLoggerV2 {
             } else {
               let target = props.target;
               if (target) {
-                while (target && target.className && !target.className.includes(this.style.edited)) {
+                while (target?.className && !target.className.includes(this.style.edited)) {
                   target = target.parentElement;
                 }
                 if (target) {
@@ -5391,8 +5086,8 @@ module.exports = class MessageLoggerV2 {
       this._addListToggleItems(newItems, id, 'notificationWhitelist', 'notificationBlacklist', 'Notification Whitelist');
     };
     this.unpatches.push(ContextMenu.patch('guild-context', (ret, props) => {
-      const menu = ((obj, path) => path.split('.').reduce((o, p) => o?.[p], obj))(
-        Utils.findInTree(ret, e => e && e.navId === 'guild-context'),
+      const menu = getNestedProp(
+        Utils.findInTree(ret, e => e?.navId === 'guild-context'),
         'children'
       );
       if (!Array.isArray(menu)) return;
@@ -5417,8 +5112,8 @@ module.exports = class MessageLoggerV2 {
       }]));
     }),
       ContextMenu.patch('user-context', (ret, props) => {
-        const menu = ((obj, path) => path.split('.').reduce((o, p) => o?.[p], obj))(
-          Utils.findInTree(ret, e => e && e.navId === 'user-context'),
+        const menu = getNestedProp(
+          Utils.findInTree(ret, e => e?.navId === 'user-context'),
           'children'
         );
         if (!Array.isArray(menu)) return;
@@ -5451,61 +5146,37 @@ module.exports = class MessageLoggerV2 {
           }]
         }]));
       }),
-      ContextMenu.patch('channel-context', (ret, props) => {
-        const menu = ((obj, path) => path.split('.').reduce((o, p) => o?.[p], obj))(
-          Utils.findInTree(ret, e => e && e.navId === 'channel-context'),
-          'children'
-        );
-        if (!Array.isArray(menu)) return;
-        const newItems = [];
-        const addElement = (label, action, options = {}) => newItems.push({ label, action, ...options });
-        addElement('Open Logs', () => this.openWindow());
-        addElement(
-          `Open Log For Channel`,
-          () => {
-            this.menu.filter = `channel:${props.channel.id}`;
-            this.openWindow();
-          }
-        );
-        handleWhiteBlackList(newItems, props.channel.id);
-        menu.push(ContextMenu.buildMenuChildren([{
-          type: 'group',
-          items: [{
-            type: 'submenu',
-            label: this.settings.contextmenuSubmenuName,
-            items: newItems
-          }]
-        }]));
-      }),
-      ContextMenu.patch('gdm-context', (ret, props) => {
-        const menu = ((obj, path) => path.split('.').reduce((o, p) => o?.[p], obj))(
-          Utils.findInTree(ret, e => e && e.navId === 'gdm-context'),
-          'children'
-        );
-        if (!Array.isArray(menu)) return;
-        const newItems = [];
-        const addElement = (label, action, options = {}) => newItems.push({ label, action, ...options });
-        addElement('Open Logs', () => this.openWindow());
-        addElement(
-          `Open Log For Channel`,
-          () => {
-            this.menu.filter = `channel:${props.channel.id}`;
-            this.openWindow();
-          }
-        );
-        handleWhiteBlackList(newItems, props.channel.id);
-        menu.push(ContextMenu.buildMenuChildren([{
-          type: 'group',
-          items: [{
-            type: 'submenu',
-            label: this.settings.contextmenuSubmenuName,
-            items: newItems
-          }]
-        }]));
-      }),
+      ...['channel-context', 'gdm-context'].map(contextName =>
+        ContextMenu.patch(contextName, (ret, props) => {
+          const menu = getNestedProp(
+            Utils.findInTree(ret, e => e?.navId === contextName),
+            'children'
+          );
+          if (!Array.isArray(menu)) return;
+          const newItems = [];
+          const addElement = (label, action, options = {}) => newItems.push({ label, action, ...options });
+          addElement('Open Logs', () => this.openWindow());
+          addElement(
+            `Open Log For Channel`,
+            () => {
+              this.menu.filter = `channel:${props.channel.id}`;
+              this.openWindow();
+            }
+          );
+          handleWhiteBlackList(newItems, props.channel.id);
+          menu.push(ContextMenu.buildMenuChildren([{
+            type: 'group',
+            items: [{
+              type: 'submenu',
+              label: this.settings.contextmenuSubmenuName,
+              items: newItems
+            }]
+          }]));
+        })
+      ),
       ContextMenu.patch('image-context', (ret, props) => {
-        const menu = ((obj, path) => path.split('.').reduce((o, p) => o?.[p], obj))(
-          Utils.findInTree(ret, e => e && e.navId === 'image-context'),
+        const menu = getNestedProp(
+          Utils.findInTree(ret, e => e?.navId === 'image-context'),
           'children'
         );
         if (!Array.isArray(menu)) return;
@@ -5524,7 +5195,7 @@ module.exports = class MessageLoggerV2 {
             fakeSrc = this.getKeyByValue(this.imageCacheServerSimulator.cached, props.src) ?? props.src;
           }
           if (!matched) {
-            matched = fakeSrc.match(/localhost:7474.*#(\d+),(\d+)/);
+            matched = /localhost:7474.*#(\d+),(\d+)/.exec(fakeSrc);
           }
         }
         if (!matched) return;
