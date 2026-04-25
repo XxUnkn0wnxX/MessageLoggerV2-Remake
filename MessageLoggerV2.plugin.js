@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.2.4
+ * @version 2.8.0.2.5
  * @author Lighty, Davilarek, NightBirde
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -67,7 +67,14 @@ const DiscordModules = (() => {
     ChannelMessages: lazyGet('ChannelMessages', () => Webpack.getModule(Filters.byKeys('_channelMessages'))),
     RenderUserPopout: lazyGet('RenderUserPopout', () => Webpack.getByStrings('"SENDING"===', 'renderUserGuildPopout: channel should never be')),
     ChannelListModule: lazyGet('ChannelListModule', () => Webpack.getByKeys('getChannels')),
-    ManaModule: lazyGet('ManaModule', () => Webpack.getByKeys('Modal', 'ConfirmModal')),
+    ManaModule: lazyGet('ManaModule', () => ({
+      Modal: Webpack.getModule(
+        Filters.combine(Filters.byStrings('actionBarInput', 'notice'), Filters.not(Filters.byStrings('caretConfig'))),
+        { searchExports: true }
+      ),
+      ConfirmModal: Webpack.getByKeys('ConfirmModal')?.ConfirmModal,
+      ModalSize: Webpack.getByKeys('SMALL', 'MEDIUM', 'LARGE', 'DYNAMIC', { searchExports: true }),
+    })),
     MessageContentComponent: lazyGet('MessageContentComponent', () => Webpack.getModule(e => e?.type?.toString()?.includes('.isCommandType()') && !e?.type?.toString()?.includes('.isFirstMessageInForumPost'))),
     I18nModule: lazyGet('I18nModule', () => Webpack.getModule(m => Object.values(m).some(x => x != null && Object.getPrototypeOf(x)?.withFormatters != null))),
     TextModule: lazyGet('TextModule', () => Webpack.getBySource('case"always-white"', { searchExports: true })),
@@ -339,19 +346,10 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Added',
-        type: 'added',
-        items: [
-          'Video attachments now display with play button overlay and can be played in modal viewer',
-          `Added an option to limit maximum cache file size to settings. Set to 0 to disable limit.`
-        ]
-      },
-      {
         title: 'Fixed',
         type: 'fixed',
         items: [
-          'Fixed opening logger modal crashing Discord',
-          'Code improvements and optimizations'          
+          'Fixed to match latest Discord structure changes.'       
         ]
       }
     ];
@@ -2924,7 +2922,7 @@ module.exports = class MessageLoggerV2 {
           this.tools.manaModule.Modal,
           {
             ...props,
-            size: 'lg',
+            size: this.tools.resolvedModalStuff.ModalSize.LARGE,
             style: { padding: 0, backgroundColor: 'transparent' }
           },
           React.createElement('div', {
@@ -3712,6 +3710,7 @@ module.exports = class MessageLoggerV2 {
         });
       }),
       Patcher.after(MemoMessage, 'type', (_, [props], ret) => {
+        if (!props?.message?.id) return ret;
         const messageId = props.message.id;
         const hasRecord = this.messageRecordIds.has(messageId);
         const record = hasRecord ? this.messageRecord[messageId] : null;
