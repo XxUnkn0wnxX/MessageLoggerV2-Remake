@@ -5090,17 +5090,20 @@ module.exports = class MessageLoggerV2 {
         'children'
       );
       if (!Array.isArray(menu)) return;
+      const guildId = props?.guild?.id;
       const newItems = [];
       const addElement = (label, action, options = {}) => newItems.push({ label, action, ...options });
       addElement('Open Logs', () => this.openWindow());
-      addElement(
-        `Open Log For Guild`,
-        () => {
-          this.menu.filter = `guild:${props.guild.id}`;
-          this.openWindow();
-        }
-      );
-      handleWhiteBlackList(newItems, props.guild.id);
+      if (guildId) {
+        addElement(
+          `Open Log For Guild`,
+          () => {
+            this.menu.filter = `guild:${guildId}`;
+            this.openWindow();
+          }
+        );
+        handleWhiteBlackList(newItems, guildId);
+      }
       menu.push(ContextMenu.buildMenuChildren([{
         type: 'group',
         items: [{
