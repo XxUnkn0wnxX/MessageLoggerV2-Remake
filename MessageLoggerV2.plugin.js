@@ -349,7 +349,8 @@ module.exports = class MessageLoggerV2 {
         title: 'Fixed',
         type: 'fixed',
         items: [
-          'Fixed to match latest Discord structure changes.'       
+          'Fixed missing red tint.',
+          `Fixed a crash when right-clicking guild folders (thanks XxUnkn0wnxX)`
         ]
       }
     ];
@@ -3598,34 +3599,8 @@ module.exports = class MessageLoggerV2 {
     this.translatedEdited = i18n.Messages.MESSAGE_EDITED;
     const SuffixEdited = React.memo(e => React.createElement(this.Tooltip, { text: e.timestamp ? new Intl.DateTimeFormat(navigator.language, options).format(e.timestamp.get()._i) : null }, tt => React.createElement('time', { dateTime: e.timestamp.toISOString(), className: this.multiClasses.edited, role: 'note', ...tt }, `(${i18n.Messages.MESSAGE_EDITED})`)));
     SuffixEdited.displayName = 'SuffixEdited';
-    const messageWrapperModule = DiscordModules.MessageWrapperClasses || {};
-    const messageWrapperClass = messageWrapperModule.message || '';
-    const findMessageElement = (tree, depth = 0) => {
-      if (depth > 6 || !tree) return null;
-      if (tree.props?.className && typeof tree.props.className === 'string') {
-        if (messageWrapperClass && tree.props.className.includes(messageWrapperClass)) return tree;
-        if (!messageWrapperClass && tree.props.className.split(' ').some(c => c.startsWith('message-'))) return tree;
-      }
-      const children = tree.props?.children;
-      if (!children) return null;
-      if (Array.isArray(children)) {
-        for (const child of children) {
-          const found = findMessageElement(child, depth + 1);
-          if (found) return found;
-        }
-      } else if (typeof children === 'object') {
-        return findMessageElement(children, depth + 1);
-      }
-      return null;
-    };
     const MessageContent = DiscordModules.MessageContentComponent;
-    const MessageModule =
-      Webpack.getBySource("Message must be a thread starter message") ||
-      Webpack.getBySource("quotedChatMessage", "EMOJI_ADDED");
-    const MemoMessage = MessageModule && Object.values(MessageModule).find(exp =>
-      exp?.$$typeof === Symbol.for('react.memo')
-    );
-    if (!MessageContent || !MemoMessage) return UI.showToast('Failed to patch message components, edit history and deleted tint will not show!', { type: "error", timeout: 0 });
+    if (!MessageContent) return UI.showToast('Failed to patch message content component, edit history will not show!', { type: "error", timeout: 0 });
     const EditHistoryContent = ({ plugin, messageId, record, originalChildren, compact }) => {
       const [, forceUpdate] = Hooks.useForceUpdate();
       React.useEffect(() => {
@@ -3709,32 +3684,55 @@ module.exports = class MessageLoggerV2 {
           compact: props.compact
         });
       }),
-      Patcher.after(MemoMessage, 'type', (_, [props], ret) => {
-        if (!props?.message?.id) return ret;
-        const messageId = props.message.id;
-        const hasRecord = this.messageRecordIds.has(messageId);
-        const record = hasRecord ? this.messageRecord[messageId] : null;
-        const [, forceUpdate] = Hooks.useForceUpdate();
-        React.useEffect(() => {
-          if (!this._messageUpdateRegistry.has(messageId)) {
-            this._messageUpdateRegistry.set(messageId, new Set());
-          }
-          this._messageUpdateRegistry.get(messageId).add(forceUpdate);
-          return this._unregisterMessageCallback.bind(this, messageId, forceUpdate);
-        }, [messageId, hasRecord]);
-        if (record?.delete_data && !this.noTintIds.has(messageId)) {
-          const message = findMessageElement(ret);
-          if (message) {
-            const deletedClass = this.settings.useAlternativeDeletedStyle ? this.style.deletedAlt : this.style.deleted;
-            if (!message.props.className.includes(deletedClass)) {
-              message.props.className += ' ' + deletedClass;
-              if (record.delete_data.time) message.props.__MLV2_deleteTime = record.delete_data.time;
+    );
+    const wrapperBaseClass = (this.classes.message || '').split(' ')[0];
+    const tintClassFor = () => this.settings.useAlternativeDeletedStyle ? this.style.deletedAlt : this.style.deleted;
+    const tintLi = (li) => {
+      if (!li || !li.id || !li.id.startsWith('chat-messages-')) return;
+      if (!this.settings.showDeletedMessages) return;
+      const parts = li.id.split('-');
+      if (parts.length < 4) return;
+      const channelId = parts[2];
+      const messageId = parts.slice(3).join('-');
+      if (!this.deletedMessageSet.get(channelId)?.has(messageId)) return;
+      if (this.noTintIds.has(messageId)) return;
+      const wrapper = wrapperBaseClass ? li.querySelector('[class*="' + wrapperBaseClass + '"]') : null;
+      if (!wrapper) return;
+      const cls = tintClassFor();
+      if (!wrapper.classList.contains(cls)) wrapper.classList.add(cls);
+    };
+    const sweepDom = () => {
+      if (!this.settings.showDeletedMessages) return;
+      document.querySelectorAll('li[id^="chat-messages-"]').forEach(tintLi);
+    };
+    const tintObserver = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type === 'childList') {
+          for (const node of m.addedNodes) {
+            if (node.nodeType !== 1) continue;
+            if (node.tagName === 'LI' && node.id && node.id.startsWith('chat-messages-')) {
+              tintLi(node);
+            } else if (node.querySelectorAll) {
+              const found = node.querySelectorAll('li[id^="chat-messages-"]');
+              if (found.length) found.forEach(tintLi);
             }
           }
+        } else if (m.type === 'attributes' && m.attributeName === 'class') {
+          const t = m.target;
+          if (t.nodeType !== 1 || !wrapperBaseClass) continue;
+          if (typeof t.className !== 'string' || !t.className.includes(wrapperBaseClass)) continue;
+          const li = t.closest('li[id^="chat-messages-"]');
+          if (li) tintLi(li);
         }
-        return ret;
-      })
-    );
+      }
+    });
+    tintObserver.observe(document.body, {
+      childList: true, subtree: true,
+      attributes: true, attributeFilter: ['class']
+    });
+    this._tintSweep = sweepDom;
+    sweepDom();
+    this.unpatches.push(() => { try { tintObserver.disconnect(); } catch {} this._tintSweep = null; });
     this.forceReloadMessages();
   }
   forceReloadMessages() {
