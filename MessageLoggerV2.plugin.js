@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.2.5
+ * @version 2.8.0.2.6
  * @author Lighty, Davilarek, NightBirde
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
