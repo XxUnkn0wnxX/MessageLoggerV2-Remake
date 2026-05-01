@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.2.6
+ * @version 2.8.0.2.7
  * @author Lighty, Davilarek, NightBirde
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -17,11 +17,15 @@ const DiscordModules = (() => {
   const cache = {};
   const lazyGet = (key, getter) => ({
     get() {
-      if (cache[key] === undefined) {
-        try { cache[key] = getter() ?? null; }
-        catch (e) { Logger.error(`Failed to load module: ${key}`, e); cache[key] = null; }
+      if (cache[key] != null) return cache[key];
+      try {
+        const result = getter();
+        if (result != null) cache[key] = result;
+        return result ?? null;
+      } catch (e) {
+        Logger.error(`Failed to load module: ${key}`, e);
+        return null;
       }
-      return cache[key];
     },
     enumerable: true, configurable: true
   });
@@ -349,8 +353,8 @@ module.exports = class MessageLoggerV2 {
         title: 'Fixed',
         type: 'fixed',
         items: [
-          'Fixed missing red tint.',
-          `Fixed a crash when right-clicking guild folders (thanks XxUnkn0wnxX)`
+          'Fixed missing red tint (again)',
+          'Fixed missing edited messages'
         ]
       }
     ];
@@ -3597,10 +3601,9 @@ module.exports = class MessageLoggerV2 {
       }
     };
     this.translatedEdited = i18n.Messages.MESSAGE_EDITED;
-    const SuffixEdited = React.memo(e => React.createElement(this.Tooltip, { text: e.timestamp ? new Intl.DateTimeFormat(navigator.language, options).format(e.timestamp.get()._i) : null }, tt => React.createElement('time', { dateTime: e.timestamp.toISOString(), className: this.multiClasses.edited, role: 'note', ...tt }, `(${i18n.Messages.MESSAGE_EDITED})`)));
+    const SuffixEdited = React.memo(e => React.createElement(this.Tooltip, { text: e.timestamp ? new Intl.DateTimeFormat(navigator.language, options).format(e.timestamp.get()._i) : null }, tt => React.createElement('time', { dateTime: e.timestamp.toISOString(), className: this.multiClasses.edited, role: 'note', ...tt }, ` (${i18n.Messages.MESSAGE_EDITED})`)));
     SuffixEdited.displayName = 'SuffixEdited';
-    const MessageContent = DiscordModules.MessageContentComponent;
-    if (!MessageContent) return UI.showToast('Failed to patch message content component, edit history will not show!', { type: "error", timeout: 0 });
+    let MessageContent = DiscordModules.MessageContentComponent;
     const EditHistoryContent = ({ plugin, messageId, record, originalChildren, compact }) => {
       const [, forceUpdate] = Hooks.useForceUpdate();
       React.useEffect(() => {
@@ -3612,7 +3615,7 @@ module.exports = class MessageLoggerV2 {
       }, [messageId]);
       const currentRecord = plugin.messageRecord[messageId];
       if (!currentRecord || !currentRecord.edit_history || currentRecord.edits_hidden) {
-        return Array.isArray(originalChildren[0]) ? originalChildren[0] : originalChildren[1];
+        return originalChildren;
       }
       const createEditedMessage = (edit, editNum, isSingular, noSuffix) =>
         React.createElement(
@@ -3667,25 +3670,39 @@ module.exports = class MessageLoggerV2 {
       return React.createElement(React.Fragment, {}, edits, oContent);
     };
     EditHistoryContent.displayName = 'EditHistoryContent';
-    this.unpatches.push(
-      Patcher.after(MessageContent, 'type', (_, [props], ret) => {
-        if (!this.settings.showEditedMessages || (typeof props.className === 'string' && props.className.includes('repliedTextContent'))) return;
-        if (!this.messageRecordIds.has(props.message.id)) return;
-        const record = this.messageRecord[props.message.id];
-        if (!record?.edit_history || record.edits_hidden || !Array.isArray(ret.props.children)) return;
-        const newClassName = [ret.props.className, this.style.edited].filter(Boolean).join(' ');
-        const originalChildren = ret.props.children;
-        ret.props.className = newClassName;
-        ret.props.children = React.createElement(EditHistoryContent, {
-          plugin: this,
-          messageId: props.message.id,
-          record: record,
-          originalChildren: originalChildren,
-          compact: props.compact
-        });
-      }),
-    );
-    const wrapperBaseClass = (this.classes.message || '').split(' ')[0];
+    this.installEditHistoryPatch = (mcc) => {
+      mcc = mcc || DiscordModules.MessageContentComponent;
+      if (!mcc) return false;
+      this.unpatches.push(
+        Patcher.after(mcc, 'type', (_, [props], ret) => {
+          if (!this.settings.showEditedMessages || (typeof props.className === 'string' && props.className.includes('repliedTextContent'))) return;
+          if (!this.messageRecordIds.has(props.message.id)) return;
+          const record = this.messageRecord[props.message.id];
+          if (!record?.edit_history || record.edits_hidden || !Array.isArray(ret.props.children)) return;
+          const newClassName = [ret.props.className, this.style.edited].filter(Boolean).join(' ');
+          const originalChildren = ret.props.children;
+          ret.props.className = newClassName;
+          ret.props.children = React.createElement(EditHistoryContent, {
+            plugin: this,
+            messageId: props.message.id,
+            record: record,
+            originalChildren: originalChildren,
+            compact: props.compact
+          });
+        })
+      );
+      return true;
+    };
+    if (!this.installEditHistoryPatch(MessageContent)) {
+      const tryInstall = (attempts) => {
+        if (!this.__started || attempts > 60) {
+          if (attempts > 60) UI.showToast('Failed to patch message content component, edit history will not show!', { type: "error", timeout: 0 });
+          return;
+        }
+        if (!this.installEditHistoryPatch()) setTimeout(() => tryInstall(attempts + 1), 1000);
+      };
+      tryInstall(0);
+    }
     const tintClassFor = () => this.settings.useAlternativeDeletedStyle ? this.style.deletedAlt : this.style.deleted;
     const tintLi = (li) => {
       if (!li || !li.id || !li.id.startsWith('chat-messages-')) return;
@@ -3696,8 +3713,8 @@ module.exports = class MessageLoggerV2 {
       const messageId = parts.slice(3).join('-');
       if (!this.deletedMessageSet.get(channelId)?.has(messageId)) return;
       if (this.noTintIds.has(messageId)) return;
-      const wrapper = wrapperBaseClass ? li.querySelector('[class*="' + wrapperBaseClass + '"]') : null;
-      if (!wrapper) return;
+      const wrapper = li.firstElementChild;
+      if (!wrapper || wrapper.tagName !== 'DIV') return;
       const cls = tintClassFor();
       if (!wrapper.classList.contains(cls)) wrapper.classList.add(cls);
     };
@@ -3719,10 +3736,11 @@ module.exports = class MessageLoggerV2 {
           }
         } else if (m.type === 'attributes' && m.attributeName === 'class') {
           const t = m.target;
-          if (t.nodeType !== 1 || !wrapperBaseClass) continue;
-          if (typeof t.className !== 'string' || !t.className.includes(wrapperBaseClass)) continue;
-          const li = t.closest('li[id^="chat-messages-"]');
-          if (li) tintLi(li);
+          if (t.nodeType !== 1 || t.tagName !== 'DIV') continue;
+          const parent = t.parentElement;
+          if (parent?.tagName === 'LI' && parent.id && parent.id.startsWith('chat-messages-')) {
+            tintLi(parent);
+          }
         }
       }
     });
