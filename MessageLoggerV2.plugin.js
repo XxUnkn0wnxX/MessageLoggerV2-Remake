@@ -63,6 +63,19 @@ const DiscordModules = (() => {
     CUser: lazyGet('CUser', () => Webpack.getModule(Filters.byPrototypeKeys('getAvatarSource', 'isLocalBot'))),
     DiscordUtils: lazyGet('DiscordUtils', () => Webpack.getByKeys('bindAll', 'debounce')),
     TimestampUtils: lazyGet('TimestampUtils', () => Webpack.getByKeys('relativeTimeRounding', 'locales') || Webpack.getByKeys('createFromInputFallback')),
+    TimestampClasses: lazyGet('TimestampClasses', () => Webpack.getByKeys(
+      'separator',
+      'timestamp',
+      'timestampInline',
+      'timestampVisibleOnHover',
+      'latin24CompactTimeStamp',
+      { searchExports: true }
+    ) || Webpack.getByKeys(
+      'separator',
+      'timestamp',
+      'timestampInline',
+      { searchExports: true }
+    )),
     Parser: lazyGet('Parser', () => Webpack.getByKeys('parse', 'astParserFor')),
     ParserNew: lazyGet('ParserNew', () => Webpack.getByKeys('defaultRules', 'parse')),
     GuildUtils: lazyGet('GuildUtils', () => Webpack.getByKeys('getGuild', 'getGuildCount')),
@@ -1010,10 +1023,6 @@ module.exports = class MessageLoggerV2 {
     };
     this.multiClasses = {
       defaultColor: DiscordModules.DefaultColorClasses?.defaultColor || '',
-      edited: this.joinClassNames(
-        this.getDiscordClass('separator timestamp'),
-        this.getDiscordClass('separator timestampInline')
-      ),
       markup: DiscordModules.MarkupClasses?.markup || ''
     };
     const spoilerModule = DiscordModules.SpoilerClasses
@@ -3601,7 +3610,7 @@ module.exports = class MessageLoggerV2 {
       }
     };
     this.translatedEdited = i18n.Messages.MESSAGE_EDITED;
-    const SuffixEdited = React.memo(e => React.createElement(this.Tooltip, { text: e.timestamp ? new Intl.DateTimeFormat(navigator.language, options).format(e.timestamp.get()._i) : null }, tt => React.createElement('time', { dateTime: e.timestamp.toISOString(), className: this.multiClasses.edited, role: 'note', ...tt }, ` (${i18n.Messages.MESSAGE_EDITED})`)));
+    const SuffixEdited = React.memo(e => React.createElement(this.Tooltip, { text: e.timestamp ? new Intl.DateTimeFormat(navigator.language, options).format(e.timestamp.get()._i) : null }, tt => React.createElement('time', { dateTime: e.timestamp.toISOString(), className: this.getEditedTimestampClasses(), role: 'note', ...tt }, ` (${i18n.Messages.MESSAGE_EDITED})`)));
     SuffixEdited.displayName = 'SuffixEdited';
     let MessageContent = DiscordModules.MessageContentComponent;
     const EditHistoryContent = ({ plugin, messageId, record, originalChildren, compact }) => {
@@ -3817,6 +3826,50 @@ module.exports = class MessageLoggerV2 {
       return '';
     }
   }
+  getTimestampClassesModule() {
+    if (this._timestampClassesModule) return this._timestampClassesModule;
+    const module = DiscordModules.TimestampClasses || Webpack.getByKeys(
+      'separator',
+      'timestamp',
+      'timestampInline',
+      'timestampVisibleOnHover',
+      'latin24CompactTimeStamp',
+      { searchExports: true }
+    ) || Webpack.getByKeys(
+      'separator',
+      'timestamp',
+      'timestampInline',
+      { searchExports: true }
+    );
+    if (module) this._timestampClassesModule = module;
+    return module || null;
+  }
+  getTimestampClass(key) {
+    const module = this.getTimestampClassesModule();
+    if (!module) {
+      Logger.warn('TimestampClasses module not found');
+      return '';
+    }
+    const result = module[key] || '';
+    if (!result) {
+      Logger.warn(`TimestampClasses missing key '${key}'. Available keys:`, Object.keys(module));
+    }
+    return result;
+  }
+  getTimestampSingleClass(key) {
+    try {
+      return this.getTimestampClass(key).split(' ')[0];
+    } catch (e) {
+      Logger.warn(`Failed to get timestamp class '${key}'`, e);
+      return '';
+    }
+  }
+  getEditedTimestampClasses() {
+    return this.joinClassNames(
+      this.getTimestampClass('timestamp'),
+      this.getTimestampClass('timestampInline')
+    );
+  }
   joinClassNames(...args) {
     const classes = [];
     for (let i = 0, len = args.length; i < len; i++) {
@@ -3899,8 +3952,8 @@ module.exports = class MessageLoggerV2 {
           this.getDiscordClass('edited avatar clickable')
         ),
           /* 5 */ this.joinClassNames(
-          this.getDiscordClass('separator timestamp'),
-          this.getDiscordClass('separator timestampInline')
+          this.getTimestampClass('timestamp'),
+          this.getTimestampClass('timestampInline')
         ),
           /* 6 */ this.joinClassNames(
           this.multiClasses.markup,
@@ -3909,13 +3962,15 @@ module.exports = class MessageLoggerV2 {
           /* 7 */ this.getDiscordClass('giftCodeContainer container'),
           /* 8 */ this.joinClassNames(
           this.getDiscordClass('zalgo latin24CompactTimeStamp'),
-          this.getDiscordClass('separator timestamp'),
-          this.getDiscordClass('alt timestampVisibleOnHover'),
-          this.getDiscordClass('timestampVisibleOnHover alt')
+          this.getTimestampClass('timestamp'),
+          this.getTimestampClass('timestampVisibleOnHover')
         ),
-          /* 9 */ this.getDiscordClass('latin24CompactTimeStamp separator'),
+          /* 9 */ this.joinClassNames(
+          this.getTimestampClass('latin24CompactTimeStamp'),
+          this.getTimestampClass('separator')
+        ),
           /* 10 */ this.getSingleDiscordClass('userJoinSystemMessageIcon username'),
-          /* 11 */ this.getSingleDiscordClass('separator timestamp'),
+          /* 11 */ this.getTimestampSingleClass('timestamp'),
           /* 12 */ this.getDiscordClass('zalgo contents')
         ],
         botTag: DiscordModules.BotTagClasses?.botTag || 'botTag',
@@ -4322,7 +4377,7 @@ module.exports = class MessageLoggerV2 {
             const hist = record.edit_history[ii];
             const editedMarkup = formatContent(hist.content, message.channel_id);
             if (!editedMarkup) continue;
-            editedMarkup.insertAdjacentHTML('beforeend', `<time class="${this.multiClasses.edited}">(${this.translatedEdited})</time>`);
+            editedMarkup.insertAdjacentHTML('beforeend', `<time class="${this.getEditedTimestampClasses()}">(${this.translatedEdited})</time>`);
             new this.Tooltip(editedMarkup, 'Edited at ' + (typeof hist.time === 'string' ? hist.time : this.createTimeStamp(hist.time)), { side: 'left' });
             editedMarkup.classList.add(this.style.edited);
             editedMarkup.edit = ii;
