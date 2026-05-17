@@ -1939,6 +1939,13 @@ module.exports = class MessageLoggerV2 {
   isLocalAuthorMessage(message) {
     return !!(message?.author?.id && this.localUser?.id && message.author.id === this.localUser.id);
   }
+  shouldIgnoreMessageAuthor(message) {
+    const author = message?.author;
+    if (!author) return false;
+    if (this.settings.ignoreBots && author.bot) return true;
+    if (!this.isLocalAuthorMessage(message) && this.settings.ignoreBlockedUsers && this.tools.isBlocked(author.id)) return true;
+    return false;
+  }
   shouldIgnoreSelfMessage(message) {
     return !!(this.settings.ignoreSelf && this.isLocalAuthorMessage(message));
   }
@@ -2815,6 +2822,7 @@ module.exports = class MessageLoggerV2 {
         return;
       }
       if (record.delete_data.hidden) return;
+      if (this.shouldIgnoreMessageAuthor(record.message)) return;
       if (this.shouldIgnoreSelfMessage(record.message)) return;
       ensureUserCleaned(record);
       toInsert.push(record.message);
@@ -3464,6 +3472,7 @@ module.exports = class MessageLoggerV2 {
             failedMessage = true;
             continue;
           }
+          if (this.shouldIgnoreMessageAuthor(purged)) continue;
           if (this.shouldIgnoreSelfMessage(purged)) continue;
           savedDeleteCount++;
           this.saveDeletedMessage(purged, this.purgedMessageRecord);
@@ -3734,6 +3743,7 @@ module.exports = class MessageLoggerV2 {
       const shouldShowPurged = this.settings.showPurgedMessages && this.purgedMessageSet.get(channelId)?.has(messageId);
       if (!shouldShowDeleted && !shouldShowPurged) return false;
       const record = this.messageRecord[messageId];
+      if (record && this.shouldIgnoreMessageAuthor(record.message)) return false;
       if (record && this.shouldIgnoreSelfMessage(record.message)) return false;
       return shouldShowDeleted || shouldShowPurged;
     };
