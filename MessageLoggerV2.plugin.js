@@ -3717,56 +3717,150 @@ module.exports = class MessageLoggerV2 {
       tryInstall(0);
     }
     const tintClassFor = () => this.settings.useAlternativeDeletedStyle ? this.style.deletedAlt : this.style.deleted;
-    const tintLi = (li) => {
-      if (!li || !li.id || !li.id.startsWith('chat-messages-')) return;
-      const parts = li.id.split('-');
+    const shouldTintMessage = (channelId, messageId) => {
+      const shouldShowDeleted = this.settings.showDeletedMessages && this.deletedMessageSet.get(channelId)?.has(messageId);
+      const shouldShowPurged = this.settings.showPurgedMessages && this.purgedMessageSet.get(channelId)?.has(messageId);
+      return shouldShowDeleted || shouldShowPurged;
+    };
+    const getMessageNodeId = (channelId, messageId) => `chat-messages-${channelId}-${messageId}`;
+    const addTintClass = (target) => {
+      if (!target || target.nodeType !== 1 || this.noTintIds.has(target.id?.split?.('-').slice(3).join('-'))) return false;
+      const cls = tintClassFor();
+      if (!target.classList.contains(cls)) target.classList.add(cls);
+      return true;
+    };
+    const getMessageNodeFromAnyNode = (node) => {
+      if (!node || node.nodeType !== 1) return null;
+      if (node.id?.startsWith('chat-messages-')) return node;
+      const messageNode = node.closest?.('[id^="chat-messages-"]');
+      if (messageNode) return messageNode;
+      const listItemNode = node.matches?.('[data-list-item-id^="chat-messages___chat-messages-"]')
+        ? node
+        : node.closest?.('[data-list-item-id^="chat-messages___chat-messages-"]');
+      const listItemId = listItemNode?.getAttribute?.('data-list-item-id');
+      if (!listItemId?.startsWith('chat-messages___chat-messages-')) return null;
+      return document.getElementById(listItemId.slice('chat-messages___'.length));
+    };
+    const getMessageTintTarget = (node) => {
+      if (!node || node.nodeType !== 1) return null;
+      if (node.matches?.('[role="article"]')) return node;
+      if (node.tagName === 'LI') {
+        const article = node.querySelector?.('[role="article"]');
+        if (article) return article;
+        return node.firstElementChild;
+      }
+      if (node.id?.startsWith('chat-messages-')) {
+        const articleSelector = `[data-list-item-id="chat-messages___${node.id}"]`;
+        const article = document.querySelector(articleSelector) || node.querySelector?.(articleSelector) || node.querySelector?.('[role="article"]');
+        if (article) return article;
+      }
+      return node.firstElementChild || node;
+    };
+    const tintMessageNode = (node) => {
+      if (!node || !node.id || !node.id.startsWith('chat-messages-')) return;
+      const parts = node.id.split('-');
       if (parts.length < 4) return;
       const channelId = parts[2];
       const messageId = parts.slice(3).join('-');
-      const shouldShowDeleted = this.settings.showDeletedMessages && this.deletedMessageSet.get(channelId)?.has(messageId);
-      const shouldShowPurged = this.settings.showPurgedMessages && this.purgedMessageSet.get(channelId)?.has(messageId);
-      if (!shouldShowDeleted && !shouldShowPurged) return;
+      if (!shouldTintMessage(channelId, messageId)) return;
       if (this.noTintIds.has(messageId)) return;
-      const wrapper = li.firstElementChild;
+      const wrapper = getMessageTintTarget(node);
       if (!wrapper || wrapper.tagName !== 'DIV') return;
-      const cls = tintClassFor();
-      if (!wrapper.classList.contains(cls)) wrapper.classList.add(cls);
+      addTintClass(wrapper);
+    };
+    const findLowestCommonAncestor = (left, right) => {
+      if (!left || !right) return null;
+      const ancestors = new Set();
+      let current = left;
+      while (current) {
+        ancestors.add(current);
+        current = current.parentElement;
+      }
+      current = right;
+      while (current) {
+        if (ancestors.has(current)) return current;
+        current = current.parentElement;
+      }
+      return null;
+    };
+    const tintForumCardByThreadId = (threadId) => {
+      if (!threadId || !shouldTintMessage(threadId, threadId) || this.noTintIds.has(threadId)) return false;
+      const card = document.querySelector(`[data-item-id="${threadId}"]`);
+      const content = document.getElementById(`message-content-${threadId}`);
+      const accessories = document.getElementById(`message-accessories-${threadId}`);
+      if (!card && !content) return false;
+      let target = findLowestCommonAncestor(content, accessories);
+      if (target && card?.contains(target)) {
+        return addTintClass(target);
+      }
+      if (content && card?.contains(content)) {
+        target = content;
+        while (target?.parentElement && target.parentElement !== card) target = target.parentElement;
+        return addTintClass(target || card);
+      }
+      return addTintClass(card);
     };
     const tintMessageById = (channelId, messageId) => {
-      const li = document.getElementById(`chat-messages-${channelId}-${messageId}`);
-      if (!li) return false;
-      tintLi(li);
-      return true;
+      const domId = getMessageNodeId(channelId, messageId);
+      let applied = false;
+      const nodes = document.querySelectorAll(`[id="${domId}"]`);
+      if (nodes.length) {
+        nodes.forEach(node => {
+          tintMessageNode(node);
+          applied = true;
+        });
+      }
+      const article = document.querySelector(`[data-list-item-id="chat-messages___${domId}"]`);
+      if (article && addTintClass(article)) applied = true;
+      return applied;
     };
     const scheduleTintForMessage = (channelId, messageId, attempt = 0) => {
       if ((!this.settings.showDeletedMessages && !this.settings.showPurgedMessages) || !channelId || !messageId) return;
-      if (tintMessageById(channelId, messageId)) return;
-      if (attempt >= 4) return;
-      requestAnimationFrame(() => scheduleTintForMessage(channelId, messageId, attempt + 1));
+      const delays = channelId === messageId
+        ? [0, 32, 96, 192, 384, 768, 1200]
+        : [0, 32, 96, 192, 384];
+      if (attempt >= delays.length) return;
+      const requiresForumCardTint = channelId === messageId;
+      setTimeout(() => {
+        requestAnimationFrame(() => {
+          const appliedMessageTint = tintMessageById(channelId, messageId);
+          const appliedForumCardTint = !requiresForumCardTint || tintForumCardByThreadId(channelId);
+          if (appliedMessageTint && appliedForumCardTint) return;
+          scheduleTintForMessage(channelId, messageId, attempt + 1);
+        });
+      }, delays[attempt]);
     };
     const sweepDom = () => {
       if (!this.settings.showDeletedMessages && !this.settings.showPurgedMessages) return;
-      document.querySelectorAll('li[id^="chat-messages-"]').forEach(tintLi);
+      document.querySelectorAll('[id^="chat-messages-"]').forEach(tintMessageNode);
+      for (const channelId of this.deletedMessageSet.keys()) {
+        if (this.deletedMessageSet.get(channelId)?.has(channelId)) tintForumCardByThreadId(channelId);
+      }
+      for (const channelId of this.purgedMessageSet.keys()) {
+        if (this.purgedMessageSet.get(channelId)?.has(channelId)) tintForumCardByThreadId(channelId);
+      }
     };
     const tintObserver = new MutationObserver((mutations) => {
       for (const m of mutations) {
         if (m.type === 'childList') {
+          const targetMessageNode = getMessageNodeFromAnyNode(m.target);
+          if (targetMessageNode) tintMessageNode(targetMessageNode);
           for (const node of m.addedNodes) {
             if (node.nodeType !== 1) continue;
-            if (node.tagName === 'LI' && node.id && node.id.startsWith('chat-messages-')) {
-              tintLi(node);
-            } else if (node.querySelectorAll) {
-              const found = node.querySelectorAll('li[id^="chat-messages-"]');
-              if (found.length) found.forEach(tintLi);
-            }
+            const messageNode = getMessageNodeFromAnyNode(node);
+            if (messageNode) tintMessageNode(messageNode);
+            if (!node.querySelectorAll) continue;
+            const found = node.querySelectorAll('[id^="chat-messages-"], [data-list-item-id^="chat-messages___chat-messages-"]');
+            if (found.length) found.forEach(foundNode => {
+              const resolvedMessageNode = getMessageNodeFromAnyNode(foundNode);
+              if (resolvedMessageNode) tintMessageNode(resolvedMessageNode);
+            });
           }
         } else if (m.type === 'attributes' && m.attributeName === 'class') {
           const t = m.target;
-          if (t.nodeType !== 1 || t.tagName !== 'DIV') continue;
-          const parent = t.parentElement;
-          if (parent?.tagName === 'LI' && parent.id && parent.id.startsWith('chat-messages-')) {
-            tintLi(parent);
-          }
+          if (t.nodeType !== 1) continue;
+          const messageNode = getMessageNodeFromAnyNode(t);
+          if (messageNode) tintMessageNode(messageNode);
         }
       }
     });
