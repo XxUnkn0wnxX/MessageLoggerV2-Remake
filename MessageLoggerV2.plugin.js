@@ -3599,10 +3599,22 @@ module.exports = class MessageLoggerV2 {
   }
   patchMessages() {
     if (!this._globalUpdateCallbackMessage) {
-      this._globalUpdateCallbackMessage = (e) => {
-        if (!e.id) return;
-        const callbacks = this._messageUpdateRegistry.get(e.id);
-        if (callbacks) callbacks.forEach(cb => cb());
+      this._globalUpdateCallbackMessage = (e = {}) => {
+        if (e.id) {
+          const callbacks = this._messageUpdateRegistry.get(e.id);
+          if (callbacks) callbacks.forEach(cb => cb());
+        } else {
+          for (const callbacks of this._messageUpdateRegistry.values()) {
+            callbacks.forEach(cb => cb());
+          }
+        }
+        requestAnimationFrame(() => {
+          if (e.id && e.channelId) {
+            this._scheduleTintForMessage?.(e.channelId, e.id);
+            return;
+          }
+          this._tintSweep?.();
+        });
       };
       this.dispatcher.subscribe('MLV2_FORCE_UPDATE_MESSAGE', this._globalUpdateCallbackMessage);
     }
@@ -3744,9 +3756,33 @@ module.exports = class MessageLoggerV2 {
       return shouldShowDeleted || shouldShowPurged;
     };
     const getMessageNodeId = (channelId, messageId) => `chat-messages-${channelId}-${messageId}`;
+    const clearTintClasses = (target) => {
+      if (!target || target.nodeType !== 1) return false;
+      let changed = false;
+      for (const cls of [this.style.deleted, this.style.deletedAlt]) {
+        if (!cls || !target.classList.contains(cls)) continue;
+        target.classList.remove(cls);
+        changed = true;
+      }
+      return changed;
+    };
+    const clearTintClassesFromNodes = (nodes) => {
+      const seen = new Set();
+      let changed = false;
+      for (const node of nodes) {
+        if (!node || node.nodeType !== 1 || seen.has(node)) continue;
+        seen.add(node);
+        changed = clearTintClasses(node) || changed;
+      }
+      return changed;
+    };
     const addTintClass = (target) => {
       if (!target || target.nodeType !== 1 || this.noTintIds.has(target.id?.split?.('-').slice(3).join('-'))) return false;
       const cls = tintClassFor();
+      for (const tintCls of [this.style.deleted, this.style.deletedAlt]) {
+        if (!tintCls || tintCls === cls || !target.classList.contains(tintCls)) continue;
+        target.classList.remove(tintCls);
+      }
       if (!target.classList.contains(cls)) target.classList.add(cls);
       return true;
     };
@@ -3789,10 +3825,12 @@ module.exports = class MessageLoggerV2 {
       if (parts.length < 4) return;
       const channelId = parts[2];
       const messageId = parts.slice(3).join('-');
-      if (!shouldTintMessage(channelId, messageId)) return;
-      if (this.noTintIds.has(messageId)) return;
       const wrapper = getMessageTintTarget(node);
       if (!wrapper || wrapper.tagName !== 'DIV') return;
+      if (!shouldTintMessage(channelId, messageId) || this.noTintIds.has(messageId)) {
+        clearTintClasses(wrapper);
+        return;
+      }
       addTintClass(wrapper);
     };
     const findLowestCommonAncestor = (left, right) => {
@@ -3811,23 +3849,38 @@ module.exports = class MessageLoggerV2 {
       return null;
     };
     const tintForumCardByThreadId = (threadId) => {
-      if (!threadId || !shouldTintMessage(threadId, threadId) || this.noTintIds.has(threadId)) return false;
       const card = document.querySelector(`[data-item-id="${threadId}"]`);
       const content = document.getElementById(`message-content-${threadId}`);
       const accessories = document.getElementById(`message-accessories-${threadId}`);
+      const forumTintTargets = [];
+      let ancestor = content;
+      while (ancestor && ancestor !== card) {
+        forumTintTargets.push(ancestor);
+        ancestor = ancestor.parentElement;
+      }
+      forumTintTargets.push(card, content, accessories);
+      if (!threadId) return false;
+      if (!shouldTintMessage(threadId, threadId) || this.noTintIds.has(threadId)) {
+        clearTintClassesFromNodes(forumTintTargets);
+        return false;
+      }
       if (!card && !content) return false;
       if (this.settings.useAlternativeDeletedStyle && card) {
+        clearTintClassesFromNodes(forumTintTargets.filter(node => node !== card));
         return addTintClass(card);
       }
       let target = findLowestCommonAncestor(content, accessories);
       if (target && card?.contains(target)) {
+        clearTintClassesFromNodes(forumTintTargets.filter(node => node !== target));
         return addTintClass(target);
       }
       if (content && card?.contains(content)) {
         target = content;
         while (target?.parentElement && target.parentElement !== card) target = target.parentElement;
+        clearTintClassesFromNodes(forumTintTargets.filter(node => node !== target));
         return addTintClass(target || card);
       }
+      clearTintClassesFromNodes(forumTintTargets.filter(node => node !== card));
       return addTintClass(card);
     };
     const tintMessageById = (channelId, messageId) => {
