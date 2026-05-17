@@ -3766,6 +3766,12 @@ module.exports = class MessageLoggerV2 {
       if (!listItemId?.startsWith('chat-messages___chat-messages-')) return null;
       return document.getElementById(listItemId.slice('chat-messages___'.length));
     };
+    const getForumThreadIdFromAnyNode = (node) => {
+      if (!node || node.nodeType !== 1) return null;
+      const cardNode = node.matches?.('[data-item-id]') ? node : node.closest?.('[data-item-id]');
+      const threadId = cardNode?.getAttribute?.('data-item-id');
+      return threadId && /^\d+$/.test(threadId) ? threadId : null;
+    };
     const getMessageTintTarget = (node) => {
       if (!node || node.nodeType !== 1) return null;
       if (node.matches?.('[role="article"]')) return node;
@@ -3814,6 +3820,9 @@ module.exports = class MessageLoggerV2 {
       const content = document.getElementById(`message-content-${threadId}`);
       const accessories = document.getElementById(`message-accessories-${threadId}`);
       if (!card && !content) return false;
+      if (this.settings.useAlternativeDeletedStyle && card) {
+        return addTintClass(card);
+      }
       let target = findLowestCommonAncestor(content, accessories);
       if (target && card?.contains(target)) {
         return addTintClass(target);
@@ -3870,15 +3879,21 @@ module.exports = class MessageLoggerV2 {
         if (m.type === 'childList') {
           const targetMessageNode = getMessageNodeFromAnyNode(m.target);
           if (targetMessageNode) tintMessageNode(targetMessageNode);
+          const targetThreadId = getForumThreadIdFromAnyNode(m.target);
+          if (targetThreadId) tintForumCardByThreadId(targetThreadId);
           for (const node of m.addedNodes) {
             if (node.nodeType !== 1) continue;
             const messageNode = getMessageNodeFromAnyNode(node);
             if (messageNode) tintMessageNode(messageNode);
+            const threadId = getForumThreadIdFromAnyNode(node);
+            if (threadId) tintForumCardByThreadId(threadId);
             if (!node.querySelectorAll) continue;
-            const found = node.querySelectorAll('[id^="chat-messages-"], [data-list-item-id^="chat-messages___chat-messages-"]');
+            const found = node.querySelectorAll('[id^="chat-messages-"], [data-list-item-id^="chat-messages___chat-messages-"], [data-item-id]');
             if (found.length) found.forEach(foundNode => {
               const resolvedMessageNode = getMessageNodeFromAnyNode(foundNode);
               if (resolvedMessageNode) tintMessageNode(resolvedMessageNode);
+              const foundThreadId = getForumThreadIdFromAnyNode(foundNode);
+              if (foundThreadId) tintForumCardByThreadId(foundThreadId);
             });
           }
         } else if (m.type === 'attributes' && m.attributeName === 'class') {
@@ -3886,6 +3901,8 @@ module.exports = class MessageLoggerV2 {
           if (t.nodeType !== 1) continue;
           const messageNode = getMessageNodeFromAnyNode(t);
           if (messageNode) tintMessageNode(messageNode);
+          const threadId = getForumThreadIdFromAnyNode(t);
+          if (threadId) tintForumCardByThreadId(threadId);
         }
       }
     });
