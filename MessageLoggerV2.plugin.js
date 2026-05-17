@@ -3296,7 +3296,7 @@ module.exports = class MessageLoggerV2 {
       let editOrDel = 0;
       if (dispatch.type == 'MESSAGE_DELETE') editOrDel = 1;
       else if (dispatch.type == 'MESSAGE_UPDATE') editOrDel = 2;
-      if (editOrDel != 0 && (this.settings.notificationBlacklist.includes(channel.id) || (guild && this.settings.notificationBlacklist.includes(guild.id))) && ((this.settings.alwaysNotifChannel && this.selectedChannel && this.selectedChannel.id == channel.id) || (this.settings.alwaysNotifGuild && guild && this.selectedChannel.guild_id == guild.id))) {
+      if (editOrDel != 0 && (this.settings.notificationBlacklist.includes(channel.id) || (guild && this.settings.notificationBlacklist.includes(guild.id))) && ((this.settings.alwaysNotifChannel && this.selectedChannel && this.selectedChannel.id == channel.id) || (this.settings.alwaysNotifGuild && guild && this.selectedChannel?.guild_id == guild.id))) {
         const shouldNotifyLocal = !isLocalUser || (guild && !this.settings.toastToggles.disableToastsForLocal);
         if (editOrDel == 1 && (guild ? this.settings.toastToggles.deleted && shouldNotifyLocal : this.settings.toastTogglesDMs.deleted && !isLocalUser)) {
           this._notifyEvent('deleted', channel, guild, dispatch.id);
