@@ -1397,7 +1397,6 @@ module.exports = class MessageLoggerV2 {
         try {
           if (isChat) {
             this.selectedChannel = this.getSelectedTextChannel();
-            this.noTintIds = new Set();
             this.editModifiers = {};
           }
           if (!this.selectedChannel) return Logger.warn('Chat was loaded but no text channel is selected');
