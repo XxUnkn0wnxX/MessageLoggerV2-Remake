@@ -1936,6 +1936,12 @@ module.exports = class MessageLoggerV2 {
   getSavedMessage(id) {
     return this.messageRecord[id];
   }
+  isLocalAuthorMessage(message) {
+    return !!(message?.author?.id && this.localUser?.id && message.author.id === this.localUser.id);
+  }
+  shouldIgnoreSelfMessage(message) {
+    return !!(this.settings.ignoreSelf && this.isLocalAuthorMessage(message));
+  }
   cleanupUserObject(user) {
     return {
       discriminator: user.discriminator,
@@ -2809,6 +2815,7 @@ module.exports = class MessageLoggerV2 {
         return;
       }
       if (record.delete_data.hidden) return;
+      if (this.shouldIgnoreSelfMessage(record.message)) return;
       ensureUserCleaned(record);
       toInsert.push(record.message);
     };
@@ -3323,6 +3330,7 @@ module.exports = class MessageLoggerV2 {
           const deleted = this.tempEditedMessageRecord[dispatch.id]?.message || this.getCachedMessage(dispatch.id, dispatch.channelId);
           if (!deleted || (deleted.type !== 0 && deleted.type !== 19 && deleted.type !== 20)) return callDefault(...args);
           if (deleted.flags == 64) return callDefault(...args);
+          if (this.shouldIgnoreSelfMessage(deleted)) return callDefault(...args);
           if (!this.tools.isMentioned(deleted, this.localUser.id)) return callDefault(...args);
           const record = this.messageRecord[dispatch.id];
           if (this._shouldShowToast(channel, guild, 'ghostPings') && !record?.ghost_pinged) {
@@ -3424,6 +3432,7 @@ module.exports = class MessageLoggerV2 {
         const deleted = this.getCachedMessage(dispatch.id, dispatch.channelId);
         if (this.settings.aggresiveMessageCaching) this._ensureChannelCached(channel.id);
         if (!deleted) return callDefault(...args);
+        if (this.shouldIgnoreSelfMessage(deleted)) return callDefault(...args);
         if (this.deletedMessageSet.get(channel.id)?.has(deleted.id)) {
           if (!this.settings.showDeletedMessages) ret = callDefault(...args);
           return ret;
@@ -3447,26 +3456,29 @@ module.exports = class MessageLoggerV2 {
         else if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: dispatch.id });
         this.saveData();
       } else if (dispatch.type == 'MESSAGE_DELETE_BULK') {
-        if (this.settings.showDeletedCount) {
-          if (!this.deletedChatMessagesCount[channel.id]) this.deletedChatMessagesCount[channel.id] = 0;
-          if (!this.selectedChannel || this.selectedChannel.id != channel.id) this.deletedChatMessagesCount[channel.id] += dispatch.ids.length;
-        }
         let failedMessage = false;
+        let savedDeleteCount = 0;
         for (const dispatchId of dispatch.ids) {
           const purged = this.getCachedMessage(dispatchId, channel.id);
           if (!purged) {
             failedMessage = true;
             continue;
           }
+          if (this.shouldIgnoreSelfMessage(purged)) continue;
+          savedDeleteCount++;
           this.saveDeletedMessage(purged, this.purgedMessageRecord);
           this._scheduleTintForMessage?.(dispatch.channelId, purged.id);
           if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: purged.id });
         }
+        if (this.settings.showDeletedCount && savedDeleteCount > 0) {
+          if (!this.deletedChatMessagesCount[channel.id]) this.deletedChatMessagesCount[channel.id] = 0;
+          if (!this.selectedChannel || this.selectedChannel.id != channel.id) this.deletedChatMessagesCount[channel.id] += savedDeleteCount;
+        }
         if (failedMessage && this.settings.aggresiveMessageCaching)
           this.cacheChannelMessages(channel.id);
         else if (this.settings.aggresiveMessageCaching) this._ensureChannelCached(channel.id);
-        if (!notificationsBlacklisted && notificationsWhitelisted && (guild ? this.settings.toastToggles.deleted : this.settings.toastTogglesDMs.deleted)) {
-          this._notifyEvent('bulkDelete', channel, guild, undefined, { count: dispatch.ids.length });
+        if (savedDeleteCount > 0 && !notificationsBlacklisted && notificationsWhitelisted && (guild ? this.settings.toastToggles.deleted : this.settings.toastTogglesDMs.deleted)) {
+          this._notifyEvent('bulkDelete', channel, guild, undefined, { count: savedDeleteCount });
         }
         if (!this.settings.showPurgedMessages) ret = callDefault(...args);
         this.saveData();
@@ -3720,6 +3732,9 @@ module.exports = class MessageLoggerV2 {
     const shouldTintMessage = (channelId, messageId) => {
       const shouldShowDeleted = this.settings.showDeletedMessages && this.deletedMessageSet.get(channelId)?.has(messageId);
       const shouldShowPurged = this.settings.showPurgedMessages && this.purgedMessageSet.get(channelId)?.has(messageId);
+      if (!shouldShowDeleted && !shouldShowPurged) return false;
+      const record = this.messageRecord[messageId];
+      if (record && this.shouldIgnoreSelfMessage(record.message)) return false;
       return shouldShowDeleted || shouldShowPurged;
     };
     const getMessageNodeId = (channelId, messageId) => `chat-messages-${channelId}-${messageId}`;
