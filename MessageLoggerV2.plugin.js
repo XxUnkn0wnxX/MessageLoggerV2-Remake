@@ -3442,6 +3442,7 @@ module.exports = class MessageLoggerV2 {
           this._notifyEvent('ghostPing', channel, guild, dispatch.id);
         }
         this.saveDeletedMessage(deleted, this.deletedMessageRecord);
+        this._scheduleTintForMessage?.(dispatch.channelId, dispatch.id);
         if (!this.settings.showDeletedMessages) ret = callDefault(...args);
         else if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: dispatch.id });
         this.saveData();
@@ -3458,6 +3459,7 @@ module.exports = class MessageLoggerV2 {
             continue;
           }
           this.saveDeletedMessage(purged, this.purgedMessageRecord);
+          this._scheduleTintForMessage?.(dispatch.channelId, purged.id);
           if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: purged.id });
         }
         if (failedMessage && this.settings.aggresiveMessageCaching)
@@ -3730,8 +3732,20 @@ module.exports = class MessageLoggerV2 {
       const cls = tintClassFor();
       if (!wrapper.classList.contains(cls)) wrapper.classList.add(cls);
     };
+    const tintMessageById = (channelId, messageId) => {
+      const li = document.getElementById(`chat-messages-${channelId}-${messageId}`);
+      if (!li) return false;
+      tintLi(li);
+      return true;
+    };
+    const scheduleTintForMessage = (channelId, messageId, attempt = 0) => {
+      if ((!this.settings.showDeletedMessages && !this.settings.showPurgedMessages) || !channelId || !messageId) return;
+      if (tintMessageById(channelId, messageId)) return;
+      if (attempt >= 4) return;
+      requestAnimationFrame(() => scheduleTintForMessage(channelId, messageId, attempt + 1));
+    };
     const sweepDom = () => {
-      if (!this.settings.showDeletedMessages) return;
+      if (!this.settings.showDeletedMessages && !this.settings.showPurgedMessages) return;
       document.querySelectorAll('li[id^="chat-messages-"]').forEach(tintLi);
     };
     const tintObserver = new MutationObserver((mutations) => {
@@ -3761,8 +3775,15 @@ module.exports = class MessageLoggerV2 {
       attributes: true, attributeFilter: ['class']
     });
     this._tintSweep = sweepDom;
+    this._tintMessageById = tintMessageById;
+    this._scheduleTintForMessage = scheduleTintForMessage;
     sweepDom();
-    this.unpatches.push(() => { try { tintObserver.disconnect(); } catch {} this._tintSweep = null; });
+    this.unpatches.push(() => {
+      try { tintObserver.disconnect(); } catch {}
+      this._tintSweep = null;
+      this._tintMessageById = null;
+      this._scheduleTintForMessage = null;
+    });
     this.forceReloadMessages();
   }
   forceReloadMessages() {
