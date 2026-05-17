@@ -3741,9 +3741,6 @@ module.exports = class MessageLoggerV2 {
       const shouldShowDeleted = this.settings.showDeletedMessages && this.deletedMessageSet.get(channelId)?.has(messageId);
       const shouldShowPurged = this.settings.showPurgedMessages && this.purgedMessageSet.get(channelId)?.has(messageId);
       if (!shouldShowDeleted && !shouldShowPurged) return false;
-      const record = this.messageRecord[messageId];
-      if (record && this.shouldIgnoreMessageAuthor(record.message)) return false;
-      if (record && this.shouldIgnoreSelfMessage(record.message)) return false;
       return shouldShowDeleted || shouldShowPurged;
     };
     const getMessageNodeId = (channelId, messageId) => `chat-messages-${channelId}-${messageId}`;
