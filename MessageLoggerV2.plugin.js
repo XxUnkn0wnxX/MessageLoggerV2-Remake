@@ -3275,7 +3275,7 @@ module.exports = class MessageLoggerV2 {
       if (!author && !(dispatch.type == 'LOAD_MESSAGES_SUCCESS' || dispatch.type == 'MESSAGE_DELETE_BULK')) return callDefault(...args);
       const isLocalUser = author && author.id === this.localUser.id;
       if (author?.bot && this.settings.ignoreBots) return callDefault(...args);
-      if (author && isLocalUser && this.settings.ignoreSelf) return callDefault(...args);
+      if (author && isLocalUser && this.settings.ignoreSelf && dispatch.type === 'MESSAGE_CREATE') return callDefault(...args);
       if (author && this.settings.ignoreBlockedUsers && this.tools.isBlocked(author.id) && !isLocalUser) return callDefault(...args);
       if (author?.avatar === 'clyde') return callDefault(...args);
       if (this.settings.ignoreLocalEdits && dispatch.type === 'MESSAGE_UPDATE' && isLocalUser) return callDefault(...args);
@@ -3412,7 +3412,9 @@ module.exports = class MessageLoggerV2 {
             });
           }
         }
-        return callDefault(...args);
+        const result = callDefault(...args);
+        requestAnimationFrame(() => this._tintSweep?.());
+        return result;
       }
       const notificationsBlacklisted = this.settings.notificationBlacklist.includes(channel.id) || (guild && this.settings.notificationBlacklist.includes(guild.id));
       let notificationsWhitelisted = true;
@@ -3715,12 +3717,13 @@ module.exports = class MessageLoggerV2 {
     const tintClassFor = () => this.settings.useAlternativeDeletedStyle ? this.style.deletedAlt : this.style.deleted;
     const tintLi = (li) => {
       if (!li || !li.id || !li.id.startsWith('chat-messages-')) return;
-      if (!this.settings.showDeletedMessages) return;
       const parts = li.id.split('-');
       if (parts.length < 4) return;
       const channelId = parts[2];
       const messageId = parts.slice(3).join('-');
-      if (!this.deletedMessageSet.get(channelId)?.has(messageId)) return;
+      const shouldShowDeleted = this.settings.showDeletedMessages && this.deletedMessageSet.get(channelId)?.has(messageId);
+      const shouldShowPurged = this.settings.showPurgedMessages && this.purgedMessageSet.get(channelId)?.has(messageId);
+      if (!shouldShowDeleted && !shouldShowPurged) return;
       if (this.noTintIds.has(messageId)) return;
       const wrapper = li.firstElementChild;
       if (!wrapper || wrapper.tagName !== 'DIV') return;
