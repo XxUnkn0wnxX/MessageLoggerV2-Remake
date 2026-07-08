@@ -6930,6 +6930,23 @@ module.exports = class MessageLoggerV2 {
   }
   patchContextMenus() {
     const getNestedProp = (obj, path) => path.split('.').reduce((o, p) => o?.[p], obj);
+    const menuIdMatches = (actual, expected) =>
+      typeof actual === 'string' && (actual === expected || actual === `message-${expected}`);
+    const findMenuGroupByChildId = (node, id) => {
+      const children = Array.isArray(node)
+        ? node
+        : Array.isArray(node?.props?.children)
+          ? node.props.children
+          : node?.props?.children
+            ? [node.props.children]
+            : [];
+      if (children.some(child => menuIdMatches(child?.props?.id, id))) return children;
+      for (const child of children) {
+        const found = findMenuGroupByChildId(child, id);
+        if (found) return found;
+      }
+      return null;
+    };
     const removeForumCardFromDom = (threadId) => {
       if (!threadId || typeof document === 'undefined') return;
       const selectors = [
@@ -7075,13 +7092,26 @@ module.exports = class MessageLoggerV2 {
         pruneNativeDeletedOptions: true,
         editTarget: props.target
       });
+      const loggerSubmenu = {
+        id: 'mlv2-message-logger',
+        type: 'submenu',
+        label: this.settings.contextmenuSubmenuName,
+        items: newItems
+      };
+      const actionGroup = findMenuGroupByChildId(ret, 'delete') || findMenuGroupByChildId(ret, 'report');
+      const actionIndex = actionGroup?.findIndex(item =>
+        menuIdMatches(item?.props?.id, 'delete') || menuIdMatches(item?.props?.id, 'report')
+      );
+      if (actionGroup && actionIndex >= 0) {
+        actionGroup.splice(actionIndex + 1, 0, ContextMenu.buildMenuChildren([
+          { type: 'separator' },
+          loggerSubmenu
+        ]));
+        return;
+      }
       menu.push(ContextMenu.buildMenuChildren([{
         type: 'group',
-        items: [{
-          type: 'submenu',
-          label: this.settings.contextmenuSubmenuName,
-          items: newItems
-        }]
+        items: [loggerSubmenu]
       }]));
     }));
     const handleWhiteBlackList = (newItems, id) => {
