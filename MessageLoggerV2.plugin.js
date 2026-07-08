@@ -38,9 +38,10 @@ const DiscordModules = (() => {
     GuildMemberStore: lazyGet('GuildMemberStore', () => Webpack.Stores.GuildMemberStore),
     RelationshipStore: lazyGet('RelationshipStore', () => Webpack.Stores.RelationshipStore ?? Webpack.getByKeys('isBlocked')),
     MessageActions: lazyGet('MessageActions', () => Webpack.getByKeys('sendMessage', 'editMessage', 'deleteMessage')),
+    ChannelActions: lazyGet('ChannelActions', () => Webpack.getByKeys('deleteChannel', 'updateChannel') || Webpack.getByKeys('deleteChannel', 'selectChannel')),
     ModalActions: lazyGet('ModalActions', () => Webpack.getByKeys('openModal', 'hasModalOpen')),
     HistoryUtils: lazyGet('HistoryUtils', () => Webpack.getByKeys('getHistory')),
-    HttpModule: lazyGet('HttpModule', () => Webpack.getByKeys('get', 'post', 'put', 'delete')),
+    HttpModule: lazyGet('HttpModule', () => Webpack.getByKeys('get', 'post', 'put', 'del') || Webpack.getByKeys('get', 'post', 'put', 'delete')),
     Endpoints: lazyGet('Endpoints', () => Webpack.getByKeys('Endpoints', 'ActionTypes')),
     ClickableClasses: lazyGet('ClickableClasses', () => Webpack.getByKeys('clickable')),
     ColorClasses: lazyGet('ColorClasses', () => Webpack.getByKeys('colorDanger', 'colorPremium')),
@@ -1412,10 +1413,12 @@ module.exports = class MessageLoggerV2 {
       Patcher.instead(DiscordModules.MessageActions, 'deleteMessage', (_, args, original) => {
         const messageId = args[1];
         if (this.messageRecord[messageId]?.delete_data) return;
-        this.localDeletes.push(messageId);
-        if (this.localDeletes.length > 10) this.localDeletes.shift();
+        this.rememberLocalDeleteId(messageId);
         return original(...args);
       }),
+      this.patchLocalDeleteTracker(DiscordModules.ChannelActions, 'deleteChannel'),
+      this.patchLocalDeleteTracker(DiscordModules.HttpModule, 'delete'),
+      this.patchLocalDeleteTracker(DiscordModules.HttpModule, 'del'),
       Patcher.instead(this.messageStore, 'getLastEditableMessage', (_this, [channelId]) => {
         const me = this.localUser.id;
         return _this
@@ -2013,14 +2016,22 @@ module.exports = class MessageLoggerV2 {
   getSavedMessage(id) {
     return this.messageRecord[id];
   }
+  getMessageAuthorId(message) {
+    const author = message?.author;
+    const id = author?.id || message?.author_id || message?.authorId || (typeof author === 'string' ? author : null);
+    return id ? String(id) : null;
+  }
   isLocalAuthorMessage(message) {
-    return !!(message?.author?.id && this.localUser?.id && message.author.id === this.localUser.id);
+    const authorId = this.getMessageAuthorId(message);
+    return !!(authorId && this.localUser?.id && authorId === String(this.localUser.id));
   }
   shouldIgnoreMessageAuthor(message) {
     const author = message?.author;
-    if (!author) return false;
-    if (this.settings.ignoreBots && author.bot) return true;
-    if (!this.isLocalAuthorMessage(message) && this.settings.ignoreBlockedUsers && this.tools.isBlocked(author.id)) return true;
+    const authorId = this.getMessageAuthorId(message);
+    if (!author && !authorId) return false;
+    const user = authorId ? this.tools.getUser(authorId) : null;
+    if (this.settings.ignoreBots && (author?.bot || user?.bot)) return true;
+    if (authorId && !this.isLocalAuthorMessage(message) && this.settings.ignoreBlockedUsers && this.tools.isBlocked(authorId)) return true;
     return false;
   }
   shouldIgnoreSelfMessage(message) {
@@ -2583,6 +2594,43 @@ module.exports = class MessageLoggerV2 {
     if (!message) return;
     this.jumpToMessage(message.channel_id, message.id, message.guild_id);
   }
+  rememberLocalDeleteId(id) {
+    if (!id) return;
+    id = String(id);
+    this.localDeletes.push(id);
+    if (this.localDeletes.length > 50) this.localDeletes.splice(0, this.localDeletes.length - 50);
+  }
+  rememberLocalDeleteFromRequest(request) {
+    const rawUrl = typeof request === 'string' ? request : request?.url || request?.uri || request?.href || request?.pathname;
+    if (!rawUrl) return;
+    const url = String(rawUrl);
+    const messageMatch = url.match(/\/channels\/\d+\/messages\/(\d+)/);
+    if (messageMatch) return this.rememberLocalDeleteId(messageMatch[1]);
+    const channelMatch = url.match(/\/channels\/(\d+)(?:[/?#]|$)/);
+    if (channelMatch) this.rememberLocalDeleteId(channelMatch[1]);
+  }
+  rememberLocalDeleteFromArgs(args) {
+    for (const arg of args || []) {
+      if (!arg) continue;
+      if (typeof arg === 'string' || typeof arg === 'number') {
+        const id = String(arg);
+        if (/^\d+$/.test(id)) this.rememberLocalDeleteId(id);
+        continue;
+      }
+      if (typeof arg === 'object') {
+        const id = arg.id || arg.channelId || arg.channel_id || arg.threadId || arg.thread_id;
+        if (id && /^\d+$/.test(String(id))) this.rememberLocalDeleteId(id);
+        this.rememberLocalDeleteFromRequest(arg);
+      }
+    }
+  }
+  patchLocalDeleteTracker(module, method) {
+    if (!module || typeof module[method] !== 'function') return () => {};
+    return Patcher.instead(module, method, (_, args, original) => {
+      this.rememberLocalDeleteFromArgs(args);
+      return original(...args);
+    });
+  }
   _cacheIncomingMessage(message) {
     if (this.cachedMessageIds.has(message.id)) return true;
     this.cachedMessageRecord.push(message);
@@ -2597,13 +2645,14 @@ module.exports = class MessageLoggerV2 {
     if (saved) return saved;
     return this.getCachedMessage(threadId, threadId) || this.createForumThreadDeleteFallbackMessage(channel);
   }
-  getCachedForumThreadMessages(threadId) {
+  getCachedForumThreadMessages(threadId, options = {}) {
     if (!threadId) return [];
     const messages = new Map();
     const addMessage = message => {
       if (!message?.id || message.channel_id !== threadId) return;
       if (message.flags == 64) return;
       if (message.type !== 0 && message.type !== 19 && (message.type !== 20 || (message.flags & 64) === 64)) return;
+      if (options.ignoreLocalAuthors && this.isLocalAuthorMessage(message)) return;
       if (this.shouldIgnoreMessageAuthor(message) || this.shouldIgnoreSelfMessage(message)) return;
       messages.set(message.id, message);
     };
@@ -2627,8 +2676,8 @@ module.exports = class MessageLoggerV2 {
     addCollection(storeMessages);
     return Array.from(messages.values()).sort((a, b) => Number(a.id) - Number(b.id));
   }
-  saveCachedForumThreadMessagesForDelete(threadId, channel = null, metadata = null) {
-    const messages = this.getCachedForumThreadMessages(threadId);
+  saveCachedForumThreadMessagesForDelete(threadId, channel = null, metadata = null, options = {}) {
+    const messages = this.getCachedForumThreadMessages(threadId, options);
     const parentId = channel?.parent_id || metadata?.parentId || null;
     const forumMetadata = metadata || (channel ? this.cacheForumThreadMetadata(channel) : null);
     let savedCount = 0;
@@ -2821,18 +2870,22 @@ module.exports = class MessageLoggerV2 {
     const threadId = channel?.id;
     if (!threadId) return callDefault(...args);
     const deleted = this.getForumThreadDeleteMessage(channel);
-    if (!deleted) {
+    const cachedThreadMessages = this.getCachedForumThreadMessages(threadId);
+    if (!deleted && !cachedThreadMessages.length) {
       this.cacheChannelMessages(threadId, threadId);
       return callDefault(...args);
     }
     const isLocalUser = this.isLocalAuthorMessage(deleted);
-    if (this.shouldIgnoreMessageAuthor(deleted)) return callDefault(...args);
-    if (this.shouldIgnoreSelfMessage(deleted)) return callDefault(...args);
-    if (this.settings.ignoreLocalDeletes && isLocalUser && this.localDeletes.includes(threadId)) return callDefault(...args);
-    if (this.deletedMessageSet.get(threadId)?.has(threadId)) return callDefault(...args);
-    const metadata = this.cacheForumThreadMetadata(channel, deleted);
-    this.saveDeletedMessage(deleted, this.deletedMessageRecord);
-    this.saveCachedForumThreadMessagesForDelete(threadId, channel, metadata);
+    const localThreadDelete = !!(this.settings.ignoreLocalDeletes && this.localDeletes.includes(threadId));
+    const metadata = this.cacheForumThreadMetadata(channel, deleted || cachedThreadMessages[0]);
+    const shouldSaveStarter = deleted && !(localThreadDelete && this.isLocalAuthorMessage(deleted)) && !this.shouldIgnoreMessageAuthor(deleted) && !this.shouldIgnoreSelfMessage(deleted);
+    const alreadySavedStarterDelete = this.deletedMessageSet.get(threadId)?.has(threadId);
+    let savedThreadMessageCount = 0;
+    if (shouldSaveStarter && !alreadySavedStarterDelete) {
+      this.saveDeletedMessage(deleted, this.deletedMessageRecord);
+      savedThreadMessageCount++;
+    }
+    savedThreadMessageCount += this.saveCachedForumThreadMessagesForDelete(threadId, channel, metadata, { ignoreLocalAuthors: localThreadDelete });
     const savedRecord = this.messageRecord[threadId];
     if (savedRecord?.delete_data) {
       savedRecord.delete_data.forum_parent_id = channel.parent_id;
@@ -2840,6 +2893,7 @@ module.exports = class MessageLoggerV2 {
       savedRecord.delete_data.forum_metadata = metadata;
       savedRecord.delete_data.forum_name = metadata?.name || channel.name || null;
     }
+    if (!savedThreadMessageCount && !savedRecord?.delete_data) return callDefault(...args);
     if (this.settings.showDeletedCount) {
       if (!this.deletedChatMessagesCount[threadId]) this.deletedChatMessagesCount[threadId] = 0;
       this.deletedChatMessagesCount[threadId]++;
@@ -3720,7 +3774,7 @@ module.exports = class MessageLoggerV2 {
       if (author && this.settings.ignoreBlockedUsers && this.tools.isBlocked(author.id) && !isLocalUser) return callDefault(...args);
       if (author?.avatar === 'clyde') return callDefault(...args);
       if (this.settings.ignoreLocalEdits && dispatch.type === 'MESSAGE_UPDATE' && isLocalUser) return callDefault(...args);
-      if (this.settings.ignoreLocalDeletes && dispatch.type === 'MESSAGE_DELETE' && isLocalUser && this.localDeletes.includes(dispatch.id)) return callDefault(...args);
+      if (this.settings.ignoreLocalDeletes && dispatch.type === 'MESSAGE_DELETE' && this.localDeletes.includes(dispatch.id)) return callDefault(...args);
       let guildIsMutedReturn = false;
       let channelIgnoreReturn = false;
       const isInWhitelist = id => this.settings.whitelist.includes(id);
