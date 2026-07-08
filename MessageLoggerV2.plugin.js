@@ -6186,8 +6186,24 @@ module.exports = class MessageLoggerV2 {
         messages = messages.filter(x => {
           const message = this.getMessageAny(x);
           if (!message) return false;
+          const record = this.getSavedMessage(x);
+          const metadata = record?.delete_data?.forum_metadata || {};
+          const savedLocation = record?.delete_data?.location || record?.saved_location || {};
           const channel = this.tools.getChannel(message.channel_id);
-          return message.channel_id == filter || (channel?.name.toLowerCase().includes(filter.replace('#', '').toLowerCase()));
+          const parentId = record?.delete_data?.forum_parent_id || metadata.parentId || savedLocation.parentId;
+          const parent = parentId ? this.tools.getChannel(parentId) : null;
+          const normalized = filter.replace('#', '').toLowerCase();
+          const names = [
+            channel?.name,
+            parent?.name,
+            metadata.name,
+            metadata.parentName,
+            savedLocation.channelName,
+            savedLocation.parentName
+          ];
+          return message.channel_id == filter
+            || parentId == filter
+            || names.some(name => name?.toLowerCase?.().includes(normalized));
         });
       if (filterType == 'message' || filterType == 'content')
         messages = messages.filter(x => {
