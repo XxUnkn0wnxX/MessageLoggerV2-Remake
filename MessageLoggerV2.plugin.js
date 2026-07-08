@@ -3641,6 +3641,7 @@ module.exports = class MessageLoggerV2 {
     if (!threadId) return new Set();
     const ids = this.getForumThreadRecordIds(threadId);
     this.suppressForumThreadId(threadId);
+    this.closeForumThreadLogModal(threadId);
     for (const id of ids) {
       this.deleteMessageFromRecords(id, { skipForumThreadCascade: true });
       this.noTintIds?.delete(id);
@@ -3665,6 +3666,20 @@ module.exports = class MessageLoggerV2 {
     this.forumThreadMetadataCache?.delete(threadId);
     if (this.deletedChatMessagesCount) delete this.deletedChatMessagesCount[threadId];
     return ids;
+  }
+  closeForumThreadLogModal(threadId) {
+    if (!threadId || !this.ModalStack?.closeModal) return;
+    this._forumThreadLogRefreshers?.delete(threadId);
+    try {
+      this.ModalStack.closeModal(`ML2-thread-log-${threadId}`);
+    } catch (e) {
+      Logger.warn('Could not close forum thread log modal:', e);
+    }
+  }
+  refreshForumThreadLogModal(threadId) {
+    if (!threadId) return;
+    const refresh = this._forumThreadLogRefreshers?.get(threadId);
+    if (refresh) refresh();
   }
   deleteMessageFromRecords(id, options = {}) {
     const record = this.messageRecord[id];
@@ -3705,6 +3720,7 @@ module.exports = class MessageLoggerV2 {
     }
     delete this.messageRecord[id];
     this.messageRecordIds.delete(id);
+    if (!options.skipForumThreadCascade && channelId && channelId !== id) this.refreshForumThreadLogModal(channelId);
   }
   removeForumCardFromDom(threadId) {
     if (!threadId || typeof document === 'undefined') return;
@@ -4550,7 +4566,6 @@ module.exports = class MessageLoggerV2 {
       if (this.menu.open) this.ModalStack.closeModal(this.style.menu);
       const threadId = message.id;
       const titleText = getForumRecordTitle(record);
-      const messageIds = getSavedForumThreadMessageIds(record);
       const deletedAt = record.delete_data?.time ? this.createTimeStamp(record.delete_data.time, true) : this.createTimeStamp(Date.now(), true);
       const header = document.createElement('div');
       header.className = this.style.deletedForumHeader;
@@ -4573,7 +4588,7 @@ module.exports = class MessageLoggerV2 {
           this.menu.shownMessages = -1;
           try {
             while (messagesNode.firstChild) messagesNode.firstChild.remove();
-            this.populateParent(messagesNode, messageIds);
+            this.populateParent(messagesNode, getSavedForumThreadMessageIds(record));
             if (!messagesNode.childElementCount && message?.content) {
               const fallback = document.createElement('div');
               fallback.className = this.multiClasses.defaultColor || this.classes.markup || '';
@@ -4586,13 +4601,16 @@ module.exports = class MessageLoggerV2 {
         };
         requestAnimationFrame(run);
       };
+      if (!this._forumThreadLogRefreshers) this._forumThreadLogRefreshers = new Map();
+      this._forumThreadLogRefreshers.set(threadId, populateMessages);
       this.createModal(
         {
           header: this.tools.createWrappedElement([header]),
           size: this.tools.resolvedModalStuff.ModalSize.LARGE,
           children: [this.tools.createWrappedElement([messagesNode])],
           ml2Data: true,
-          className: this.style.menuRoot
+          className: this.style.menuRoot,
+          onClose: () => this._forumThreadLogRefreshers?.delete(threadId)
         },
         false,
         `ML2-thread-log-${threadId}`
@@ -5318,7 +5336,7 @@ module.exports = class MessageLoggerV2 {
           this.deleteMessageFromRecords(msgid);
         }
         if (invalidatedChannelCache) this.cacheChannelMessages(invalidatedChannelCache);
-        this.refilterMessages();
+        this.scheduleLoggerMenuRefresh();
         this.saveData();
       };
       timestampEl.addEventListener('contextmenu', e => {
@@ -5449,7 +5467,7 @@ module.exports = class MessageLoggerV2 {
                 action: () => {
                   ContextMenu.close();
                   this.deleteEditedMessageFromRecord(messageId, editNum);
-                  this.refilterMessages();
+                  this.scheduleLoggerMenuRefresh();
                   this.showToast('Deleted!', { type: 'success' });
                 }
               });
@@ -5484,7 +5502,7 @@ module.exports = class MessageLoggerV2 {
                   this.removeForumCardFromDom(messageId);
                 }
                 this.deleteMessageFromRecords(messageId);
-                this.refilterMessages();
+                this.scheduleLoggerMenuRefresh();
                 if (invalidatedChannelCache) this.cacheChannelMessages(invalidatedChannelCache);
                 this.saveData();
                 if (record.message.channel_id !== this.selectedChannel?.id) return;
@@ -5561,26 +5579,19 @@ module.exports = class MessageLoggerV2 {
       } else {
         this.deleteMessageFromRecords(messageId);
       }
-      this.refilterMessages();
+      this.scheduleLoggerMenuRefresh();
       this.saveData();
     });
     return element;
   }
   populateParent(parent, messages) {
-    let lastMessage;
-    let messageGroup;
     const populate = i => {
       try {
         const messageId = messages[i];
         const record = this.getSavedMessage(messageId);
         const message = record ? record.message : this.getMessageAny(messageId);
         if (!message) return;
-        if (!messageGroup || !lastMessage || lastMessage.channel_id != message.channel_id || lastMessage.author.id != message.author.id || new Date(message.timestamp).getDate() !== new Date(lastMessage.timestamp).getDate() || (message.attachments.length && message.content.length)) {
-          messageGroup = this.createMessageGroup(message, true);
-        } else {
-          messageGroup = this.createMessageGroup(message);
-        }
-        lastMessage = message;
+        const messageGroup = this.createMessageGroup(message, true);
         let markup = messageGroup.getElementsByClassName(this.classes.markup)[0];
         if (!markup) {
           markup = messageGroup.getElementsByClassName(this.multiClasses.markup)[0];
@@ -5669,7 +5680,7 @@ module.exports = class MessageLoggerV2 {
             img.addEventListener('click', e => {
               if (this.menu.deleteKeyDown) {
                 this.deleteMessageFromRecords(messageId);
-                this.refilterMessages();
+                this.scheduleLoggerMenuRefresh();
                 this.saveData();
                 return;
               }
@@ -5739,7 +5750,7 @@ module.exports = class MessageLoggerV2 {
             container.addEventListener('click', () => {
               if (this.menu.deleteKeyDown) {
                 this.deleteMessageFromRecords(messageId);
-                this.refilterMessages();
+                this.scheduleLoggerMenuRefresh();
                 this.saveData();
                 return;
               }
@@ -5786,7 +5797,7 @@ module.exports = class MessageLoggerV2 {
                 container.addEventListener('click', () => {
                   if (this.menu.deleteKeyDown) {
                     this.deleteMessageFromRecords(messageId);
-                    this.refilterMessages();
+                    this.scheduleLoggerMenuRefresh();
                     this.saveData();
                     return;
                   }
@@ -5828,7 +5839,7 @@ module.exports = class MessageLoggerV2 {
                 img.addEventListener('click', () => {
                   if (this.menu.deleteKeyDown) {
                     this.deleteMessageFromRecords(messageId);
-                    this.refilterMessages();
+                    this.scheduleLoggerMenuRefresh();
                     this.saveData();
                     return;
                   }
@@ -6036,7 +6047,16 @@ module.exports = class MessageLoggerV2 {
   }
   refreshLoggerMenu() {
     if (!this.menu?.open || !document.getElementById(this.style.menuMessages)) return;
+    this.menu.shownMessages = -1;
     this.refilterMessages();
+  }
+  scheduleLoggerMenuRefresh() {
+    if (!this.menu?.open) return;
+    if (this._loggerMenuRefreshTimeout) clearTimeout(this._loggerMenuRefreshTimeout);
+    this._loggerMenuRefreshTimeout = setTimeout(() => {
+      this._loggerMenuRefreshTimeout = null;
+      this.refreshLoggerMenu();
+    }, 0);
   }
   openTab(tab) {
     const tabBar = document.getElementById(this.style.menuTabBar);
@@ -6238,7 +6258,7 @@ module.exports = class MessageLoggerV2 {
             }
             this.saveData();
           }
-          setImmediate(_ => this.refilterMessages());
+          this.scheduleLoggerMenuRefresh();
         }
       });
     };
@@ -6613,7 +6633,7 @@ module.exports = class MessageLoggerV2 {
           'Remove From Log',
           () => {
             this.deleteMessageFromRecords(element.messageId);
-            this.refilterMessages();
+            this.scheduleLoggerMenuRefresh();
             this.saveData();
             if (record.delete_data) this.dispatcher.dispatch({ type: 'MESSAGE_DELETE', id: messageId, channelId: channelId, ML2: true });
             else this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
