@@ -529,6 +529,7 @@ module.exports = class MessageLoggerV2 {
       ignoreLocalDeletes: false,
       alwaysLogGhostPings: false,
       showOpenLogsButton: true,
+      showHiddenTab: false,
       messageCacheCap: 1000,
       savedMessagesCap: 1000,
       reverseOrder: true,
@@ -588,6 +589,10 @@ module.exports = class MessageLoggerV2 {
     if (!this.settings || !Object.keys(this.settings).length) {
       UI.showToast(`[${this.getName()}] Settings file corrupted! All settings restored to default.`, { type: "error", timeout: 0 });
       this.settings = defaultSettings;
+      settingsChanged = true;
+    }
+    if (typeof this.settings.showHiddenTab !== 'boolean') {
+      this.settings.showHiddenTab = false;
       settingsChanged = true;
     }
     if (this.settings.autoUpdate) {
@@ -1657,6 +1662,12 @@ module.exports = class MessageLoggerV2 {
           },
           { name: 'Show amount of new deleted messages when entering a channel', id: 'showDeletedCount', type: 'switch' },
           { name: 'Show amount of new edited messages when entering a channel', id: 'showEditedCount', type: 'switch' },
+          {
+            name: 'Show Hidden tab in logger',
+            note: 'Hidden records remain stored when this tab is disabled.',
+            id: 'showHiddenTab',
+            type: 'switch'
+          },
           { name: 'Display update notes', id: 'displayUpdateNotes', type: 'switch' },
           {
             name: 'Menu sort direction',
@@ -6399,7 +6410,7 @@ module.exports = class MessageLoggerV2 {
     tabs.appendChild(createTab('Edited', 'edited'));
     tabs.appendChild(createTab('Purged', 'purged'));
     tabs.appendChild(createTab('Ghost pings', 'ghostpings'));
-    tabs.appendChild(createTab('Hidden', 'hidden'));
+    if (this.settings.showHiddenTab) tabs.appendChild(createTab('Hidden', 'hidden'));
     tabBar.style.marginRight = '20px';
     return tabBar;
   }
@@ -6497,6 +6508,7 @@ module.exports = class MessageLoggerV2 {
     this.menu.open = true;
     if (type) this.menu.selectedTab = type;
     if (!this.menu.selectedTab) this.menu.selectedTab = 'deleted';
+    if (!this.settings.showHiddenTab && this.menu.selectedTab === 'hidden') this.menu.selectedTab = 'deleted';
     const messagesDIV = this.parseHTML(`<div id="${this.style.menuMessages}"></div>`);
     const viewportHeight = document.getElementById('app-mount').getBoundingClientRect().height;
     messagesDIV.style.minHeight = viewportHeight * 0.514090909 + 'px';
