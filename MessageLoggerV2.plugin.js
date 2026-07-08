@@ -1087,6 +1087,7 @@ module.exports = class MessageLoggerV2 {
     this.style.deleted = 'ml2-deleted';
     this.style.deletedAlt = this.obfuscatedClass('ml2-deleted-alt');
     this.style.deletedForumText = this.obfuscatedClass('ml2-deleted-forum-text');
+    this.style.forumLogPath = this.obfuscatedClass('ml2-forum-log-path');
     this.style.edited = this.obfuscatedClass('ml2-edited');
     this.style.editedCompact = this.obfuscatedClass('ml2-edited-compact');
     this.style.tab = this.obfuscatedClass('ml2-tab');
@@ -1163,8 +1164,20 @@ module.exports = class MessageLoggerV2 {
                     html #app-mount .${this.style.restoredForumCard}.${this.style.deleted}:hover {
                       background-color: ${this.settings.deletedMessageColor ? hexToRgb(this.settings.deletedMessageColor, 0.16) : "rgba(240, 71, 71, 0.16)"} !important;
                     }
+                    html #app-mount .${this.style.restoredForumCard}.${this.style.deleted} [class*="postTitleText_"],
+                    html #app-mount .${this.style.restoredForumCard}.${this.style.deleted} [class*="messageContent_"],
+                    html #app-mount .${this.style.restoredForumCard}.${this.style.deleted} [id^="message-content-"] {
+                      color: var(--text-muted) !important;
+                    }
+                    html #app-mount .${this.style.restoredForumCard}.${this.style.deleted} .${this.style.restoredForumMeta} {
+                      color: var(--text-muted) !important;
+                    }
                     html #app-mount .${this.style.deletedForumText}, html #app-mount .${this.style.deletedForumText} * {
                       color: ${this.settings.deletedMessageColor || "#f04747"} !important;
+                    }
+                    html #app-mount .${this.style.forumLogPath} {
+                      color: var(--header-primary) !important;
+                      font-weight: 700 !important;
                     }
                     html #app-mount .${this.style.restoredForumCard}.${this.style.restoredForumJump} {
                       box-shadow: 0 0 0 2px var(--brand-500), 0 0 0 6px rgba(88, 101, 242, 0.22) !important;
@@ -4949,6 +4962,7 @@ module.exports = class MessageLoggerV2 {
       }
       return null;
     };
+    const copyStyle = (source, selector) => source?.querySelector?.(selector)?.getAttribute?.('style') || null;
     const createAnchoredRestoredForumCard = (record, sourceCard, sourceLi, parentChannel) => {
       if (!sourceCard || !sourceLi || !parentChannel?.id) return null;
       const message = record.message;
@@ -4984,6 +4998,8 @@ module.exports = class MessageLoggerV2 {
       const title = document.createElement('h3');
       title.className = copyClass(sourceCard, '[class*="postTitleText"]', 'lineClamp2Plus__4bd52 heading-lg/semibold_cf4812 defaultColor__5345c postTitleText_faa96b');
       title.setAttribute('data-text-variant', 'heading-lg/semibold');
+      const titleStyle = copyStyle(sourceCard, '[class*="postTitleText"]');
+      if (titleStyle) title.setAttribute('style', titleStyle);
       title.textContent = titleText;
       headerText.appendChild(title);
       header.appendChild(headerText);
@@ -4996,7 +5012,9 @@ module.exports = class MessageLoggerV2 {
       const focusBlock = document.createElement('div');
       focusBlock.className = copyClass(sourceCard, '.messageFocusBlock_faa96b', 'messageFocusBlock_faa96b');
       const textWrap = document.createElement('div');
-      textWrap.className = copyClass(sourceCard, '[class*="text-sm"]', 'text-sm/semibold_cf4812');
+      textWrap.className = copyClass(sourceCard, '[class*="messageFocusBlock_"] > div', 'text-sm/semibold_cf4812');
+      const textWrapStyle = copyStyle(sourceCard, '[class*="messageFocusBlock_"] > div');
+      if (textWrapStyle) textWrap.setAttribute('style', textWrapStyle);
       const content = document.createElement('div');
       content.id = `message-content-${threadId}`;
       content.className = copyClass(sourceCard, '[id^="message-content-"]', this.classes.messageContent || 'messageContent_c19a55');
@@ -5326,9 +5344,27 @@ module.exports = class MessageLoggerV2 {
       }
     }
     const locationName = this.getForumThreadDeleteLocationName(record, message) || this.getSavedRecordLocationName(record, message) || this.getLiteralName(message.guild_id || channel?.guild_id, message.channel_id);
-    details += ` ${locationName} `;
-    details += `at ${this.createTimeStamp(timestamp, true)}`;
-    details = details.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+    const escapeHTML = value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+    const splitForumLogLocation = location => {
+      const marker = ', #';
+      const idx = location?.indexOf?.(marker);
+      if (idx === undefined || idx < 0) return null;
+      const prefix = location.slice(0, idx + 2);
+      const forumPath = location.slice(idx + 2);
+      if (!forumPath.includes(' > ')) return null;
+      const parts = forumPath.split(/\s*>\s*/g).filter(Boolean);
+      if (parts.length < 2) return null;
+      return {
+        prefix,
+        parent: parts.slice(0, -1).join(' | '),
+        thread: parts[parts.length - 1]
+      };
+    };
+    const detailPrefix = `${details} `;
+    const detailSuffix = ` at ${this.createTimeStamp(timestamp, true)}`;
+    const forumLocationParts = splitForumLogLocation(locationName);
+    const highlightThreadPath = !!(forumLocationParts && (record?.delete_data?.forum_thread_delete || message.id === message.channel_id));
+    details = escapeHTML(`${detailPrefix}${locationName}${detailSuffix}`);
     if (!this.createMessageGroup.classes) {
       this.createMessageGroup.classes = {
         extra: [
@@ -5391,7 +5427,7 @@ module.exports = class MessageLoggerV2 {
     const element = isStart
       ? this.parseHTML(`<div class="${classes.extra[0]}">
                                       <div class="${classes.extra[12]}">
-                                        <img src="${getAvatarOf(message.author)}" class="${classes.extra[3]}" style="width: 40px; height: 40px;" alt=" "><h2 class="${classes.extra[2]}"><span class="${classes.extra[4]}" role="button">${message.author.username.replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')}</span>${botTagHtml}<span class="${classes.extra[5]}"><span >${details}</span></span></h2>
+                                        <img src="${getAvatarOf(message.author)}" class="${classes.extra[3]}" style="width: 40px; height: 40px;" alt=" "><h2 class="${classes.extra[2]}"><span class="${classes.extra[4]}" role="button">${escapeHTML(message.author.username)}</span>${botTagHtml}<span class="${classes.extra[5]}"><span data-ml2-log-details="true">${details}</span></span></h2>
                                         <div class="${classes.extra[6]}"></div>
                                       </div>
                                       <div class="${classes.extra[7]}"></div>
@@ -5410,6 +5446,22 @@ module.exports = class MessageLoggerV2 {
                                     <div class="${classes.extra[7]}"></div>
                                   </div>`);
     element.messageId = message.id;
+    if (isStart && forumLocationParts) {
+      const detailNode = element.querySelector('[data-ml2-log-details="true"]');
+      if (detailNode) {
+        detailNode.textContent = '';
+        detailNode.appendChild(document.createTextNode(`${detailPrefix}${forumLocationParts.prefix}${forumLocationParts.parent} | `));
+        if (highlightThreadPath) {
+          const path = document.createElement('span');
+          path.className = this.style.forumLogPath;
+          path.textContent = forumLocationParts.thread;
+          detailNode.appendChild(path);
+        } else {
+          detailNode.appendChild(document.createTextNode(forumLocationParts.thread));
+        }
+        detailNode.appendChild(document.createTextNode(detailSuffix));
+      }
+    }
     const profImg = element.getElementsByClassName(classes.avatarImgSingle)[0];
     if (profImg) {
       profImg.onerror = () => {
