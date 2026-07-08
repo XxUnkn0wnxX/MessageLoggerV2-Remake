@@ -1,0 +1,143 @@
+# Settings Reference
+
+This page documents the controls shown in **BetterDiscord Settings > Plugins > MessageLoggerV2 Settings**. Defaults refer to a fresh installation; older installations retain saved values when new settings are added.
+
+## Logging Scope
+
+The whitelist and blacklist are managed from the **Message Logger** submenu in server, channel, DM, and thread context menus.
+
+### Scope precedence
+
+1. **Always log selected channel** and **Always log DMs** bypass normal whitelist, blacklist, mute, and NSFW scope checks for their targets.
+2. A whitelisted channel can still be logged inside a muted or blacklisted server.
+3. A blacklisted channel is excluded inside a whitelisted server.
+4. In whitelist-only mode, unlisted servers and channels are ignored.
+5. Outside whitelist-only mode, unlisted targets are logged unless excluded by blacklist, mute, or NSFW settings.
+6. Threads and forum posts inherit relevant parent-channel whitelist, blacklist, mute, and notification scope.
+
+## Ignores and Overrides
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| Ignore muted servers | On | Skips muted servers unless another scope rule overrides it. |
+| Ignore muted channels | On | Skips muted channels unless the channel is whitelisted or an override applies. |
+| Ignore bots | On | Skips messages authored by bots. |
+| Ignore messages posted by you | Off | Applies author filtering per message, including messages inside forums and threads. |
+| Ignore message edits from you | Off | Skips edits to messages authored by the local user. |
+| Ignore message deletes from you | Off | Skips deletion actions initiated by the local client. For a locally deleted forum post or thread, the root deletion is not logged. |
+| Ignore blocked users | On | Skips messages from blocked users, excluding the local user. |
+| Ignore NSFW channels | Off | Skips unwhitelisted NSFW channels when enabled. |
+| Only log whitelist | On | Requires servers or channels to be whitelisted unless an override applies. |
+| Always log selected channel | On | Logs the selected channel or a selected thread's parent regardless of normal scope rules. |
+| Always log DMs | On | Logs DMs regardless of normal scope rules. |
+| Always log ghost pings | Off | Watches ignored locations for mentions and only persists the message if it becomes a ghost ping. |
+
+`Ignore messages posted by you` and `Ignore message deletes from you` answer different questions: the first checks who authored each message; the second checks whether the deletion was initiated locally.
+
+## Display Settings
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| Display dates with timestamps | On | Shows the date as well as the time in logger timestamps. |
+| Display deleted messages in chat | On | Restores and displays logged deletions in channel views. |
+| Display edited messages in chat | On | Shows saved edit history with messages. |
+| Max number of shown edits | `0` | Limits visible edits; `0` means no configured limit. |
+| Show oldest edit instead of newest | On | When the edit limit is exceeded, keeps older edits visible instead of newer ones. |
+| Use red background instead of red text | Off | Uses the alternative deleted-message tint. |
+| Display purged messages in chat | On | Restores messages captured from bulk deletes. |
+| Restore deleted messages after reload | On | Re-adds saved messages when Discord reloads channel history. |
+| Show amount of new deleted messages | On | Displays the unseen deleted-message count when entering a channel. |
+| Show amount of new edited messages | On | Displays the unseen edited-message count when entering a channel. |
+| Show Hidden tab in logger | Off | Adds the **Hidden** tab. Hidden records remain stored when the tab is disabled. |
+| Display update notes | On | Shows the plugin changelog after a version change. |
+| Menu sort direction | Old to new | Controls message ordering in the logger window. |
+| Use BdApi basic notifications | On | Uses BetterDiscord notifications instead of the plugin's custom toasts. |
+
+## Misc Settings
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| Disable saving data | Off | Keeps logs only for the current session and disables automatic backups. |
+| Auto backup data | Off | Maintains a fallback copy of the logger data. It reduces, but cannot eliminate, data-loss risk. |
+| Deleted messages color | Empty | Overrides the deleted tint; an empty value uses the built-in red. |
+| Aggressive message caching | On | Keeps more message data available so deletes and edits can be reconstructed. |
+| Cache all images | On | Stores available attachments under `MLV2_IMAGE_CACHE` in the plugins folder. |
+| Use new cached images system | Off | Organizes cached media in a hierarchy. |
+| Always show notifications for selected channel | Off | Allows selected-channel notifications despite notification blacklist rules. |
+| Always show notifications for selected guild | Off | Allows selected-server notifications despite notification blacklist rules. |
+| Add user ID to saved media filename | Off | Includes the author ID in filenames created by the new cache system. |
+| Show notifications to whitelisted only | Off | Restricts logger notifications to the notification whitelist. |
+| Path to new cached images system | Empty | Uses a custom existing directory for the hierarchical cache. |
+| Save all cached attachments | Off | Extends the new cache system beyond images to other attachment types. |
+| Max cache file size | `0` MB | Skips larger files; `0` disables the size limit. |
+| Display open logs button | On | Shows the logger button beside channel search. |
+| Block spam edit notifications | Off | Reduces repeated edit notifications from rapid edits. |
+
+### Local files
+
+BetterDiscord stores the plugin's data beside the installed plugin:
+
+- `MessageLoggerV2.config.json`: settings.
+- `MessageLoggerV2Data.config.json`: active logs.
+- `MessageLoggerV2DataBackup.config.json`: optional backup.
+- `MLV2_IMAGE_CACHE/`: default attachment cache.
+
+Disabling a display option does not necessarily delete its stored records. Use **Remove From Log** or **Clear log** when permanent removal is intended.
+
+## Toast Notifications
+
+Guilds and DMs have separate notification controls. These affect alerts, not whether records are saved.
+
+### Guilds
+
+| Setting | Default |
+| --- | --- |
+| Message sent | Off |
+| Message edited | On |
+| Message deleted | On |
+| Ghost pings | On |
+| Disable toasts for local user | Off |
+
+### DMs
+
+| Setting | Default |
+| --- | --- |
+| Message sent | Off |
+| Message edited | On |
+| Message deleted | On |
+| Ghost pings | On |
+
+The notification whitelist and blacklist are managed from the same server, channel, DM, and thread context menus as the logging lists.
+
+## Message Caps
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| Cached messages cap | `1000` | Maximum sent messages retained in the working cache. |
+| Saved messages cap | `1000` | Separate maximum for deleted, edited, and purged records. |
+| Menu message render cap | `50` | Number rendered before **Load More** appears. |
+
+Caps are enforced periodically. Increasing a cap does not restore records that were already removed.
+
+## Advanced
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| Obfuscate CSS classes | On | Uses plugin-specific class names to reduce conflicts with themes and plugins. |
+| Automatic updates | On | Checks the repository for a newer plugin version. |
+| Contextmenu submenu name | Empty | Replaces the **Message Logger** label. Empty values use the built-in label. |
+
+## Settings Actions
+
+- **Stats**: shows saved and cached message counts.
+- **Check for update now!**: runs an immediate update check.
+- **Support server**: opens the BetterDiscord invite prompt.
+- **Help**: opens the built-in logger help page.
+
+## Forum Posts and Threads
+
+- Forum posts and channel threads retain server, parent-channel, thread, author, and message metadata when available.
+- Fully deleted forum cards and thread entries are restored only when Discord has a live item that can act as a layout anchor.
+- Hiding or unhiding a saved root post applies to its related child messages. Individual child messages can still be managed separately.
+- Permanently removing a saved root post also removes related messages and cached attachment references for that thread ID.
+- Thread-created system rows in parent channels are never stored as deleted or purged messages.
