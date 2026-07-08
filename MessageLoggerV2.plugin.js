@@ -2102,6 +2102,7 @@ module.exports = class MessageLoggerV2 {
     message = structuredClone(message);
     const obj = {
       message: this.cleanupMessageObject(message),
+      saved_location: this.getMessageLocationSnapshot(message),
       local_mentioned: this.tools.isMentioned(message, this.localUser.id),
       delete_data: null,
       edit_history: null
@@ -2697,6 +2698,20 @@ module.exports = class MessageLoggerV2 {
     }
     return savedCount;
   }
+  annotateSavedForumThreadMessage(message, channel = null) {
+    const thread = channel || (message?.channel_id ? this.tools.getChannel(message.channel_id) : null);
+    if (!message?.id || !this.isForumThreadChannel(thread)) return;
+    const metadata = this.cacheForumThreadMetadata(thread, message) || this.forumThreadMetadataCache?.get(thread.id);
+    const record = this.messageRecord[message.id];
+    if (!record?.delete_data) return;
+    const location = this.getMessageLocationSnapshot(message, thread);
+    record.saved_location = location;
+    record.delete_data.location = location;
+    if (thread.parent_id) record.delete_data.forum_parent_id = thread.parent_id;
+    if (metadata) record.delete_data.forum_metadata = metadata;
+    record.delete_data.forum_name = metadata?.name || thread.name || record.delete_data.forum_name || null;
+    record.delete_data.forum_thread_message_delete = true;
+  }
   isForumThreadChannel(channel) {
     if (!channel?.parent_id) return false;
     const parent = this.tools.getChannel(channel.parent_id);
@@ -2840,17 +2855,26 @@ module.exports = class MessageLoggerV2 {
       };
     }) : [];
     const existing = this.forumThreadMetadataCache.get(threadId) || {};
+    const guild = channel?.guild_id || starterMessage?.guild_id || existing.guildId ? this.tools.getServer(channel?.guild_id || starterMessage?.guild_id || existing.guildId) : null;
+    const guildName = guild?.name || existing.guildName || null;
+    const parentName = parent?.name || existing.parentName || null;
+    const threadName = channel?.name || existing.name || starterMessage?.thread?.name || null;
+    const parentPath = guildName && parentName ? `${guildName}, #${parentName}` : existing.parentPath || null;
+    const path = parentPath && threadName ? `${parentPath} > ${threadName}` : existing.path || parentPath;
     const metadata = {
       ...existing,
       id: threadId,
       parentId: channel?.parent_id || existing.parentId || null,
       guildId: channel?.guild_id || starterMessage?.guild_id || existing.guildId || null,
-      name: channel?.name || existing.name || starterMessage?.thread?.name || null,
+      guildName,
+      name: threadName,
       topic: channel?.topic || existing.topic || null,
       ownerId: channel?.owner_id || channel?.ownerId || existing.ownerId || starterMessage?.author?.id || null,
       appliedTags,
       tags: tags.length ? tags : existing.tags || [],
-      parentName: parent?.name || existing.parentName || null,
+      parentName,
+      path,
+      parentPath,
       messageCount: channel?.message_count ?? channel?.messageCount ?? existing.messageCount ?? null,
       memberCount: channel?.member_count ?? channel?.memberCount ?? existing.memberCount ?? null,
       totalMessageSent: channel?.total_message_sent ?? channel?.totalMessageSent ?? existing.totalMessageSent ?? null,
@@ -3339,18 +3363,57 @@ module.exports = class MessageLoggerV2 {
       return 'DMs';
     }
   }
+  getMessageLocationSnapshot(message, channel = null) {
+    const liveChannel = channel || (message?.channel_id ? this.tools.getChannel(message.channel_id) : null);
+    const parent = liveChannel?.parent_id ? this.tools.getChannel(liveChannel.parent_id) : null;
+    const guildId = message?.guild_id || liveChannel?.guild_id || parent?.guild_id || null;
+    const guild = guildId ? this.tools.getServer(guildId) : null;
+    const guildName = guild?.name || null;
+    const channelName = liveChannel?.name || null;
+    const parentName = parent?.name || null;
+    const serverPrefix = guildName || (guildId ? 'unknown-server' : null);
+    const parentPath = serverPrefix && parentName ? `${serverPrefix}, #${parentName}` : null;
+    const path = parentPath && channelName
+      ? `${parentPath} > ${channelName}`
+      : serverPrefix && channelName
+        ? `${serverPrefix}, #${channelName}`
+        : null;
+    return {
+      guildId,
+      guildName,
+      channelId: liveChannel?.id || message?.channel_id || null,
+      channelName,
+      parentId: liveChannel?.parent_id || null,
+      parentName,
+      path,
+      parentPath,
+      cachedAt: Date.now()
+    };
+  }
+  getSavedRecordLocationName(record, message) {
+    return record?.delete_data?.location?.path || record?.saved_location?.path || null;
+  }
   getForumThreadDeleteLocationName(record, message) {
     const threadRecord = message?.channel_id ? this.messageRecord?.[message.channel_id] : null;
+    const threadChannel = message?.channel_id ? this.tools.getChannel(message.channel_id) : null;
+    if (!record?.delete_data?.forum_parent_id && !record?.delete_data?.forum_metadata && this.isForumThreadChannel(threadChannel)) {
+      const metadata = this.cacheForumThreadMetadata(threadChannel, message) || {};
+      const parentId = threadChannel.parent_id || metadata.parentId;
+      if (metadata.path || metadata.parentPath) return metadata.path || metadata.parentPath;
+      if (parentId) return this.getLiteralName(message.guild_id || metadata.guildId || threadChannel.guild_id, parentId);
+    }
     const locationRecord = (record?.delete_data?.forum_thread_delete || record?.delete_data?.forum_thread_message_delete || record?.delete_data?.forum_parent_id)
       ? record
       : threadRecord;
     if (!locationRecord?.delete_data?.forum_thread_delete && !locationRecord?.delete_data?.forum_thread_message_delete && !locationRecord?.delete_data?.forum_parent_id) return null;
     const metadata = locationRecord.delete_data.forum_metadata || {};
+    if (locationRecord.delete_data.location?.path) return locationRecord.delete_data.location.path;
+    if (metadata.path || metadata.parentPath) return metadata.path || metadata.parentPath;
     const guildId = message.guild_id || metadata.guildId || locationRecord.message?.guild_id;
     const parentId = locationRecord.delete_data.forum_parent_id || metadata.parentId;
     if (parentId && this.tools.getChannel(parentId)) return this.getLiteralName(guildId, parentId);
     const guild = guildId ? this.tools.getServer(guildId) : null;
-    const guildName = guild?.name || 'unknown-server';
+    const guildName = metadata.guildName || guild?.name || 'unknown-server';
     const parentName = metadata.parentName || (parentId ? `unknown-channel (${parentId})` : 'unknown-channel');
     return guildId ? `${guildName}, #${parentName}` : `#${parentName}`;
   }
@@ -3360,6 +3423,7 @@ module.exports = class MessageLoggerV2 {
     const id = message.id;
     const channelId = message.channel_id;
     result.delete_data.time = Date.now();
+    result.delete_data.location = result.saved_location || this.getMessageLocationSnapshot(message);
     result.ghost_pinged = result.local_mentioned;
     if (!Array.isArray(targetMessageRecord[channelId])) targetMessageRecord[channelId] = [];
     if (this.messageRecord[id]) {
@@ -3887,6 +3951,7 @@ module.exports = class MessageLoggerV2 {
             this._notifyEvent('ghostPing', channel, guild, dispatch.id);
           }
           this.saveDeletedMessage(deleted, this.deletedMessageRecord);
+          this.annotateSavedForumThreadMessage(deleted, channel);
           this.saveData();
           if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: dispatch.id });
         } else if (dispatch.type === 'MESSAGE_UPDATE') {
@@ -4003,6 +4068,7 @@ module.exports = class MessageLoggerV2 {
           this._notifyEvent('ghostPing', channel, guild, dispatch.id);
         }
         this.saveDeletedMessage(deleted, this.deletedMessageRecord);
+        this.annotateSavedForumThreadMessage(deleted, channel);
         this._scheduleTintForMessage?.(dispatch.channelId, dispatch.id);
         if (!this.settings.showDeletedMessages) ret = callDefault(...args);
         else if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: dispatch.id });
@@ -4020,6 +4086,7 @@ module.exports = class MessageLoggerV2 {
           if (this.shouldIgnoreSelfMessage(purged)) continue;
           savedDeleteCount++;
           this.saveDeletedMessage(purged, this.purgedMessageRecord);
+          this.annotateSavedForumThreadMessage(purged, channel);
           this._scheduleTintForMessage?.(dispatch.channelId, purged.id);
           if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: purged.id });
         }
@@ -5184,7 +5251,7 @@ module.exports = class MessageLoggerV2 {
         if (typeof record.edit_history[record.edit_history.length - 1].time !== 'string') timestamp = record.edit_history[record.edit_history.length - 1].time;
       }
     }
-    const locationName = this.getForumThreadDeleteLocationName(record, message) || this.getLiteralName(message.guild_id || channel?.guild_id, message.channel_id);
+    const locationName = this.getForumThreadDeleteLocationName(record, message) || this.getSavedRecordLocationName(record, message) || this.getLiteralName(message.guild_id || channel?.guild_id, message.channel_id);
     details += ` ${locationName} `;
     details += `at ${this.createTimeStamp(timestamp, true)}`;
     details = details.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
