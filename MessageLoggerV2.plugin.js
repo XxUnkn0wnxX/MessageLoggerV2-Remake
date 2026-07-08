@@ -2562,9 +2562,12 @@ module.exports = class MessageLoggerV2 {
   }
   jumpToDeletedForumPost(record) {
     const message = record?.message;
-    if (!record?.delete_data?.forum_thread_delete || !message?.id) return false;
+    const isForumThreadLog = record?.delete_data?.forum_thread_delete || record?.delete_data?.forum_thread_message_delete || record?.delete_data?.forum_parent_id;
+    if (!isForumThreadLog || !message?.id) return false;
     if (this.menu.open) this.ModalStack.closeModal(this.style.menu);
     const metadata = record.delete_data.forum_metadata || {};
+    const threadId = record.delete_data.forum_thread_delete ? message.id : message.channel_id;
+    this.closeForumThreadLogModal(threadId);
     const parentId = record.delete_data.forum_parent_id || metadata.parentId;
     if (!parentId) {
       this.showToast('Could not find parent forum channel for this deleted post.', { type: 'error' });
@@ -2574,7 +2577,6 @@ module.exports = class MessageLoggerV2 {
     const guildId = message.guild_id || metadata.guildId || parent?.guild_id;
     const historyModule = DiscordModules.HistoryUtils;
     if (historyModule) historyModule.getHistory().push(`/channels/${guildId || '@me'}/${parentId}`);
-    const threadId = message.id;
     const highlight = (attempt = 0) => {
       this._scheduleForumCardRestore?.();
       const card = document.querySelector(`[data-ml2-restored-forum-card="${threadId}"]`) || document.querySelector(`[data-item-id="${threadId}"]`);
@@ -5479,7 +5481,7 @@ module.exports = class MessageLoggerV2 {
           let editNum = -1;
           if (isEdited) editNum = isEdited.edit;
           const menuItems = [];
-          if (channel || record.delete_data?.forum_thread_delete) {
+          if (channel || record.delete_data?.forum_thread_delete || record.delete_data?.forum_thread_message_delete || record.delete_data?.forum_parent_id) {
             menuItems.push({
               type: 'item',
               label: 'Jump to Message',
