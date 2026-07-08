@@ -2608,7 +2608,6 @@ module.exports = class MessageLoggerV2 {
       try {
         this._restoreDeletedForumCards?.();
         this._tintSweep?.();
-        this.forceUpdateUI();
         setTimeout(() => {
           this._restoreDeletedForumCards?.();
           this._tintSweep?.();
