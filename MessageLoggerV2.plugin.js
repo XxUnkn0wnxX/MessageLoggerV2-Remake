@@ -1093,7 +1093,11 @@ module.exports = class MessageLoggerV2 {
     this.style.tab = this.obfuscatedClass('ml2-tab');
     this.style.tabSelected = this.obfuscatedClass('ml2-tab-selected');
     this.style.textIndent = this.obfuscatedClass('ml2-help-text-indent');
+    this.style.helpContent = this.obfuscatedClass('ml2-help-content');
+    this.style.filterHelpModal = this.obfuscatedClass('ml2-filter-help-modal');
     this.style.menu = this.obfuscatedClass('ML2-MENU');
+    this.loggerHelpModalKey = `${this.style.menu}-logger-help`;
+    this.filterHelpModalKey = `${this.style.menu}-filter-help`;
     this.style.openLogs = this.obfuscatedClass('ML2-OL');
     this.style.filter = this.obfuscatedClass('ML2-FILTER');
     this.style.menuMessages = this.obfuscatedClass('ML2-MENU-MESSAGES');
@@ -1270,6 +1274,17 @@ module.exports = class MessageLoggerV2 {
                     }
                     .${this.style.textIndent} {
                         margin-left: 40px;
+                    }
+                    .${this.style.helpContent} {
+                      max-height: 60vh;
+                      overflow-y: auto;
+                      padding-right: 12px;
+                      scrollbar-gutter: stable;
+                    }
+                    .${this.style.filterHelpModal} footer > div,
+                    .${this.style.filterHelpModal} footer [data-direction="horizontal"],
+                    .${this.style.filterHelpModal} footer [data-mana-component="button"] {
+                      width: 100%;
                     }
                     .${this.style.imageRoot} {
                       pointer-events: all;
@@ -3119,16 +3134,27 @@ module.exports = class MessageLoggerV2 {
       this.toolbarButtonCleanup = null;
     }
   }
+  returnToLoggerWindow(modalKeyToClose) {
+    const loggerOpen = this.ModalStack?.hasModalOpen?.(this.style.menu);
+    if (modalKeyToClose && this.ModalStack?.hasModalOpen?.(modalKeyToClose)) {
+      this.ModalStack.closeModal(modalKeyToClose);
+    }
+    if (loggerOpen) return;
+    this.menu.open = false;
+    setTimeout(() => this.openWindow(), 0);
+  }
   showLoggerHelpModal(initial = false) {
     this.createModal({
       confirmText: 'OK',
+      cancelText: 'Back',
+      onConfirm: () => this.returnToLoggerWindow(this.filterHelpModalKey),
       header: 'Logger help',
       size: this.tools.resolvedModalStuff.ModalSize.LARGE,
       confirmButtonColor: this.tools.buttonColors.BRAND,
       children: [
         this.tools.createWrappedElement([
           this.parseHTML(
-            `<div class="${this.multiClasses.defaultColor}" style="max-height: 0; min-height: 60vh;">
+            `<div class="${this.multiClasses.defaultColor} ${this.style.helpContent}">
                                ${initial ? '</br><span style="font-size: 40px;">As you are a <strong>first time user</strong>, you must know in order to have a server be logged, you must <strong>RIGHT CLICK</strong> a server or channel and add it to the whitelist.</br>Alternatively if this behavior is unwanted, you can always log all unmuted servers and channels by disabling <strong>Only log whitelist</strong> in logger settings under <strong>IGNORES AND OVERRIDES</strong>.</span></br></br>' : ''}
                                Hello! This is the ${this.getName()} help modal! You may at any time open this in plugin settings by clicking the help button, or in the menu by pressing the question mark button and then then Logger help button.</br>
                                <strong>Menu:</strong></br></br>
@@ -3219,7 +3245,7 @@ module.exports = class MessageLoggerV2 {
           )
         ])
       ],
-    });
+    }, false, this.loggerHelpModalKey);
   }
   showStatsModal() {
     const elements = [];
@@ -6367,7 +6393,6 @@ module.exports = class MessageLoggerV2 {
     helpButton.addEventListener('click', () => {
       const extraHelp = this.createButton('Logger help', () => this.showLoggerHelpModal());
       this.createModal({
-        confirmText: 'OK',
         header: 'Filter help',
         size: this.tools.resolvedModalStuff.ModalSize.LARGE,
         children: [
@@ -6387,8 +6412,11 @@ module.exports = class MessageLoggerV2 {
             extraHelp
           ])
         ],
-        confirmButtonColor: this.tools.buttonColors.BRAND,
-      });
+        cancelText: 'Back',
+        onCancel: () => this.returnToLoggerWindow(this.filterHelpModalKey),
+        ml2Data: true,
+        className: this.style.filterHelpModal,
+      }, false, this.filterHelpModalKey);
     });
     return textBox;
   }
