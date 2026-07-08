@@ -3193,6 +3193,17 @@ module.exports = class MessageLoggerV2 {
       return 'DMs';
     }
   }
+  getForumThreadDeleteLocationName(record, message) {
+    if (!record?.delete_data?.forum_thread_delete) return null;
+    const metadata = record.delete_data.forum_metadata || {};
+    const guildId = message.guild_id || metadata.guildId;
+    const parentId = record.delete_data.forum_parent_id || metadata.parentId;
+    if (parentId && this.tools.getChannel(parentId)) return this.getLiteralName(guildId, parentId);
+    const guild = guildId ? this.tools.getServer(guildId) : null;
+    const guildName = guild?.name || 'unknown-server';
+    const parentName = metadata.parentName || (parentId ? `unknown-channel (${parentId})` : 'unknown-channel');
+    return guildId ? `${guildName}, #${parentName}` : `#${parentName}`;
+  }
   saveDeletedMessage(message, targetMessageRecord) {
     const result = this.createMiniFormattedData(message);
     result.delete_data = {};
@@ -4935,7 +4946,8 @@ module.exports = class MessageLoggerV2 {
         if (typeof record.edit_history[record.edit_history.length - 1].time !== 'string') timestamp = record.edit_history[record.edit_history.length - 1].time;
       }
     }
-    details += ` ${this.getLiteralName(message.guild_id || channel?.guild_id, message.channel_id)} `;
+    const locationName = this.getForumThreadDeleteLocationName(record, message) || this.getLiteralName(message.guild_id || channel?.guild_id, message.channel_id);
+    details += ` ${locationName} `;
     details += `at ${this.createTimeStamp(timestamp, true)}`;
     details = details.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
     if (!this.createMessageGroup.classes) {
