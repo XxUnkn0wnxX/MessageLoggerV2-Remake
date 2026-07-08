@@ -2869,6 +2869,8 @@ module.exports = class MessageLoggerV2 {
   handleForumThreadDelete(channel, guild, notificationsBlacklisted, notificationsWhitelisted, callDefault, args) {
     const threadId = channel?.id;
     if (!threadId) return callDefault(...args);
+    if (this.isSuppressedForumThreadId(threadId)) return callDefault(...args);
+    if (this.settings.ignoreLocalDeletes && this.localDeletes.includes(threadId)) return callDefault(...args);
     const deleted = this.getForumThreadDeleteMessage(channel);
     const cachedThreadMessages = this.getCachedForumThreadMessages(threadId);
     if (!deleted && !cachedThreadMessages.length) {
@@ -2876,16 +2878,15 @@ module.exports = class MessageLoggerV2 {
       return callDefault(...args);
     }
     const isLocalUser = this.isLocalAuthorMessage(deleted);
-    const localThreadDelete = !!(this.settings.ignoreLocalDeletes && this.localDeletes.includes(threadId));
     const metadata = this.cacheForumThreadMetadata(channel, deleted || cachedThreadMessages[0]);
-    const shouldSaveStarter = deleted && !(localThreadDelete && this.isLocalAuthorMessage(deleted)) && !this.shouldIgnoreMessageAuthor(deleted) && !this.shouldIgnoreSelfMessage(deleted);
+    const shouldSaveStarter = deleted && !this.shouldIgnoreMessageAuthor(deleted) && !this.shouldIgnoreSelfMessage(deleted);
     const alreadySavedStarterDelete = this.deletedMessageSet.get(threadId)?.has(threadId);
     let savedThreadMessageCount = 0;
     if (shouldSaveStarter && !alreadySavedStarterDelete) {
       this.saveDeletedMessage(deleted, this.deletedMessageRecord);
       savedThreadMessageCount++;
     }
-    savedThreadMessageCount += this.saveCachedForumThreadMessagesForDelete(threadId, channel, metadata, { ignoreLocalAuthors: localThreadDelete });
+    savedThreadMessageCount += this.saveCachedForumThreadMessagesForDelete(threadId, channel, metadata);
     const savedRecord = this.messageRecord[threadId];
     if (savedRecord?.delete_data) {
       savedRecord.delete_data.forum_parent_id = channel.parent_id;
@@ -3625,7 +3626,47 @@ module.exports = class MessageLoggerV2 {
       }
     }, 0);
   }
-  deleteMessageFromRecords(id) {
+  getForumThreadRecordIds(threadId) {
+    const ids = new Set([threadId]);
+    for (const [messageId, record] of Object.entries(this.messageRecord || {})) {
+      if (record?.message?.channel_id === threadId) ids.add(messageId);
+    }
+    for (const map of [this.deletedMessageRecord, this.editedMessageRecord, this.purgedMessageRecord]) {
+      if (!Array.isArray(map?.[threadId])) continue;
+      map[threadId].forEach(messageId => ids.add(messageId));
+    }
+    return ids;
+  }
+  deleteForumThreadFromRecords(threadId) {
+    if (!threadId) return new Set();
+    const ids = this.getForumThreadRecordIds(threadId);
+    this.suppressForumThreadId(threadId);
+    for (const id of ids) {
+      this.deleteMessageFromRecords(id, { skipForumThreadCascade: true });
+      this.noTintIds?.delete(id);
+      if (this.editModifiers) delete this.editModifiers[id];
+    }
+    if (Array.isArray(this.cachedMessageRecord)) {
+      this.cachedMessageRecord = this.cachedMessageRecord.filter(message => {
+        if (message?.channel_id !== threadId && !ids.has(message?.id)) return true;
+        if (message?.id) {
+          this.cachedMessageIds?.delete(message.id);
+          this.cachedMessagesMap?.delete(message.id);
+        }
+        return false;
+      });
+    }
+    for (const id of ids) {
+      this.cachedMessageIds?.delete(id);
+      this.cachedMessagesMap?.delete(id);
+    }
+    this.sortedDeletedMessageIds?.delete(threadId);
+    this.sortedPurgedMessageIds?.delete(threadId);
+    this.forumThreadMetadataCache?.delete(threadId);
+    if (this.deletedChatMessagesCount) delete this.deletedChatMessagesCount[threadId];
+    return ids;
+  }
+  deleteMessageFromRecords(id, options = {}) {
     const record = this.messageRecord[id];
     const setMaps = [this.deletedMessageSet, this.editedMessageSet, this.purgedMessageSet];
     if (!record) {
@@ -3646,7 +3687,9 @@ module.exports = class MessageLoggerV2 {
       return;
     }
     const channelId = record.message.channel_id;
-    if (record.delete_data?.forum_thread_delete || channelId === id) this.suppressForumThreadId(id);
+    if (!options.skipForumThreadCascade && (record.delete_data?.forum_thread_delete || channelId === id)) {
+      return this.deleteForumThreadFromRecords(id);
+    }
     for (let i = 0; i < 3; i++) {
       const map = [this.deletedMessageRecord, this.editedMessageRecord, this.purgedMessageRecord][i];
       const setMap = setMaps[i];
