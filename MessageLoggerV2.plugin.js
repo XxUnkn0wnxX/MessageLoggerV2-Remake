@@ -1463,7 +1463,13 @@ module.exports = class MessageLoggerV2 {
     this.addOpenLogsButton();
     this.unpatches.push(
       Patcher.instead(DiscordModules.MessageActions, 'deleteMessage', (_, args, original) => {
+        const channelId = args[0];
         const messageId = args[1];
+        const message = this.getCachedMessage(messageId, channelId);
+        if (this.isThreadCreatedSystemMessage(message)) {
+          this.rememberLocalDeleteId(messageId);
+          return original(...args);
+        }
         if (this.messageRecord[messageId]?.delete_data) return;
         this.rememberLocalDeleteId(messageId);
         return original(...args);
@@ -2123,6 +2129,9 @@ module.exports = class MessageLoggerV2 {
   }
   shouldIgnoreSelfMessage(message) {
     return !!(this.settings.ignoreSelf && this.isLocalAuthorMessage(message));
+  }
+  isThreadCreatedSystemMessage(message) {
+    return Number(message?.type) === 18;
   }
   cleanupUserObject(user) {
     return {
@@ -4299,6 +4308,7 @@ module.exports = class MessageLoggerV2 {
         const deleted = this.getCachedMessage(dispatch.id, dispatch.channelId) || (this.isForumThreadChannel(channel) && dispatch.id === channel.id ? this.getForumThreadDeleteMessage(channel) : null);
         if (this.settings.aggresiveMessageCaching) this._ensureChannelCached(channel.id);
         if (!deleted) return callDefault(...args);
+        if (this.isThreadCreatedSystemMessage(deleted)) return callDefault(...args);
         if (this.shouldIgnoreSelfMessage(deleted)) return callDefault(...args);
         if (this.deletedMessageSet.get(channel.id)?.has(deleted.id)) {
           if (!this.settings.showDeletedMessages) ret = callDefault(...args);
@@ -4332,6 +4342,7 @@ module.exports = class MessageLoggerV2 {
             failedMessage = true;
             continue;
           }
+          if (this.isThreadCreatedSystemMessage(purged)) continue;
           if (this.shouldIgnoreMessageAuthor(purged)) continue;
           if (this.shouldIgnoreSelfMessage(purged)) continue;
           savedDeleteCount++;
