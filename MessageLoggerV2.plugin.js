@@ -574,7 +574,7 @@ module.exports = class MessageLoggerV2 {
       alwaysLogSelected: true,
       alwaysLogDM: true,
       restoreDeletedMessages: true,
-      contextmenuSubmenuName: 'Message Logger',
+      contextmenuSubmenuName: '',
       imageCacheDir: this.pluginDir + '/MLV2_IMAGE_CACHE',
       maxCacheFileSize: 0,
       flags: 0,
@@ -593,10 +593,6 @@ module.exports = class MessageLoggerV2 {
     }
     if (typeof this.settings.showHiddenTab !== 'boolean') {
       this.settings.showHiddenTab = false;
-      settingsChanged = true;
-    }
-    if (typeof this.settings.contextmenuSubmenuName !== 'string' || !this.settings.contextmenuSubmenuName.trim()) {
-      this.settings.contextmenuSubmenuName = defaultSettings.contextmenuSubmenuName;
       settingsChanged = true;
     }
     if (this.settings.autoUpdate) {
@@ -2473,6 +2469,26 @@ module.exports = class MessageLoggerV2 {
   _invalidateAndRecache(channelId) {
     this.invalidateChannelCache(channelId);
     this.cacheChannelMessages(channelId);
+  }
+  getSavedThreadRootTypeLabel(record) {
+    const deleteData = record?.delete_data || {};
+    const metadata = deleteData.forum_metadata || {};
+    const location = deleteData.location || record?.saved_location || {};
+    const parentId = deleteData.forum_parent_id || metadata.parentId || location.parentId;
+    const parent = parentId ? this.tools.getChannel(parentId) : null;
+    const isForumPost = !!metadata.isForumParent
+      || [15, 16].includes(metadata.parentType)
+      || [15, 16].includes(location.parentType)
+      || [15, 16].includes(parent?.type);
+    return isForumPost ? 'Forum Post' : 'Thread';
+  }
+  getSavedThreadVisibilityLabel(record, hidden) {
+    return `${hidden ? 'Hide' : 'Unhide'} ${this.getSavedThreadRootTypeLabel(record)}`;
+  }
+  getSavedThreadRemovalLabel(record) {
+    return record?.delete_data?.forum_thread_delete
+      ? `Remove ${this.getSavedThreadRootTypeLabel(record)} From Log`
+      : 'Remove From Log';
   }
   setSavedThreadHidden(record, hidden) {
     const message = record?.message;
@@ -4796,7 +4812,8 @@ module.exports = class MessageLoggerV2 {
       return out;
     };
     const getDeletedCompactThreadRecords = (parentChannel) => {
-      if (!parentChannel?.id || !parentChannel.guild_id || isForumListChannel(parentChannel)) return [];
+      if (!parentChannel?.id || !parentChannel.guild_id) return [];
+      const forumParent = isForumListChannel(parentChannel);
       const out = [];
       for (const [threadId, ids] of Object.entries(this.deletedMessageRecord || {})) {
         if (!Array.isArray(ids) || !ids.includes(threadId)) continue;
@@ -4805,7 +4822,10 @@ module.exports = class MessageLoggerV2 {
         const metadata = record?.delete_data?.forum_metadata || {};
         if (!record?.delete_data?.forum_thread_delete || record.delete_data.hidden || !message) continue;
         if (message.id !== threadId || message.channel_id !== threadId) continue;
-        if (metadata.isForumParent || metadata.parentType === 15 || metadata.parentType === 16) continue;
+        const savedParentType = metadata.parentType ?? record.delete_data.location?.parentType;
+        const hasKnownParentKind = !!metadata.isForumParent || savedParentType != null;
+        const recordHasForumParent = !!metadata.isForumParent || savedParentType === 15 || savedParentType === 16;
+        if (hasKnownParentKind && recordHasForumParent !== forumParent) continue;
         if (this.shouldIgnoreMessageAuthor(message) || this.shouldIgnoreSelfMessage(message)) continue;
         const savedParentId = record.delete_data.forum_parent_id || metadata.parentId;
         if (savedParentId !== parentChannel.id) continue;
@@ -5072,7 +5092,7 @@ module.exports = class MessageLoggerV2 {
         menuItems.push(
           {
             type: 'item',
-            label: 'Hide Thread and Messages',
+            label: this.getSavedThreadVisibilityLabel(record, true),
             action: () => {
               ContextMenu.close();
               this.hideSavedDeletedRecord(record);
@@ -5095,7 +5115,7 @@ module.exports = class MessageLoggerV2 {
       menuItems.push(
         {
           type: 'item',
-          label: 'Remove From Log',
+          label: this.getSavedThreadRemovalLabel(record),
           danger: true,
           action: () => {
             ContextMenu.close();
@@ -5308,7 +5328,7 @@ module.exports = class MessageLoggerV2 {
       const focus = li.querySelector('[data-list-item-id^="channels___"]');
       if (!focus) return null;
       focus.setAttribute('data-list-item-id', `channels___${threadId}`);
-      focus.setAttribute('aria-label', `${title} (deleted thread)`);
+      focus.setAttribute('aria-label', `${title} (deleted ${isForumListChannel(parentChannel) ? 'forum post' : 'thread'})`);
       focus.setAttribute('tabindex', '-1');
       replaceText(li, ['[class*="name_"]'], title);
       wireRestoredForumCard(li, record);
@@ -5356,7 +5376,7 @@ module.exports = class MessageLoggerV2 {
         const parentId = record?.delete_data?.forum_parent_id || metadata.parentId;
         if (!record?.delete_data?.forum_thread_delete || !parentId) continue;
         const parent = this.tools.getChannel(parentId);
-        if (!parent || isForumListChannel(parent)) continue;
+        if (!parent) continue;
         parents.set(parentId, parent);
       }
       for (const [parentId, parent] of parents) {
@@ -6034,7 +6054,9 @@ module.exports = class MessageLoggerV2 {
             if (record.delete_data.hidden) {
               menuItems.push({
                 type: 'item',
-                label: record.delete_data.forum_thread_delete ? 'Unhide Thread and Messages' : 'Unhide Deleted Message',
+                label: record.delete_data.forum_thread_delete
+                  ? this.getSavedThreadVisibilityLabel(record, false)
+                  : 'Unhide Deleted Message',
                 action: () => {
                   ContextMenu.close();
                   this.unhideSavedDeletedRecord(record);
@@ -6042,7 +6064,7 @@ module.exports = class MessageLoggerV2 {
               });
             } else {
               const hideLabel = record.delete_data.forum_thread_delete
-                ? 'Hide Thread and Messages'
+                ? this.getSavedThreadVisibilityLabel(record, true)
                 : this.menu.selectedTab === 'purged'
                   ? 'Hide Purged Message'
                   : this.menu.selectedTab === 'ghostpings'
@@ -6098,7 +6120,7 @@ module.exports = class MessageLoggerV2 {
           menuItems.push(
             {
               type: 'item',
-              label: 'Remove From Log',
+              label: this.getSavedThreadRemovalLabel(record),
               action: () => {
                 ContextMenu.close();
                 let invalidatedChannelCache = false;
@@ -6976,7 +6998,9 @@ module.exports = class MessageLoggerV2 {
             }
           }
           addElement(
-            record.delete_data.forum_thread_delete ? 'Hide Thread and Messages' : 'Hide Deleted Message',
+            record.delete_data.forum_thread_delete
+              ? this.getSavedThreadVisibilityLabel(record, true)
+              : 'Hide Deleted Message',
             () => this.hideSavedDeletedRecord(record)
           );
           const hasTint = !this.noTintIds.has(messageId);
@@ -7051,7 +7075,7 @@ module.exports = class MessageLoggerV2 {
           }
         }
         addElement(
-          'Remove From Log',
+          this.getSavedThreadRemovalLabel(record),
           () => {
             if (record.delete_data?.forum_thread_delete) this.suppressForumThreadId(messageId);
             this.deleteMessageFromRecords(messageId);
