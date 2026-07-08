@@ -1152,6 +1152,12 @@ module.exports = class MessageLoggerV2 {
                     html #app-mount .${this.style.restoredForumMeta} {
                       color: var(--text-muted) !important;
                     }
+                    html #app-mount .${this.style.restoredForumCard}.${this.style.deleted} {
+                      background-color: ${this.settings.deletedMessageColor ? hexToRgb(this.settings.deletedMessageColor, 0.12) : "rgba(240, 71, 71, 0.12)"} !important;
+                    }
+                    html #app-mount .${this.style.restoredForumCard}.${this.style.deleted}:hover {
+                      background-color: ${this.settings.deletedMessageColor ? hexToRgb(this.settings.deletedMessageColor, 0.16) : "rgba(240, 71, 71, 0.16)"} !important;
+                    }
                     .${this.style.deletedForumModal} {
                       max-height: 85vh;
                       min-width: min(860px, 90vw);
@@ -2557,10 +2563,89 @@ module.exports = class MessageLoggerV2 {
   handleForumThreadUiEvent(dispatch, callDefault, args) {
     const result = callDefault(...args);
     const thread = dispatch.channel || dispatch.thread;
+    if (thread) this.cacheForumThreadMetadata(thread);
+    for (const key of ['threads', 'channels']) {
+      const items = dispatch[key];
+      if (Array.isArray(items)) items.forEach(item => this.cacheForumThreadMetadata(item));
+      else if (items && typeof items === 'object') Object.values(items).forEach(item => this.cacheForumThreadMetadata(item));
+    }
     const parentId = thread?.parent_id || dispatch.parentId || dispatch.parent_id || dispatch.channelId || dispatch.channel_id;
     const selectedChannelId = this.selectedChannel?.id || DiscordModules.SelectedChannelStore?.getChannelId?.();
     if (parentId && selectedChannelId === parentId) this.scheduleForumListRefresh();
     return result;
+  }
+  getForumCardDomMetadata(threadId) {
+    if (!threadId || typeof document === 'undefined') return null;
+    const card = document.querySelector(`[data-item-id="${threadId}"]`);
+    if (!card) return null;
+    if (card.hasAttribute('data-ml2-restored-forum-card')) return null;
+    const textOf = selector => card.querySelector(selector)?.textContent?.trim?.() || null;
+    const tags = Array.from(card.querySelectorAll('[class*="pill_"]'))
+      .map(node => ({
+        text: node.textContent?.trim?.() || '',
+        emojiName: node.querySelector('img[data-name]')?.getAttribute('data-name') || null,
+        emojiSrc: node.querySelector('img')?.getAttribute('src') || null
+      }))
+      .filter(tag => tag.text || tag.emojiName || tag.emojiSrc);
+    const reactions = Array.from(card.querySelectorAll('[class*="reaction_"]'))
+      .map(node => ({
+        label: node.getAttribute('aria-label') || '',
+        emojiName: node.querySelector('img[data-name]')?.getAttribute('data-name') || null,
+        emojiAlt: node.querySelector('img')?.getAttribute('alt') || null,
+        count: node.querySelector('[class*="reactionCount"]')?.textContent?.trim?.() || null
+      }))
+      .filter(reaction => reaction.label || reaction.emojiName || reaction.emojiAlt || reaction.count);
+    return {
+      title: textOf('[class*="postTitleText"], h3'),
+      preview: textOf('[id^="message-content-"], [class*="messageContent"]'),
+      authorText: textOf('[class*="message_"] > span, [class*="author"]'),
+      pinned: !!card.querySelector('[class*="pinIcon"]'),
+      tags,
+      reactions,
+      messageCount: textOf('[class*="messageCountText"]'),
+      thumbnailSrc: card.querySelector('[class*="thumbnail"], [class*="imageContent"] img')?.getAttribute('src') || null
+    };
+  }
+  cacheForumThreadMetadata(channel, starterMessage = null) {
+    const threadId = channel?.id || starterMessage?.id;
+    if (!threadId || !(channel?.parent_id || starterMessage?.channel_id === threadId)) return null;
+    if (!this.forumThreadMetadataCache) this.forumThreadMetadataCache = new Map();
+    const parent = channel?.parent_id ? this.tools.getChannel(channel.parent_id) : null;
+    const appliedTags = channel?.applied_tags || channel?.appliedTags || [];
+    const availableTags = parent?.availableTags || parent?.available_tags || parent?.threadTags || [];
+    const tags = Array.isArray(appliedTags) ? appliedTags.map(tagId => {
+      const tag = Array.isArray(availableTags) ? availableTags.find(item => item.id === tagId) : null;
+      return {
+        id: tagId,
+        name: tag?.name || null,
+        emojiId: tag?.emoji_id || tag?.emojiId || null,
+        emojiName: tag?.emoji_name || tag?.emojiName || null,
+        moderated: !!tag?.moderated
+      };
+    }) : [];
+    const existing = this.forumThreadMetadataCache.get(threadId) || {};
+    const metadata = {
+      ...existing,
+      id: threadId,
+      parentId: channel?.parent_id || existing.parentId || null,
+      guildId: channel?.guild_id || starterMessage?.guild_id || existing.guildId || null,
+      name: channel?.name || existing.name || starterMessage?.thread?.name || null,
+      topic: channel?.topic || existing.topic || null,
+      ownerId: channel?.owner_id || channel?.ownerId || existing.ownerId || starterMessage?.author?.id || null,
+      appliedTags,
+      tags: tags.length ? tags : existing.tags || [],
+      parentName: parent?.name || existing.parentName || null,
+      messageCount: channel?.message_count ?? channel?.messageCount ?? existing.messageCount ?? null,
+      memberCount: channel?.member_count ?? channel?.memberCount ?? existing.memberCount ?? null,
+      totalMessageSent: channel?.total_message_sent ?? channel?.totalMessageSent ?? existing.totalMessageSent ?? null,
+      flags: channel?.flags ?? existing.flags ?? null,
+      rateLimitPerUser: channel?.rate_limit_per_user ?? channel?.rateLimitPerUser ?? existing.rateLimitPerUser ?? null,
+      threadMetadata: channel?.thread_metadata || channel?.threadMetadata || existing.threadMetadata || null,
+      card: this.getForumCardDomMetadata(threadId) || existing.card || null,
+      cachedAt: Date.now()
+    };
+    this.forumThreadMetadataCache.set(threadId, metadata);
+    return metadata;
   }
   handleForumThreadDelete(channel, guild, notificationsBlacklisted, notificationsWhitelisted, callDefault, args) {
     const threadId = channel?.id;
@@ -2578,8 +2663,11 @@ module.exports = class MessageLoggerV2 {
     this.saveDeletedMessage(deleted, this.deletedMessageRecord);
     const savedRecord = this.messageRecord[threadId];
     if (savedRecord?.delete_data) {
+      const metadata = this.cacheForumThreadMetadata(channel, deleted);
       savedRecord.delete_data.forum_parent_id = channel.parent_id;
       savedRecord.delete_data.forum_thread_delete = true;
+      savedRecord.delete_data.forum_metadata = metadata;
+      savedRecord.delete_data.forum_name = metadata?.name || channel.name || null;
     }
     if (this.settings.showDeletedCount) {
       if (!this.deletedChatMessagesCount[threadId]) this.deletedChatMessagesCount[threadId] = 0;
@@ -3943,8 +4031,10 @@ module.exports = class MessageLoggerV2 {
     };
     const getForumThreadIdFromAnyNode = (node) => {
       if (!node || node.nodeType !== 1) return null;
-      const cardNode = node.matches?.('[data-item-id]') ? node : node.closest?.('[data-item-id]');
-      const threadId = cardNode?.getAttribute?.('data-item-id');
+      const cardNode = node.matches?.('[data-item-id], [data-ml2-restored-forum-card]')
+        ? node
+        : node.closest?.('[data-item-id], [data-ml2-restored-forum-card]');
+      const threadId = cardNode?.getAttribute?.('data-item-id') || cardNode?.getAttribute?.('data-ml2-restored-forum-card');
       return threadId && /^\d+$/.test(threadId) ? threadId : null;
     };
     const getMessageTintTarget = (node) => {
@@ -3992,7 +4082,7 @@ module.exports = class MessageLoggerV2 {
       return null;
     };
     const tintForumCardByThreadId = (threadId) => {
-      const card = document.querySelector(`[data-item-id="${threadId}"]`);
+      const card = document.querySelector(`[data-item-id="${threadId}"]`) || document.querySelector(`[data-ml2-restored-forum-card="${threadId}"]`);
       const content = document.getElementById(`message-content-${threadId}`);
       const accessories = document.getElementById(`message-accessories-${threadId}`);
       const forumTintTargets = [];
@@ -4049,18 +4139,54 @@ module.exports = class MessageLoggerV2 {
       return out;
     };
     const copyClass = (source, selector, fallback) => source?.querySelector?.(selector)?.className || fallback;
+    const getForumRecordMetadata = (record) => record?.delete_data?.forum_metadata || {};
     const getForumRecordTitle = (record) => {
       const message = record?.message;
-      return (message?.content || '').split(/\r?\n/).find(line => line.trim())?.trim()
+      const metadata = getForumRecordMetadata(record);
+      return metadata.card?.title || metadata.name || record?.delete_data?.forum_name
+        || (message?.content || '').split(/\r?\n/).find(line => line.trim())?.trim()
         || (message?.attachments?.length ? '[attachment]' : '[deleted forum post]');
     };
     const getForumRecordPreview = (record) => {
       const message = record?.message;
-      return message?.content || getForumRecordTitle(record);
+      const metadata = getForumRecordMetadata(record);
+      return metadata.card?.preview || message?.content || getForumRecordTitle(record);
     };
     const getForumRecordMeta = (record) => {
+      const metadata = getForumRecordMetadata(record);
       const deletedAt = record?.delete_data?.time ? this.createTimeStamp(record.delete_data.time) : this.createTimeStamp();
-      return `Deleted ${deletedAt}`;
+      const parts = [`Deleted ${deletedAt}`];
+      const count = metadata.card?.messageCount || metadata.messageCount || metadata.totalMessageSent;
+      if (count) parts.push(`${count} messages`);
+      if (metadata.card?.reactions?.length) {
+        const reactionText = metadata.card.reactions
+          .map(reaction => `${reaction.emojiAlt || reaction.emojiName || 'reaction'}${reaction.count ? ` ${reaction.count}` : ''}`)
+          .join(', ');
+        if (reactionText) parts.push(reactionText);
+      }
+      return parts.join(' - ');
+    };
+    const appendForumCardMetadata = (body, record, sourceCard) => {
+      const metadata = getForumRecordMetadata(record);
+      const tags = metadata.card?.tags?.length ? metadata.card.tags : metadata.tags;
+      const hasPinned = metadata.card?.pinned;
+      if (!hasPinned && !tags?.length) return;
+      const row = document.createElement('div');
+      row.className = copyClass(sourceCard, '[class*="tags_"]', 'tags__08166');
+      if (hasPinned) {
+        const pin = document.createElement('span');
+        pin.className = this.style.restoredForumMeta;
+        pin.textContent = 'Pinned';
+        row.appendChild(pin);
+      }
+      for (const tag of tags || []) {
+        const pill = document.createElement('span');
+        pill.className = copyClass(sourceCard, '[class*="pill_"]', '');
+        pill.textContent = [tag.emojiName || tag.text?.match?.(/^\S+/)?.[0], tag.name || tag.text].filter(Boolean).join(' ');
+        if (!pill.textContent) continue;
+        row.appendChild(pill);
+      }
+      if (row.childElementCount) body.appendChild(row);
     };
     const getSavedForumThreadMessageIds = (record) => {
       const threadId = record?.message?.id;
@@ -4098,49 +4224,52 @@ module.exports = class MessageLoggerV2 {
       const titleText = getForumRecordTitle(record);
       const messageIds = getSavedForumThreadMessageIds(record);
       const deletedAt = record.delete_data?.time ? this.createTimeStamp(record.delete_data.time, true) : this.createTimeStamp(Date.now(), true);
-      let populated = false;
-      const children = React.createElement('div', {
-        className: this.style.deletedForumRoot,
-        ref: node => {
-          if (!node || populated) return;
-          populated = true;
-          requestAnimationFrame(() => {
-            const messagesNode = node.querySelector('[data-ml2-deleted-forum-messages="true"]');
-            if (!messagesNode) return;
-            const previousShownMessages = this.menu.shownMessages;
-            this.menu.shownMessages = -1;
-            try {
-              this.populateParent(messagesNode, messageIds);
-              if (!messagesNode.childElementCount && message?.content) {
-                const fallback = document.createElement('div');
-                fallback.className = this.multiClasses.defaultColor || this.classes.markup || '';
-                fallback.textContent = message.content;
-                messagesNode.appendChild(fallback);
-              }
-            } finally {
-              this.menu.shownMessages = previousShownMessages;
+      const header = document.createElement('div');
+      header.className = this.style.deletedForumHeader;
+      const title = document.createElement('div');
+      title.className = this.style.deletedForumTitle;
+      title.textContent = titleText;
+      const meta = document.createElement('div');
+      meta.className = this.style.deletedForumMeta;
+      meta.textContent = `${message.author?.username || 'Unknown'} - deleted ${deletedAt}`;
+      header.append(title, meta);
+      const messagesNode = document.createElement('div');
+      messagesNode.className = this.style.deletedForumMessages;
+      messagesNode.setAttribute('data-ml2-thread-log-messages', threadId);
+      const viewportHeight = document.getElementById('app-mount')?.getBoundingClientRect?.().height || 800;
+      messagesNode.style.minHeight = viewportHeight * 0.514090909 + 'px';
+      messagesNode.style.maxHeight = '65vh';
+      const populateMessages = () => {
+        const run = () => {
+          const previousShownMessages = this.menu.shownMessages;
+          this.menu.shownMessages = -1;
+          try {
+            while (messagesNode.firstChild) messagesNode.firstChild.remove();
+            this.populateParent(messagesNode, messageIds);
+            if (!messagesNode.childElementCount && message?.content) {
+              const fallback = document.createElement('div');
+              fallback.className = this.multiClasses.defaultColor || this.classes.markup || '';
+              fallback.textContent = message.content;
+              messagesNode.appendChild(fallback);
             }
-          });
-        }
-      },
-        React.createElement('div', { className: this.style.deletedForumHeader },
-          React.createElement('div', { className: this.style.deletedForumTitle }, titleText),
-          React.createElement('div', { className: this.style.deletedForumMeta },
-            `${message.author?.username || 'Unknown'} - deleted ${deletedAt}`
-          )
-        ),
-        React.createElement('div', {
-          className: this.style.deletedForumMessages,
-          'data-ml2-deleted-forum-messages': 'true'
-        })
+          } finally {
+            this.menu.shownMessages = previousShownMessages;
+          }
+        };
+        requestAnimationFrame(run);
+      };
+      this.createModal(
+        {
+          header: this.tools.createWrappedElement([header]),
+          size: this.tools.resolvedModalStuff.ModalSize.LARGE,
+          children: [this.tools.createWrappedElement([messagesNode])],
+          ml2Data: true,
+          className: this.style.menuRoot
+        },
+        false,
+        `ML2-thread-log-${threadId}`
       );
-      this.createModal({
-        ml2Data: true,
-        header: 'Deleted Forum Post',
-        size: this.tools.resolvedModalStuff.ModalSize.LARGE,
-        children,
-        className: this.style.deletedForumModal
-      }, false, `ML2-deleted-forum-post-${threadId}`);
+      setTimeout(populateMessages, 100);
     };
     const openRestoredForumPost = (record) => {
       const message = record?.message;
@@ -4175,7 +4304,7 @@ module.exports = class MessageLoggerV2 {
       const focusNodes = Array.from(document.querySelectorAll(`[data-list-item-id^="forum-channel-list-${parentChannel.id}___"]`));
       for (const focus of focusNodes) {
         const card = focus.closest('[data-item-id]');
-        if (!card || card.getAttribute('data-ml2-restored-forum-card') === 'true') continue;
+        if (!card || card.hasAttribute('data-ml2-restored-forum-card')) continue;
         const li = card.closest('li');
         const list = li?.parentElement;
         if (!list || list.id === 'channels') continue;
@@ -4183,15 +4312,129 @@ module.exports = class MessageLoggerV2 {
       }
       return {};
     };
+    const removeForumCardNode = (threadId) => {
+      if (!threadId) return;
+      const selectors = [
+        `[data-ml2-restored-forum-thread="${threadId}"]`,
+        `[data-ml2-restored-forum-card="${threadId}"]`,
+        `[data-item-id="${threadId}"]`
+      ];
+      for (const selector of selectors) {
+        document.querySelectorAll(selector).forEach(node => {
+          const target = node.matches?.('li') ? node : node.closest?.('li') || node;
+          target?.remove?.();
+        });
+      }
+    };
+    const openRestoredForumContextMenu = (event, record) => {
+      const message = record?.message;
+      if (!message?.id) return;
+      const threadId = message.id;
+      const hasTint = !this.noTintIds.has(threadId);
+      const menuItems = [
+        {
+          type: 'item',
+          label: 'Open Thread Log',
+          action: () => {
+            ContextMenu.close();
+            openRestoredForumPost(record);
+          }
+        },
+        {
+          type: 'item',
+          label: 'Open Logs',
+          action: () => {
+            ContextMenu.close();
+            this.openWindow();
+          }
+        },
+        {
+          type: 'item',
+          label: 'Open Log For Thread',
+          action: () => {
+            ContextMenu.close();
+            this.menu.filter = `channel:${threadId}`;
+            this.openWindow();
+          }
+        }
+      ];
+      if (record.delete_data) {
+        menuItems.push(
+          {
+            type: 'item',
+            label: 'Hide Deleted Message',
+            action: () => {
+              ContextMenu.close();
+              record.delete_data.hidden = true;
+              this.saveData();
+              removeForumCardNode(threadId);
+              this._scheduleForumCardRestore?.();
+              this.showToast('Hidden!', { type: 'success' });
+            }
+          },
+          {
+            type: 'item',
+            label: `${hasTint ? 'Remove' : 'Add'} Deleted Tint`,
+            action: () => {
+              ContextMenu.close();
+              if (hasTint) this.noTintIds.add(threadId);
+              else this.noTintIds.delete(threadId);
+              tintForumCardByThreadId(threadId);
+              this.showToast(hasTint ? 'Removed!' : 'Added!', { type: 'success' });
+            }
+          }
+        );
+      }
+      menuItems.push(
+        {
+          type: 'item',
+          label: 'Remove From Log',
+          danger: true,
+          action: () => {
+            ContextMenu.close();
+            this.deleteMessageFromRecords(threadId);
+            this.saveData();
+            removeForumCardNode(threadId);
+          }
+        }
+      );
+      this._addListToggleItems(menuItems, threadId, 'whitelist', 'blacklist', 'Whitelist');
+      this._addListToggleItems(menuItems, threadId, 'notificationWhitelist', 'notificationBlacklist', 'Notification Whitelist');
+      menuItems.push(
+        {
+          type: 'item',
+          label: 'Copy Thread ID',
+          action: () => {
+            ContextMenu.close();
+            this.nodeModules.electron.clipboard.writeText(threadId);
+            this.showToast('Copied!', { type: 'success' });
+          }
+        }
+      );
+      ContextMenu.open(event, this.buildMenu([{ type: 'group', items: menuItems }]));
+    };
     const wireRestoredForumCard = (card, record) => {
-      const open = (event) => {
+      const blockNativeNavigation = (event) => {
+        if (event.button !== undefined && event.button !== 0) return;
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation?.();
+      };
+      const open = (event) => {
+        blockNativeNavigation(event);
         openRestoredForumPost(record);
       };
+      for (const eventName of ['pointerdown', 'mousedown', 'mouseup', 'auxclick']) {
+        card.addEventListener(eventName, blockNativeNavigation, true);
+      }
       card.addEventListener('click', open, true);
       card.addEventListener('click', open);
+      card.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        openRestoredForumContextMenu(event, record);
+      }, true);
       card.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
@@ -4221,11 +4464,12 @@ module.exports = class MessageLoggerV2 {
       const card = document.createElement('div');
       card.className = [sourceCard?.className || 'container_faa96b mainCard_f369db', this.style.deleted, this.style.restoredForumCard].filter(Boolean).join(' ');
       card.setAttribute('data-item-id', threadId);
-      card.setAttribute('data-ml2-restored-forum-card', 'true');
+      card.setAttribute('data-ml2-restored-forum-card', threadId);
 
       const focus = document.createElement('div');
       focus.className = copyClass(sourceCard, '[data-list-item-id^="forum-channel-list-"]', 'focusTarget_faa96b');
       focus.setAttribute('data-list-item-id', `forum-channel-list-${this.selectedChannel?.id || 'unknown'}___${threadId}`);
+      focus.setAttribute('data-ml2-forum-list-item-id', `forum-channel-list-${this.selectedChannel?.id || 'unknown'}___${threadId}`);
       focus.setAttribute('role', 'button');
       focus.setAttribute('tabindex', '0');
       focus.setAttribute('aria-label', `Deleted forum post ${titleText}`);
@@ -4270,6 +4514,7 @@ module.exports = class MessageLoggerV2 {
       focusBlock.appendChild(textWrap);
       messageWrap.append(author, focusBlock);
       footer.appendChild(meta);
+      appendForumCardMetadata(body, record, sourceCard);
       body.append(header, messageWrap, footer);
       left.appendChild(body);
       card.append(focus, left);
@@ -4291,8 +4536,8 @@ module.exports = class MessageLoggerV2 {
         const restoredLi = focus.closest?.(`[data-ml2-restored-forum-thread]`);
         if (restoredLi && !list.contains(restoredLi)) restoredLi.remove();
       });
-      const existingIds = new Set(Array.from(list.querySelectorAll('[data-item-id]'))
-        .map(card => card.getAttribute('data-item-id'))
+      const existingIds = new Set(Array.from(list.querySelectorAll('[data-item-id], [data-ml2-restored-forum-card]'))
+        .map(card => card.getAttribute('data-item-id') || card.getAttribute('data-ml2-restored-forum-card'))
         .filter(Boolean));
       const records = getDeletedForumRecordsForChannel(parentChannel);
       for (const record of records) {
@@ -4371,7 +4616,7 @@ module.exports = class MessageLoggerV2 {
             const threadId = getForumThreadIdFromAnyNode(node);
             if (threadId) tintForumCardByThreadId(threadId);
             if (!node.querySelectorAll) continue;
-            const found = node.querySelectorAll('[id^="chat-messages-"], [data-list-item-id^="chat-messages___chat-messages-"], [data-item-id]');
+            const found = node.querySelectorAll('[id^="chat-messages-"], [data-list-item-id^="chat-messages___chat-messages-"], [data-item-id], [data-ml2-restored-forum-card]');
             if (found.length) found.forEach(foundNode => {
               const resolvedMessageNode = getMessageNodeFromAnyNode(foundNode);
               if (resolvedMessageNode) tintMessageNode(resolvedMessageNode);
@@ -5660,6 +5905,145 @@ module.exports = class MessageLoggerV2 {
   }
   patchContextMenus() {
     const getNestedProp = (obj, path) => path.split('.').reduce((o, p) => o?.[p], obj);
+    const removeForumCardFromDom = (threadId) => {
+      if (!threadId || typeof document === 'undefined') return;
+      const selectors = [
+        `[data-ml2-restored-forum-thread="${threadId}"]`,
+        `[data-ml2-restored-forum-card="${threadId}"]`,
+        `[data-item-id="${threadId}"]`
+      ];
+      for (const selector of selectors) {
+        document.querySelectorAll(selector).forEach(node => {
+          const target = node.matches?.('li') ? node : node.closest?.('li') || node;
+          target?.remove?.();
+        });
+      }
+    };
+    const addSavedRecordItems = (newItems, addElement, record, messageId, channelId, options = {}) => {
+      if (!record) return;
+      try {
+        if (record.delete_data) {
+          if (options.pruneNativeDeletedOptions) {
+            const nativeOptions = options.menu?.find(m => m?.props?.children && m.props.children.length > 10);
+            if (nativeOptions?.props?.children) {
+              nativeOptions.props.children.splice(0, nativeOptions.props.children.length);
+            }
+          }
+          addElement(
+            'Hide Deleted Message',
+            () => {
+              this.dispatcher.dispatch({
+                type: 'MESSAGE_DELETE',
+                id: messageId,
+                channelId: channelId,
+                ML2: true
+              });
+              this.showToast('Hidden!', { type: 'success' });
+              record.delete_data.hidden = true;
+              this.saveData();
+              if (record.delete_data.forum_thread_delete || messageId === channelId) removeForumCardFromDom(messageId);
+              this._scheduleForumCardRestore?.();
+            }
+          );
+          const hasTint = !this.noTintIds.has(messageId);
+          addElement(
+            `${hasTint ? 'Remove' : 'Add'} Deleted Tint`,
+            () => {
+              if (hasTint) { this.noTintIds.add(messageId); }
+              else { this.noTintIds.delete(messageId); }
+              this._scheduleTintForMessage?.(channelId, messageId);
+              this._tintSweep?.();
+              this.showToast(hasTint ? 'Removed!' : 'Added!', { type: 'success' });
+            }
+          );
+        }
+        if (record.edit_history && options.editTarget) {
+          if (record.edits_hidden) {
+            addElement(
+              'Unhide Edits',
+              () => {
+                record.edits_hidden = false;
+                this.saveData();
+                this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
+              }
+            );
+          } else {
+            let target = options.editTarget;
+            while (target?.className && !target.className.includes(this.style.edited)) {
+              target = target.parentElement;
+            }
+            if (target) {
+              if (!this.editModifiers[messageId]) {
+                addElement(
+                  'Hide Edits',
+                  () => {
+                    record.edits_hidden = true;
+                    this.saveData();
+                    this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
+                  }
+                );
+              }
+              const editNum = target.getAttribute('editNum');
+              if (this.editModifiers[messageId]) {
+                addElement(
+                  `${this.editModifiers[messageId].noSuffix ? 'Show' : 'Hide'} (edited) Tag`,
+                  () => {
+                    this.editModifiers[messageId].noSuffix = true;
+                    this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
+                  }
+                );
+                addElement(
+                  `Undo Show As Message`,
+                  () => {
+                    delete this.editModifiers[messageId];
+                    this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
+                  },
+                  this.obfuscatedClass('undo-show-as-message')
+                );
+              } else if (editNum !== undefined && editNum !== null) {
+                addElement(
+                  'Show Edit As Message',
+                  () => {
+                    this.editModifiers[messageId] = { editNum };
+                    this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
+                  }
+                );
+                addElement(
+                  'Delete Edit',
+                  () => {
+                    this.deleteEditedMessageFromRecord(messageId, Number.parseInt(editNum));
+                    this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
+                  },
+                  { className: DiscordModules.ColorClasses?.colorDanger }
+                );
+              }
+            }
+          }
+        }
+        addElement(
+          'Remove From Log',
+          () => {
+            this.deleteMessageFromRecords(messageId);
+            this.saveData();
+            if (record.delete_data?.forum_thread_delete || messageId === channelId) removeForumCardFromDom(messageId);
+            if (record.delete_data) {
+              this.dispatcher.dispatch({
+                type: 'MESSAGE_DELETE',
+                id: messageId,
+                channelId: channelId,
+                ML2: true
+              });
+              this._scheduleForumCardRestore?.();
+            } else {
+              this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
+            }
+          },
+          { className: DiscordModules.ColorClasses?.colorDanger }
+        );
+      } catch (err) {
+        Logger.error('Error in record handling:', err);
+      }
+    };
     this.unpatches.push(ContextMenu.patch('message', (ret, props) => {
       const menu = getNestedProp(
         Utils.findInTree(ret, e => e?.navId === 'message'),
@@ -5672,124 +6056,11 @@ module.exports = class MessageLoggerV2 {
       const messageId = props.message.id;
       const channelId = props.channel.id;
       const record = this.messageRecord[messageId];
-      if (record) {
-        try {
-          if (record.delete_data) {
-            const options = menu.find(m => m?.props?.children && m.props.children.length > 10);
-            if (options?.props?.children) {
-              options.props.children.splice(0, options.props.children.length);
-            }
-            addElement(
-              'Hide Deleted Message',
-              () => {
-                this.dispatcher.dispatch({
-                  type: 'MESSAGE_DELETE',
-                  id: messageId,
-                  channelId: channelId,
-                  ML2: true
-                });
-                this.showToast('Hidden!', { type: 'success' });
-                record.delete_data.hidden = true;
-                this.saveData();
-              }
-            );
-            const hasTint = !this.noTintIds.has(messageId);
-            addElement(
-              `${hasTint ? 'Remove' : 'Add'} Deleted Tint`,
-              () => {
-                if (hasTint) { this.noTintIds.add(messageId); }
-                else { this.noTintIds.delete(messageId); }
-                this.showToast(hasTint ? 'Removed!' : 'Added!', { type: 'success' });
-              }
-            );
-          }
-          if (record.edit_history) {
-            if (record.edits_hidden) {
-              addElement(
-                'Unhide Edits',
-                () => {
-                  record.edits_hidden = false;
-                  this.saveData();
-                  this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
-                }
-              );
-            } else {
-              let target = props.target;
-              if (target) {
-                while (target?.className && !target.className.includes(this.style.edited)) {
-                  target = target.parentElement;
-                }
-                if (target) {
-                  if (!this.editModifiers[messageId]) {
-                    addElement(
-                      'Hide Edits',
-                      () => {
-                        record.edits_hidden = true;
-                        this.saveData();
-                        this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
-                      }
-                    );
-                  }
-                  const editNum = target.getAttribute('editNum');
-                  if (this.editModifiers[messageId]) {
-                    addElement(
-                      `${this.editModifiers[messageId].noSuffix ? 'Show' : 'Hide'} (edited) Tag`,
-                      () => {
-                        this.editModifiers[messageId].noSuffix = true;
-                        this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
-                      }
-                    );
-                    addElement(
-                      `Undo Show As Message`,
-                      () => {
-                        delete this.editModifiers[messageId];
-                        this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
-                      },
-                      this.obfuscatedClass('undo-show-as-message')
-                    );
-                  } else if (editNum !== undefined && editNum !== null) {
-                    addElement(
-                      'Show Edit As Message',
-                      () => {
-                        this.editModifiers[messageId] = { editNum };
-                        this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
-                      }
-                    );
-                    addElement(
-                      'Delete Edit',
-                      () => {
-                        this.deleteEditedMessageFromRecord(messageId, Number.parseInt(editNum));
-                        this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
-                      },
-                      { className: DiscordModules.ColorClasses?.colorDanger }
-                    );
-                  }
-                }
-              }
-            }
-          }
-          addElement(
-            'Remove From Log',
-            () => {
-              this.deleteMessageFromRecords(messageId);
-              this.saveData();
-              if (record.delete_data) {
-                this.dispatcher.dispatch({
-                  type: 'MESSAGE_DELETE',
-                  id: messageId,
-                  channelId: channelId,
-                  ML2: true
-                });
-              } else {
-                this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
-              }
-            },
-            { className: DiscordModules.ColorClasses?.colorDanger }
-          );
-        } catch (err) {
-          Logger.error('Error in record handling:', err);
-        }
-      }
+      addSavedRecordItems(newItems, addElement, record, messageId, channelId, {
+        menu,
+        pruneNativeDeletedOptions: true,
+        editTarget: props.target
+      });
       menu.push(ContextMenu.buildMenuChildren([{
         type: 'group',
         items: [{
@@ -5867,24 +6138,29 @@ module.exports = class MessageLoggerV2 {
           }]
         }]));
       }),
-      ...['channel-context', 'gdm-context'].map(contextName =>
+      ...['channel-context', 'gdm-context', 'thread-context'].map(contextName =>
         ContextMenu.patch(contextName, (ret, props) => {
           const menu = getNestedProp(
             Utils.findInTree(ret, e => e?.navId === contextName),
             'children'
           );
-          if (!Array.isArray(menu)) return;
+          const channelId = props?.channel?.id;
+          if (!Array.isArray(menu) || !channelId) return;
           const newItems = [];
           const addElement = (label, action, options = {}) => newItems.push({ label, action, ...options });
           addElement('Open Logs', () => this.openWindow());
+          const logTarget = contextName === 'thread-context' ? 'Thread' : 'Channel';
           addElement(
-            `Open Log For Channel`,
+            `Open Log For ${logTarget}`,
             () => {
-              this.menu.filter = `channel:${props.channel.id}`;
+              this.menu.filter = `channel:${channelId}`;
               this.openWindow();
             }
           );
-          handleWhiteBlackList(newItems, props.channel.id);
+          if (contextName === 'thread-context') {
+            addSavedRecordItems(newItems, addElement, this.messageRecord[channelId], channelId, channelId);
+          }
+          handleWhiteBlackList(newItems, channelId);
           menu.push(ContextMenu.buildMenuChildren([{
             type: 'group',
             items: [{
