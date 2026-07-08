@@ -2445,6 +2445,38 @@ module.exports = class MessageLoggerV2 {
     this.invalidateChannelCache(channelId);
     this.cacheChannelMessages(channelId);
   }
+  hideSavedDeletedRecord(record) {
+    const message = record?.message;
+    if (!record?.delete_data || !message?.id || record.delete_data.hidden) return false;
+    record.delete_data.hidden = true;
+    if (record.delete_data.forum_thread_delete) {
+      this.suppressForumThreadId(message.id);
+      this.removeForumCardFromDom(message.id);
+    }
+    this.dispatcher.dispatch({
+      type: 'MESSAGE_DELETE',
+      id: message.id,
+      channelId: message.channel_id,
+      ML2: true
+    });
+    this.saveData();
+    this.scheduleLoggerMenuRefresh();
+    this.refreshForumThreadLogModal(message.channel_id);
+    if (record.delete_data.forum_thread_delete) this._scheduleForumCardRestore?.();
+    this.showToast('Hidden!', { type: 'success' });
+    return true;
+  }
+  hideSavedEdits(record) {
+    const message = record?.message;
+    if (!record?.edit_history || !message?.id || record.edits_hidden) return false;
+    record.edits_hidden = true;
+    this.saveData();
+    this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: message.id });
+    this.scheduleLoggerMenuRefresh();
+    this.refreshForumThreadLogModal(message.channel_id);
+    this.showToast('Hidden!', { type: 'success' });
+    return true;
+  }
   _openUserContextMenu(event, user, channel) {
     const targetModule = DiscordModules.UserContextMenuModule;
     const filterFunc2 = x2 => x2?.toString?.().includes("isGroupDM") && x2?.toString?.().includes("targetIsUser");
@@ -2512,6 +2544,10 @@ module.exports = class MessageLoggerV2 {
     const had = this.suppressedForumThreadIds.has(threadId);
     this.suppressedForumThreadIds.add(threadId);
     return !had;
+  }
+  unsuppressForumThreadId(threadId) {
+    if (!threadId || !this.suppressedForumThreadIds) return false;
+    return this.suppressedForumThreadIds.delete(threadId);
   }
   isSuppressedForumThreadId(threadId) {
     if (!threadId || !/^\d+$/.test(threadId)) return false;
@@ -4721,7 +4757,6 @@ module.exports = class MessageLoggerV2 {
         const saved = this.messageRecord[id];
         const message = saved?.message;
         if (!message || message.channel_id !== threadId) return;
-        if (saved.delete_data?.hidden) return;
         if (this.shouldIgnoreMessageAuthor(message) || this.shouldIgnoreSelfMessage(message)) return;
         ids.add(id);
       };
@@ -4898,12 +4933,7 @@ module.exports = class MessageLoggerV2 {
             label: 'Hide Deleted Message',
             action: () => {
               ContextMenu.close();
-              record.delete_data.hidden = true;
-              this.suppressForumThreadId(threadId);
-              this.saveData();
-              removeForumCardNode(threadId);
-              this._scheduleForumCardRestore?.();
-              this.showToast('Hidden!', { type: 'success' });
+              this.hideSavedDeletedRecord(record);
             }
           },
           {
@@ -5665,18 +5695,40 @@ module.exports = class MessageLoggerV2 {
               }
             );
           }
-          if (record.delete_data?.hidden) {
-            menuItems.push({
-              type: 'item',
-              label: 'Unhide Deleted Message',
-              action: () => {
-                ContextMenu.close();
-                record.delete_data.hidden = false;
-                this._invalidateAndRecache(record.message.channel_id);
-                this.saveData();
-                this.showToast('Unhidden!', { type: 'success' });
-              }
-            });
+          if (record.delete_data) {
+            if (record.delete_data.hidden) {
+              menuItems.push({
+                type: 'item',
+                label: 'Unhide Deleted Message',
+                action: () => {
+                  ContextMenu.close();
+                  record.delete_data.hidden = false;
+                  if (record.delete_data.forum_thread_delete) {
+                    this.unsuppressForumThreadId(messageId);
+                    this._scheduleForumCardRestore?.();
+                  }
+                  this._invalidateAndRecache(record.message.channel_id);
+                  this.saveData();
+                  this.scheduleLoggerMenuRefresh();
+                  this.refreshForumThreadLogModal(record.message.channel_id);
+                  this.showToast('Unhidden!', { type: 'success' });
+                }
+              });
+            } else {
+              const hideLabel = this.menu.selectedTab === 'purged'
+                ? 'Hide Purged Message'
+                : this.menu.selectedTab === 'ghostpings'
+                  ? 'Hide Ghost Ping'
+                  : 'Hide Deleted Message';
+              menuItems.push({
+                type: 'item',
+                label: hideLabel,
+                action: () => {
+                  ContextMenu.close();
+                  this.hideSavedDeletedRecord(record);
+                }
+              });
+            }
           }
           if (record.edit_history) {
             if (editNum != -1) {
@@ -5699,7 +5751,18 @@ module.exports = class MessageLoggerV2 {
                   ContextMenu.close();
                   record.edits_hidden = false;
                   this.saveData();
+                  this.scheduleLoggerMenuRefresh();
+                  this.refreshForumThreadLogModal(record.message.channel_id);
                   this.showToast('Unhidden!', { type: 'success' });
+                }
+              });
+            } else {
+              menuItems.push({
+                type: 'item',
+                label: 'Hide Edits',
+                action: () => {
+                  ContextMenu.close();
+                  this.hideSavedEdits(record);
                 }
               });
             }
@@ -6158,12 +6221,12 @@ module.exports = class MessageLoggerV2 {
   }
   getFilteredMessages() {
     let messages = [];
-    const pushIdsIntoMessages = map => {
+    const isHiddenRecord = record => !!(record?.delete_data?.hidden || record?.edits_hidden);
+    const pushIdsIntoMessages = (map, includeRecord = record => !isHiddenRecord(record)) => {
       for (let channel in map) {
         for (let messageIdIDX in map[channel]) {
           const messageId = map[channel][messageIdIDX];
-          const record = this.getSavedMessage(messageId);
-          if (record?.delete_data?.hidden) continue;
+          if (!includeRecord(this.getSavedMessage(messageId))) continue;
           messages.push(messageId);
         }
       }
@@ -6174,7 +6237,7 @@ module.exports = class MessageLoggerV2 {
           const messageId = map[channel][messageIdIDX];
           const record = this.getSavedMessage(messageId);
           if (!record) continue;
-          if (record.delete_data?.hidden) continue;
+          if (isHiddenRecord(record)) continue;
           if (record.ghost_pinged) {
             messages.push(messageId);
           }
@@ -6189,6 +6252,11 @@ module.exports = class MessageLoggerV2 {
     if (this.menu.selectedTab == 'edited') pushIdsIntoMessages(this.editedMessageRecord);
     if (this.menu.selectedTab == 'deleted') pushIdsIntoMessages(this.deletedMessageRecord);
     if (this.menu.selectedTab == 'purged') pushIdsIntoMessages(this.purgedMessageRecord);
+    if (this.menu.selectedTab == 'hidden') {
+      messages = Object.entries(this.messageRecord)
+        .filter(([, record]) => isHiddenRecord(record))
+        .map(([messageId]) => messageId);
+    }
     if (this.menu.selectedTab == 'ghostpings') {
       checkIsMentioned(this.deletedMessageRecord);
       checkIsMentioned(this.editedMessageRecord);
@@ -6331,6 +6399,7 @@ module.exports = class MessageLoggerV2 {
     tabs.appendChild(createTab('Edited', 'edited'));
     tabs.appendChild(createTab('Purged', 'purged'));
     tabs.appendChild(createTab('Ghost pings', 'ghostpings'));
+    tabs.appendChild(createTab('Hidden', 'hidden'));
     tabBar.style.marginRight = '20px';
     return tabBar;
   }
@@ -6562,23 +6631,7 @@ module.exports = class MessageLoggerV2 {
           }
           addElement(
             'Hide Deleted Message',
-            () => {
-              this.dispatcher.dispatch({
-                type: 'MESSAGE_DELETE',
-                id: messageId,
-                channelId: channelId,
-                ML2: true
-              });
-              this.showToast('Hidden!', { type: 'success' });
-              record.delete_data.hidden = true;
-              if (record.delete_data.forum_thread_delete) this.suppressForumThreadId(messageId);
-              this.saveData();
-              if (record.delete_data.forum_thread_delete) {
-                removeForumCardFromDom(messageId);
-                this._scheduleForumCardRestore?.();
-              }
-              this.refreshLoggerMenu?.();
-            }
+            () => this.hideSavedDeletedRecord(record)
           );
           const hasTint = !this.noTintIds.has(messageId);
           addElement(
@@ -6611,11 +6664,7 @@ module.exports = class MessageLoggerV2 {
               if (!this.editModifiers[messageId]) {
                 addElement(
                   'Hide Edits',
-                  () => {
-                    record.edits_hidden = true;
-                    this.saveData();
-                    this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
-                  }
+                  () => this.hideSavedEdits(record)
                 );
               }
               const editNum = target.getAttribute('editNum');
