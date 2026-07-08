@@ -2556,7 +2556,49 @@ module.exports = class MessageLoggerV2 {
     if (!threadId) return null;
     const saved = this.messageRecord[threadId]?.message;
     if (saved) return saved;
-    return this.getCachedMessage(threadId, threadId);
+    return this.getCachedMessage(threadId, threadId) || this.createForumThreadDeleteFallbackMessage(channel);
+  }
+  isForumThreadChannel(channel) {
+    if (!channel?.parent_id) return false;
+    const parent = this.tools.getChannel(channel.parent_id);
+    if (!parent) return false;
+    if (parent.type === 15 || parent.type === 16) return true;
+    return Array.isArray(parent.availableTags) || Array.isArray(parent.available_tags) || Array.isArray(parent.threadTags);
+  }
+  createForumThreadDeleteFallbackMessage(channel) {
+    const threadId = channel?.id;
+    if (!threadId || !this.isForumThreadChannel(channel)) return null;
+    const metadata = this.cacheForumThreadMetadata(channel) || this.forumThreadMetadataCache?.get(threadId) || {};
+    const ownerId = metadata.ownerId || channel.owner_id || channel.ownerId;
+    const author = ownerId ? this.tools.getUser(ownerId) : null;
+    if (author?.bot && this.settings.ignoreBots) return null;
+    const fallbackAuthor = author || {
+      id: ownerId || '0',
+      username: ownerId ? 'Unknown User' : 'Unknown',
+      discriminator: '0',
+      avatar: null,
+      bot: false,
+      public_flags: 0
+    };
+    const threadMetadata = channel.thread_metadata || channel.threadMetadata || metadata.threadMetadata || {};
+    return {
+      mention_everyone: false,
+      edited_timestamp: null,
+      attachments: [],
+      channel_id: threadId,
+      reactions: [],
+      guild_id: channel.guild_id || metadata.guildId,
+      content: metadata.card?.preview || metadata.name || channel.name || '[deleted forum post]',
+      type: 0,
+      embeds: [],
+      author: fallbackAuthor,
+      mentions: [],
+      mention_roles: [],
+      id: threadId,
+      flags: channel.flags || 0,
+      timestamp: threadMetadata.createTimestamp || threadMetadata.archiveTimestamp || Date.now(),
+      referenced_message: null
+    };
   }
   scheduleForumListRefresh() {
     if (this._forumListRefreshPending) return;
@@ -4593,8 +4635,12 @@ module.exports = class MessageLoggerV2 {
       return createAnchoredRestoredForumCard(record, sourceCard, sourceLi, parentChannel);
     };
     const restoreDeletedForumCards = () => {
-      if (!this.settings.showDeletedMessages) return;
       const parentChannel = this.selectedChannel || this.getSelectedTextChannel?.();
+      if (!this.settings.showDeletedMessages || !this.settings.restoreDeletedMessages) {
+        if (parentChannel?.id) removeRestoredForumCardsForChannel(parentChannel.id);
+        else document.querySelectorAll('[data-ml2-restored-forum-thread]').forEach(node => node.remove());
+        return;
+      }
       if (!isForumListChannel(parentChannel) || !parentChannel?.guild_id) return;
       const { sourceCard, sourceLi, list: sourceList } = findForumCardSource(parentChannel);
       const list = sourceList;
