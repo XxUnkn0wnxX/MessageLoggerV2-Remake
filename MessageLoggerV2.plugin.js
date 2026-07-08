@@ -1102,6 +1102,7 @@ module.exports = class MessageLoggerV2 {
     this.style.restoredForumItem = this.obfuscatedClass('MLv2-restored-forum-item');
     this.style.restoredForumCard = this.obfuscatedClass('MLv2-restored-forum-card');
     this.style.restoredForumMeta = this.obfuscatedClass('MLv2-restored-forum-meta');
+    this.style.restoredForumJump = this.obfuscatedClass('MLv2-restored-forum-jump');
     this.style.deletedForumModal = this.obfuscatedClass('MLv2-deleted-forum-modal');
     this.style.deletedForumRoot = this.obfuscatedClass('MLv2-deleted-forum-root');
     this.style.deletedForumHeader = this.obfuscatedClass('MLv2-deleted-forum-header');
@@ -1159,6 +1160,9 @@ module.exports = class MessageLoggerV2 {
                     }
                     html #app-mount .${this.style.restoredForumCard}.${this.style.deleted}:hover {
                       background-color: ${this.settings.deletedMessageColor ? hexToRgb(this.settings.deletedMessageColor, 0.16) : "rgba(240, 71, 71, 0.16)"} !important;
+                    }
+                    html #app-mount .${this.style.restoredForumCard}.${this.style.restoredForumJump} {
+                      box-shadow: 0 0 0 2px var(--brand-500), 0 0 0 6px rgba(88, 101, 242, 0.22) !important;
                     }
                     .${this.style.deletedForumModal} {
                       max-height: 85vh;
@@ -2502,7 +2506,7 @@ module.exports = class MessageLoggerV2 {
     const timeout = config.timeout === undefined ? undefined : config.timeout;
     const actions = config.tab ? [
       { label: "View", onClick: () => this.openWindow(config.tab) },
-      { label: "Jump", onClick: () => this.jumpToMessage(channel.id, messageId, guild?.id) }
+      { label: "Jump", onClick: () => this.jumpToSavedRecord(this.messageRecord[messageId] || { message: { id: messageId, channel_id: channel.id, guild_id: guild?.id }, delete_data: null }) }
     ] : [];
     this._showNotification(config.title, message, config.type, actions, timeout);
   }
@@ -2543,6 +2547,41 @@ module.exports = class MessageLoggerV2 {
       const path = `/channels/${guildId || '@me'}/${channelId}${messageId ? '/' + messageId : ''}`;
       historyModule.getHistory().push(path);
     }
+  }
+  jumpToDeletedForumPost(record) {
+    const message = record?.message;
+    if (!record?.delete_data?.forum_thread_delete || !message?.id) return false;
+    if (this.menu.open) this.ModalStack.closeModal(this.style.menu);
+    const metadata = record.delete_data.forum_metadata || {};
+    const parentId = record.delete_data.forum_parent_id || metadata.parentId;
+    if (!parentId) {
+      this.showToast('Could not find parent forum channel for this deleted post.', { type: 'error' });
+      return true;
+    }
+    const parent = this.tools.getChannel(parentId);
+    const guildId = message.guild_id || metadata.guildId || parent?.guild_id;
+    const historyModule = DiscordModules.HistoryUtils;
+    if (historyModule) historyModule.getHistory().push(`/channels/${guildId || '@me'}/${parentId}`);
+    const threadId = message.id;
+    const highlight = (attempt = 0) => {
+      this._scheduleForumCardRestore?.();
+      const card = document.querySelector(`[data-ml2-restored-forum-card="${threadId}"]`) || document.querySelector(`[data-item-id="${threadId}"]`);
+      if (!card) {
+        if (attempt < 8) setTimeout(() => highlight(attempt + 1), 150);
+        return;
+      }
+      card.scrollIntoView?.({ block: 'center', behavior: attempt ? 'auto' : 'smooth' });
+      card.classList.add(this.style.restoredForumJump);
+      setTimeout(() => card.classList.remove(this.style.restoredForumJump), 2200);
+    };
+    setTimeout(() => highlight(), 150);
+    return true;
+  }
+  jumpToSavedRecord(record) {
+    if (this.jumpToDeletedForumPost(record)) return;
+    const message = record?.message;
+    if (!message) return;
+    this.jumpToMessage(message.channel_id, message.id, message.guild_id);
   }
   _cacheIncomingMessage(message) {
     if (this.cachedMessageIds.has(message.id)) return true;
@@ -5174,13 +5213,13 @@ module.exports = class MessageLoggerV2 {
           let editNum = -1;
           if (isEdited) editNum = isEdited.edit;
           const menuItems = [];
-          if (channel) {
+          if (channel || record.delete_data?.forum_thread_delete) {
             menuItems.push({
               type: 'item',
               label: 'Jump to Message',
               action: () => {
                 ContextMenu.close();
-                this.jumpToMessage(message.channel_id, messageId, message.guild_id);
+                this.jumpToSavedRecord(record);
               }
             });
           }
@@ -6392,7 +6431,7 @@ module.exports = class MessageLoggerV2 {
         addElement(
           'Jump to Message',
           () => {
-            this.jumpToMessage(channelId, element.messageId, record.message.guild_id);
+            this.jumpToSavedRecord(record);
           },
           this.obfuscatedClass('jump-to')
         );
