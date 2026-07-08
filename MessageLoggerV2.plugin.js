@@ -595,6 +595,10 @@ module.exports = class MessageLoggerV2 {
       this.settings.showHiddenTab = false;
       settingsChanged = true;
     }
+    if (typeof this.settings.contextmenuSubmenuName !== 'string' || !this.settings.contextmenuSubmenuName.trim()) {
+      this.settings.contextmenuSubmenuName = defaultSettings.contextmenuSubmenuName;
+      settingsChanged = true;
+    }
     if (this.settings.autoUpdate) {
       if (this._autoUpdateInterval) clearInterval(this._autoUpdateInterval);
       setTimeout(() => this.checkNewUpdate(false), 5000);
@@ -7095,7 +7099,7 @@ module.exports = class MessageLoggerV2 {
       const loggerSubmenu = {
         id: 'mlv2-message-logger',
         type: 'submenu',
-        label: this.settings.contextmenuSubmenuName,
+        label: this.settings.contextmenuSubmenuName?.trim() || 'Message Logger',
         items: newItems
       };
       const actionGroup = findMenuGroupByChildId(ret, 'delete') || findMenuGroupByChildId(ret, 'report');
@@ -7142,7 +7146,7 @@ module.exports = class MessageLoggerV2 {
         type: 'group',
         items: [{
           type: 'submenu',
-          label: this.settings.contextmenuSubmenuName,
+          label: this.settings.contextmenuSubmenuName?.trim() || 'Message Logger',
           items: newItems
         }]
       }]));
@@ -7177,7 +7181,7 @@ module.exports = class MessageLoggerV2 {
           type: 'group',
           items: [{
             type: 'submenu',
-            label: this.settings.contextmenuSubmenuName,
+            label: this.settings.contextmenuSubmenuName?.trim() || 'Message Logger',
             items: newItems
           }]
         }]));
@@ -7209,7 +7213,7 @@ module.exports = class MessageLoggerV2 {
             type: 'group',
             items: [{
               type: 'submenu',
-              label: this.settings.contextmenuSubmenuName,
+              label: this.settings.contextmenuSubmenuName?.trim() || 'Message Logger',
               items: newItems
             }]
           }]));
@@ -7309,7 +7313,7 @@ module.exports = class MessageLoggerV2 {
           type: 'group',
           items: [{
             type: 'submenu',
-            label: this.settings.contextmenuSubmenuName,
+            label: this.settings.contextmenuSubmenuName?.trim() || 'Message Logger',
             items: newItems
           }]
         }]));
