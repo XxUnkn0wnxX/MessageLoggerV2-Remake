@@ -1470,6 +1470,7 @@ module.exports = class MessageLoggerV2 {
       }),
       this.patchLocalDeleteTracker(DiscordModules.HttpModule, 'delete'),
       this.patchLocalDeleteTracker(DiscordModules.HttpModule, 'del'),
+      this.patchLocalDeleteXhrTracker(),
       Patcher.instead(this.messageStore, 'getLastEditableMessage', (_this, [channelId]) => {
         const me = this.localUser.id;
         return _this
@@ -2824,6 +2825,14 @@ module.exports = class MessageLoggerV2 {
     return Patcher.instead(module, method, (_, args, original) => {
       this.rememberLocalDeleteFromArgs(args);
       return original(...args);
+    });
+  }
+  patchLocalDeleteXhrTracker() {
+    const prototype = globalThis.XMLHttpRequest?.prototype;
+    if (!prototype || typeof prototype.open !== 'function') return () => {};
+    return Patcher.before(prototype, 'open', (_, [method, url]) => {
+      if (String(method).toUpperCase() !== 'DELETE') return;
+      this.rememberLocalDeleteFromRequest(url);
     });
   }
   _cacheIncomingMessage(message) {
