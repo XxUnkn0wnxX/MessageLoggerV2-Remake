@@ -1097,6 +1097,15 @@ module.exports = class MessageLoggerV2 {
     this.style.toolbarButton = this.obfuscatedClass('MLv2-toolbar-button');
     this.style.imageRoot = this.obfuscatedClass('MLv2-image-root');
     this.style.imageError = this.obfuscatedClass('MLv2-image-error');
+    this.style.restoredForumItem = this.obfuscatedClass('MLv2-restored-forum-item');
+    this.style.restoredForumCard = this.obfuscatedClass('MLv2-restored-forum-card');
+    this.style.restoredForumMeta = this.obfuscatedClass('MLv2-restored-forum-meta');
+    this.style.deletedForumModal = this.obfuscatedClass('MLv2-deleted-forum-modal');
+    this.style.deletedForumRoot = this.obfuscatedClass('MLv2-deleted-forum-root');
+    this.style.deletedForumHeader = this.obfuscatedClass('MLv2-deleted-forum-header');
+    this.style.deletedForumTitle = this.obfuscatedClass('MLv2-deleted-forum-title');
+    this.style.deletedForumMeta = this.obfuscatedClass('MLv2-deleted-forum-meta');
+    this.style.deletedForumMessages = this.obfuscatedClass('MLv2-deleted-forum-messages');
     this.style.inputWrapper = this.obfuscatedClass('MLv2-input-wrapper');
     this.style.multiInput = this.obfuscatedClass('MLv2-input');
     this.style.multiInputFirst = this.obfuscatedClass('MLv2-input-first');
@@ -1126,6 +1135,63 @@ module.exports = class MessageLoggerV2 {
         `
                     .${this.style.deleted} .${this.classes.markup}, .${this.style.deleted} .${this.classes.markup} .hljs, .${this.style.deleted} .${this.classes.container} *{
                         color: #f04747 !important;
+                    }
+                    html #app-mount [data-item-id].${this.style.deleted} {
+                      background-color: ${this.settings.deletedMessageColor ? hexToRgb(this.settings.deletedMessageColor, 0.12) : "rgba(240, 71, 71, 0.12)"} !important;
+                    }
+                    html #app-mount [data-item-id].${this.style.deleted}:hover {
+                      background-color: ${this.settings.deletedMessageColor ? hexToRgb(this.settings.deletedMessageColor, 0.16) : "rgba(240, 71, 71, 0.16)"} !important;
+                    }
+                    html #app-mount .${this.style.restoredForumCard} {
+                      cursor: pointer !important;
+                    }
+                    html #app-mount .${this.style.restoredForumItem} {
+                      display: block !important;
+                      list-style: none !important;
+                    }
+                    html #app-mount .${this.style.restoredForumMeta} {
+                      color: var(--text-muted) !important;
+                    }
+                    .${this.style.deletedForumModal} {
+                      max-height: 85vh;
+                      min-width: min(860px, 90vw);
+                      max-width: 90vw;
+                    }
+                    .${this.style.deletedForumModal} main {
+                      overflow: hidden !important;
+                    }
+                    .${this.style.deletedForumRoot} {
+                      display: flex;
+                      flex-direction: column;
+                      max-height: 72vh;
+                      min-height: 360px;
+                      overflow: hidden;
+                    }
+                    .${this.style.deletedForumHeader} {
+                      border-bottom: 1px solid var(--background-modifier-accent);
+                      padding: 0 0 12px;
+                      margin-bottom: 8px;
+                    }
+                    .${this.style.deletedForumTitle} {
+                      color: var(--header-primary);
+                      font-size: 20px;
+                      font-weight: 600;
+                      line-height: 26px;
+                      overflow-wrap: anywhere;
+                    }
+                    .${this.style.deletedForumMeta} {
+                      color: var(--text-muted);
+                      font-size: 13px;
+                      line-height: 18px;
+                      margin-top: 4px;
+                    }
+                    .${this.style.deletedForumMessages} {
+                      flex: 1 1 auto;
+                      overflow-y: auto;
+                      padding: 8px 4px 16px 0;
+                    }
+                    .${this.style.deletedForumMessages} .${this.classes.markup} {
+                      color: var(--text-default) !important;
                     }
                     html #app-mount .${this.style.deletedAlt} {
                       background-color: ${this.settings.deletedMessageColor ? hexToRgb(this.settings.deletedMessageColor, 0.15) : "rgba(240, 71, 71, 0.15)"} !important;
@@ -2355,7 +2421,8 @@ module.exports = class MessageLoggerV2 {
     };
   }
   _shouldShowToast(channel, guild, toastType, isLocalUser = false) {
-    if (!this.selectedChannel || this.selectedChannel.id !== channel.id) {
+    const selectedChannelId = this.selectedChannel?.id;
+    if (!selectedChannelId || (selectedChannelId !== channel.id && selectedChannelId !== channel.parent_id)) {
       const toggles = guild ? this.settings.toastToggles : this.settings.toastTogglesDMs;
       if (toggles[toastType]) {
         if (guild && isLocalUser && this.settings.toastToggles.disableToastsForLocal) return false;
@@ -2461,6 +2528,73 @@ module.exports = class MessageLoggerV2 {
     this.cachedMessageIds.add(message.id);
     this.cachedMessagesMap.set(message.id, message);
     return false;
+  }
+  getForumThreadDeleteMessage(channel) {
+    const threadId = channel?.id;
+    if (!threadId) return null;
+    const saved = this.messageRecord[threadId]?.message;
+    if (saved) return saved;
+    return this.getCachedMessage(threadId, threadId);
+  }
+  scheduleForumListRefresh() {
+    if (this._forumListRefreshPending) return;
+    this._forumListRefreshPending = true;
+    setTimeout(() => {
+      this._forumListRefreshPending = false;
+      try {
+        this._restoreDeletedForumCards?.();
+        this._tintSweep?.();
+        this.forceUpdateUI();
+        setTimeout(() => {
+          this._restoreDeletedForumCards?.();
+          this._tintSweep?.();
+        }, 150);
+      } catch (e) {
+        Logger.warn('Could not refresh forum list:', e);
+      }
+    }, 75);
+  }
+  handleForumThreadUiEvent(dispatch, callDefault, args) {
+    const result = callDefault(...args);
+    const thread = dispatch.channel || dispatch.thread;
+    const parentId = thread?.parent_id || dispatch.parentId || dispatch.parent_id || dispatch.channelId || dispatch.channel_id;
+    const selectedChannelId = this.selectedChannel?.id || DiscordModules.SelectedChannelStore?.getChannelId?.();
+    if (parentId && selectedChannelId === parentId) this.scheduleForumListRefresh();
+    return result;
+  }
+  handleForumThreadDelete(channel, guild, notificationsBlacklisted, notificationsWhitelisted, callDefault, args) {
+    const threadId = channel?.id;
+    if (!threadId) return callDefault(...args);
+    const deleted = this.getForumThreadDeleteMessage(channel);
+    if (!deleted) {
+      this.cacheChannelMessages(threadId, threadId);
+      return callDefault(...args);
+    }
+    const isLocalUser = this.isLocalAuthorMessage(deleted);
+    if (this.shouldIgnoreMessageAuthor(deleted)) return callDefault(...args);
+    if (this.shouldIgnoreSelfMessage(deleted)) return callDefault(...args);
+    if (this.settings.ignoreLocalDeletes && isLocalUser && this.localDeletes.includes(threadId)) return callDefault(...args);
+    if (this.deletedMessageSet.get(threadId)?.has(threadId)) return callDefault(...args);
+    this.saveDeletedMessage(deleted, this.deletedMessageRecord);
+    const savedRecord = this.messageRecord[threadId];
+    if (savedRecord?.delete_data) {
+      savedRecord.delete_data.forum_parent_id = channel.parent_id;
+      savedRecord.delete_data.forum_thread_delete = true;
+    }
+    if (this.settings.showDeletedCount) {
+      if (!this.deletedChatMessagesCount[threadId]) this.deletedChatMessagesCount[threadId] = 0;
+      this.deletedChatMessagesCount[threadId]++;
+    }
+    if (!notificationsBlacklisted && notificationsWhitelisted && this._shouldShowToast(channel, guild, 'deleted', isLocalUser)) {
+      this._notifyEvent('deleted', channel, guild, threadId);
+    }
+    this._scheduleTintForMessage?.(threadId, threadId);
+    this.saveData();
+    if (this.settings.showDeletedMessages && this.selectedChannel?.id === channel.parent_id) {
+      this.scheduleForumListRefresh();
+      return Promise.resolve();
+    }
+    return callDefault(...args);
   }
   _testUrlPattern(url, regex) {
     if (regex.test(url)) return true;
@@ -3272,12 +3406,16 @@ module.exports = class MessageLoggerV2 {
       if (dispatch.type === 'CHANNEL_SELECT') {
         ret = callDefault(...args);
         this.selectedChannel = this.getSelectedTextChannel();
+        this._scheduleForumCardRestore?.();
         return ret;
       }
+      if (dispatch.type === 'THREAD_CREATE' || dispatch.type === 'THREAD_UPDATE' || dispatch.type === 'THREAD_LIST_SYNC') {
+        return this.handleForumThreadUiEvent(dispatch, callDefault, args);
+      }
       if (dispatch.ML2 && dispatch.type === 'MESSAGE_DELETE') return callDefault(...args);
-      if (dispatch.type !== 'MESSAGE_CREATE' && dispatch.type !== 'MESSAGE_DELETE' && dispatch.type !== 'MESSAGE_DELETE_BULK' && dispatch.type !== 'MESSAGE_UPDATE' && dispatch.type !== 'LOAD_MESSAGES_SUCCESS') return callDefault(...args);
+      if (dispatch.type !== 'MESSAGE_CREATE' && dispatch.type !== 'MESSAGE_DELETE' && dispatch.type !== 'MESSAGE_DELETE_BULK' && dispatch.type !== 'MESSAGE_UPDATE' && dispatch.type !== 'LOAD_MESSAGES_SUCCESS' && dispatch.type !== 'THREAD_DELETE') return callDefault(...args);
       if (dispatch.message && (dispatch.message.type !== 0 && dispatch.message.type !== 19 && (dispatch.message.type !== 20 || (dispatch.message.flags & 64) === 64))) return callDefault(...args);
-      const channel = this.tools.getChannel(dispatch.message ? dispatch.message.channel_id : dispatch.channelId);
+      const channel = dispatch.type === 'THREAD_DELETE' && dispatch.channel ? dispatch.channel : this.tools.getChannel(dispatch.message ? dispatch.message.channel_id : dispatch.channelId);
       if (!channel) return callDefault(...args);
       const guild = channel.guild_id ? this.tools.getServer(channel.guild_id) : false;
       let author = dispatch.message?.author ? this.tools.getUser(dispatch.message.author.id) : false;
@@ -3286,7 +3424,7 @@ module.exports = class MessageLoggerV2 {
         let message = this.getCachedMessage(dispatch.id);
         if (message) author = this.tools.getUser(message.author.id);
       }
-      if (!author && !(dispatch.type == 'LOAD_MESSAGES_SUCCESS' || dispatch.type == 'MESSAGE_DELETE_BULK')) return callDefault(...args);
+      if (!author && !(dispatch.type == 'LOAD_MESSAGES_SUCCESS' || dispatch.type == 'MESSAGE_DELETE_BULK' || dispatch.type == 'THREAD_DELETE')) return callDefault(...args);
       const isLocalUser = author && author.id === this.localUser.id;
       if (author?.bot && this.settings.ignoreBots) return callDefault(...args);
       if (author && isLocalUser && this.settings.ignoreSelf && dispatch.type === 'MESSAGE_CREATE') return callDefault(...args);
@@ -3299,9 +3437,11 @@ module.exports = class MessageLoggerV2 {
       const isInWhitelist = id => this.settings.whitelist.includes(id);
       const isInBlacklist = id => this.settings.blacklist.includes(id);
       const guildWhitelisted = guild && isInWhitelist(guild.id);
-      const channelWhitelisted = isInWhitelist(channel.id);
+      const parentChannelWhitelisted = channel.parent_id && isInWhitelist(channel.parent_id);
+      const channelWhitelisted = isInWhitelist(channel.id) || parentChannelWhitelisted;
       const guildBlacklisted = guild && isInBlacklist(guild.id);
-      const channelBlacklisted = isInBlacklist(channel.id);
+      const parentChannelBlacklisted = channel.parent_id && isInBlacklist(channel.parent_id);
+      const channelBlacklisted = isInBlacklist(channel.id) || parentChannelBlacklisted;
       let doReturn = false;
       if (guild) {
         guildIsMutedReturn = this.settings.ignoreMutedGuilds && this.muteModule.isMuted(guild.id);
@@ -3310,7 +3450,8 @@ module.exports = class MessageLoggerV2 {
       let editOrDel = 0;
       if (dispatch.type == 'MESSAGE_DELETE') editOrDel = 1;
       else if (dispatch.type == 'MESSAGE_UPDATE') editOrDel = 2;
-      if (editOrDel != 0 && (this.settings.notificationBlacklist.includes(channel.id) || (guild && this.settings.notificationBlacklist.includes(guild.id))) && ((this.settings.alwaysNotifChannel && this.selectedChannel && this.selectedChannel.id == channel.id) || (this.settings.alwaysNotifGuild && guild && this.selectedChannel?.guild_id == guild.id))) {
+      const isSelectedChannelOrThreadParent = this.selectedChannel && (this.selectedChannel.id == channel.id || (channel.parent_id && this.selectedChannel.id == channel.parent_id));
+      if (editOrDel != 0 && (this.settings.notificationBlacklist.includes(channel.id) || (channel.parent_id && this.settings.notificationBlacklist.includes(channel.parent_id)) || (guild && this.settings.notificationBlacklist.includes(guild.id))) && ((this.settings.alwaysNotifChannel && isSelectedChannelOrThreadParent) || (this.settings.alwaysNotifGuild && guild && this.selectedChannel?.guild_id == guild.id))) {
         const shouldNotifyLocal = !isLocalUser || (guild && !this.settings.toastToggles.disableToastsForLocal);
         if (editOrDel == 1 && (guild ? this.settings.toastToggles.deleted && shouldNotifyLocal : this.settings.toastTogglesDMs.deleted && !isLocalUser)) {
           this._notifyEvent('deleted', channel, guild, dispatch.id);
@@ -3318,7 +3459,7 @@ module.exports = class MessageLoggerV2 {
           this._notifyEvent('edited', channel, guild, dispatch.message.id);
         }
       }
-      if (!((this.settings.alwaysLogSelected && this.selectedChannel && this.selectedChannel.id == channel.id) || (this.settings.alwaysLogDM && !guild))) {
+      if (!((this.settings.alwaysLogSelected && isSelectedChannelOrThreadParent) || (this.settings.alwaysLogDM && !guild))) {
         if (guildBlacklisted) {
           if (!channelWhitelisted) doReturn = true;
         } else if (guildWhitelisted) {
@@ -3431,11 +3572,13 @@ module.exports = class MessageLoggerV2 {
         requestAnimationFrame(() => this._tintSweep?.());
         return result;
       }
-      const notificationsBlacklisted = this.settings.notificationBlacklist.includes(channel.id) || (guild && this.settings.notificationBlacklist.includes(guild.id));
+      const notificationsBlacklisted = this.settings.notificationBlacklist.includes(channel.id) || (channel.parent_id && this.settings.notificationBlacklist.includes(channel.parent_id)) || (guild && this.settings.notificationBlacklist.includes(guild.id));
       let notificationsWhitelisted = true;
       if (this.settings.notifOnlyWhitelist)
-        notificationsWhitelisted = this.settings.notificationWhitelist.includes(channel.id) || (guild && this.settings.notificationWhitelist.includes(guild.id));
-      if (dispatch.type == 'MESSAGE_DELETE') {
+        notificationsWhitelisted = this.settings.notificationWhitelist.includes(channel.id) || (channel.parent_id && this.settings.notificationWhitelist.includes(channel.parent_id)) || (guild && this.settings.notificationWhitelist.includes(guild.id));
+      if (dispatch.type == 'THREAD_DELETE') {
+        return this.handleForumThreadDelete(channel, guild, notificationsBlacklisted, notificationsWhitelisted, callDefault, args);
+      } else if (dispatch.type == 'MESSAGE_DELETE') {
         const deleted = this.getCachedMessage(dispatch.id, dispatch.channelId);
         if (this.settings.aggresiveMessageCaching) this._ensureChannelCached(channel.id);
         if (!deleted) return callDefault(...args);
@@ -3865,7 +4008,7 @@ module.exports = class MessageLoggerV2 {
         return false;
       }
       if (!card && !content) return false;
-      if (this.settings.useAlternativeDeletedStyle && card) {
+      if (card) {
         clearTintClassesFromNodes(forumTintTargets.filter(node => node !== card));
         return addTintClass(card);
       }
@@ -3882,6 +4025,296 @@ module.exports = class MessageLoggerV2 {
       }
       clearTintClassesFromNodes(forumTintTargets.filter(node => node !== card));
       return addTintClass(card);
+    };
+    const isForumListChannel = (channel) => channel?.type === 15 || channel?.type === 16;
+    const getDeletedForumRecordsForChannel = (parentChannel) => {
+      if (!isForumListChannel(parentChannel) || !parentChannel?.id || !parentChannel.guild_id) return [];
+      const out = [];
+      for (const [threadId, ids] of Object.entries(this.deletedMessageRecord || {})) {
+        if (!Array.isArray(ids) || !ids.includes(threadId)) continue;
+        const record = this.messageRecord[threadId];
+        const message = record?.message;
+        if (!record?.delete_data || record.delete_data.hidden || !message) continue;
+        if (message.id !== threadId || message.channel_id !== threadId) continue;
+        if (this.shouldIgnoreMessageAuthor(message) || this.shouldIgnoreSelfMessage(message)) continue;
+        const savedParentId = record.delete_data.forum_parent_id;
+        if (savedParentId) {
+          if (savedParentId !== parentChannel.id) continue;
+        } else if (message.guild_id !== parentChannel.guild_id) {
+          continue;
+        }
+        out.push(record);
+      }
+      out.sort((a, b) => Number(b.message.id) - Number(a.message.id));
+      return out;
+    };
+    const copyClass = (source, selector, fallback) => source?.querySelector?.(selector)?.className || fallback;
+    const getForumRecordTitle = (record) => {
+      const message = record?.message;
+      return (message?.content || '').split(/\r?\n/).find(line => line.trim())?.trim()
+        || (message?.attachments?.length ? '[attachment]' : '[deleted forum post]');
+    };
+    const getForumRecordPreview = (record) => {
+      const message = record?.message;
+      return message?.content || getForumRecordTitle(record);
+    };
+    const getForumRecordMeta = (record) => {
+      const deletedAt = record?.delete_data?.time ? this.createTimeStamp(record.delete_data.time) : this.createTimeStamp();
+      return `Deleted ${deletedAt}`;
+    };
+    const getSavedForumThreadMessageIds = (record) => {
+      const threadId = record?.message?.id;
+      if (!threadId) return [];
+      const ids = new Set();
+      const addId = (id) => {
+        if (!id || ids.has(id)) return;
+        const saved = this.messageRecord[id];
+        const message = saved?.message;
+        if (!message || message.channel_id !== threadId) return;
+        if (saved.delete_data?.hidden) return;
+        if (this.shouldIgnoreMessageAuthor(message) || this.shouldIgnoreSelfMessage(message)) return;
+        ids.add(id);
+      };
+      addId(threadId);
+      const addFromMap = (map) => {
+        const channelIds = map?.[threadId];
+        if (!Array.isArray(channelIds)) return;
+        channelIds.forEach(addId);
+      };
+      addFromMap(this.deletedMessageRecord);
+      addFromMap(this.purgedMessageRecord);
+      addFromMap(this.editedMessageRecord);
+      for (const [messageId, saved] of Object.entries(this.messageRecord || {})) {
+        if (saved?.message?.channel_id === threadId) addId(messageId);
+      }
+      if (!ids.size && record?.message) ids.add(threadId);
+      return Array.from(ids).sort((a, b) => Number(a) - Number(b));
+    };
+    const openDeletedForumPostView = (record) => {
+      const message = record?.message;
+      if (!message?.id) return;
+      if (this.menu.open) this.ModalStack.closeModal(this.style.menu);
+      const threadId = message.id;
+      const titleText = getForumRecordTitle(record);
+      const messageIds = getSavedForumThreadMessageIds(record);
+      const deletedAt = record.delete_data?.time ? this.createTimeStamp(record.delete_data.time, true) : this.createTimeStamp(Date.now(), true);
+      let populated = false;
+      const children = React.createElement('div', {
+        className: this.style.deletedForumRoot,
+        ref: node => {
+          if (!node || populated) return;
+          populated = true;
+          requestAnimationFrame(() => {
+            const messagesNode = node.querySelector('[data-ml2-deleted-forum-messages="true"]');
+            if (!messagesNode) return;
+            const previousShownMessages = this.menu.shownMessages;
+            this.menu.shownMessages = -1;
+            try {
+              this.populateParent(messagesNode, messageIds);
+              if (!messagesNode.childElementCount && message?.content) {
+                const fallback = document.createElement('div');
+                fallback.className = this.multiClasses.defaultColor || this.classes.markup || '';
+                fallback.textContent = message.content;
+                messagesNode.appendChild(fallback);
+              }
+            } finally {
+              this.menu.shownMessages = previousShownMessages;
+            }
+          });
+        }
+      },
+        React.createElement('div', { className: this.style.deletedForumHeader },
+          React.createElement('div', { className: this.style.deletedForumTitle }, titleText),
+          React.createElement('div', { className: this.style.deletedForumMeta },
+            `${message.author?.username || 'Unknown'} - deleted ${deletedAt}`
+          )
+        ),
+        React.createElement('div', {
+          className: this.style.deletedForumMessages,
+          'data-ml2-deleted-forum-messages': 'true'
+        })
+      );
+      this.createModal({
+        ml2Data: true,
+        header: 'Deleted Forum Post',
+        size: this.tools.resolvedModalStuff.ModalSize.LARGE,
+        children,
+        className: this.style.deletedForumModal
+      }, false, `ML2-deleted-forum-post-${threadId}`);
+    };
+    const openRestoredForumPost = (record) => {
+      const message = record?.message;
+      if (!message?.id) return;
+      openDeletedForumPostView(record);
+    };
+    const findForumListContainer = (parentChannel) => {
+      const focus = document.querySelector(`[data-list-item-id^="forum-channel-list-${parentChannel.id}___"]`);
+      const focusList = focus?.closest?.('li')?.parentElement;
+      if (focusList) return focusList;
+      const selectedIdNeedles = [
+        parentChannel.id,
+        parentChannel.name
+      ].filter(Boolean);
+      const candidates = Array.from(document.querySelectorAll('[class*="scroller"], [class*="content"], [class*="chatContent"], main'))
+        .filter(candidate => candidate.id !== 'channels' && candidate.getAttribute?.('aria-label') !== 'Channels');
+      for (const candidate of candidates) {
+        const text = [
+          candidate.getAttribute?.('aria-label'),
+          candidate.getAttribute?.('data-list-id'),
+          candidate.className,
+          candidate.textContent?.slice?.(0, 500)
+        ].filter(Boolean).join(' ');
+        if (selectedIdNeedles.some(needle => text.includes(needle))) return candidate;
+      }
+      return document.querySelector('[class*="chatContent"] [class*="scroller"]')
+        || document.querySelector('[class*="chatContent"]')
+        || document.querySelector('main');
+    };
+    const findForumCardSource = (parentChannel) => {
+      if (!parentChannel?.id) return {};
+      const focusNodes = Array.from(document.querySelectorAll(`[data-list-item-id^="forum-channel-list-${parentChannel.id}___"]`));
+      for (const focus of focusNodes) {
+        const card = focus.closest('[data-item-id]');
+        if (!card || card.getAttribute('data-ml2-restored-forum-card') === 'true') continue;
+        const li = card.closest('li');
+        const list = li?.parentElement;
+        if (!list || list.id === 'channels') continue;
+        return { sourceCard: card, sourceLi: li, list };
+      }
+      return {};
+    };
+    const wireRestoredForumCard = (card, record) => {
+      const open = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        openRestoredForumPost(record);
+      };
+      card.addEventListener('click', open, true);
+      card.addEventListener('click', open);
+      card.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        openRestoredForumPost(record);
+      }, true);
+    };
+    const replaceText = (root, selectors, value) => {
+      for (const selector of selectors) {
+        const node = root.querySelector(selector);
+        if (!node) continue;
+        node.textContent = value;
+        return node;
+      }
+      return null;
+    };
+    const createFallbackRestoredForumCard = (record, sourceCard, sourceLi) => {
+      const message = record.message;
+      const threadId = message.id;
+      const titleText = getForumRecordTitle(record);
+      const li = document.createElement('li');
+      li.className = [sourceLi?.className || 'card_f369db', this.style.restoredForumItem].filter(Boolean).join(' ');
+      li.setAttribute('data-item-role', 'item');
+      li.setAttribute('data-ml2-restored-forum-thread', threadId);
+
+      const card = document.createElement('div');
+      card.className = [sourceCard?.className || 'container_faa96b mainCard_f369db', this.style.deleted, this.style.restoredForumCard].filter(Boolean).join(' ');
+      card.setAttribute('data-item-id', threadId);
+      card.setAttribute('data-ml2-restored-forum-card', 'true');
+
+      const focus = document.createElement('div');
+      focus.className = copyClass(sourceCard, '[data-list-item-id^="forum-channel-list-"]', 'focusTarget_faa96b');
+      focus.setAttribute('data-list-item-id', `forum-channel-list-${this.selectedChannel?.id || 'unknown'}___${threadId}`);
+      focus.setAttribute('role', 'button');
+      focus.setAttribute('tabindex', '0');
+      focus.setAttribute('aria-label', `Deleted forum post ${titleText}`);
+
+      const left = document.createElement('div');
+      left.className = copyClass(sourceCard, '.left_faa96b', 'left_faa96b');
+      const body = document.createElement('div');
+      body.className = copyClass(sourceCard, '.body_faa96b', 'body_faa96b');
+
+      const header = document.createElement('div');
+      header.className = copyClass(sourceCard, '.header_faa96b', 'header_faa96b');
+      const headerText = document.createElement('div');
+      headerText.className = copyClass(sourceCard, '.headerText_faa96b', 'headerText_faa96b');
+      const title = document.createElement('h3');
+      title.className = copyClass(sourceCard, '[class*="postTitleText"]', 'lineClamp2Plus__4bd52 heading-lg/semibold_cf4812 defaultColor__5345c postTitleText_faa96b');
+      title.setAttribute('data-text-variant', 'heading-lg/semibold');
+      title.textContent = titleText;
+      headerText.appendChild(title);
+      header.appendChild(headerText);
+
+      const messageWrap = document.createElement('div');
+      messageWrap.className = copyClass(sourceCard, '.message_faa96b', 'message_faa96b');
+      const author = document.createElement('span');
+      author.className = copyClass(sourceCard, '.message_faa96b > span', 'defaultColor__4bd52 text-sm/semibold_cf4812 author_d3eee8');
+      author.textContent = `${message.author?.username || 'Unknown'}: `;
+      const focusBlock = document.createElement('div');
+      focusBlock.className = copyClass(sourceCard, '.messageFocusBlock_faa96b', 'messageFocusBlock_faa96b');
+      const textWrap = document.createElement('div');
+      textWrap.className = copyClass(sourceCard, '[class*="text-sm"]', 'text-sm/semibold_cf4812');
+      const content = document.createElement('div');
+      content.id = `message-content-${threadId}`;
+      content.className = copyClass(sourceCard, '[id^="message-content-"]', this.classes.messageContent || 'messageContent_c19a55');
+      content.textContent = message.content || titleText;
+
+      const footer = document.createElement('div');
+      footer.className = copyClass(sourceCard, '.footer_faa96b', 'footer_faa96b');
+      const meta = document.createElement('span');
+      meta.className = [copyClass(sourceCard, '[class*="text-sm/normal"]', 'text-sm/normal_cf4812'), this.style.restoredForumMeta].filter(Boolean).join(' ');
+      meta.textContent = getForumRecordMeta(record);
+
+      textWrap.appendChild(content);
+      focusBlock.appendChild(textWrap);
+      messageWrap.append(author, focusBlock);
+      footer.appendChild(meta);
+      body.append(header, messageWrap, footer);
+      left.appendChild(body);
+      card.append(focus, left);
+      wireRestoredForumCard(card, record);
+      li.appendChild(card);
+      return li;
+    };
+    const createRestoredForumCard = (record, sourceCard, sourceLi, parentChannel) => {
+      return createFallbackRestoredForumCard(record, sourceCard, sourceLi);
+    };
+    const restoreDeletedForumCards = () => {
+      if (!this.settings.showDeletedMessages) return;
+      const parentChannel = this.selectedChannel || this.getSelectedTextChannel?.();
+      if (!isForumListChannel(parentChannel) || !parentChannel?.guild_id) return;
+      const { sourceCard, sourceLi, list: sourceList } = findForumCardSource(parentChannel);
+      const list = sourceList || findForumListContainer(parentChannel);
+      if (!list || list.id === 'channels') return;
+      document.querySelectorAll(`[data-list-item-id^="forum-channel-list-${parentChannel.id}___"]`).forEach(focus => {
+        const restoredLi = focus.closest?.(`[data-ml2-restored-forum-thread]`);
+        if (restoredLi && !list.contains(restoredLi)) restoredLi.remove();
+      });
+      const existingIds = new Set(Array.from(list.querySelectorAll('[data-item-id]'))
+        .map(card => card.getAttribute('data-item-id'))
+        .filter(Boolean));
+      const records = getDeletedForumRecordsForChannel(parentChannel);
+      for (const record of records) {
+        const threadId = record.message.id;
+        if (existingIds.has(threadId)) {
+          tintForumCardByThreadId(threadId);
+          continue;
+        }
+        const restored = createRestoredForumCard(record, sourceCard, sourceLi, parentChannel);
+        list.appendChild(restored);
+        existingIds.add(threadId);
+        tintForumCardByThreadId(threadId);
+      }
+    };
+    let restoreForumCardsPending = false;
+    const scheduleRestoreDeletedForumCards = () => {
+      if (restoreForumCardsPending) return;
+      restoreForumCardsPending = true;
+      requestAnimationFrame(() => {
+        restoreForumCardsPending = false;
+        restoreDeletedForumCards();
+      });
     };
     const tintMessageById = (channelId, messageId) => {
       const domId = getMessageNodeId(channelId, messageId);
@@ -3922,6 +4355,7 @@ module.exports = class MessageLoggerV2 {
       for (const channelId of this.purgedMessageSet.keys()) {
         if (this.purgedMessageSet.get(channelId)?.has(channelId)) tintForumCardByThreadId(channelId);
       }
+      restoreDeletedForumCards();
     };
     const tintObserver = new MutationObserver((mutations) => {
       for (const m of mutations) {
@@ -3944,6 +4378,7 @@ module.exports = class MessageLoggerV2 {
               const foundThreadId = getForumThreadIdFromAnyNode(foundNode);
               if (foundThreadId) tintForumCardByThreadId(foundThreadId);
             });
+            if (threadId || found.length) scheduleRestoreDeletedForumCards();
           }
         } else if (m.type === 'attributes' && m.attributeName === 'class') {
           const t = m.target;
@@ -3962,12 +4397,16 @@ module.exports = class MessageLoggerV2 {
     this._tintSweep = sweepDom;
     this._tintMessageById = tintMessageById;
     this._scheduleTintForMessage = scheduleTintForMessage;
+    this._restoreDeletedForumCards = restoreDeletedForumCards;
+    this._scheduleForumCardRestore = scheduleRestoreDeletedForumCards;
     sweepDom();
     this.unpatches.push(() => {
       try { tintObserver.disconnect(); } catch {}
       this._tintSweep = null;
       this._tintMessageById = null;
       this._scheduleTintForMessage = null;
+      this._restoreDeletedForumCards = null;
+      this._scheduleForumCardRestore = null;
     });
     this.forceReloadMessages();
   }
