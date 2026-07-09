@@ -1152,7 +1152,7 @@ module.exports = class MessageLoggerV2 {
         this.style.css,
         `
                     .${this.style.deleted} .${this.classes.markup}, .${this.style.deleted} .${this.classes.markup} .hljs, .${this.style.deleted} .${this.classes.container} *{
-                        color: #f04747 !important;
+                        color: ${this.settings.deletedMessageColor || "#f04747"} !important;
                     }
                     html #app-mount [data-item-id].${this.style.deleted} {
                       background-color: ${this.settings.deletedMessageColor ? hexToRgb(this.settings.deletedMessageColor, 0.12) : "rgba(240, 71, 71, 0.12)"} !important;
@@ -1605,22 +1605,37 @@ module.exports = class MessageLoggerV2 {
           { name: 'Ignore muted servers', id: 'ignoreMutedGuilds', type: 'switch' },
           { name: 'Ignore muted channels', id: 'ignoreMutedChannels', type: 'switch' },
           { name: 'Ignore bots', id: 'ignoreBots', type: 'switch' },
-          { name: 'Ignore messages posted by you', id: 'ignoreSelf', type: 'switch' },
-          { name: 'Ignore message edits from you', id: 'ignoreLocalEdits', type: 'switch' },
+          {
+            name: 'Ignore messages posted by you',
+            note: 'Applied per author, including messages inside forum posts and threads.',
+            id: 'ignoreSelf',
+            type: 'switch'
+          },
+          {
+            name: 'Ignore message edits from you',
+            note: 'Skips edits to messages authored by your account.',
+            id: 'ignoreLocalEdits',
+            type: 'switch'
+          },
           {
             name: 'Ignore message deletes from you',
-            note: 'Only ignores if you delete your own message.',
+            note: 'Skips deletions initiated by this Discord client.',
             id: 'ignoreLocalDeletes',
             type: 'switch'
           },
           { name: 'Ignore blocked users', id: 'ignoreBlockedUsers', type: 'switch' },
           { name: 'Ignore NSFW channels', id: 'ignoreNSFW', type: 'switch' },
           { name: 'Only log whitelist', id: 'onlyLogWhitelist', type: 'switch' },
-          { name: 'Always log selected channel, regardless of whitelist/blacklist', id: 'alwaysLogSelected', type: 'switch' },
+          {
+            name: 'Always log selected channel, regardless of whitelist/blacklist',
+            note: 'A selected thread also applies this override to its parent channel.',
+            id: 'alwaysLogSelected',
+            type: 'switch'
+          },
           { name: 'Always log DMs, regardless of whitelist/blacklist', id: 'alwaysLogDM', type: 'switch' },
           {
             name: 'Always log ghost pings, regardless of whitelist/blacklist',
-            note: 'Messages sent in ignored/muted/blacklisted servers and channels will be logged and shown in sent, but only gets saved if a ghost ping occurs.',
+            note: 'Watches ignored locations, but only saves a message if it becomes a ghost ping.',
             id: 'alwaysLogGhostPings',
             type: 'switch'
           }
@@ -1664,7 +1679,8 @@ module.exports = class MessageLoggerV2 {
             action: 'forceUpdateContent'
           },
           {
-            name: 'Use red background instead of red text for deleted messages',
+            name: 'Use background instead of text tint for deleted messages',
+            note: 'Uses the configured deleted-message color as a background tint.',
             id: 'useAlternativeDeletedStyle',
             type: 'switch',
             action: 'forceUpdateMessage'
@@ -1677,6 +1693,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Restore deleted messages after reload',
+            note: 'Requires deleted messages to be displayed in chat.',
             id: 'restoreDeletedMessages',
             type: 'switch',
             action: 'refreshCache'
@@ -1701,7 +1718,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Use BdApi basic notifications instead of custom toasts',
-            note: "This works for edit, send, delete and purge toasts, as well as delete and edit count toasts. Toggle it if you don't know what this does.",
+            note: 'Uses BetterDiscord notifications for logger alerts and message counts.',
             id: 'useNotificationsInstead',
             type: 'switch',
             action: 'notificationTest'
@@ -1722,32 +1739,44 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: "Auto backup data (won't fully prevent losing data, just prevent total data loss)",
+            note: 'Keeps a fallback copy of saved logger data.',
             id: 'autoBackup',
             type: 'switch',
             action: 'handleBackup'
           },
-          { name: 'Deleted messages color', id: 'deletedMessageColor', type: 'textbox' },
+          {
+            name: 'Deleted messages color',
+            note: 'Enter a hex color. Leave blank to use the built-in red.',
+            id: 'deletedMessageColor',
+            type: 'textbox',
+            action: 'refreshDeletedStyle'
+          },
           { name: 'Aggresive message caching (makes sure we have the data of any deleted or edited messages)', id: 'aggresiveMessageCaching', type: 'switch' },
           { name: 'Cache all images by storing them locally in the MLV2_IMAGE_CACHE folder inside the plugins folder', id: 'cacheAllImages', type: 'switch' },
           {
             name: "Use new cached images system",
-            note: "Makes image cache in a hierarchy",
+            note: 'Organizes cached media by server and channel.',
             id: 'newCacheAllImages',
             type: 'switch'
           },
           { name: "Always show notifications for selected channel", id: 'alwaysNotifChannel', type: 'switch' },
           { name: "Always show notifications for selected guild", id: 'alwaysNotifGuild', type: 'switch' },
           { name: "Add user id to saved media filename", id: 'addUserIdToSavedMediaFilename', type: 'switch' },
-          { name: "Show notifications to whitelisted only", id: 'notifOnlyWhitelist', type: 'switch' },
+          {
+            name: "Show notifications to whitelisted only",
+            note: 'Restricts alerts without changing what gets logged.',
+            id: 'notifOnlyWhitelist',
+            type: 'switch'
+          },
           {
             name: 'Path to new cached images system (optional)',
-            note: "",
+            note: 'Uses this existing folder instead of the default image cache.',
             id: 'newCacheAllImagesPath',
             type: 'textbox'
           },
           {
             name: "Save all cached attachments",
-            note: "Allows you to save all file types, png, gif, mp3, mp4 etc",
+            note: 'Extends the new cache system beyond images to other file types.',
             id: 'newSaveAllFileTypes',
             type: 'switch',
             customValue: true
@@ -1808,7 +1837,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Saved messages cap',
-            note: "Max number of messages saved to disk, this limit is for deleted, edited and purged INDIVIDUALLY. So if you have it set to 1000, it'll be 1000 edits, 1000 deletes and 1000 purged messages max",
+            note: 'Applied separately to deleted, edited, and purged records.',
             id: 'savedMessagesCap',
             type: 'textbox',
             validator: 'number',
@@ -1855,6 +1884,10 @@ module.exports = class MessageLoggerV2 {
       refreshCache: () => {
         this.invalidateAllChannelCache();
         if (this.selectedChannel) this.cacheChannelMessages(this.selectedChannel.id);
+      },
+      refreshDeletedStyle: () => {
+        this.updateCSS();
+        this._tintSweep?.();
       },
       forceUpdateContent: () => this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' }),
       forceUpdateMessage: () => this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE' }),
@@ -2133,6 +2166,47 @@ module.exports = class MessageLoggerV2 {
   isThreadCreatedSystemMessage(message) {
     return Number(message?.type) === 18;
   }
+  getMessageStickerItems(message) {
+    const candidates = [message?.sticker_items, message?.stickerItems, message?.stickers];
+    return candidates.find(stickers => Array.isArray(stickers) && stickers.length)
+      || candidates.find(Array.isArray)
+      || [];
+  }
+  hasSupportedMessagePayload(message) {
+    return !!(
+      message?.content?.length
+      || message?.attachments?.length
+      || message?.embeds?.length
+      || this.getMessageStickerItems(message).length
+    );
+  }
+  getStickerMedia(sticker) {
+    const id = sticker?.id;
+    const format = Number(sticker?.format_type ?? sticker?.formatType ?? 1);
+    const providedUrl = sticker?.url || sticker?.asset_url || sticker?.assetUrl;
+    if (!id || (!providedUrl && format === 3)) return null;
+    let providedExtension = null;
+    if (providedUrl) {
+      try {
+        providedExtension = new URL(providedUrl).pathname.match(/\.([0-9a-z]+)$/i)?.[1]?.toLowerCase() || null;
+      } catch {
+        return null;
+      }
+    }
+    const extension = providedExtension || (format === 4 ? 'gif' : 'png');
+    if (!this.isImage(`sticker.${extension}`)) return null;
+    const url = providedUrl || `https://media.discordapp.net/stickers/${id}.${extension}?size=160`;
+    return {
+      id: String(id),
+      filename: `${sticker.name || 'sticker'}.${extension}`,
+      url,
+      proxy_url: url,
+      width: 160,
+      height: 160,
+      hidden: false,
+      isSticker: true
+    };
+  }
   cleanupUserObject(user) {
     return {
       discriminator: user.discriminator,
@@ -2152,6 +2226,7 @@ module.exports = class MessageLoggerV2 {
     } else {
       mentionEveryone = false;
     }
+    const stickerItems = this.getMessageStickerItems(message);
     const ret = {
       mention_everyone: mentionEveryone,
       edited_timestamp: message.edited_timestamp || message.editedTimestamp && new Date(message.editedTimestamp).getTime() || null,
@@ -2177,6 +2252,8 @@ module.exports = class MessageLoggerV2 {
       mention_roles: message.mention_roles || message.mentionRoles || [],
       id: message.id,
       flags: message.flags,
+      sticker_items: stickerItems,
+      stickers: Array.isArray(message.stickers) && message.stickers.length ? message.stickers : stickerItems,
       timestamp: new Date(message.timestamp).getTime(),
       referenced_message: null
     };
@@ -3117,14 +3194,14 @@ module.exports = class MessageLoggerV2 {
     if (!threadId) return callDefault(...args);
     if (this.isSuppressedForumThreadId(threadId)) return callDefault(...args);
     if (this.settings.ignoreLocalDeletes && this.localDeletes.includes(threadId)) return callDefault(...args);
-    const deleted = this.getForumThreadDeleteMessage(channel);
     const cachedThreadMessages = this.getCachedForumThreadMessages(threadId);
+    const metadata = this.cacheForumThreadMetadata(channel, cachedThreadMessages[0] || null);
+    const deleted = this.getForumThreadDeleteMessage(channel);
     if (!deleted && !cachedThreadMessages.length) {
       this.cacheChannelMessages(threadId, threadId);
       return callDefault(...args);
     }
     const isLocalUser = this.isLocalAuthorMessage(deleted);
-    const metadata = this.cacheForumThreadMetadata(channel, cachedThreadMessages[0] || deleted);
     const shouldSaveStarter = deleted && !this.shouldIgnoreMessageAuthor(deleted) && !this.shouldIgnoreSelfMessage(deleted);
     const alreadySavedStarterDelete = this.deletedMessageSet.get(threadId)?.has(threadId);
     let savedThreadMessageCount = 0;
@@ -3161,7 +3238,7 @@ module.exports = class MessageLoggerV2 {
     try { return regex.test(new URL(url).pathname); } catch { return false; }
   }
   isImage(url) {
-    return this._testUrlPattern(url, /\.(jpe?g|png|gif|bmp|webp)$/i);
+    return this._testUrlPattern(url, /\.(jpe?g|png|gif|bmp|webp|avif|tiff?)$/i);
   }
   isVideo(url) {
     return this._testUrlPattern(url, /\.(mp4|webm|mov|avi|mkv)$/i);
@@ -3915,6 +3992,9 @@ module.exports = class MessageLoggerV2 {
       'image/png': '.png',
       'image/gif': '.gif',
       'image/webp': '.webp',
+      'image/bmp': '.bmp',
+      'image/avif': '.avif',
+      'image/tiff': '.tiff',
       'video/mp4': '.mp4',
       'video/mpeg': '.mpeg',
       'audio/mpeg': '.mp3',
@@ -3928,6 +4008,7 @@ module.exports = class MessageLoggerV2 {
     setTimeout(() => {
       const attachments = message.attachments || [];
       const embeds = message.embeds || [];
+      const stickers = this.getMessageStickerItems(message);
       for (let i = 0; i < attachments.length; i++) {
         const attachment = attachments[i];
         const maxSize = this.settings.maxCacheFileSize * 1024 * 1024;
@@ -3943,6 +4024,11 @@ module.exports = class MessageLoggerV2 {
         if (!embeds[i].image) continue;
         const embed = embeds[i].image;
         this.cacheImage(embed.url, i, embed.url.split("/")[embed.url.split("/").length - 2], message.id, message.channel_id, this.settings.newCacheAllImages === true ? message.guild_id : undefined);
+      }
+      for (let i = 0; i < stickers.length; i++) {
+        const sticker = this.getStickerMedia(stickers[i]);
+        if (!sticker) continue;
+        this.cacheImage(sticker.url, i, sticker.id, message.id, message.channel_id, this.settings.newCacheAllImages === true ? message.guild_id : undefined);
       }
     }, 0);
   }
@@ -4270,7 +4356,7 @@ module.exports = class MessageLoggerV2 {
           if (this._shouldShowToast(channel, guild, 'ghostPings')) {
             this._notifyEvent('ghostPing', channel, guild, dispatch.id);
           }
-        } else if (dispatch.type == 'MESSAGE_CREATE' && dispatch.message && (dispatch.message.content.length || dispatch.attachments?.length || dispatch.embeds?.length) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20) && this.tools.isMentioned(dispatch.message, this.localUser.id)) {
+        } else if (dispatch.type == 'MESSAGE_CREATE' && this.hasSupportedMessagePayload(dispatch.message) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20) && this.tools.isMentioned(dispatch.message, this.localUser.id)) {
           if (this._cacheIncomingMessage(dispatch.message)) return callDefault(...args);
         }
       }
@@ -4457,8 +4543,9 @@ module.exports = class MessageLoggerV2 {
         }
         this.saveData();
         return callDefault(...args);
-      } else if (dispatch.type == 'MESSAGE_CREATE' && dispatch.message && (dispatch.message.content.length || dispatch.attachments?.length || dispatch.embeds?.length) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20)) {
+      } else if (dispatch.type == 'MESSAGE_CREATE' && this.hasSupportedMessagePayload(dispatch.message) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20)) {
         if (this._cacheIncomingMessage(dispatch.message)) return callDefault(...args);
+        if (this.settings.cacheAllImages) this.cacheMessageImages(dispatch.message);
         if (this.settings.aggresiveMessageCaching) this._ensureChannelCached(channel.id);
         if (!notificationsBlacklisted && this._shouldShowToast(channel, guild, 'sent')) {
           this._notifyEvent('sent', channel, guild, dispatch.message.id);
@@ -6013,7 +6100,8 @@ module.exports = class MessageLoggerV2 {
         let isMarkup = false;
         let isEdited = false;
         let isBadImage = target.tagName == 'IMG' && target.classList.contains(this.style.imageError);
-        if (!isBadImage) {
+        const isAttachment = !!target.closest?.(`[data-ml2-attachment-message-id="${message.id}"]`);
+        if (!isBadImage && !isAttachment) {
           while (target && !target.classList) {
             if (target.classList?.contains(this.style.edited)) isEdited = target;
             target = target.parentElement;
@@ -6029,7 +6117,7 @@ module.exports = class MessageLoggerV2 {
             }
           }
         }
-        if (isMarkup || isBadImage) {
+        if (isMarkup || isBadImage || isAttachment) {
           const messageId = message.id;
           const record = this.getSavedMessage(messageId);
           if (!record) return;
@@ -6046,7 +6134,7 @@ module.exports = class MessageLoggerV2 {
               }
             });
           }
-          if (!isBadImage || record.message.content.length) {
+          if ((!isBadImage && !isAttachment) || record.message.content.length) {
             menuItems.push(
               {
                 type: 'item',
@@ -6189,6 +6277,10 @@ module.exports = class MessageLoggerV2 {
               }
             }
           );
+          if (isAttachment) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
           ContextMenu.open(
             e,
             this.buildMenu([
@@ -6306,12 +6398,45 @@ module.exports = class MessageLoggerV2 {
         if (formattedContent) {
           markup.appendChild(formattedContent);
         }
+        let hasPayloadReference = false;
+        const appendPayloadReference = (label, text, url = null) => {
+          const line = document.createElement('div');
+          line.className = this.multiClasses.markup || this.classes.markup || '';
+          line.style.color = 'var(--text-muted)';
+          line.style.marginTop = '4px';
+          line.appendChild(document.createTextNode(`[${label}] `));
+          if (url) {
+            const link = document.createElement('a');
+            link.href = url;
+            link.target = '_blank';
+            link.rel = 'noreferrer noopener';
+            link.textContent = text || url;
+            line.appendChild(link);
+          } else {
+            line.appendChild(document.createTextNode(text || 'Unavailable'));
+          }
+          markup.appendChild(line);
+          hasPayloadReference = true;
+        };
+        for (const attachment of message.attachments || []) {
+          if (this.isImage(attachment.filename || attachment.url) || this.isVideo(attachment.filename || attachment.url)) continue;
+          const isVoiceMessage = (Number(message.flags) & 8192) === 8192;
+          appendPayloadReference(isVoiceMessage ? 'Voice message' : 'Attachment', attachment.filename, attachment.url);
+        }
+        for (const embed of message.embeds || []) {
+          const rawText = embed.title || embed.description || embed.url || embed.type || 'Embedded content';
+          const text = String(rawText).length > 240 ? `${String(rawText).slice(0, 237)}...` : String(rawText);
+          appendPayloadReference('Embed', text, embed.url);
+        }
         if (!record) {
           const channel = this.tools.getChannel(message.channel_id);
           const guild = this.tools.getServer(channel?.guild_id);
           markup.addEventListener('click', () => this.jumpToMessage(message.channel_id, message.id, guild?.id));
         }
-        if (contentDiv && message.attachments.length) {
+        const stickerMedia = this.getMessageStickerItems(message).map(sticker => this.getStickerMedia(sticker)).filter(Boolean);
+        const renderedMedia = [...(message.attachments || []), ...stickerMedia];
+        if (contentDiv && renderedMedia.length) {
+          contentDiv.dataset.ml2AttachmentMessageId = messageId;
           const attemptToUseCachedImage = (attachmentId, attachmentIdx, hidden, filename, width, height) => {
             const img = document.createElement('img');
             img.classList = DiscordModules.ClickableClasses?.clickable || '';
@@ -6538,10 +6663,14 @@ module.exports = class MessageLoggerV2 {
               contentDiv.appendChild(img);
             }
           };
-          for (let ii = 0; ii < message.attachments.length; ii++) handleCreateImage(message.attachments[ii], ii);
+          for (let ii = 0; ii < renderedMedia.length; ii++) handleCreateImage(renderedMedia[ii], ii);
         }
-        if (contentDiv && !contentDiv.childElementCount && !message.content.length) return;
-        if (!contentDiv && !message.content.length) return;
+        for (const sticker of this.getMessageStickerItems(message)) {
+          if (this.getStickerMedia(sticker)) continue;
+          appendPayloadReference('Sticker', sticker.name || sticker.id);
+        }
+        if (contentDiv && !contentDiv.childElementCount && !message.content.length && !hasPayloadReference) return;
+        if (!contentDiv && !message.content.length && !hasPayloadReference) return;
         parent.appendChild(messageGroup);
       } catch (err) {
         Logger.error('Error in populateParent', err);

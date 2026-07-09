@@ -43,7 +43,7 @@ The whitelist and blacklist are managed from the **Message Logger** submenu in s
 | Display edited messages in chat | On | Shows saved edit history with messages. |
 | Max number of shown edits | `0` | Limits visible edits; `0` means no configured limit. |
 | Show oldest edit instead of newest | On | When the edit limit is exceeded, keeps older edits visible instead of newer ones. |
-| Use red background instead of red text | Off | Uses the alternative deleted-message tint. |
+| Use background instead of text tint | Off | Uses the configured deleted-message color as a background tint. |
 | Display purged messages in chat | On | Restores messages captured from bulk deletes. |
 | Restore deleted messages after reload | On | Re-adds saved messages when Discord reloads channel history. |
 | Show amount of new deleted messages | On | Displays the unseen deleted-message count when entering a channel. |
