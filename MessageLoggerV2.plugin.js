@@ -1190,6 +1190,7 @@ module.exports = class MessageLoggerV2 {
     this.style.helpContent = this.obfuscatedClass('ml2-help-content');
     this.style.filterHelpModal = this.obfuscatedClass('ml2-filter-help-modal');
     this.style.settingsHelpModal = this.obfuscatedClass('ml2-settings-help-modal');
+    this.style.cachedFilesModal = this.obfuscatedClass('ml2-cached-files-modal');
     this.style.menu = this.obfuscatedClass('ML2-MENU');
     this.loggerHelpModalKey = `${this.style.menu}-logger-help`;
     this.filterHelpModalKey = `${this.style.menu}-filter-help`;
@@ -1398,6 +1399,11 @@ module.exports = class MessageLoggerV2 {
                     .${this.style.settingsHelpModal} footer [data-direction="horizontal"],
                     .${this.style.settingsHelpModal} footer [data-mana-component="button"] {
                       width: 100%;
+                    }
+                    .${this.style.cachedFilesModal} {
+                      width: min(560px, calc(100vw - 32px)) !important;
+                      max-width: 560px !important;
+                      margin-inline: auto;
                     }
                     .${this.style.imageRoot} {
                       pointer-events: all;
@@ -1856,8 +1862,18 @@ module.exports = class MessageLoggerV2 {
             id: 'cacheAllImages',
             type: 'switch'
           },
-          { name: "Always show notifications for selected channel", id: 'alwaysNotifChannel', type: 'switch' },
-          { name: "Always show notifications for selected guild", id: 'alwaysNotifGuild', type: 'switch' },
+          {
+            name: "Always show notifications for selected channel",
+            note: 'Allows enabled alerts while viewing the active channel, thread, or parent forum.',
+            id: 'alwaysNotifChannel',
+            type: 'switch'
+          },
+          {
+            name: "Always show notifications for selected guild",
+            note: 'Treats the currently open server as an override for notification location lists.',
+            id: 'alwaysNotifGuild',
+            type: 'switch'
+          },
           { name: "Add user id to saved media filename", id: 'addUserIdToSavedMediaFilename', type: 'switch' },
           {
             name: "Show notifications to whitelisted only",
@@ -2784,7 +2800,7 @@ module.exports = class MessageLoggerV2 {
         title,
         content,
         type,
-        duration: timeout,
+        duration: timeout === 0 ? Infinity : timeout,
         actions
       });
     } else {
@@ -2797,6 +2813,10 @@ module.exports = class MessageLoggerV2 {
     }
   }
   showNotificationTest(useNotifications = this.settings.useNotificationsInstead) {
+    const now = Date.now();
+    if (this.lastNotificationTest?.mode === useNotifications
+      && now - this.lastNotificationTest.time < 500) return;
+    this.lastNotificationTest = { mode: useNotifications, time: now };
     const message = useNotifications ? 'Using BdApi notifications' : 'Using custom toasts';
     if (useNotifications) {
       UI.showNotification({
@@ -3009,16 +3029,24 @@ module.exports = class MessageLoggerV2 {
     return !!(record?.delete_data?.forum_thread_delete && record.delete_data.hidden);
   }
   _shouldShowToast(channel, guild, toastType, isLocalUser = false) {
+    if (!channel) return false;
+    const toggles = guild ? this.settings.toastToggles : this.settings.toastTogglesDMs;
+    if (!toggles?.[toastType]) return false;
+    if (guild && isLocalUser && this.settings.toastToggles.disableToastsForLocal) return false;
+    if (!guild && isLocalUser) return false;
     const selectedChannelId = this.selectedChannel?.id;
-    if (!selectedChannelId || (selectedChannelId !== channel.id && selectedChannelId !== channel.parent_id)) {
-      const toggles = guild ? this.settings.toastToggles : this.settings.toastTogglesDMs;
-      if (toggles[toastType]) {
-        if (guild && isLocalUser && this.settings.toastToggles.disableToastsForLocal) return false;
-        if (!guild && isLocalUser) return false;
-        return true;
-      }
-    }
-    return false;
+    const selectedChannelOrParent = !!selectedChannelId
+      && (selectedChannelId === channel.id || selectedChannelId === channel.parent_id);
+    const selectedGuild = !!guild && this.selectedChannel?.guild_id === guild.id;
+    const selectedOverride = (this.settings.alwaysNotifChannel && selectedChannelOrParent)
+      || (this.settings.alwaysNotifGuild && selectedGuild);
+    const notificationIds = [channel.id, channel.parent_id, guild?.id].filter(Boolean);
+    const notificationBlacklisted = notificationIds.some(id => this.settings.notificationBlacklist.includes(id));
+    const notificationWhitelisted = notificationIds.some(id => this.settings.notificationWhitelist.includes(id));
+    if (notificationBlacklisted && !selectedOverride) return false;
+    if (this.settings.notifOnlyWhitelist && !notificationWhitelisted && !selectedOverride) return false;
+    if (selectedChannelOrParent && !selectedOverride) return false;
+    return true;
   }
   _notifyEvent(eventType, channel, guild, messageId, options = {}) {
     const configs = {
@@ -3051,7 +3079,7 @@ module.exports = class MessageLoggerV2 {
         title: "Message Sent",
         getMessage: (name) => `Message sent in ${name}`,
         type: "info",
-        tab: "sent"
+        tab: null
       },
       editSpamBlocked: {
         title: "Edit Spam Blocked",
@@ -3066,10 +3094,15 @@ module.exports = class MessageLoggerV2 {
     const locationName = this.getLiteralName(channel.guild_id, channel.id);
     const message = config.getMessage(locationName, options.count, options.username);
     const timeout = config.timeout === undefined ? undefined : config.timeout;
-    const actions = config.tab ? [
-      { label: "View", onClick: () => this.openWindow(config.tab) },
-      { label: "Jump", onClick: () => this.jumpToSavedRecord(this.messageRecord[messageId] || { message: { id: messageId, channel_id: channel.id, guild_id: guild?.id }, delete_data: null }) }
-    ] : [];
+    const actions = [];
+    if (config.tab) actions.push({ label: "View", onClick: () => this.openWindow(config.tab) });
+    if (messageId) {
+      actions.push({
+        label: "Jump",
+        onClick: () => this.jumpToSavedRecord(this.messageRecord[messageId]
+          || { message: { id: messageId, channel_id: channel.id, guild_id: guild?.id }, delete_data: null })
+      });
+    }
     this._showNotification(config.title, message, config.type, actions, timeout);
   }
   _sortMessagesById(messages) {
@@ -3473,7 +3506,7 @@ module.exports = class MessageLoggerV2 {
     this.forumThreadMetadataCache.set(threadId, metadata);
     return metadata;
   }
-  handleForumThreadDelete(channel, guild, notificationsBlacklisted, notificationsWhitelisted, callDefault, args) {
+  handleForumThreadDelete(channel, guild, callDefault, args) {
     const threadId = channel?.id;
     if (!threadId) return callDefault(...args);
     const selectedChannelId = this.selectedChannel?.id || DiscordModules.SelectedChannelStore?.getChannelId?.();
@@ -3507,7 +3540,7 @@ module.exports = class MessageLoggerV2 {
       if (!this.deletedChatMessagesCount[threadId]) this.deletedChatMessagesCount[threadId] = 0;
       this.deletedChatMessagesCount[threadId]++;
     }
-    if (!notificationsBlacklisted && notificationsWhitelisted && this._shouldShowToast(channel, guild, 'deleted', isLocalUser)) {
+    if (this._shouldShowToast(channel, guild, 'deleted', isLocalUser)) {
       this._notifyEvent('deleted', channel, guild, threadId);
     }
     this._scheduleTintForMessage?.(threadId, threadId);
@@ -4466,9 +4499,10 @@ module.exports = class MessageLoggerV2 {
     }
     this.createModal({
       header: `Deleted Cached Files (${names.length})`,
-      size: this.tools.resolvedModalStuff.ModalSize.MEDIUM,
+      size: this.tools.resolvedModalStuff.ModalSize.SMALL,
       children: [this.tools.createWrappedElement([list])],
-      ml2Data: true
+      ml2Data: true,
+      className: this.style.cachedFilesModal
     }, false, modalKey);
   }
   deleteCachedFilesForRecord(record) {
@@ -4755,18 +4789,7 @@ module.exports = class MessageLoggerV2 {
         guildIsMutedReturn = this.settings.ignoreMutedGuilds && this.muteModule.isMuted(guild.id);
         channelIgnoreReturn = (this.settings.ignoreNSFW && channel.nsfw && !channelWhitelisted) || (this.settings.ignoreMutedChannels && (this.muteModule.isChannelMuted(guild.id, channel.id) || (channel.parent_id && this.muteModule.isChannelMuted(guild.id, channel.parent_id))));
       }
-      let editOrDel = 0;
-      if (dispatch.type == 'MESSAGE_DELETE') editOrDel = 1;
-      else if (dispatch.type == 'MESSAGE_UPDATE') editOrDel = 2;
       const isSelectedChannelOrThreadParent = this.selectedChannel && (this.selectedChannel.id == channel.id || (channel.parent_id && this.selectedChannel.id == channel.parent_id));
-      if (editOrDel != 0 && (this.settings.notificationBlacklist.includes(channel.id) || (channel.parent_id && this.settings.notificationBlacklist.includes(channel.parent_id)) || (guild && this.settings.notificationBlacklist.includes(guild.id))) && ((this.settings.alwaysNotifChannel && isSelectedChannelOrThreadParent) || (this.settings.alwaysNotifGuild && guild && this.selectedChannel?.guild_id == guild.id))) {
-        const shouldNotifyLocal = !isLocalUser || (guild && !this.settings.toastToggles.disableToastsForLocal);
-        if (editOrDel == 1 && (guild ? this.settings.toastToggles.deleted && shouldNotifyLocal : this.settings.toastTogglesDMs.deleted && !isLocalUser)) {
-          this._notifyEvent('deleted', channel, guild, dispatch.id);
-        } else if (editOrDel == 2 && (guild ? this.settings.toastToggles.edited && shouldNotifyLocal : this.settings.toastTogglesDMs.edited && !isLocalUser)) {
-          this._notifyEvent('edited', channel, guild, dispatch.message.id);
-        }
-      }
       if (!((this.settings.alwaysLogSelected && isSelectedChannelOrThreadParent) || (this.settings.alwaysLogDM && !guild))) {
         if (guildBlacklisted) {
           if (!channelWhitelisted) doReturn = true;
@@ -4851,7 +4874,7 @@ module.exports = class MessageLoggerV2 {
             this.saveData();
           }
           if (this._shouldShowToast(channel, guild, 'ghostPings')) {
-            this._notifyEvent('ghostPing', channel, guild, dispatch.id);
+            this._notifyEvent('ghostPing', channel, guild, dispatch.message.id);
           }
         } else if (dispatch.type == 'MESSAGE_CREATE' && this.hasSupportedMessagePayload(dispatch.message) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20) && this.tools.isMentioned(dispatch.message, this.localUser.id)) {
           if (this._cacheIncomingMessage(dispatch.message)) return callDefault(...args);
@@ -4881,12 +4904,8 @@ module.exports = class MessageLoggerV2 {
         requestAnimationFrame(() => this._tintSweep?.());
         return result;
       }
-      const notificationsBlacklisted = this.settings.notificationBlacklist.includes(channel.id) || (channel.parent_id && this.settings.notificationBlacklist.includes(channel.parent_id)) || (guild && this.settings.notificationBlacklist.includes(guild.id));
-      let notificationsWhitelisted = true;
-      if (this.settings.notifOnlyWhitelist)
-        notificationsWhitelisted = this.settings.notificationWhitelist.includes(channel.id) || (channel.parent_id && this.settings.notificationWhitelist.includes(channel.parent_id)) || (guild && this.settings.notificationWhitelist.includes(guild.id));
       if (dispatch.type == 'THREAD_DELETE') {
-        return this.handleForumThreadDelete(channel, guild, notificationsBlacklisted, notificationsWhitelisted, callDefault, args);
+        return this.handleForumThreadDelete(channel, guild, callDefault, args);
       } else if (dispatch.type == 'MESSAGE_DELETE') {
         const deleted = this.getCachedMessage(dispatch.id, dispatch.channelId) || (this.isForumThreadChannel(channel) && dispatch.id === channel.id ? this.getForumThreadDeleteMessage(channel) : null);
         this._ensureChannelCached(channel.id);
@@ -4903,7 +4922,7 @@ module.exports = class MessageLoggerV2 {
           if (!this.deletedChatMessagesCount[channel.id]) this.deletedChatMessagesCount[channel.id] = 0;
           if (!this.selectedChannel || this.selectedChannel.id != channel.id) this.deletedChatMessagesCount[channel.id]++;
         }
-        if (!notificationsBlacklisted && this._shouldShowToast(channel, guild, 'deleted', isLocalUser)) {
+        if (this._shouldShowToast(channel, guild, 'deleted', isLocalUser)) {
           this._notifyEvent('deleted', channel, guild, dispatch.id);
         }
         const record = this.messageRecord[dispatch.id];
@@ -4920,6 +4939,7 @@ module.exports = class MessageLoggerV2 {
       } else if (dispatch.type == 'MESSAGE_DELETE_BULK') {
         let failedMessage = false;
         let savedDeleteCount = 0;
+        let hasNonLocalPurgedMessage = false;
         for (const dispatchId of dispatch.ids) {
           const purged = this.getCachedMessage(dispatchId, channel.id);
           if (!purged) {
@@ -4930,6 +4950,7 @@ module.exports = class MessageLoggerV2 {
           if (this.shouldIgnoreMessageAuthor(purged)) continue;
           if (this.shouldIgnoreSelfMessage(purged)) continue;
           savedDeleteCount++;
+          if (!this.isLocalAuthorMessage(purged)) hasNonLocalPurgedMessage = true;
           this.saveDeletedMessage(purged, this.purgedMessageRecord);
           this.annotateSavedForumThreadMessage(purged, channel);
           if (this.settings.showPurgedMessages) this.refreshCacheOnlyMessage(purged);
@@ -4942,7 +4963,8 @@ module.exports = class MessageLoggerV2 {
         }
         if (failedMessage) this.cacheChannelMessages(channel.id);
         else this._ensureChannelCached(channel.id);
-        if (savedDeleteCount > 0 && !notificationsBlacklisted && notificationsWhitelisted && (guild ? this.settings.toastToggles.deleted : this.settings.toastTogglesDMs.deleted)) {
+        const localOnlyPurge = savedDeleteCount > 0 && !hasNonLocalPurgedMessage;
+        if (savedDeleteCount > 0 && this._shouldShowToast(channel, guild, 'deleted', localOnlyPurge)) {
           this._notifyEvent('bulkDelete', channel, guild, undefined, { count: savedDeleteCount });
         }
         if (!this.settings.showPurgedMessages) ret = callDefault(...args);
@@ -5037,35 +5059,33 @@ module.exports = class MessageLoggerV2 {
           previousMessage,
           [lastEditedSaved, currentSavedRecord]
         );
-        if (!notificationsBlacklisted && notificationsWhitelisted) {
-          if (guild ? this.settings.toastToggles.edited && ((isLocalUser && !this.settings.toastToggles.disableToastsForLocal) || !isLocalUser) : this.settings.toastTogglesDMs.edited && !isLocalUser) {
-            if (!this.settings.blockSpamEdit) {
-              if (this.editHistoryAntiSpam[author.id]) {
-                this.editHistoryAntiSpam[author.id].times.push(Date.now());
-              } else {
-                this.editHistoryAntiSpam[author.id] = {
-                  blocked: false,
-                  times: [Date.now()]
-                };
-              }
-              if (this.editHistoryAntiSpam[author.id].times.length > 10) this.editHistoryAntiSpam[author.id].times.shift();
-              if (this.editHistoryAntiSpam[author.id].times.length === 10 && Date.now() - this.editHistoryAntiSpam[author.id].times[0] < 60 * 1000) {
-                if (!this.editHistoryAntiSpam[author.id].blocked) {
-                  this._notifyEvent('editSpamBlocked', channel, guild, null, { username: author.username });
-                  this.editHistoryAntiSpam[author.id].blocked = true;
-                }
-              } else if (this.editHistoryAntiSpam[author.id].blocked) {
-                this.editHistoryAntiSpam[author.id].blocked = false;
-                this.editHistoryAntiSpam[author.id].times = [];
-              }
+        if (this._shouldShowToast(channel, guild, 'edited', isLocalUser)) {
+          if (!this.settings.blockSpamEdit) {
+            if (this.editHistoryAntiSpam[author.id]) {
+              this.editHistoryAntiSpam[author.id].times.push(Date.now());
+            } else {
+              this.editHistoryAntiSpam[author.id] = {
+                blocked: false,
+                times: [Date.now()]
+              };
             }
-            if (this.settings.blockSpamEdit || !this.editHistoryAntiSpam[author.id].blocked) {
-              this._notifyEvent('edited', channel, guild, dispatch.message.id);
+            if (this.editHistoryAntiSpam[author.id].times.length > 10) this.editHistoryAntiSpam[author.id].times.shift();
+            if (this.editHistoryAntiSpam[author.id].times.length === 10 && Date.now() - this.editHistoryAntiSpam[author.id].times[0] < 60 * 1000) {
+              if (!this.editHistoryAntiSpam[author.id].blocked) {
+                this._notifyEvent('editSpamBlocked', channel, guild, null, { username: author.username });
+                this.editHistoryAntiSpam[author.id].blocked = true;
+              }
+            } else if (this.editHistoryAntiSpam[author.id].blocked) {
+              this.editHistoryAntiSpam[author.id].blocked = false;
+              this.editHistoryAntiSpam[author.id].times = [];
             }
+          }
+          if (this.settings.blockSpamEdit || !this.editHistoryAntiSpam[author.id].blocked) {
+            this._notifyEvent('edited', channel, guild, dispatch.message.id);
           }
         }
         if (this._shouldShowToast(channel, guild, 'ghostPings') && ghostPinged) {
-          this._notifyEvent('ghostPing', channel, guild, dispatch.id);
+          this._notifyEvent('ghostPing', channel, guild, dispatch.message.id);
         }
         this.saveData();
         return callDefault(...args);
@@ -5073,7 +5093,7 @@ module.exports = class MessageLoggerV2 {
         if (this._cacheIncomingMessage(dispatch.message)) return callDefault(...args);
         if (this.settings.cacheAllImages) this.cacheMessageImages(dispatch.message);
         this._ensureChannelCached(channel.id);
-        if (!notificationsBlacklisted && this._shouldShowToast(channel, guild, 'sent')) {
+        if (this._shouldShowToast(channel, guild, 'sent', isLocalUser)) {
           this._notifyEvent('sent', channel, guild, dispatch.message.id);
         }
         return callDefault(...args);

@@ -61,8 +61,8 @@ The whitelist and blacklist are managed from the **Message Logger** submenu in s
 | Auto backup data | Off | Maintains a fallback copy of the logger data. It reduces, but cannot eliminate, data-loss risk. |
 | Deleted messages color | Empty | Sets deleted text and forum/thread tints; an empty value uses the built-in red. |
 | Cache media locally | On | Master switch for caching attachments, embed images, and stickers. |
-| Always show notifications for selected channel | Off | Allows selected-channel notifications despite notification blacklist rules. |
-| Always show notifications for selected guild | Off | Allows selected-server notifications despite notification blacklist rules. |
+| Always show notifications for selected channel | Off | Allows enabled alerts while viewing the active channel, thread, or parent forum and overrides notification location lists there. |
+| Always show notifications for selected guild | Off | Treats the currently open server as an override for notification location lists. |
 | Add user ID to saved media filename | Off | Includes the author ID in hierarchical cache filenames. |
 | Show notifications to whitelisted only | Off | Restricts logger notifications to the notification whitelist. |
 | Media cache path | Empty | Uses a custom existing directory instead of `MLV2_IMAGE_CACHE`. |
