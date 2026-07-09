@@ -1934,7 +1934,13 @@ module.exports = class MessageLoggerV2 {
           { name: 'Message edited', id: 'edited', type: 'switch', parent: 'toastToggles' },
           { name: 'Message deleted', id: 'deleted', type: 'switch', parent: 'toastToggles' },
           { name: 'Ghost pings', id: 'ghostPings', type: 'switch', parent: 'toastToggles' },
-          { name: 'Disable toasts for local user (yourself)', id: 'disableToastsForLocal', type: 'switch', parent: 'toastToggles' }
+          {
+            name: 'Disable toasts for local user (yourself)',
+            note: 'Suppresses alerts for actions initiated by this client. Remote deletions of your messages still alert unless messages posted by you are ignored.',
+            id: 'disableToastsForLocal',
+            type: 'switch',
+            parent: 'toastToggles'
+          }
         ]
       },
       {
@@ -3282,6 +3288,10 @@ module.exports = class MessageLoggerV2 {
     this.localDeletes.push(id);
     if (this.localDeletes.length > 50) this.localDeletes.splice(0, this.localDeletes.length - 50);
   }
+  isLocalDeleteEvent(ids) {
+    const candidates = Array.isArray(ids) ? ids : [ids];
+    return candidates.some(id => id && this.localDeletes.includes(String(id)));
+  }
   rememberLocalDeleteFromRequest(request) {
     const rawUrl = typeof request === 'string' ? request : request?.url || request?.uri || request?.href || request?.pathname;
     if (!rawUrl) return;
@@ -3603,8 +3613,9 @@ module.exports = class MessageLoggerV2 {
       this.cacheChannelMessages(threadId, threadId);
       return callDefault(...args);
     }
-    const isLocalUser = this.isLocalAuthorMessage(deleted);
-    const shouldSaveStarter = deleted && !this.shouldIgnoreMessageAuthor(deleted) && !this.shouldIgnoreSelfMessage(deleted);
+    const isLocalDelete = this.isLocalDeleteEvent(threadId);
+    const ignoredLocalStarter = !!deleted && this.shouldIgnoreSelfMessage(deleted);
+    const shouldSaveStarter = deleted && !this.shouldIgnoreMessageAuthor(deleted) && !ignoredLocalStarter;
     const alreadySavedStarterDelete = this.deletedMessageSet.get(threadId)?.has(threadId);
     let savedThreadMessageCount = 0;
     if (shouldSaveStarter && !alreadySavedStarterDelete) {
@@ -3624,7 +3635,7 @@ module.exports = class MessageLoggerV2 {
       if (!this.deletedChatMessagesCount[threadId]) this.deletedChatMessagesCount[threadId] = 0;
       this.deletedChatMessagesCount[threadId]++;
     }
-    if (this._shouldShowToast(channel, guild, 'deleted', isLocalUser)) {
+    if (!ignoredLocalStarter && this._shouldShowToast(channel, guild, 'deleted', isLocalDelete)) {
       this._notifyEvent('deleted', channel, guild, threadId);
     }
     this._scheduleTintForMessage?.(threadId, threadId);
@@ -4847,7 +4858,7 @@ module.exports = class MessageLoggerV2 {
       if (author && isLocalUser && this.settings.ignoreSelf && dispatch.type === 'MESSAGE_CREATE') return callDefault(...args);
       if (author && this.settings.ignoreBlockedUsers && this.tools.isBlocked(author.id) && !isLocalUser) return callDefault(...args);
       if (author?.avatar === 'clyde') return callDefault(...args);
-      if (this.settings.ignoreLocalEdits && dispatch.type === 'MESSAGE_UPDATE' && isLocalUser) {
+      if ((this.settings.ignoreLocalEdits || this.settings.ignoreSelf) && dispatch.type === 'MESSAGE_UPDATE' && isLocalUser) {
         const last = this.getCachedMessage(dispatch.message.id, channel.id);
         const savedRecord = this.messageRecord[dispatch.message.id];
         if (last || savedRecord) {
@@ -4895,7 +4906,8 @@ module.exports = class MessageLoggerV2 {
           if (this.shouldIgnoreSelfMessage(deleted)) return callDefault(...args);
           if (!this.tools.isMentioned(deleted, this.localUser.id)) return callDefault(...args);
           const record = this.messageRecord[dispatch.id];
-          if (this._shouldShowToast(channel, guild, 'ghostPings') && !record?.ghost_pinged) {
+          const isLocalDelete = this.isLocalDeleteEvent(dispatch.id);
+          if (this._shouldShowToast(channel, guild, 'ghostPings', isLocalDelete) && !record?.ghost_pinged) {
             this._notifyEvent('ghostPing', channel, guild, dispatch.id);
           }
           this.saveDeletedMessage(deleted, this.deletedMessageRecord);
@@ -4956,7 +4968,7 @@ module.exports = class MessageLoggerV2 {
             this._addToChannelSet(this.editedMessageSet, channel.id, dispatch.message.id);
             this.saveData();
           }
-          if (this._shouldShowToast(channel, guild, 'ghostPings')) {
+          if (this._shouldShowToast(channel, guild, 'ghostPings', isLocalUser)) {
             this._notifyEvent('ghostPing', channel, guild, dispatch.message.id);
           }
         } else if (dispatch.type == 'MESSAGE_CREATE' && this.hasSupportedMessagePayload(dispatch.message) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20) && this.tools.isMentioned(dispatch.message, this.localUser.id)) {
@@ -5005,11 +5017,12 @@ module.exports = class MessageLoggerV2 {
           if (!this.deletedChatMessagesCount[channel.id]) this.deletedChatMessagesCount[channel.id] = 0;
           if (!this.selectedChannel || this.selectedChannel.id != channel.id) this.deletedChatMessagesCount[channel.id]++;
         }
-        if (this._shouldShowToast(channel, guild, 'deleted', isLocalUser)) {
+        const isLocalDelete = this.isLocalDeleteEvent(dispatch.id);
+        if (this._shouldShowToast(channel, guild, 'deleted', isLocalDelete)) {
           this._notifyEvent('deleted', channel, guild, dispatch.id);
         }
         const record = this.messageRecord[dispatch.id];
-        if (this._shouldShowToast(channel, guild, 'ghostPings') && !record?.ghost_pinged && this.tools.isMentioned(deleted, this.localUser.id)) {
+        if (this._shouldShowToast(channel, guild, 'ghostPings', isLocalDelete) && !record?.ghost_pinged && this.tools.isMentioned(deleted, this.localUser.id)) {
           this._notifyEvent('ghostPing', channel, guild, dispatch.id);
         }
         this.saveDeletedMessage(deleted, this.deletedMessageRecord);
@@ -5022,7 +5035,7 @@ module.exports = class MessageLoggerV2 {
       } else if (dispatch.type == 'MESSAGE_DELETE_BULK') {
         let failedMessage = false;
         let savedDeleteCount = 0;
-        let hasNonLocalPurgedMessage = false;
+        const isLocalBulkDelete = this.isLocalDeleteEvent(dispatch.ids);
         for (const dispatchId of dispatch.ids) {
           const purged = this.getCachedMessage(dispatchId, channel.id);
           if (!purged) {
@@ -5033,7 +5046,6 @@ module.exports = class MessageLoggerV2 {
           if (this.shouldIgnoreMessageAuthor(purged)) continue;
           if (this.shouldIgnoreSelfMessage(purged)) continue;
           savedDeleteCount++;
-          if (!this.isLocalAuthorMessage(purged)) hasNonLocalPurgedMessage = true;
           this.saveDeletedMessage(purged, this.purgedMessageRecord);
           this.annotateSavedForumThreadMessage(purged, channel);
           if (this.settings.showPurgedMessages) this.refreshCacheOnlyMessage(purged);
@@ -5046,8 +5058,7 @@ module.exports = class MessageLoggerV2 {
         }
         if (failedMessage) this.cacheChannelMessages(channel.id);
         else this._ensureChannelCached(channel.id);
-        const localOnlyPurge = savedDeleteCount > 0 && !hasNonLocalPurgedMessage;
-        if (savedDeleteCount > 0 && this._shouldShowToast(channel, guild, 'deleted', localOnlyPurge)) {
+        if (savedDeleteCount > 0 && this._shouldShowToast(channel, guild, 'deleted', isLocalBulkDelete)) {
           this._notifyEvent('bulkDelete', channel, guild, undefined, { count: savedDeleteCount });
         }
         if (!this.settings.showPurgedMessages) ret = callDefault(...args);
@@ -5167,7 +5178,7 @@ module.exports = class MessageLoggerV2 {
             this._notifyEvent('edited', channel, guild, dispatch.message.id);
           }
         }
-        if (this._shouldShowToast(channel, guild, 'ghostPings') && ghostPinged) {
+        if (this._shouldShowToast(channel, guild, 'ghostPings', isLocalUser) && ghostPinged) {
           this._notifyEvent('ghostPing', channel, guild, dispatch.message.id);
         }
         this.saveData();

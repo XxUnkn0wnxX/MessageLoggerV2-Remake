@@ -34,6 +34,8 @@ The whitelist and blacklist are managed from the **Message Logger** submenu in s
 
 `Ignore messages posted by you` and `Ignore message deletes from you` answer different questions: the first checks who authored each message; the second checks whether the deletion was initiated locally.
 
+Self-related gates are cumulative across sent, edited, deleted, bulk-delete, ghost-ping, forum, and thread events. An author ignore excludes your message regardless of who acts on it; an event-specific local ignore only excludes actions initiated by this client.
+
 ## Display Settings
 
 | Setting | Default | Behavior |
@@ -107,6 +109,8 @@ Guilds and DMs have separate notification controls. These affect alerts, not whe
 | Ghost pings | On |
 
 The notification whitelist and blacklist are managed from the same server, channel, DM, and thread context menus as the logging lists.
+
+**Disable toasts for local user** suppresses alerts for actions initiated by this Discord client. It does not suppress a remote deletion merely because you authored the deleted message or thread. If **Ignore messages posted by you** is also enabled, your ignored message or thread root does not produce an alert.
 
 ## Message Caps
 
