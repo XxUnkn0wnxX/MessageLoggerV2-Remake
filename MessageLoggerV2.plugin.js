@@ -5780,6 +5780,34 @@ module.exports = class MessageLoggerV2 {
         restoreDeletedForumCards();
       });
     };
+    const nativeForumRefreshButtons = new WeakSet();
+    const clickNativeForumNewPostsButton = root => {
+      if (!root?.querySelectorAll) return false;
+      const candidates = [];
+      if (root.matches?.('[role="button"]')) candidates.push(root);
+      candidates.push(...root.querySelectorAll('[role="button"]'));
+      for (const button of candidates) {
+        if (nativeForumRefreshButtons.has(button)) continue;
+        if (!/^\d+\s+new posts?$/i.test(button.textContent?.trim?.() || '')) continue;
+        const list = button.parentElement?.querySelector?.('[data-list-id^="forum-channel-list-"]');
+        const listId = list?.getAttribute?.('data-list-id') || '';
+        const forumChannelId = listId.match(/^forum-channel-list-(\d+)$/)?.[1];
+        const selectedChannelId = DiscordModules.SelectedChannelStore?.getChannelId?.();
+        if (!forumChannelId || selectedChannelId !== forumChannelId) continue;
+        nativeForumRefreshButtons.add(button);
+        requestAnimationFrame(() => {
+          if (!button.isConnected || DiscordModules.SelectedChannelStore?.getChannelId?.() !== forumChannelId) return;
+          if (!/^\d+\s+new posts?$/i.test(button.textContent?.trim?.() || '')) return;
+          button.click();
+          requestAnimationFrame(() => {
+            scheduleRestoreDeletedForumCards();
+            scheduleRestoreDeletedCompactThreads();
+          });
+        });
+        return true;
+      }
+      return false;
+    };
     const tintMessageById = (channelId, messageId) => {
       const domId = getMessageNodeId(channelId, messageId);
       let applied = false;
@@ -5811,6 +5839,7 @@ module.exports = class MessageLoggerV2 {
       }, delays[attempt]);
     };
     const sweepDom = () => {
+      clickNativeForumNewPostsButton(document);
       if (!this.settings.showDeletedMessages && !this.settings.showPurgedMessages) return;
       removeSuppressedForumCards();
       document.querySelectorAll('[id^="chat-messages-"]').forEach(tintMessageNode);
@@ -5832,6 +5861,7 @@ module.exports = class MessageLoggerV2 {
           if (targetThreadId && !removeSuppressedForumCards(m.target)) tintForumCardByThreadId(targetThreadId);
           for (const node of m.addedNodes) {
             if (node.nodeType !== 1) continue;
+            clickNativeForumNewPostsButton(node);
             const removedSuppressed = removeSuppressedForumCards(node);
             if (removedSuppressed && !node.isConnected) continue;
             const messageNode = getMessageNodeFromAnyNode(node);
