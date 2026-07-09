@@ -281,6 +281,7 @@ module.exports = class MessageLoggerV2 {
       clearTimeout(this.updateTimeout);
       clearTimeout(this.saveBackupTimeout);
       clearTimeout(this.requestedDataSave);
+      this._clearNativeNotificationQueue();
       if (this.menu?.filterSetTimeout) clearTimeout(this.menu.filterSetTimeout);
       if (this.keydownListener) {
         document.removeEventListener('keydown', this.keydownListener);
@@ -521,6 +522,9 @@ module.exports = class MessageLoggerV2 {
   initialize() {
     if (this.__started) return UI.showToast(`[**${this.getName()}**] Tried to start twice..`, { timeout: 0 }, { type: "warning" });
     this.__started = true;
+    this._nativeNotificationQueueStopped = false;
+    this._nativeNotificationQueue = [];
+    this._nativeNotificationActive = null;
     DiscordModules.ModalActions.closeModal(`${this.getName()}_DEP_MODAL`);
     if (globalThis.PluginUpdates?.plugins) delete PluginUpdates.plugins['https://gitlab.com/_Lighty_/bdstuff/raw/main/public/plugins/MessageLoggerV2.plugin.js'];
     if (Plugins.get('NoDeleteMessages') && Plugins.isEnabled('NoDeleteMessages'))
@@ -2796,7 +2800,7 @@ module.exports = class MessageLoggerV2 {
   }
   _showNotification(title, content, type, actions, timeout = 4500) {
     if (this.settings.useNotificationsInstead) {
-      UI.showNotification({
+      this._enqueueNativeNotification({
         title,
         content,
         type,
@@ -2812,6 +2816,86 @@ module.exports = class MessageLoggerV2 {
       });
     }
   }
+  _enqueueNativeNotification(notification) {
+    if (this._nativeNotificationQueueStopped) return;
+    if (!this._nativeNotificationQueue) this._nativeNotificationQueue = [];
+    this._nativeNotificationQueue.push(notification);
+    this._drainNativeNotificationQueue();
+    this._scheduleNativeNotificationYield();
+  }
+  _drainNativeNotificationQueue() {
+    if (this._nativeNotificationQueueStopped || this._nativeNotificationActive) return;
+    const notification = this._nativeNotificationQueue?.shift();
+    if (!notification) return;
+    const active = {
+      notification,
+      duration: notification.duration,
+      shownAt: Date.now(),
+      handle: null,
+      fallbackTimer: null,
+      yieldTimer: null,
+      finished: false,
+      finish: null
+    };
+    active.finish = () => {
+      if (active.finished) return;
+      active.finished = true;
+      clearTimeout(active.fallbackTimer);
+      clearTimeout(active.yieldTimer);
+      if (this._nativeNotificationActive === active) this._nativeNotificationActive = null;
+      if (!this._nativeNotificationQueueStopped) setTimeout(() => this._drainNativeNotificationQueue(), 0);
+    };
+    this._nativeNotificationActive = active;
+    try {
+      active.handle = UI.showNotification({
+        ...notification,
+        onClose: active.finish
+      });
+    } catch (error) {
+      Logger.error('Failed to show queued notification', error);
+      active.finish();
+      return;
+    }
+    if (!active.handle) {
+      active.finish();
+      return;
+    }
+    if (Number.isFinite(active.duration) && active.duration > 0) {
+      active.fallbackTimer = setTimeout(() => {
+        try {
+          active.handle?.close?.();
+        } finally {
+          active.finish();
+        }
+      }, active.duration + 1000);
+    }
+    this._scheduleNativeNotificationYield();
+  }
+  _scheduleNativeNotificationYield() {
+    const active = this._nativeNotificationActive;
+    if (!active || active.duration !== Infinity || !this._nativeNotificationQueue?.length || active.yieldTimer) return;
+    const delay = Math.max(0, active.shownAt + 4500 - Date.now());
+    active.yieldTimer = setTimeout(() => {
+      try {
+        active.handle?.close?.();
+      } finally {
+        active.finish();
+      }
+    }, delay);
+  }
+  _clearNativeNotificationQueue() {
+    this._nativeNotificationQueueStopped = true;
+    if (this._nativeNotificationQueue) this._nativeNotificationQueue.length = 0;
+    const active = this._nativeNotificationActive;
+    this._nativeNotificationActive = null;
+    if (!active) return;
+    active.finished = true;
+    clearTimeout(active.fallbackTimer);
+    clearTimeout(active.yieldTimer);
+    try {
+      active.handle?.close?.();
+    } catch {}
+  }
   showNotificationTest(useNotifications = this.settings.useNotificationsInstead) {
     const now = Date.now();
     if (this.lastNotificationTest?.mode === useNotifications
@@ -2819,7 +2903,7 @@ module.exports = class MessageLoggerV2 {
     this.lastNotificationTest = { mode: useNotifications, time: now };
     const message = useNotifications ? 'Using BdApi notifications' : 'Using custom toasts';
     if (useNotifications) {
-      UI.showNotification({
+      this._enqueueNativeNotification({
         title: 'Notification Test',
         content: message,
         type: 'success',
