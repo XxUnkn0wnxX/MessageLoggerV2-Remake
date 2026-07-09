@@ -112,13 +112,25 @@ The notification whitelist and blacklist are managed from the same server, chann
 
 **Disable toasts for local user** suppresses alerts for actions initiated by this Discord client. It does not suppress a remote deletion merely because you authored the deleted message or thread. If **Ignore messages posted by you** is also enabled, your ignored message or thread root does not produce an alert.
 
+## Anti Nuke
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| Enable Anti Nuke | On | Captures a bounded snapshot under **Purged** when a parent forum or text channel is deleted. This emergency path overrides whitelist, blacklist, mute, NSFW, bot, blocked-user, self-author, and local-delete rules. Turning it off suppresses the entire cascade. |
+| Thread and forum post cap | `10` | Limits structural thread/forum-post roots captured per deleted parent channel. Blank or `0` is unlimited. |
+| Total message cap | `10` | One total shared allowance for child replies across all captured threads/forum posts plus ordinary parent-channel messages. Root messages do not consume this cap, so the total saved record count can exceed it. Blank or `0` is unlimited. |
+| Total attachment cap | `10` | One total shared allowance for Discord file attachments across the deleted channel. A single message can consume the entire cap. Blank or `0` is unlimited. |
+
+All three caps are shared across one parent-channel deletion event. Thread/forum roots are captured newest-first, replies within them are captured newest-first, and the remaining message allowance then captures the newest ordinary parent-channel messages. The attachment allowance is consumed only after its owning message is admitted by the message cap, so attachments from an excluded message are never stored. It only governs Discord file attachments; roots are still retained when their attachments exceed the budget. Anti Nuke intentionally bypasses normal logging ignores and overrides; only its own toggle disables capture. Unlimited values can freeze or crash Discord or use substantial disk space on large channels.
+
+Anti Nuke records are archival because their parent channel no longer exists, so they do not offer **Jump to Message**. The same channel-aware rule applies outside Anti Nuke: Jump is omitted whenever neither the message channel nor a saved thread/forum parent still exists.
+
 ## Message Caps
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
 | Cached messages cap | `1000` | Maximum sent messages retained in the working cache. |
 | Saved messages cap | `1000` | Separate maximum for deleted, edited, and purged records. |
-| Deleted channel capture cap | `25` | Shared limit for forum posts, channel threads, and ordinary messages captured under **Purged** when their parent forum or text channel is deleted. Thread roots are captured before ordinary channel messages. Blank or `0` is unlimited and can freeze or crash Discord on large channels. |
 | Menu message render cap | `50` | Number rendered before **Load More** appears. |
 
 Caps are enforced periodically. Increasing a cap does not restore records that were already removed.

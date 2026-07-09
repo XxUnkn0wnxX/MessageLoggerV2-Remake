@@ -139,11 +139,11 @@ Notification settings affect alerts only. Logging scope is controlled separately
 - Hiding or unhiding the root applies to all related child records.
 - Removing the root from the logger removes all related records.
 - Child messages can be hidden, unhidden, or removed individually while the root remains.
-- Jumping from a child record opens the exact message when its live thread still exists. Fully deleted threads fall back to the restored parent card or thread entry.
+- Jumping from a child record opens the exact message when its live thread still exists. Fully deleted threads fall back to the restored parent card or thread entry. Jump is unavailable when both the thread and its parent channel are gone.
 - A restored forum card opens a logger view limited to that thread.
 - **Automatically refresh new forum posts** uses Discord's native **New Post(s)** control so new cards appear without leaving and reopening the forum.
 - Fully deleted forum cards and thread entries use an anchor system: Discord must have at least one live forum post or thread entry whose current layout can be cloned. If the list is empty, deleted items remain logged but are not rendered until a live item exists.
-- Deleting a parent forum or text channel captures nested forum posts or threads first, then ordinary channel messages under **Purged** with one configurable event cap. The default is `25`; blank or `0` is unlimited and unsafe for large channels.
+- **Anti Nuke** captures a deleted parent forum or text channel under **Purged**, overriding all normal logging ignores and location rules unless Anti Nuke itself is disabled. Thread/forum-post, total-message, and total-attachment caps default to `10` and are shared across one deletion event. Capture runs newest-first; attachments are considered only after their owning message is admitted, while root messages bypass the total-message cap but their files still consume the attachment cap. Blank or `0` is unlimited and unsafe for large channels. Anti Nuke records do not offer Jump because their parent channel is gone.
 - Parent-channel “started a thread” system messages are left to Discord and are not logged.
 - Message-history caching and hierarchical media storage stay enabled internally so complete post/thread deletions do not lose unloaded messages or media paths.
 - Flat media-cache files from older versions or forks remain supported for rendering.
