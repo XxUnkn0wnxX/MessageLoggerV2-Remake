@@ -574,6 +574,7 @@ module.exports = class MessageLoggerV2 {
       alwaysLogSelected: true,
       alwaysLogDM: true,
       restoreDeletedMessages: true,
+      autoRefreshForumPosts: true,
       contextmenuSubmenuName: '',
       imageCacheDir: this.pluginDir + '/MLV2_IMAGE_CACHE',
       maxCacheFileSize: 0,
@@ -1864,6 +1865,13 @@ module.exports = class MessageLoggerV2 {
             type: 'switch',
             action: 'toggleLogsButton'
           },
+          {
+            name: 'Automatically refresh new forum posts',
+            note: "Uses Discord's native New Post control so cards appear without leaving the forum.",
+            id: 'autoRefreshForumPosts',
+            type: 'switch',
+            action: 'refreshNativeForumPosts'
+          },
           { name: 'Block spam edit notifications (if enabled)', id: 'blockSpamEdit', type: 'switch' }
         ]
       },
@@ -1988,6 +1996,9 @@ module.exports = class MessageLoggerV2 {
       toggleLogsButton: (val) => {
         if (val) return this.addOpenLogsButton();
         this.removeOpenLogsButton();
+      },
+      refreshNativeForumPosts: (val) => {
+        if (val) this._refreshNativeForumPosts?.();
       },
       resetDataInterval: () => {
         clearInterval(this.dataManagerInterval);
@@ -5782,6 +5793,7 @@ module.exports = class MessageLoggerV2 {
     };
     const nativeForumRefreshButtons = new WeakSet();
     const clickNativeForumNewPostsButton = root => {
+      if (!this.settings.autoRefreshForumPosts) return false;
       if (!root?.querySelectorAll) return false;
       const candidates = [];
       if (root.matches?.('[role="button"]')) candidates.push(root);
@@ -5796,8 +5808,13 @@ module.exports = class MessageLoggerV2 {
         if (!forumChannelId || selectedChannelId !== forumChannelId) continue;
         nativeForumRefreshButtons.add(button);
         requestAnimationFrame(() => {
-          if (!button.isConnected || DiscordModules.SelectedChannelStore?.getChannelId?.() !== forumChannelId) return;
-          if (!/^\d+\s+new posts?$/i.test(button.textContent?.trim?.() || '')) return;
+          if (!this.settings.autoRefreshForumPosts
+            || !button.isConnected
+            || DiscordModules.SelectedChannelStore?.getChannelId?.() !== forumChannelId
+            || !/^\d+\s+new posts?$/i.test(button.textContent?.trim?.() || '')) {
+            nativeForumRefreshButtons.delete(button);
+            return;
+          }
           button.click();
           requestAnimationFrame(() => {
             scheduleRestoreDeletedForumCards();
@@ -5900,6 +5917,7 @@ module.exports = class MessageLoggerV2 {
     this._scheduleForumCardRestore = scheduleRestoreDeletedForumCards;
     this._restoreDeletedCompactThreads = restoreDeletedCompactThreads;
     this._scheduleThreadRestore = scheduleRestoreDeletedCompactThreads;
+    this._refreshNativeForumPosts = () => clickNativeForumNewPostsButton(document);
     sweepDom();
     this.unpatches.push(() => {
       try { tintObserver.disconnect(); } catch {}
@@ -5910,6 +5928,7 @@ module.exports = class MessageLoggerV2 {
       this._scheduleForumCardRestore = null;
       this._restoreDeletedCompactThreads = null;
       this._scheduleThreadRestore = null;
+      this._refreshNativeForumPosts = null;
     });
     this.forceReloadMessages();
   }

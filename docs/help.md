@@ -136,6 +136,7 @@ Notification settings affect alerts only. Logging scope is controlled separately
 - Child messages can be hidden, unhidden, or removed individually while the root remains.
 - Jumping from a child record opens the exact message when its live thread still exists. Fully deleted threads fall back to the restored parent card or thread entry.
 - A restored forum card opens a logger view limited to that thread.
+- **Automatically refresh new forum posts** uses Discord's native **New Post(s)** control so new cards appear without leaving and reopening the forum.
 - Fully deleted forum cards and thread entries use an anchor system: Discord must have at least one live forum post or thread entry whose current layout can be cloned. If the list is empty, deleted items remain logged but are not rendered until a live item exists.
 - Parent-channel “started a thread” system messages are left to Discord and are not logged.
 - Message-history caching and hierarchical media storage stay enabled internally so complete post/thread deletions do not lose unloaded messages or media paths.
