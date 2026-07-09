@@ -138,6 +138,8 @@ Notification settings affect alerts only. Logging scope is controlled separately
 - A restored forum card opens a logger view limited to that thread.
 - Restored forum and thread list items require at least one live Discord item to supply the current layout.
 - Parent-channel “started a thread” system messages are left to Discord and are not logged.
+- Message-history caching and hierarchical media storage stay enabled internally so complete post/thread deletions do not lose unloaded messages or media paths.
+- Flat media-cache files from older versions or forks remain supported for rendering.
 
 ## Troubleshooting
 
@@ -160,7 +162,7 @@ Enable **Show Hidden tab in logger** under Display settings. Disabling the tab d
 
 ### Attachments are unavailable
 
-Remote Discord attachment and sticker URLs can expire or return `403`/`404`. Enable media caching before deletion when local preservation is required. Content already expired before it was cached cannot be recovered.
+Remote Discord attachment and sticker URLs can expire or return `403`/`404`. Keep **Cache media locally** enabled when local preservation is required. Content already expired before it was cached cannot be recovered.
 
 ### Plugin conflicts
 

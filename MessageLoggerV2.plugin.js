@@ -554,12 +554,10 @@ module.exports = class MessageLoggerV2 {
       blockSpamEdit: false,
       cacheAllImages: true,
       newCacheAllImagesPath: '',
-      newCacheAllImages: false,
       alwaysNotifChannel: false,
       alwaysNotifGuild: false,
       notifOnlyWhitelist: false,
       notificationWhitelist: [],
-      aggresiveMessageCaching: true,
       renderCap: 50,
       maxShownEdits: 0,
       hideNewerEditsFirst: true,
@@ -589,6 +587,11 @@ module.exports = class MessageLoggerV2 {
     if (!this.settings || !Object.keys(this.settings).length) {
       UI.showToast(`[${this.getName()}] Settings file corrupted! All settings restored to default.`, { type: "error", timeout: 0 });
       this.settings = defaultSettings;
+      settingsChanged = true;
+    }
+    for (const legacySetting of ['aggresiveMessageCaching', 'newCacheAllImages']) {
+      if (!Object.prototype.hasOwnProperty.call(this.settings, legacySetting)) continue;
+      delete this.settings[legacySetting];
       settingsChanged = true;
     }
     if (typeof this.settings.showHiddenTab !== 'boolean') {
@@ -1751,12 +1754,10 @@ module.exports = class MessageLoggerV2 {
             type: 'textbox',
             action: 'refreshDeletedStyle'
           },
-          { name: 'Aggresive message caching (makes sure we have the data of any deleted or edited messages)', id: 'aggresiveMessageCaching', type: 'switch' },
-          { name: 'Cache all images by storing them locally in the MLV2_IMAGE_CACHE folder inside the plugins folder', id: 'cacheAllImages', type: 'switch' },
           {
-            name: "Use new cached images system",
-            note: 'Organizes cached media by server and channel.',
-            id: 'newCacheAllImages',
+            name: 'Cache media locally',
+            note: 'Master switch for caching attachments, embed images, and stickers.',
+            id: 'cacheAllImages',
             type: 'switch'
           },
           { name: "Always show notifications for selected channel", id: 'alwaysNotifChannel', type: 'switch' },
@@ -1769,14 +1770,14 @@ module.exports = class MessageLoggerV2 {
             type: 'switch'
           },
           {
-            name: 'Path to new cached images system (optional)',
-            note: 'Uses this existing folder instead of the default image cache.',
+            name: 'Media cache path (optional)',
+            note: 'Uses this existing folder instead of MLV2_IMAGE_CACHE.',
             id: 'newCacheAllImagesPath',
             type: 'textbox'
           },
           {
-            name: "Save all cached attachments",
-            note: 'Extends the new cache system beyond images to other file types.',
+            name: "Cache all attachment types",
+            note: 'Also caches videos, audio, and other non-image files.',
             id: 'newSaveAllFileTypes',
             type: 'switch',
             customValue: true
@@ -2576,8 +2577,7 @@ module.exports = class MessageLoggerV2 {
       if (logged.includes(changed[i].id)) continue;
       content += "`Attachment Deleted: `" + changed[i].url + "\n";
       if (this.settings.cacheAllImages) {
-        this.cacheImage(changed[i].url, i, changed[i].id, messageId, channelId,
-          this.settings.newCacheAllImages ? guildId : undefined);
+        this.cacheImage(changed[i].url, i, changed[i].id, messageId, channelId, guildId);
       }
       logged.push(changed[i].id);
     }
@@ -4003,15 +4003,10 @@ module.exports = class MessageLoggerV2 {
         return;
       }
       if (!Number(attachmentId)) attachmentId = messageId;
-      if (this.settings.newCacheAllImages === true) {
-        const filePath = this.imageCacheServerSimulator.resolveNewCachePath({ channelId: channelId, serverId: serverId });
-        this.nodeModules.fs.mkdirSync(filePath, { recursive: true });
-        this.nodeModules.fs.writeFileSync(filePath + `/${attachmentId} (${messageId}${(this.settings.addUserIdToSavedMediaFilename && this.messageRecord[messageId]?.message?.author?.id) ? (" by " + this.messageRecord[messageId].message.author.id) : ""
-        })${fileExtension}`, finalData, { encoding: null });
-      }
-      else {
-        this.nodeModules.fs.writeFileSync(this.settings.imageCacheDir + `/${attachmentId}${fileExtension}`, finalData, { encoding: null });
-      }
+      const filePath = this.imageCacheServerSimulator.resolveNewCachePath({ channelId: channelId, serverId: serverId });
+      this.nodeModules.fs.mkdirSync(filePath, { recursive: true });
+      this.nodeModules.fs.writeFileSync(filePath + `/${attachmentId} (${messageId}${(this.settings.addUserIdToSavedMediaFilename && this.messageRecord[messageId]?.message?.author?.id) ? (" by " + this.messageRecord[messageId].message.author.id) : ""
+      })${fileExtension}`, finalData, { encoding: null });
       Logger.log(`Cached image: ${attachmentId}${fileExtension}`);
     } catch (e) {
       attempts++;
@@ -4053,18 +4048,18 @@ module.exports = class MessageLoggerV2 {
           continue;
         }
         if (this.isImage(attachment.url) || this.settings.newSaveAllFileTypes) {
-          this.cacheImage(attachment.url, i, attachment.id, message.id, message.channel_id, this.settings.newCacheAllImages === true ? message.guild_id : undefined);
+          this.cacheImage(attachment.url, i, attachment.id, message.id, message.channel_id, message.guild_id);
         }
       }
       for (let i = 0; i < embeds.length; i++) {
         if (!embeds[i].image) continue;
         const embed = embeds[i].image;
-        this.cacheImage(embed.url, i, embed.url.split("/")[embed.url.split("/").length - 2], message.id, message.channel_id, this.settings.newCacheAllImages === true ? message.guild_id : undefined);
+        this.cacheImage(embed.url, i, embed.url.split("/")[embed.url.split("/").length - 2], message.id, message.channel_id, message.guild_id);
       }
       for (let i = 0; i < stickers.length; i++) {
         const sticker = this.getStickerMedia(stickers[i]);
         if (!sticker) continue;
-        this.cacheImage(sticker.url, i, sticker.id, message.id, message.channel_id, this.settings.newCacheAllImages === true ? message.guild_id : undefined);
+        this.cacheImage(sticker.url, i, sticker.id, message.id, message.channel_id, message.guild_id);
       }
     }, 0);
   }
@@ -4436,7 +4431,7 @@ module.exports = class MessageLoggerV2 {
         return this.handleForumThreadDelete(channel, guild, notificationsBlacklisted, notificationsWhitelisted, callDefault, args);
       } else if (dispatch.type == 'MESSAGE_DELETE') {
         const deleted = this.getCachedMessage(dispatch.id, dispatch.channelId) || (this.isForumThreadChannel(channel) && dispatch.id === channel.id ? this.getForumThreadDeleteMessage(channel) : null);
-        if (this.settings.aggresiveMessageCaching) this._ensureChannelCached(channel.id);
+        this._ensureChannelCached(channel.id);
         if (!deleted) return callDefault(...args);
         if (this.isThreadCreatedSystemMessage(deleted)) return callDefault(...args);
         if (this.shouldIgnoreSelfMessage(deleted)) return callDefault(...args);
@@ -4485,9 +4480,8 @@ module.exports = class MessageLoggerV2 {
           if (!this.deletedChatMessagesCount[channel.id]) this.deletedChatMessagesCount[channel.id] = 0;
           if (!this.selectedChannel || this.selectedChannel.id != channel.id) this.deletedChatMessagesCount[channel.id] += savedDeleteCount;
         }
-        if (failedMessage && this.settings.aggresiveMessageCaching)
-          this.cacheChannelMessages(channel.id);
-        else if (this.settings.aggresiveMessageCaching) this._ensureChannelCached(channel.id);
+        if (failedMessage) this.cacheChannelMessages(channel.id);
+        else this._ensureChannelCached(channel.id);
         if (savedDeleteCount > 0 && !notificationsBlacklisted && notificationsWhitelisted && (guild ? this.settings.toastToggles.deleted : this.settings.toastTogglesDMs.deleted)) {
           this._notifyEvent('bulkDelete', channel, guild, undefined, { count: savedDeleteCount });
         }
@@ -4501,7 +4495,7 @@ module.exports = class MessageLoggerV2 {
           if (savedRecord) this.saveData();
           return callDefault(...args);
         }
-        if (this.settings.aggresiveMessageCaching) this._ensureChannelCached(channel.id);
+        this._ensureChannelCached(channel.id);
         const last = this.getCachedMessage(dispatch.message.id, channel.id);
         const lastEditedSaved = this.getEditedMessage(dispatch.message.id, channel.id);
         if (!last && !lastEditedSaved) return callDefault(...args);
@@ -4618,7 +4612,7 @@ module.exports = class MessageLoggerV2 {
       } else if (dispatch.type == 'MESSAGE_CREATE' && this.hasSupportedMessagePayload(dispatch.message) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20)) {
         if (this._cacheIncomingMessage(dispatch.message)) return callDefault(...args);
         if (this.settings.cacheAllImages) this.cacheMessageImages(dispatch.message);
-        if (this.settings.aggresiveMessageCaching) this._ensureChannelCached(channel.id);
+        this._ensureChannelCached(channel.id);
         if (!notificationsBlacklisted && this._shouldShowToast(channel, guild, 'sent')) {
           this._notifyEvent('sent', channel, guild, dispatch.message.id);
         }

@@ -60,15 +60,13 @@ The whitelist and blacklist are managed from the **Message Logger** submenu in s
 | Disable saving data | Off | Keeps logs only for the current session and disables automatic backups. |
 | Auto backup data | Off | Maintains a fallback copy of the logger data. It reduces, but cannot eliminate, data-loss risk. |
 | Deleted messages color | Empty | Sets deleted text and forum/thread tints; an empty value uses the built-in red. |
-| Aggressive message caching | On | Keeps more message data available so deletes and edits can be reconstructed. |
-| Cache all images | On | Stores available image attachments, embed images, and stickers under `MLV2_IMAGE_CACHE`. |
-| Use new cached images system | Off | Organizes cached media in a hierarchy. |
+| Cache media locally | On | Master switch for caching attachments, embed images, and stickers. |
 | Always show notifications for selected channel | Off | Allows selected-channel notifications despite notification blacklist rules. |
 | Always show notifications for selected guild | Off | Allows selected-server notifications despite notification blacklist rules. |
-| Add user ID to saved media filename | Off | Includes the author ID in filenames created by the new cache system. |
+| Add user ID to saved media filename | Off | Includes the author ID in hierarchical cache filenames. |
 | Show notifications to whitelisted only | Off | Restricts logger notifications to the notification whitelist. |
-| Path to new cached images system | Empty | Uses a custom existing directory for the hierarchical cache. |
-| Save all cached attachments | Off | Extends the new cache system beyond images to other attachment types. |
+| Media cache path | Empty | Uses a custom existing directory instead of `MLV2_IMAGE_CACHE`. |
+| Cache all attachment types | Off | Also caches videos, audio, and other non-image files. |
 | Max cache file size | `0` MB | Skips larger files; `0` disables the size limit. |
 | Display open logs button | On | Shows the logger button beside channel search. |
 | Block spam edit notifications | Off | Reduces repeated edit notifications from rapid edits. |
@@ -118,6 +116,8 @@ The notification whitelist and blacklist are managed from the same server, chann
 | Menu message render cap | `50` | Number rendered before **Load More** appears. |
 
 Caps are enforced periodically. Increasing a cap does not restore records that were already removed.
+
+Message-history caching and hierarchical media storage are core behavior and no longer have separate toggles. Disabling either made complete forum-post and thread deletions vulnerable to missing unloaded messages or inconsistent media paths. Legacy flat-cache files from older versions and other logger forks remain readable; only new downloads are forced into hierarchical folders.
 
 ## Advanced
 
