@@ -3820,14 +3820,14 @@ module.exports = class MessageLoggerV2 {
                                 </div>
                                 <strong>Toasts:</strong></br>
                                 <div class="${this.style.textIndent}">
-                                    Note: Little "notifications" in discord that tell you if a message was edited, deleted, purged etc are called Toasts!</br></br>
+                                    Note: Custom toasts can stack and expose actions through mouse clicks.</br></br>
                                     LEFT-CLICK:</br>
                                     <div class="${this.style.textIndent}">
-                                        Opens menu with the relevant tab</br>
+                                        Runs the first available action. Saved events open the relevant logger tab; sent-message alerts jump directly because there is no Sent tab.</br>
                                     </div></br>
                                     RIGHT-CLICK:</br>
                                     <div class="${this.style.textIndent}">
-                                        Jumps to relevant message in the relevant channel
+                                        Runs the second action when available, normally jumping to the relevant message or location.
                                     </div></br>
                                     MIDDLE-CLICK/SCROLLWHEEL-CLICK:</br>
                                     <div class="${this.style.textIndent}">
@@ -3836,14 +3836,13 @@ module.exports = class MessageLoggerV2 {
                                 </div>
                                 <strong>Notifications:</strong></br>
                                 <div class="${this.style.textIndent}">
-                                    Note: They show in the bottom right corner and are called Custom notifications. Can be enabled in Settings > Display Settings, all the way at the bottom.</br></br>
-                                    LEFT-CLICK:</br>
+                                    Note: BetterDiscord displays one notification at a time. Alerts from guilds and DMs share one memory-only queue that clears on plugin or Discord reload.</br></br>
+                                    ACTIONS:</br>
                                     <div class="${this.style.textIndent}">
-                                        Opens menu with the relevant tab</br>
-                                    </div></br>
-                                    RIGHT-CLICK:</br>
-                                    <div class="${this.style.textIndent}">
-                                        Jumps to relevant message in the relevant channel
+                                        Deleted, edited, and ghost-ping alerts provide View and Jump.</br>
+                                        Sent-message alerts provide Jump only because sent messages are not stored in a logger tab.</br>
+                                        Bulk-delete summaries provide View only.</br>
+                                        Persistent ghost pings yield after 4.5 seconds when another alert is waiting.
                                     </div></br>
                                 </div>
                                 <strong>Open Logs button (top right next to search):</strong></br>

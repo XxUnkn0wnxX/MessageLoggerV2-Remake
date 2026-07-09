@@ -85,7 +85,7 @@ Disabling a display option does not necessarily delete its stored records. Use *
 
 ## Toast Notifications
 
-Guilds and DMs have separate notification controls. These affect alerts, not whether records are saved.
+Guilds and DMs have separate notification controls. These affect alerts, not whether records are saved. BetterDiscord notifications from every location share one memory-only FIFO queue; custom toasts continue to stack.
 
 ### Guilds
 

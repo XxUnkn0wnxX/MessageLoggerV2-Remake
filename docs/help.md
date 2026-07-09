@@ -22,7 +22,6 @@ To log all eligible unmuted servers instead, disable **Only log whitelist** unde
 
 ## Logger Tabs
 
-- **Sent**: cached sent messages used by logger features.
 - **Deleted**: individually deleted messages and deleted forum/thread roots.
 - **Edited**: saved edit history.
 - **Purged**: messages captured from bulk deletes.
@@ -30,6 +29,8 @@ To log all eligible unmuted servers instead, disable **Only log whitelist** unde
 - **Hidden**: hidden records from every category, when enabled in Display settings.
 
 Unhiding a record returns it to its original category.
+
+Sent messages do not have a logger tab or persistent history. They are retained only in a bounded memory cache used to reconstruct later deletions and edits.
 
 ## Filtering
 
@@ -95,14 +96,16 @@ Right-click saved messages in the logger or channel view to access applicable ac
 
 For custom toasts:
 
-- Left-click: open the relevant logger tab.
-- Right-click: jump to the relevant message or forum/thread location.
+- Left-click: run the first available action. Saved events open the relevant logger tab; sent-message alerts jump directly.
+- Right-click: run the second action when available, normally jumping to the relevant message or forum/thread location.
 - Middle-click: dismiss the toast.
 
 For BetterDiscord notifications:
 
-- Left-click: open the relevant logger tab.
-- Right-click: jump to the relevant location.
+- Deleted, edited, and ghost-ping alerts provide **View** and **Jump**.
+- Sent-message alerts provide **Jump** only.
+- Bulk-delete summaries provide **View** only.
+- Guild and DM alerts share one memory-only FIFO queue. Persistent ghost pings yield after 4.5 seconds when another alert is waiting.
 
 Notification settings affect alerts only. Logging scope is controlled separately.
 
