@@ -79,6 +79,13 @@ Right-click saved messages in the logger or channel view to access applicable ac
 
 **Hide** preserves the record and moves it to the Hidden tab. **Remove From Log** permanently deletes the stored record.
 
+### Media-only records
+
+- Attachment-only messages retain the same hide, remove, and context-menu actions as text messages.
+- Supported image and animated stickers render as media when their source or local cache is available.
+- Embeds, voice messages, non-image files, and unsupported stickers show a compact reference in the logger window.
+- Restored channel messages retain their saved payload so Discord can render supported content natively.
+
 ### Clear log
 
 **Clear log** applies to the selected tab and active filter. For example, clearing a channel-filtered Deleted tab removes matching deleted records, not every category and location.
@@ -152,7 +159,7 @@ Enable **Show Hidden tab in logger** under Display settings. Disabling the tab d
 
 ### Attachments are unavailable
 
-Remote Discord attachment URLs can expire or return `403`/`404`. Enable attachment caching before deletion when local preservation is required.
+Remote Discord attachment and sticker URLs can expire or return `403`/`404`. Enable media caching before deletion when local preservation is required. Content already expired before it was cached cannot be recovered.
 
 ### Plugin conflicts
 

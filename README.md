@@ -11,7 +11,8 @@ A maintained BetterDiscord message logger for deleted, edited, purged, and ghost
 - Restored deleted messages after reload.
 - Forum post and channel thread logging with parent-channel metadata.
 - Whitelist, blacklist, mute, author, and local-action controls.
-- Search filters, context-menu actions, notifications, hidden records, and attachment caching.
+- Search filters, context-menu actions, notifications, hidden records, and media caching.
+- Attachment-only messages, stickers, and compact embed/file references in logger views.
 
 ## Install
 

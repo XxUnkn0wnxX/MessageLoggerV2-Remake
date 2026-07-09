@@ -59,9 +59,9 @@ The whitelist and blacklist are managed from the **Message Logger** submenu in s
 | --- | --- | --- |
 | Disable saving data | Off | Keeps logs only for the current session and disables automatic backups. |
 | Auto backup data | Off | Maintains a fallback copy of the logger data. It reduces, but cannot eliminate, data-loss risk. |
-| Deleted messages color | Empty | Overrides the deleted tint; an empty value uses the built-in red. |
+| Deleted messages color | Empty | Sets deleted text and forum/thread tints; an empty value uses the built-in red. |
 | Aggressive message caching | On | Keeps more message data available so deletes and edits can be reconstructed. |
-| Cache all images | On | Stores available attachments under `MLV2_IMAGE_CACHE` in the plugins folder. |
+| Cache all images | On | Stores available image attachments, embed images, and stickers under `MLV2_IMAGE_CACHE`. |
 | Use new cached images system | Off | Organizes cached media in a hierarchy. |
 | Always show notifications for selected channel | Off | Allows selected-channel notifications despite notification blacklist rules. |
 | Always show notifications for selected guild | Off | Allows selected-server notifications despite notification blacklist rules. |
