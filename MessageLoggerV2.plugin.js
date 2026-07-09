@@ -572,7 +572,7 @@ module.exports = class MessageLoggerV2 {
       antiNukeThreadCap: 10,
       antiNukeMessageCap: 10,
       antiNukeAttachmentCap: 10,
-      reverseOrder: true,
+      reverseOrder: false,
       onlyLogWhitelist: true,
       whitelist: [],
       blacklist: [],
