@@ -134,9 +134,9 @@ Notification settings affect alerts only. Logging scope is controlled separately
 - Hiding or unhiding the root applies to all related child records.
 - Removing the root from the logger removes all related records.
 - Child messages can be hidden, unhidden, or removed individually while the root remains.
-- Jumping from a child record targets its parent forum card or thread entry.
+- Jumping from a child record opens the exact message when its live thread still exists. Fully deleted threads fall back to the restored parent card or thread entry.
 - A restored forum card opens a logger view limited to that thread.
-- Restored forum and thread list items require at least one live Discord item to supply the current layout.
+- Fully deleted forum cards and thread entries use an anchor system: Discord must have at least one live forum post or thread entry whose current layout can be cloned. If the list is empty, deleted items remain logged but are not rendered until a live item exists.
 - Parent-channel “started a thread” system messages are left to Discord and are not logged.
 - Message-history caching and hierarchical media storage stay enabled internally so complete post/thread deletions do not lose unloaded messages or media paths.
 - Flat media-cache files from older versions or forks remain supported for rendering.
@@ -154,7 +154,7 @@ Notification settings affect alerts only. Logging scope is controlled separately
 
 - Confirm its messages pass the active author and local-delete ignores.
 - Open the parent forum or channel.
-- Ensure at least one live forum card or thread entry exists to anchor the restored layout.
+- Ensure at least one live forum post or thread entry exists. Fully deleted items cannot render in an empty list until Discord provides this layout anchor.
 
 ### Hidden records are missing
 

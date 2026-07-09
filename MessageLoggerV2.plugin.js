@@ -2986,6 +2986,10 @@ module.exports = class MessageLoggerV2 {
     const metadata = record.delete_data.forum_metadata || {};
     const threadId = record.delete_data.forum_thread_delete ? message.id : message.channel_id;
     this.closeForumThreadLogModal(threadId);
+    if (!record.delete_data.forum_thread_delete && this.tools.getChannel(threadId)) {
+      this.jumpToMessage(threadId, message.id, message.guild_id || metadata.guildId);
+      return true;
+    }
     const parentId = record.delete_data.forum_parent_id || metadata.parentId;
     if (!parentId) {
       this.showToast('Could not find parent forum channel for this deleted post.', { type: 'error' });
@@ -3192,17 +3196,18 @@ module.exports = class MessageLoggerV2 {
   scheduleForumListRefresh() {
     if (this._forumListRefreshPending) return;
     this._forumListRefreshPending = true;
+    const refresh = () => {
+      const selectedChannel = this.getSelectedTextChannel?.();
+      if (selectedChannel) this.selectedChannel = selectedChannel;
+      this._restoreDeletedForumCards?.();
+      this._restoreDeletedCompactThreads?.();
+      this._tintSweep?.();
+    };
     setTimeout(() => {
       this._forumListRefreshPending = false;
       try {
-        this._restoreDeletedForumCards?.();
-        this._restoreDeletedCompactThreads?.();
-        this._tintSweep?.();
-        setTimeout(() => {
-          this._restoreDeletedForumCards?.();
-          this._restoreDeletedCompactThreads?.();
-          this._tintSweep?.();
-        }, 150);
+        refresh();
+        setTimeout(refresh, 150);
       } catch (e) {
         Logger.warn('Could not refresh forum list:', e);
       }
@@ -3338,6 +3343,7 @@ module.exports = class MessageLoggerV2 {
   handleForumThreadDelete(channel, guild, notificationsBlacklisted, notificationsWhitelisted, callDefault, args) {
     const threadId = channel?.id;
     if (!threadId) return callDefault(...args);
+    const selectedChannelId = this.selectedChannel?.id || DiscordModules.SelectedChannelStore?.getChannelId?.();
     if (this.isSuppressedForumThreadId(threadId)) return callDefault(...args);
     if (this.settings.ignoreLocalDeletes && this.localDeletes.includes(threadId)) return callDefault(...args);
     const cachedThreadMessages = this.getCachedForumThreadMessages(threadId);
@@ -3374,7 +3380,8 @@ module.exports = class MessageLoggerV2 {
     this._scheduleTintForMessage?.(threadId, threadId);
     this.saveData();
     const result = callDefault(...args);
-    if (this.settings.showDeletedMessages && this.selectedChannel?.id === channel.parent_id) {
+    if (this.settings.showDeletedMessages
+      && (selectedChannelId === channel.parent_id || selectedChannelId === threadId)) {
       this.scheduleForumListRefresh();
     }
     return result;
@@ -6301,7 +6308,8 @@ module.exports = class MessageLoggerV2 {
           let editNum = -1;
           if (isEdited) editNum = isEdited.edit;
           const menuItems = [];
-          if (channel || record.delete_data?.forum_thread_delete || record.delete_data?.forum_thread_message_delete || record.delete_data?.forum_parent_id) {
+          if (this.menu.selectedTab !== 'hidden'
+            && (channel || record.delete_data?.forum_thread_delete || record.delete_data?.forum_thread_message_delete || record.delete_data?.forum_parent_id)) {
             menuItems.push({
               type: 'item',
               label: 'Jump to Message',
@@ -7655,13 +7663,15 @@ module.exports = class MessageLoggerV2 {
           },
           this.obfuscatedClass('reveal-in-folder')
         )
-        addElement(
-          'Jump to Message',
-          () => {
-            this.jumpToSavedRecord(record);
-          },
-          this.obfuscatedClass('jump-to')
-        );
+        if (!(this.menu?.open && this.menu.selectedTab === 'hidden')) {
+          addElement(
+            'Jump to Message',
+            () => {
+              this.jumpToSavedRecord(record);
+            },
+            this.obfuscatedClass('jump-to')
+          );
+        }
         menu.push(ContextMenu.buildMenuChildren([{
           type: 'group',
           items: [{

@@ -137,7 +137,7 @@ Message-history caching and hierarchical media storage are core behavior and no 
 ## Forum Posts and Threads
 
 - Forum posts and channel threads retain server, parent-channel, thread, author, and message metadata when available.
-- Fully deleted forum cards and thread entries are restored only when Discord has a live item that can act as a layout anchor.
+- Fully deleted forum cards and thread entries use an anchor system. At least one live forum post or thread entry must exist so its current Discord layout can be cloned; logged deletions remain unrendered while that list is empty.
 - Hiding or unhiding a saved root post applies to its related child messages. Individual child messages can still be managed separately.
 - Permanently removing a saved root post also removes related messages and cached attachment references for that thread ID.
 - Thread-created system rows in parent channels are never stored as deleted or purged messages.
