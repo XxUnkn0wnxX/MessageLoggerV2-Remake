@@ -6498,7 +6498,7 @@ module.exports = class MessageLoggerV2 {
         for (const embed of message.embeds || []) {
           const rawText = embed.title || embed.description || embed.url || embed.type || 'Embedded content';
           const text = String(rawText).length > 240 ? `${String(rawText).slice(0, 237)}...` : String(rawText);
-          appendPayloadReference('Embed', text, embed.url);
+          appendPayloadReference('Embed', text);
         }
         if (!record) {
           const channel = this.tools.getChannel(message.channel_id);
