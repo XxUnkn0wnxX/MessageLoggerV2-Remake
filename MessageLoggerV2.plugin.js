@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.2.8
+ * @version 2.8.0.2.9
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -387,7 +387,8 @@ module.exports = class MessageLoggerV2 {
         items: [
           'Uses Discord native forum refresh behavior and repairs deleted tint, jump, context-menu, purge, and restore edge cases.',
           'Improves settings validation, accordion navigation, help screens, documentation, and legacy cache compatibility.',
-          'Moves source and automatic updates to the maintained XxUnkn0wnxX fork.'
+          'Moves source and automatic updates to the maintained XxUnkn0wnxX fork.',
+          'Prevents blank Discord pages during plugin reloads, removes duplicate synthetic thread starters, and adds a temporary deleted-file viewer.'
         ]
       }
     ];
@@ -467,8 +468,12 @@ module.exports = class MessageLoggerV2 {
               timeout: 3000
             });
             setTimeout(() => {
-              Plugins.reload(this.getName());
-            }, 1000);
+              if (typeof globalThis.location?.reload === 'function') {
+                globalThis.location.reload();
+              } else {
+                Plugins.reload(this.getName());
+              }
+            }, 750);
           } catch (error) {
             Logger.error('Update failed:', error);
             UI.showToast(`[${this.getName()}] Update failed! Check console for details.`, {
@@ -504,17 +509,11 @@ module.exports = class MessageLoggerV2 {
         Logger.error('Could not find React component');
         return;
       }
-      const { render } = target.stateNode;
-      if (render.toString().includes("null")) {
-        Logger.log('Render already null, skipping');
+      if (typeof target.stateNode.forceUpdate !== 'function') {
+        Logger.warn('React root does not expose forceUpdate');
         return;
       }
-      target.stateNode.render = () => null;
-      target.stateNode.forceUpdate(() => {
-        target.stateNode.render = render;
-        target.stateNode.forceUpdate();
-        Logger.log('UI force update completed');
-      });
+      target.stateNode.forceUpdate(() => Logger.log('UI force update completed'));
     } catch (e) {
       Logger.error('Failed to force UI update:', e);
     }
@@ -2675,7 +2674,7 @@ module.exports = class MessageLoggerV2 {
     if (icon || config.icon) {
       toastContent = `<span style="margin-right: 8px; font-size: 16px;">${icon || config.icon}</span>`;
     }
-    toastContent += `<span style="flex: 1;">${content.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')}</span>`;
+    toastContent += `<span style="flex: 1; white-space: pre-line;">${content.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')}</span>`;
     toast.innerHTML = toastContent;
     const closeBtn = document.createElement('span');
     closeBtn.innerHTML = '\u2715';
@@ -4441,16 +4440,36 @@ module.exports = class MessageLoggerV2 {
     this.cachedFileDeletionToastTimeout = setTimeout(() => {
       const names = Array.from(this.pendingCachedFileDeletionLabels);
       this.pendingCachedFileDeletionLabels.clear();
-      const visible = names.slice(0, 3).join(', ');
-      const extra = names.length > 3 ? `, +${names.length - 3} more` : '';
+      const visible = names.slice(0, 4).join('\n');
+      const extra = names.length > 4 ? `\n+${names.length - 4} more` : '';
       this._showNotification(
         names.length === 1 ? 'Cached Attachment Deleted' : 'Cached Attachments Deleted',
         `${names.length === 1 ? 'Deleted cached attachment' : 'Deleted cached attachments'}: ${visible}${extra}`,
         'success',
-        [],
+        [{ label: 'View files', onClick: () => this.showDeletedCachedFilesModal(names) }],
         3000
       );
     }, 150);
+  }
+  showDeletedCachedFilesModal(names) {
+    if (!Array.isArray(names) || !names.length) return;
+    const modalKey = `${this.style.menu}-deleted-cached-files`;
+    if (this.ModalStack?.hasModalOpen?.(modalKey)) this.ModalStack.closeModal(modalKey);
+    const list = document.createElement('div');
+    list.className = this.multiClasses.defaultColor || '';
+    list.style.cssText = 'max-height: 60vh; overflow-y: auto; overflow-wrap: anywhere;';
+    for (const name of names) {
+      const row = document.createElement('div');
+      row.textContent = name;
+      row.style.padding = '4px 0';
+      list.appendChild(row);
+    }
+    this.createModal({
+      header: `Deleted Cached Files (${names.length})`,
+      size: this.tools.resolvedModalStuff.ModalSize.MEDIUM,
+      children: [this.tools.createWrappedElement([list])],
+      ml2Data: true
+    }, false, modalKey);
   }
   deleteCachedFilesForRecord(record) {
     const message = record?.message;
@@ -5519,9 +5538,11 @@ module.exports = class MessageLoggerV2 {
       const threadId = record?.message?.id;
       if (!threadId) return [];
       const metadata = getForumRecordMetadata(record);
+      const hasDistinctStarter = !!metadata.starterMessageId && metadata.starterMessageId !== threadId;
       const ids = new Set();
       const addId = (id) => {
         if (!id || ids.has(id)) return;
+        if (id === threadId && hasDistinctStarter) return;
         const saved = this.messageRecord[id];
         const message = saved?.message;
         if (!message || message.channel_id !== threadId) return;
@@ -5540,7 +5561,7 @@ module.exports = class MessageLoggerV2 {
       for (const [messageId, saved] of Object.entries(this.messageRecord || {})) {
         if (saved?.message?.channel_id === threadId) addId(messageId);
       }
-      if (!ids.size && record?.message) ids.add(threadId);
+      if (!ids.size && record?.message && !hasDistinctStarter) ids.add(threadId);
       return Array.from(ids).sort((a, b) => Number(a) - Number(b));
     };
     const openDeletedForumPostView = (record) => {
@@ -5548,6 +5569,8 @@ module.exports = class MessageLoggerV2 {
       if (!message?.id) return;
       if (this.menu.open) this.ModalStack.closeModal(this.style.menu);
       const threadId = message.id;
+      const metadata = getForumRecordMetadata(record);
+      const hasDistinctStarter = !!metadata.starterMessageId && metadata.starterMessageId !== threadId;
       const titleText = getForumRecordTitle(record);
       const deletedAt = record.delete_data?.time ? this.createTimeStamp(record.delete_data.time, true) : this.createTimeStamp(Date.now(), true);
       const header = document.createElement('div');
@@ -5572,7 +5595,7 @@ module.exports = class MessageLoggerV2 {
           try {
             while (messagesNode.firstChild) messagesNode.firstChild.remove();
             this.populateParent(messagesNode, getSavedForumThreadMessageIds(record));
-            if (!messagesNode.childElementCount && message?.content) {
+            if (!messagesNode.childElementCount && message?.content && !hasDistinctStarter) {
               const fallback = document.createElement('div');
               fallback.className = this.multiClasses.defaultColor || this.classes.markup || '';
               fallback.textContent = message.content;

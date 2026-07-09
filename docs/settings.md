@@ -125,7 +125,7 @@ Message-history caching and hierarchical media storage are core behavior and no 
 | Setting | Default | Behavior |
 | --- | --- | --- |
 | Obfuscate CSS classes | On | Uses plugin-specific class names to reduce conflicts with themes and plugins. |
-| Automatic updates | On | Checks the repository for a newer plugin version. |
+| Automatic updates | On | Checks the repository for a newer plugin version, then reloads the Discord renderer cleanly. |
 | Contextmenu submenu name | Empty | Replaces the **Message Logger** label. Empty values use the built-in label. |
 | Only render locally cached attachments | Off | Prevents uncached attachments from rendering through Discord CDN. The saved record shows a filename placeholder instead. Toggling this reevaluates open logger and channel views immediately. |
 | Delete cached files with log records | Off | Permanently deletes related cached attachments, embeds, and stickers whenever their final log record is removed, including purges and thread/forum cascades. |
