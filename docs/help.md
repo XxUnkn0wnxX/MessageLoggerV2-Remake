@@ -165,6 +165,8 @@ Enable **Show Hidden tab in logger** under Display settings. Disabling the tab d
 
 Remote Discord attachment and sticker URLs can expire or return `403`/`404`. Keep **Cache media locally** enabled when local preservation is required. Enable **Only render locally cached attachments** to block CDN fallback; uncached or unavailable files remain manageable as full-filename placeholders. Content already expired before it was cached cannot be recovered.
 
+Enable **Delete cached files with log records** to remove related local media when records are permanently removed. This applies to individual records, purges, automatic cap cleanup, and complete thread/forum removals, and cannot be undone. Successful file deletions are written to the console and confirmed by a filename toast.
+
 ### Plugin conflicts
 
 **NoDeleteMessages** and **SuppressUserMentions** are unsupported alongside MessageLoggerV2 and should be disabled.

@@ -579,6 +579,7 @@ module.exports = class MessageLoggerV2 {
       imageCacheDir: this.pluginDir + '/MLV2_IMAGE_CACHE',
       maxCacheFileSize: 0,
       onlyRenderCachedAttachments: false,
+      deleteCachedFilesWithRecords: false,
       flags: 0,
       autoUpdate: true,
       versionInfo: ''
@@ -937,6 +938,7 @@ module.exports = class MessageLoggerV2 {
     this.tempEditedMessageRecord = {};
     this.editHistoryAntiSpam = {};
     this.localDeletes = [];
+    this.cacheDeletionMessageIds = new Set();
     const defaultImageCacheDir = this.pluginDir + '/MLV2_IMAGE_CACHE';
     this.settings.imageCacheDir = defaultImageCacheDir;
     const imageCacheDirFailure = () => {
@@ -1970,6 +1972,12 @@ module.exports = class MessageLoggerV2 {
             id: 'onlyRenderCachedAttachments',
             type: 'switch',
             action: 'refreshAttachmentRendering'
+          },
+          {
+            name: 'Delete cached files with log records',
+            note: 'Permanently removes related cached media when a log record is removed. This cannot be undone.',
+            id: 'deleteCachedFilesWithRecords',
+            type: 'switch'
           }
         ]
       }
@@ -3067,6 +3075,7 @@ module.exports = class MessageLoggerV2 {
     );
     if (this.deletedMessageSet.get(channelId)?.has(id)) return this.saveData();
     if (this.purgedMessageSet.get(channelId)?.has(id)) return this.saveData();
+    if (this.settings?.deleteCachedFilesWithRecords) this.deleteCachedFilesForRecord(record);
     delete this.messageRecord[id];
     this.messageRecordIds.delete(id);
     this.saveData();
@@ -4188,6 +4197,7 @@ module.exports = class MessageLoggerV2 {
     return record.message;
   }
   async cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts = 0) {
+    if (this.cacheDeletionMessageIds.has(messageId)) return;
     try {
       const response = await fetch(url);
       if (!response.ok) {
@@ -4213,6 +4223,7 @@ module.exports = class MessageLoggerV2 {
         Logger.warn(`Could not determine file extension for ${attachmentId}, skipping cache`);
         return;
       }
+      if (this.cacheDeletionMessageIds.has(messageId)) return;
       if (!Number(attachmentId)) attachmentId = messageId;
       const filePath = this.imageCacheServerSimulator.resolveNewCachePath({ channelId: channelId, serverId: serverId });
       this.nodeModules.fs.mkdirSync(filePath, { recursive: true });
@@ -4330,6 +4341,184 @@ module.exports = class MessageLoggerV2 {
     const refresh = this._forumThreadLogRefreshers?.get(threadId);
     if (refresh) refresh();
   }
+  getRecordCachedMediaIds(record) {
+    const message = record?.message;
+    const ids = new Set();
+    if (!message?.id) return ids;
+    ids.add(String(message.id));
+    for (const attachment of message.attachments || []) {
+      if (attachment?.id) ids.add(String(attachment.id));
+    }
+    for (const sticker of this.getMessageStickerItems(message)) {
+      if (sticker?.id) ids.add(String(sticker.id));
+    }
+    for (const embed of message.embeds || []) {
+      const url = embed?.image?.url || embed?.image?.proxy_url;
+      if (!url) continue;
+      try {
+        const parts = new URL(url).pathname.split('/').filter(Boolean);
+        const cacheId = parts[parts.length - 2];
+        if (cacheId) ids.add(String(cacheId));
+      } catch {}
+    }
+    for (const id of record.logged_attachments || []) {
+      if (id) ids.add(String(id));
+    }
+    return ids;
+  }
+  isCachedMediaIdReferencedElsewhere(mediaId, messageId) {
+    for (const [recordId, record] of Object.entries(this.messageRecord || {})) {
+      if (recordId === messageId || !record?.message) continue;
+      if (this.getRecordCachedMediaIds(record).has(mediaId)) return true;
+    }
+    return false;
+  }
+  getRecordCachedMediaLabels(record) {
+    const message = record?.message;
+    const labels = new Map();
+    if (!message?.id) return labels;
+    for (const attachment of message.attachments || []) {
+      if (attachment?.id) labels.set(String(attachment.id), attachment.filename || String(attachment.id));
+    }
+    for (const sticker of this.getMessageStickerItems(message)) {
+      if (!sticker?.id) continue;
+      const media = this.getStickerMedia(sticker);
+      labels.set(String(sticker.id), media?.filename || sticker.name || String(sticker.id));
+    }
+    for (const embed of message.embeds || []) {
+      const url = embed?.image?.url || embed?.image?.proxy_url;
+      if (!url) continue;
+      try {
+        const parsed = new URL(url);
+        const parts = parsed.pathname.split('/').filter(Boolean);
+        const cacheId = parts[parts.length - 2];
+        const filename = decodeURIComponent(parts[parts.length - 1] || '') || embed.title || 'embedded media';
+        if (cacheId) labels.set(String(cacheId), filename);
+        if (!Number(cacheId)) labels.set(String(message.id), filename);
+      } catch {}
+    }
+    return labels;
+  }
+  queueCachedFilesDeletedToast(labels) {
+    if (!labels?.size) return;
+    if (!this.pendingCachedFileDeletionLabels) this.pendingCachedFileDeletionLabels = new Set();
+    labels.forEach(label => this.pendingCachedFileDeletionLabels.add(label));
+    clearTimeout(this.cachedFileDeletionToastTimeout);
+    this.cachedFileDeletionToastTimeout = setTimeout(() => {
+      const names = Array.from(this.pendingCachedFileDeletionLabels);
+      this.pendingCachedFileDeletionLabels.clear();
+      const visible = names.slice(0, 3).join(', ');
+      const extra = names.length > 3 ? `, +${names.length - 3} more` : '';
+      this.showToast(
+        `${names.length === 1 ? 'Deleted cached attachment' : 'Deleted cached attachments'}: ${visible}${extra}`,
+        { type: 'success' }
+      );
+    }, 150);
+  }
+  deleteCachedFilesForRecord(record) {
+    const message = record?.message;
+    if (!message?.id) return 0;
+    const messageId = String(message.id);
+    const mediaIds = this.getRecordCachedMediaIds(record);
+    const roots = new Set();
+    if (this.settings.imageCacheDir) {
+      roots.add(this.nodeModules.path.resolve(this.settings.imageCacheDir));
+    }
+    try {
+      const activeRoot = this.imageCacheServerSimulator?._getBaseCachePath?.();
+      if (activeRoot) roots.add(this.nodeModules.path.resolve(activeRoot));
+    } catch (error) {
+      Logger.warn('Could not resolve active media cache path:', error.message);
+    }
+    const escapedMessageId = messageId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const messagePattern = new RegExp(` \\(${escapedMessageId}(?: by \\d+)?\\)\\.[^.]+$`);
+    const legacyMediaIds = new Set(Array.from(mediaIds).filter(mediaId =>
+      !this.isCachedMediaIdReferencedElsewhere(mediaId, messageId)
+    ));
+    const mediaLabels = this.getRecordCachedMediaLabels(record);
+    const deletedLabels = new Set();
+    let deleted = 0;
+    const readEntries = directory => {
+      try {
+        return this.nodeModules.fs.readdirSync(directory).map(name => {
+          const target = this.nodeModules.path.join(directory, name);
+          const stats = this.nodeModules.fs.lstatSync(target);
+          return {
+            name,
+            isDirectory: () => stats.isDirectory(),
+            isFile: () => stats.isFile(),
+            isSymbolicLink: () => stats.isSymbolicLink()
+          };
+        });
+      } catch (error) {
+        Logger.warn(`Could not inspect cache directory ${directory}:`, error.message);
+        return [];
+      }
+    };
+    const getCacheDirectories = root => {
+      const directories = new Set([root]);
+      const channelPrefix = `${message.channel_id} (`;
+      for (const entry of readEntries(root)) {
+        if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+        const child = this.nodeModules.path.join(root, entry.name);
+        if (entry.name === String(message.channel_id) || entry.name.startsWith(channelPrefix)) {
+          directories.add(child);
+          continue;
+        }
+        for (const nested of readEntries(child)) {
+          if (!nested.isDirectory() || nested.isSymbolicLink()) continue;
+          if (nested.name === String(message.channel_id) || nested.name.startsWith(channelPrefix)) {
+            directories.add(this.nodeModules.path.join(child, nested.name));
+          }
+        }
+      }
+      return directories;
+    };
+    const deleteMatchingFiles = (directory, root) => {
+      if (!this.nodeModules.fs.existsSync(directory)) return;
+      for (const entry of readEntries(directory)) {
+        if (!entry.isFile() || entry.isSymbolicLink()) continue;
+        const legacyMediaMatch = Array.from(legacyMediaIds).some(mediaId => entry.name.startsWith(`${mediaId}.`));
+        if (!messagePattern.test(entry.name) && !legacyMediaMatch) continue;
+        const target = this.nodeModules.path.join(directory, entry.name);
+        const resolvedTarget = this.nodeModules.path.resolve(target);
+        if (resolvedTarget !== root && !resolvedTarget.startsWith(root + this.nodeModules.path.sep)) continue;
+        try {
+          this.nodeModules.fs.unlinkSync(resolvedTarget);
+          deleted++;
+          const mediaId = Array.from(mediaIds).find(id =>
+            entry.name.startsWith(`${id}.`) || entry.name.startsWith(`${id} (`)
+          );
+          deletedLabels.add(mediaLabels.get(mediaId) || entry.name);
+        } catch (error) {
+          Logger.warn(`Could not delete cached file ${resolvedTarget}:`, error.message);
+        }
+      }
+    };
+    this.cacheDeletionMessageIds.add(messageId);
+    const suppressionTimeout = setTimeout(() => this.cacheDeletionMessageIds.delete(messageId), 30000);
+    suppressionTimeout.unref?.();
+    for (const root of roots) {
+      if (!this.nodeModules.fs.existsSync(root)) continue;
+      if (this.nodeModules.path.parse(root).root === root) {
+        Logger.warn(`Refusing to scan filesystem root as a media cache path: ${root}`);
+        continue;
+      }
+      for (const directory of getCacheDirectories(root)) deleteMatchingFiles(directory, root);
+    }
+    for (const [cacheKey, objectUrl] of Object.entries(this.imageCacheServerSimulator?.cached || {})) {
+      const hashParts = cacheKey.split('#')[1]?.split(',') || [];
+      if (hashParts[2] !== messageId) continue;
+      if (objectUrl?.startsWith?.('blob:')) URL.revokeObjectURL(objectUrl);
+      delete this.imageCacheServerSimulator.cached[cacheKey];
+    }
+    if (deleted) {
+      const names = Array.from(deletedLabels).join(', ');
+      Logger.log(`Deleted ${deleted} cached file${deleted === 1 ? '' : 's'} for message ${messageId}: ${names}`);
+      this.queueCachedFilesDeletedToast(deletedLabels);
+    }
+    return deleted;
+  }
   deleteMessageFromRecords(id, options = {}) {
     const record = this.messageRecord[id];
     const setMaps = [this.deletedMessageSet, this.editedMessageSet, this.purgedMessageSet];
@@ -4354,6 +4543,7 @@ module.exports = class MessageLoggerV2 {
     if (!options.skipForumThreadCascade && record.delete_data?.forum_thread_delete) {
       return this.deleteForumThreadFromRecords(id);
     }
+    if (this.settings?.deleteCachedFilesWithRecords) this.deleteCachedFilesForRecord(record);
     for (let i = 0; i < 3; i++) {
       const map = [this.deletedMessageRecord, this.editedMessageRecord, this.purgedMessageRecord][i];
       const setMap = setMaps[i];
@@ -7738,7 +7928,8 @@ module.exports = class MessageLoggerV2 {
         const attachmentId = matched[2];
         const element = document.getElementById(attachmentId);
         if (!element) return;
-        const record = this.getSavedMessage(element.messageId);
+        const messageId = element.messageId;
+        const record = this.getSavedMessage(messageId);
         if (!record) return;
         const localRequest = {
           get: async (url, options, cb) => {
@@ -7772,7 +7963,7 @@ module.exports = class MessageLoggerV2 {
         addElement(
           'Remove From Log',
           () => {
-            this.deleteMessageFromRecords(element.messageId);
+            this.deleteMessageFromRecords(messageId);
             this.scheduleLoggerMenuRefresh();
             this.saveData();
             if (record.delete_data) this.dispatcher.dispatch({ type: 'MESSAGE_DELETE', id: messageId, channelId: channelId, ML2: true });
