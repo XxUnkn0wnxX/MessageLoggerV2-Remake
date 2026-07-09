@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.2.9
+ * @version 2.8.0.2.10
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -368,6 +368,15 @@ module.exports = class MessageLoggerV2 {
   }
   getChanges() {
     return [
+      {
+        title: 'Anti Nuke recovery',
+        type: 'added',
+        items: [
+          'Captures bounded snapshots of deleted parent channels under Purged, including forum posts, threads, replies, ordinary messages, and file attachments.',
+          'Adds separate thread/forum-post, total-message, and total-attachment caps with newest-first ordering and guaranteed root records.',
+          'Keeps deleted-channel paths stable, removes impossible jump actions, and makes Anti Nuke the only override for full channel-deletion cascades.'
+        ]
+      },
       {
         title: 'Forum posts and threads',
         type: 'added',
