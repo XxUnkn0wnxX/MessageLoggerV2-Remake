@@ -1171,6 +1171,7 @@ module.exports = class MessageLoggerV2 {
     this.style.textIndent = this.obfuscatedClass('ml2-help-text-indent');
     this.style.helpContent = this.obfuscatedClass('ml2-help-content');
     this.style.filterHelpModal = this.obfuscatedClass('ml2-filter-help-modal');
+    this.style.settingsHelpModal = this.obfuscatedClass('ml2-settings-help-modal');
     this.style.menu = this.obfuscatedClass('ML2-MENU');
     this.loggerHelpModalKey = `${this.style.menu}-logger-help`;
     this.filterHelpModalKey = `${this.style.menu}-filter-help`;
@@ -1374,7 +1375,10 @@ module.exports = class MessageLoggerV2 {
                     }
                     .${this.style.filterHelpModal} footer > div,
                     .${this.style.filterHelpModal} footer [data-direction="horizontal"],
-                    .${this.style.filterHelpModal} footer [data-mana-component="button"] {
+                    .${this.style.filterHelpModal} footer [data-mana-component="button"],
+                    .${this.style.settingsHelpModal} footer > div,
+                    .${this.style.settingsHelpModal} footer [data-direction="horizontal"],
+                    .${this.style.settingsHelpModal} footer [data-mana-component="button"] {
                       width: 100%;
                     }
                     .${this.style.imageRoot} {
@@ -1994,19 +1998,7 @@ module.exports = class MessageLoggerV2 {
       },
       forceUpdateContent: () => this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' }),
       forceUpdateMessage: () => this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE' }),
-      notificationTest: (val) => {
-        const message = val ? 'Using BdApi notifications' : 'Using custom toasts';
-        if (val) {
-          UI.showNotification({
-            title: "Notification Test",
-            content: message,
-            type: "success",
-            duration: 5000
-          });
-        } else {
-          this.showToast(message, { type: 'success', timeout: 5000 });
-        }
-      },
+      notificationTest: (val) => this.showNotificationTest(val),
       handleDataSave: (val) => {
         if (!val) this.saveData();
         if (!val && this.settings.autoBackup) this.saveBackup();
@@ -2148,7 +2140,7 @@ module.exports = class MessageLoggerV2 {
     div.appendChild(
       this.createButton('Support server', () => UI.showInviteModal('e66JbKte2P'))
     );
-    div.appendChild(this.createButton('Help', () => this.showLoggerHelpModal()));
+    div.appendChild(this.createButton('Help', () => this.showLoggerHelpModal(false, 'settings')));
     let button = div.firstElementChild;
     while (button) {
       button.style.marginRight = button.style.marginLeft = `5px`;
@@ -2784,6 +2776,19 @@ module.exports = class MessageLoggerV2 {
         onContext: actions?.[1]?.onClick,
         timeout
       });
+    }
+  }
+  showNotificationTest(useNotifications = this.settings.useNotificationsInstead) {
+    const message = useNotifications ? 'Using BdApi notifications' : 'Using custom toasts';
+    if (useNotifications) {
+      UI.showNotification({
+        title: 'Notification Test',
+        content: message,
+        type: 'success',
+        duration: 5000
+      });
+    } else {
+      this.showToast(message, { type: 'success', timeout: 5000 });
     }
   }
   _getChangedAttachments(oldAttachments, newAttachments, messageId, channelId, guildId) {
@@ -3641,11 +3646,21 @@ module.exports = class MessageLoggerV2 {
     this.menu.open = false;
     setTimeout(() => this.openWindow(), 0);
   }
-  showLoggerHelpModal(initial = false) {
+  showLoggerHelpModal(initial = false, returnTarget = 'logger') {
+    const fromSettings = returnTarget === 'settings';
     this.createModal({
-      confirmText: 'OK',
-      cancelText: 'Back',
-      onConfirm: () => this.returnToLoggerWindow(this.filterHelpModalKey),
+      ...(fromSettings
+        ? {
+          cancelText: 'Back',
+          onCancel: () => this.ModalStack.closeModal(this.loggerHelpModalKey),
+          ml2Data: true,
+          className: this.style.settingsHelpModal
+        }
+        : {
+          confirmText: 'OK',
+          cancelText: 'Back',
+          onConfirm: () => this.returnToLoggerWindow(this.filterHelpModalKey)
+        }),
       header: 'Logger help',
       size: this.tools.resolvedModalStuff.ModalSize.LARGE,
       confirmButtonColor: this.tools.buttonColors.BRAND,
@@ -4409,9 +4424,12 @@ module.exports = class MessageLoggerV2 {
       this.pendingCachedFileDeletionLabels.clear();
       const visible = names.slice(0, 3).join(', ');
       const extra = names.length > 3 ? `, +${names.length - 3} more` : '';
-      this.showToast(
+      this._showNotification(
+        names.length === 1 ? 'Cached Attachment Deleted' : 'Cached Attachments Deleted',
         `${names.length === 1 ? 'Deleted cached attachment' : 'Deleted cached attachments'}: ${visible}${extra}`,
-        { type: 'success' }
+        'success',
+        [],
+        3000
       );
     }, 150);
   }
