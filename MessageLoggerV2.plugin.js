@@ -578,6 +578,7 @@ module.exports = class MessageLoggerV2 {
       contextmenuSubmenuName: '',
       imageCacheDir: this.pluginDir + '/MLV2_IMAGE_CACHE',
       maxCacheFileSize: 0,
+      onlyRenderCachedAttachments: false,
       flags: 0,
       autoUpdate: true,
       versionInfo: ''
@@ -1330,10 +1331,10 @@ module.exports = class MessageLoggerV2 {
                     .${this.style.editedCompact} {
                         text-indent: 0;
                     }
-                    .theme-dark .${this.style.deleted}:not(:hover) img:not(.${this.classes.avatar}), .${this.style.deleted}:not(:hover) .mention, .${this.style.deleted}:not(:hover) .reactions, .${this.style.deleted}:not(:hover) a {
+                    .theme-dark .${this.style.deleted}:not(:hover) img:not(.${this.classes.avatar}), .theme-dark .${this.style.deleted}:not(:hover) video, .theme-dark .${this.style.deleted}:not(:hover) audio, .theme-dark .${this.style.deleted}:not(:hover) canvas, .${this.style.deleted}:not(:hover) .mention, .${this.style.deleted}:not(:hover) .reactions, .${this.style.deleted}:not(:hover) a {
                         filter: grayscale(100%) !important;
                     }
-                    .${this.style.deleted} img:not(.${this.classes.avatar}), .${this.style.deleted} .mention, .${this.style.deleted} .reactions, .${this.style.deleted} a {
+                    .${this.style.deleted} img:not(.${this.classes.avatar}), .${this.style.deleted} video, .${this.style.deleted} audio, .${this.style.deleted} canvas, .${this.style.deleted} .mention, .${this.style.deleted} .reactions, .${this.style.deleted} a {
                         transition: filter 0.3s !important;
                     }
                     .theme-dark .${this.style.tab} {
@@ -1962,6 +1963,13 @@ module.exports = class MessageLoggerV2 {
             note: "Instead of saying Message Logger, make it say something else, so it's screenshot friendly",
             id: 'contextmenuSubmenuName',
             type: 'textbox'
+          },
+          {
+            name: 'Only render locally cached attachments',
+            note: 'Prevents uncached attachment URLs from rendering through Discord CDN in deleted messages and logger views.',
+            id: 'onlyRenderCachedAttachments',
+            type: 'switch',
+            action: 'refreshAttachmentRendering'
           }
         ]
       }
@@ -1971,6 +1979,7 @@ module.exports = class MessageLoggerV2 {
         this.invalidateAllChannelCache();
         if (this.selectedChannel) this.cacheChannelMessages(this.selectedChannel.id);
       },
+      refreshAttachmentRendering: () => this.refreshAttachmentRendering(),
       refreshDeletedStyle: () => {
         this.updateCSS();
         this._tintSweep?.();
@@ -2314,6 +2323,66 @@ module.exports = class MessageLoggerV2 {
     return candidates.find(stickers => Array.isArray(stickers) && stickers.length)
       || candidates.find(Array.isArray)
       || [];
+  }
+  isAttachmentLocallyCached(attachment, message) {
+    if (!attachment?.id || !message?.id || !message?.channel_id) return false;
+    return this.imageCacheServerSimulator.exists(
+      attachment.id,
+      attachment.filename || attachment.url || '',
+      message.channel_id,
+      message.id
+    );
+  }
+  getCacheOnlyMessage(message) {
+    if (!this.settings.onlyRenderCachedAttachments || !message?.attachments?.length) return message;
+    const attachments = [];
+    const unavailable = [];
+    for (const attachment of message.attachments) {
+      if (this.isAttachmentLocallyCached(attachment, message)) attachments.push(attachment);
+      else unavailable.push(attachment);
+    }
+    if (attachments.length === message.attachments.length) return message;
+    const placeholders = unavailable.map(attachment =>
+      `[Attachment not cached: ${attachment.filename || 'unknown file'}]`
+    );
+    return {
+      ...message,
+      attachments,
+      content: [message.content, ...placeholders].filter(Boolean).join('\n')
+    };
+  }
+  refreshCacheOnlyMessage(message) {
+    const filtered = this.getCacheOnlyMessage(message);
+    if (filtered === message) return;
+    setImmediate(() => {
+      this.dispatcher.dispatch({
+        type: 'MESSAGE_UPDATE',
+        message: filtered,
+        ML2: true
+      });
+    });
+  }
+  refreshAttachmentRendering() {
+    const channelId = DiscordModules.SelectedChannelStore?.getChannelId?.() || this.selectedChannel?.id;
+    if (channelId) {
+      const ids = new Set([
+        ...(this.deletedMessageRecord[channelId] || []),
+        ...(this.purgedMessageRecord[channelId] || [])
+      ]);
+      for (const id of ids) {
+        const record = this.messageRecord[id];
+        if (!record?.message || record.delete_data?.hidden) continue;
+        this.dispatcher.dispatch({
+          type: 'MESSAGE_UPDATE',
+          message: this.getCacheOnlyMessage(record.message),
+          ML2: true
+        });
+      }
+      this.invalidateChannelCache(channelId);
+      this.cacheChannelMessages(channelId);
+      this.refreshForumThreadLogModal(channelId);
+    }
+    this.scheduleLoggerMenuRefresh();
   }
   hasSupportedMessagePayload(message) {
     return !!(
@@ -3791,7 +3860,7 @@ module.exports = class MessageLoggerV2 {
       if (this.shouldIgnoreMessageAuthor(record.message)) return;
       if (this.shouldIgnoreSelfMessage(record.message)) return;
       ensureUserCleaned(record);
-      toInsert.push(record.message);
+      toInsert.push(this.getCacheOnlyMessage(record.message));
     };
     const toInsert = [];
     if (deletedMessages.length >= 100 && !channelStart && !channelEnd) {
@@ -4404,7 +4473,7 @@ module.exports = class MessageLoggerV2 {
       if (dispatch.type === 'THREAD_CREATE' || dispatch.type === 'THREAD_UPDATE' || dispatch.type === 'THREAD_LIST_SYNC') {
         return this.handleForumThreadUiEvent(dispatch, callDefault, args);
       }
-      if (dispatch.ML2 && dispatch.type === 'MESSAGE_DELETE') return callDefault(...args);
+      if (dispatch.ML2 && (dispatch.type === 'MESSAGE_DELETE' || dispatch.type === 'MESSAGE_UPDATE')) return callDefault(...args);
       if (dispatch.type !== 'MESSAGE_CREATE' && dispatch.type !== 'MESSAGE_DELETE' && dispatch.type !== 'MESSAGE_DELETE_BULK' && dispatch.type !== 'MESSAGE_UPDATE' && dispatch.type !== 'LOAD_MESSAGES_SUCCESS' && dispatch.type !== 'THREAD_DELETE') return callDefault(...args);
       if (dispatch.message && (dispatch.message.type !== 0 && dispatch.message.type !== 19 && (dispatch.message.type !== 20 || (dispatch.message.flags & 64) === 64))) return callDefault(...args);
       const channel = dispatch.type === 'THREAD_DELETE' && dispatch.channel ? dispatch.channel : this.tools.getChannel(dispatch.message ? dispatch.message.channel_id : dispatch.channelId);
@@ -4604,6 +4673,7 @@ module.exports = class MessageLoggerV2 {
         }
         this.saveDeletedMessage(deleted, this.deletedMessageRecord);
         this.annotateSavedForumThreadMessage(deleted, channel);
+        if (this.settings.showDeletedMessages) this.refreshCacheOnlyMessage(deleted);
         this._scheduleTintForMessage?.(dispatch.channelId, dispatch.id);
         if (!this.settings.showDeletedMessages) ret = callDefault(...args);
         else if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: dispatch.id });
@@ -4623,6 +4693,7 @@ module.exports = class MessageLoggerV2 {
           savedDeleteCount++;
           this.saveDeletedMessage(purged, this.purgedMessageRecord);
           this.annotateSavedForumThreadMessage(purged, channel);
+          if (this.settings.showPurgedMessages) this.refreshCacheOnlyMessage(purged);
           this._scheduleTintForMessage?.(dispatch.channelId, purged.id);
           if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: purged.id });
         }
@@ -6588,7 +6659,8 @@ module.exports = class MessageLoggerV2 {
       try {
         const messageId = messages[i];
         const record = this.getSavedMessage(messageId);
-        const message = record ? record.message : this.getMessageAny(messageId);
+        const sourceMessage = record ? record.message : this.getMessageAny(messageId);
+        const message = this.getCacheOnlyMessage(sourceMessage);
         if (!message) return;
         const messageGroup = this.createMessageGroup(message, true);
         let markup = messageGroup.getElementsByClassName(this.classes.markup)[0];
@@ -6692,6 +6764,15 @@ module.exports = class MessageLoggerV2 {
         const renderedMedia = [...(message.attachments || []), ...stickerMedia];
         if (contentDiv && renderedMedia.length) {
           contentDiv.dataset.ml2AttachmentMessageId = messageId;
+          const createUnavailableAttachmentPlaceholder = filename => {
+            const placeholder = document.createElement('div');
+            placeholder.className = this.multiClasses.markup || this.classes.markup || '';
+            placeholder.dataset.ml2AttachmentMessageId = messageId;
+            placeholder.style.color = 'var(--text-muted)';
+            placeholder.style.marginTop = '4px';
+            placeholder.textContent = `[Attachment not cached: ${filename || 'unknown file'}]`;
+            return placeholder;
+          };
           const attemptToUseCachedImage = (attachmentId, attachmentIdx, hidden, filename, width, height) => {
             const img = document.createElement('img');
             img.classList = DiscordModules.ClickableClasses?.clickable || '';
@@ -6739,11 +6820,7 @@ module.exports = class MessageLoggerV2 {
               );
             });
             img.onerror = () => {
-              const imageErrorDiv = document.createElement('img');
-              imageErrorDiv.classList = this.style.imageError;
-              imageErrorDiv.messageId = messageId;
-              imageErrorDiv.src = this.errorImage;
-              img.replaceWith(imageErrorDiv);
+              img.replaceWith(createUnavailableAttachmentPlaceholder(filename));
             };
             contentDiv.appendChild(img);
             return true;
@@ -6803,18 +6880,15 @@ module.exports = class MessageLoggerV2 {
               );
             });
             video.onerror = () => {
-              const videoErrorDiv = document.createElement('img');
-              videoErrorDiv.classList = this.style.imageError;
-              videoErrorDiv.messageId = messageId;
-              videoErrorDiv.src = this.errorImage;
-              container.replaceWith(videoErrorDiv);
+              container.replaceWith(createUnavailableAttachmentPlaceholder(filename));
             };
             contentDiv.appendChild(container);
             return true;
           };
           const handleCreateImage = (attachment, idx) => {
             const isCached = attachment.url == 'ERROR' ||
-              this.imageCacheServerSimulator.exists(attachment.id, attachment.filename, record?.message?.channel_id, messageId);
+              this.isAttachmentLocallyCached(attachment, message);
+            if (this.settings.onlyRenderCachedAttachments && !isCached) return;
             const isVideoFile = this.isVideo(attachment.filename || attachment.url);
             if (isCached && isVideoFile) {
               attemptToUseCachedVideo(attachment.id, idx, attachment.hidden, attachment.filename, attachment.width, attachment.height);
@@ -6850,15 +6924,12 @@ module.exports = class MessageLoggerV2 {
                 });
               }
               video.onerror = () => {
-                if (video.triedCache) {
-                  const videoErrorDiv = document.createElement('img');
-                  videoErrorDiv.classList = this.style.imageError;
-                  videoErrorDiv.messageId = messageId;
-                  videoErrorDiv.src = this.errorImage;
-                  container.replaceWith(videoErrorDiv);
+                if (this.isAttachmentLocallyCached(attachment, message)) {
+                  container.remove();
+                  attemptToUseCachedVideo(attachment.id, idx, attachment.hidden, attachment.filename, attachment.width, attachment.height);
+                } else {
+                  container.replaceWith(createUnavailableAttachmentPlaceholder(attachment.filename));
                 }
-                video.triedCache = true;
-                attemptToUseCachedVideo(attachment.id, idx, attachment.hidden, attachment.filename, attachment.width, attachment.height);
               };
               contentDiv.appendChild(container);
             } else if (this.isImage(attachment.url)) {
@@ -6899,14 +6970,12 @@ module.exports = class MessageLoggerV2 {
                 });
               }
               img.onerror = () => {
-                if (img.triedCache) {
-                  const imageErrorDiv = document.createElement('img');
-                  imageErrorDiv.classList = this.style.imageError;
-                  imageErrorDiv.messageId = messageId;
-                  imageErrorDiv.src = this.errorImage;
-                  img.replaceWith(imageErrorDiv);
+                if (this.isAttachmentLocallyCached(attachment, message)) {
+                  img.remove();
+                  attemptToUseCachedImage(attachment.id, idx, attachment.hidden, attachment.filename, attachment.width, attachment.height);
+                } else {
+                  img.replaceWith(createUnavailableAttachmentPlaceholder(attachment.filename));
                 }
-                attemptToUseCachedImage(attachment.id, idx, attachment.hidden, attachment.filename, attachment.width, attachment.height);
               };
               if (attachment.hidden) {
                 img.src = `https://i.clouds.tf/q2vy/r8q6.png#${record.message.channel_id},${img.id}`;
