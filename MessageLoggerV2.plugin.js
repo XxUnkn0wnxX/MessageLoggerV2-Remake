@@ -1656,10 +1656,14 @@ module.exports = class MessageLoggerV2 {
     return this.buildSetting(current);
   }
   createGroup(group) {
-    const { name, id, collapsible, shown, settings } = group;
+    const { name, id, collapsible, shown, settings, onDrawerToggle, reactKey = id } = group;
     const list = [];
     for (const setting of settings) list.push(this.createSetting(setting));
-    const settingGroup = React.createElement(Components.SettingGroup, { key: id, id, shown, collapsible, name }, ...list);
+    const settingGroup = React.createElement(
+      Components.SettingGroup,
+      { key: reactKey, id, shown, collapsible, name, onDrawerToggle },
+      ...list
+    );
     return settingGroup;
   }
   getSettingsPanel() {
@@ -2089,15 +2093,32 @@ module.exports = class MessageLoggerV2 {
       }
       return setting;
     };
-    const list = settingsConfig.map(group => {
-      return this.createGroup({
-        name: group.name,
-        id: this.obfuscatedClass(group.id),
-        collapsible: group.collapsible,
-        shown: group.shown,
-        settings: group.settings.map(s => createSettingFromConfig(s))
-      });
-    });
+    const AccordionGroups = () => {
+      const initiallyOpen = settingsConfig.find(group => group.shown)?.id || null;
+      const [openGroupId, setOpenGroupId] = React.useState(initiallyOpen);
+      return React.createElement(
+        React.Fragment,
+        null,
+        ...settingsConfig.map(group => {
+          const id = this.obfuscatedClass(group.id);
+          const shown = openGroupId === group.id;
+          return this.createGroup({
+            name: group.name,
+            id,
+            reactKey: `${id}:${shown ? 'open' : 'closed'}`,
+            collapsible: group.collapsible,
+            shown,
+            onDrawerToggle: wasCollapsed => {
+              setOpenGroupId(wasCollapsed ? group.id : null);
+            },
+            settings: group.settings.map(s => createSettingFromConfig(s))
+          });
+        })
+      );
+    };
+    const list = [
+      React.createElement(AccordionGroups, { key: 'ml2-settings-accordion' })
+    ];
     const div = document.createElement('div');
     div.id = this.obfuscatedClass('ml2-settings-buttonbox');
     div.style.display = 'inline-flex';
