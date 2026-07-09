@@ -525,6 +525,7 @@ module.exports = class MessageLoggerV2 {
     this._nativeNotificationQueueStopped = false;
     this._nativeNotificationQueue = [];
     this._nativeNotificationActive = null;
+    this._nativeNotificationSequence = 0;
     DiscordModules.ModalActions.closeModal(`${this.getName()}_DEP_MODAL`);
     if (globalThis.PluginUpdates?.plugins) delete PluginUpdates.plugins['https://gitlab.com/_Lighty_/bdstuff/raw/main/public/plugins/MessageLoggerV2.plugin.js'];
     if (Plugins.get('NoDeleteMessages') && Plugins.isEnabled('NoDeleteMessages'))
@@ -1826,10 +1827,10 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Use BdApi basic notifications instead of custom toasts',
-            note: 'Uses BetterDiscord notifications for logger alerts and message counts.',
+            note: 'Uses BetterDiscord notifications for logger alerts and message counts. Switching this off dismisses the active notification and clears queued notifications.',
             id: 'useNotificationsInstead',
             type: 'switch',
-            action: 'notificationTest'
+            action: 'notificationModeChange'
           }
         ]
       },
@@ -2042,7 +2043,7 @@ module.exports = class MessageLoggerV2 {
       },
       forceUpdateContent: () => this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' }),
       forceUpdateMessage: () => this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE' }),
-      notificationTest: (val) => this.showNotificationTest(val),
+      notificationModeChange: (val) => this.handleNotificationModeChange(val),
       handleDataSave: (val) => {
         if (!val) this.saveData();
         if (!val && this.settings.autoBackup) this.saveBackup();
@@ -2714,8 +2715,9 @@ module.exports = class MessageLoggerV2 {
     closeBtn.onmouseover = () => closeBtn.style.opacity = '1';
     closeBtn.onmouseout = () => closeBtn.style.opacity = '0.7';
     toast.appendChild(closeBtn);
+    let progressBar = null;
     if (timeout > 0) {
-      const progressBar = document.createElement('div');
+      progressBar = document.createElement('div');
       progressBar.style.cssText = `
         position: absolute;
         bottom: 0;
@@ -2744,10 +2746,14 @@ module.exports = class MessageLoggerV2 {
       toast.style.opacity = '1';
       toast.style.transform = 'translateX(0)';
     });
-    let timeoutId;
-    let removeTimeoutId;
+    let timeoutId = null;
+    let removeTimeoutId = null;
+    let timeoutStartedAt = 0;
+    let timeoutRemaining = timeout;
+    let timeoutPaused = false;
     const remove = () => {
       if (removeTimeoutId) return;
+      timeoutId = null;
       toast.style.opacity = '0';
       toast.style.transform = 'translateX(400px)';
       removeTimeoutId = setTimeout(() => {
@@ -2758,11 +2764,28 @@ module.exports = class MessageLoggerV2 {
       }, 300);
     };
     const clearTimeouts = () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      if (removeTimeoutId) clearTimeout(removeTimeoutId);
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      if (removeTimeoutId !== null) clearTimeout(removeTimeoutId);
+      timeoutId = null;
+    };
+    const resumeTimeout = () => {
+      if (timeout <= 0 || removeTimeoutId !== null || !timeoutPaused && timeoutId !== null) return;
+      if (timeoutRemaining <= 0) return remove();
+      timeoutPaused = false;
+      timeoutStartedAt = Date.now();
+      if (progressBar) progressBar.style.animationPlayState = 'running';
+      timeoutId = setTimeout(remove, timeoutRemaining);
+    };
+    const pauseTimeout = () => {
+      if (timeoutPaused || timeoutId === null || removeTimeoutId !== null) return;
+      timeoutPaused = true;
+      timeoutRemaining = Math.max(0, timeoutRemaining - (Date.now() - timeoutStartedAt));
+      clearTimeout(timeoutId);
+      timeoutId = null;
+      if (progressBar) progressBar.style.animationPlayState = 'paused';
     };
     if (timeout > 0) {
-      timeoutId = setTimeout(remove, timeout);
+      resumeTimeout();
     }
     const handleClick = (e) => {
       e.preventDefault();
@@ -2795,12 +2818,8 @@ module.exports = class MessageLoggerV2 {
       remove();
     });
     if (timeout > 0) {
-      toast.addEventListener('mouseenter', () => {
-        clearTimeout(timeoutId);
-      });
-      toast.addEventListener('mouseleave', () => {
-        timeoutId = setTimeout(remove, 2000);
-      });
+      toast.addEventListener('pointerenter', pauseTimeout);
+      toast.addEventListener('pointerleave', resumeTimeout);
     }
     return toast;
   }
@@ -2825,7 +2844,9 @@ module.exports = class MessageLoggerV2 {
   _enqueueNativeNotification(notification) {
     if (this._nativeNotificationQueueStopped) return;
     if (!this._nativeNotificationQueue) this._nativeNotificationQueue = [];
-    this._nativeNotificationQueue.push(notification);
+    if (!Number.isSafeInteger(this._nativeNotificationSequence)) this._nativeNotificationSequence = 0;
+    const id = `MessageLoggerV2-${Date.now()}-${++this._nativeNotificationSequence}`;
+    this._nativeNotificationQueue.push({ ...notification, id });
     this._drainNativeNotificationQueue();
     this._scheduleNativeNotificationYield();
   }
@@ -2838,15 +2859,15 @@ module.exports = class MessageLoggerV2 {
       duration: notification.duration,
       shownAt: Date.now(),
       handle: null,
-      fallbackTimer: null,
       yieldTimer: null,
+      yieldRemaining: null,
+      yieldLastTick: null,
       finished: false,
       finish: null
     };
     active.finish = () => {
       if (active.finished) return;
       active.finished = true;
-      clearTimeout(active.fallbackTimer);
       clearTimeout(active.yieldTimer);
       if (this._nativeNotificationActive === active) this._nativeNotificationActive = null;
       if (!this._nativeNotificationQueueStopped) setTimeout(() => this._drainNativeNotificationQueue(), 0);
@@ -2866,41 +2887,50 @@ module.exports = class MessageLoggerV2 {
       active.finish();
       return;
     }
-    if (Number.isFinite(active.duration) && active.duration > 0) {
-      active.fallbackTimer = setTimeout(() => {
-        try {
-          active.handle?.close?.();
-        } finally {
-          active.finish();
-        }
-      }, active.duration + 1000);
-    }
     this._scheduleNativeNotificationYield();
   }
   _scheduleNativeNotificationYield() {
     const active = this._nativeNotificationActive;
     if (!active || active.duration !== Infinity || !this._nativeNotificationQueue?.length || active.yieldTimer) return;
-    const delay = Math.max(0, active.shownAt + 4500 - Date.now());
-    active.yieldTimer = setTimeout(() => {
-      try {
-        active.handle?.close?.();
-      } finally {
-        active.finish();
+    active.yieldRemaining = Math.max(0, active.shownAt + 4500 - Date.now());
+    active.yieldLastTick = Date.now();
+    const tick = () => {
+      if (active.finished) return;
+      const now = Date.now();
+      const hovered = !!globalThis.document?.querySelector?.('#bd-notifications-container .bd-notification:hover');
+      if (!hovered) active.yieldRemaining -= now - active.yieldLastTick;
+      active.yieldLastTick = now;
+      if (active.yieldRemaining <= 0) {
+        try {
+          active.handle?.close?.();
+        } finally {
+          active.finish();
+        }
+        return;
       }
-    }, delay);
+      active.yieldTimer = setTimeout(tick, Math.min(100, active.yieldRemaining));
+    };
+    active.yieldTimer = setTimeout(tick, Math.min(100, active.yieldRemaining));
   }
-  _clearNativeNotificationQueue() {
-    this._nativeNotificationQueueStopped = true;
+  _clearNativeNotificationQueue(stopQueue = true) {
+    this._nativeNotificationQueueStopped = stopQueue;
     if (this._nativeNotificationQueue) this._nativeNotificationQueue.length = 0;
     const active = this._nativeNotificationActive;
     this._nativeNotificationActive = null;
     if (!active) return;
     active.finished = true;
-    clearTimeout(active.fallbackTimer);
     clearTimeout(active.yieldTimer);
     try {
       active.handle?.close?.();
     } catch {}
+  }
+  handleNotificationModeChange(useNotifications) {
+    if (useNotifications) {
+      this._nativeNotificationQueueStopped = false;
+    } else {
+      this._clearNativeNotificationQueue(false);
+    }
+    this.showNotificationTest(useNotifications);
   }
   showNotificationTest(useNotifications = this.settings.useNotificationsInstead) {
     const now = Date.now();
@@ -3844,6 +3874,7 @@ module.exports = class MessageLoggerV2 {
                                     <div class="${this.style.textIndent}">
                                         Only dismisses/closes the Toast.
                                     </div></br>
+                                    Hovering pauses the remaining timeout until the pointer leaves.</br>
                                 </div>
                                 <strong>Notifications:</strong></br>
                                 <div class="${this.style.textIndent}">
@@ -3853,7 +3884,8 @@ module.exports = class MessageLoggerV2 {
                                         Deleted, edited, and ghost-ping alerts provide View and Jump.</br>
                                         Sent-message alerts provide Jump only because sent messages are not stored in a logger tab.</br>
                                         Bulk-delete summaries provide View only.</br>
-                                        Persistent ghost pings yield after 4.5 seconds when another alert is waiting.
+                                        Persistent ghost pings yield after 4.5 seconds when another alert is waiting.</br>
+                                        Hovering pauses the remaining timeout.
                                     </div></br>
                                 </div>
                                 <strong>Open Logs button (top right next to search):</strong></br>

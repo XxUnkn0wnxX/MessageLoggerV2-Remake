@@ -99,6 +99,7 @@ For custom toasts:
 - Left-click: run the first available action. Saved events open the relevant logger tab; sent-message alerts jump directly.
 - Right-click: run the second action when available, normally jumping to the relevant message or forum/thread location.
 - Middle-click: dismiss the toast.
+- Hover: pause the remaining timeout until the pointer leaves.
 
 For BetterDiscord notifications:
 
@@ -106,6 +107,7 @@ For BetterDiscord notifications:
 - Sent-message alerts provide **Jump** only.
 - Bulk-delete summaries provide **View** only.
 - Guild and DM alerts share one memory-only FIFO queue. Persistent ghost pings yield after 4.5 seconds when another alert is waiting.
+- Hovering pauses the remaining notification timeout and queued ghost-ping yield.
 
 Notification settings affect alerts only. Logging scope is controlled separately.
 

@@ -53,7 +53,7 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Show Hidden tab in logger | Off | Adds the **Hidden** tab. Hidden records remain stored when the tab is disabled. |
 | Display update notes | On | Shows the plugin changelog after a version change. |
 | Menu sort direction | Old to new | Controls message ordering in the logger window. |
-| Use BdApi basic notifications | On | Uses BetterDiscord notifications instead of the plugin's custom toasts. |
+| Use BdApi basic notifications | On | Uses BetterDiscord notifications instead of the plugin's custom toasts. Switching it off immediately dismisses the active native notification and clears its memory-only queue. |
 
 ## Misc Settings
 
