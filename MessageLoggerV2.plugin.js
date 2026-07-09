@@ -1,14 +1,14 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.2.7
- * @author Lighty, Davilarek, NightBirde
+ * @version 2.8.0.2.8
+ * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
  * @invite e66JbKte2P
- * @source https://git.slowb.ro/NightBirde/MessageLoggerV2-Remake/src/branch/main/MessageLoggerV2.plugin.js
- * @updateUrl https://git.slowb.ro/NightBirde/MessageLoggerV2-Remake/raw/branch/main/MessageLoggerV2.plugin.js
+ * @source https://git.slowb.ro/XxUnkn0wnxX/MessageLoggerV2-Remake/src/branch/main/MessageLoggerV2.plugin.js
+ * @updateUrl https://git.slowb.ro/XxUnkn0wnxX/MessageLoggerV2-Remake/raw/branch/main/MessageLoggerV2.plugin.js
  */
-const REPO_MAIN_URL = "https://git.slowb.ro/NightBirde/MessageLoggerV2-Remake/raw/branch/main/";
+const REPO_MAIN_URL = "https://git.slowb.ro/XxUnkn0wnxX/MessageLoggerV2-Remake/raw/branch/main/";
 const DISCORD_EPOCH = 14200704e5;
 const { React, ReactDOM, Webpack, UI, Plugins, DOM, Patcher, Components, ContextMenu, Utils, Hooks, ReactUtils, Logger } = new BdApi('MessageLoggerV2');
 const { Data } = BdApi;
@@ -364,11 +364,30 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Fixed',
+        title: 'Forum posts and threads',
+        type: 'added',
+        items: [
+          'Restores fully deleted forum posts and channel threads from saved metadata when a live item is available as an anchor.',
+          'Adds thread-scoped log views, native context actions, jump routing, hidden-record cascades, and stable server/channel/thread paths.',
+          'Preserves replies and later-added attachments while respecting per-message self, bot, blocked-user, and local-delete rules.'
+        ]
+      },
+      {
+        title: 'Media and logs',
+        type: 'improved',
+        items: [
+          'Expands attachment, embed, sticker, and media-only logging with local-cache and CDN fallback controls.',
+          'Adds optional cached-file cleanup when records are permanently removed, including thread and forum cascades.',
+          'Adds a Hidden tab, live logger refreshes, channel-aware filters, configurable deleted tints, and improved theme-compatible rendering.'
+        ]
+      },
+      {
+        title: 'Compatibility and interface',
         type: 'fixed',
         items: [
-          'Fixed missing red tint (again)',
-          'Fixed missing edited messages'
+          'Uses Discord native forum refresh behavior and repairs deleted tint, jump, context-menu, purge, and restore edge cases.',
+          'Improves settings validation, accordion navigation, help screens, documentation, and legacy cache compatibility.',
+          'Moves source and automatic updates to the maintained XxUnkn0wnxX fork.'
         ]
       }
     ];
