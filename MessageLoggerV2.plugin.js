@@ -554,6 +554,8 @@ module.exports = class MessageLoggerV2 {
       blockSpamEdit: false,
       cacheAllImages: true,
       newCacheAllImagesPath: '',
+      newSaveAllFileTypes: false,
+      addUserIdToSavedMediaFilename: false,
       alwaysNotifChannel: false,
       alwaysNotifGuild: false,
       notifOnlyWhitelist: false,
@@ -589,9 +591,61 @@ module.exports = class MessageLoggerV2 {
       this.settings = defaultSettings;
       settingsChanged = true;
     }
+    for (const [key, defaultValue] of Object.entries(defaultSettings)) {
+      const current = this.settings[key];
+      let normalized = current;
+      if (Array.isArray(defaultValue)) {
+        normalized = Array.isArray(current)
+          ? Array.from(new Set(current.filter(value => typeof value === 'string' && value.length)))
+          : structuredClone(defaultValue);
+      } else if (defaultValue && typeof defaultValue === 'object') {
+        const currentObject = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+        normalized = {};
+        for (const [nestedKey, nestedDefault] of Object.entries(defaultValue)) {
+          normalized[nestedKey] = typeof currentObject[nestedKey] === typeof nestedDefault
+            ? currentObject[nestedKey]
+            : nestedDefault;
+        }
+      } else if (typeof defaultValue === 'number') {
+        const parsed = current === null || current === undefined || String(current).trim() === ''
+          ? defaultValue
+          : Number(current);
+        normalized = Number.isFinite(parsed) && Number.isInteger(parsed) ? parsed : defaultValue;
+      } else {
+        normalized = typeof current === typeof defaultValue ? current : defaultValue;
+      }
+      if (JSON.stringify(current) === JSON.stringify(normalized)) continue;
+      this.settings[key] = normalized;
+      settingsChanged = true;
+    }
     for (const legacySetting of ['aggresiveMessageCaching', 'newCacheAllImages']) {
       if (!Object.prototype.hasOwnProperty.call(this.settings, legacySetting)) continue;
       delete this.settings[legacySetting];
+      settingsChanged = true;
+    }
+    const numericSettings = {
+      maxShownEdits: { fallback: 0, min: 0 },
+      maxCacheFileSize: { fallback: 0, min: 0 },
+      messageCacheCap: { fallback: defaultSettings.messageCacheCap, min: 1 },
+      savedMessagesCap: { fallback: defaultSettings.savedMessagesCap, min: 0 },
+      renderCap: { fallback: defaultSettings.renderCap, min: 0 }
+    };
+    for (const [id, limits] of Object.entries(numericSettings)) {
+      const raw = this.settings[id];
+      const parsed = raw === null || String(raw).trim() === '' ? limits.fallback : Number(raw);
+      const normalized = Number.isFinite(parsed) && Number.isInteger(parsed) && parsed >= limits.min
+        ? parsed
+        : limits.fallback;
+      if (raw === normalized) continue;
+      this.settings[id] = normalized;
+      settingsChanged = true;
+    }
+    if (typeof this.settings.deletedMessageColor !== 'string'
+      || (this.settings.deletedMessageColor && !/^#?[0-9a-f]{6}$/i.test(this.settings.deletedMessageColor))) {
+      this.settings.deletedMessageColor = '';
+      settingsChanged = true;
+    } else if (this.settings.deletedMessageColor && !this.settings.deletedMessageColor.startsWith('#')) {
+      this.settings.deletedMessageColor = `#${this.settings.deletedMessageColor}`;
       settingsChanged = true;
     }
     if (typeof this.settings.showHiddenTab !== 'boolean') {
@@ -626,17 +680,27 @@ module.exports = class MessageLoggerV2 {
     this.imageCacheServerSimulator = {
       "cached": {},
       "_getBaseCachePath": () => {
-        return this.settings.newCacheAllImagesPath && this.nodeModules.fs.existsSync(this.settings.newCacheAllImagesPath) ? this.settings.newCacheAllImagesPath : this.settings.imageCacheDir;
+        const customPath = this.settings.newCacheAllImagesPath;
+        try {
+          if (customPath && this.nodeModules.fs.statSync(customPath).isDirectory()) return customPath;
+        } catch {}
+        return this.settings.imageCacheDir;
       },
       "_resolveImagePath": (attachmentId, ext, channelId, messageId) => {
-        let pathname = this.nodeModules.path.join(this.settings.imageCacheDir, attachmentId + ext);
-        if (this.nodeModules.fs.existsSync(pathname)) return pathname;
-        const joinBase = this.imageCacheServerSimulator.resolveNewCachePath({ channelId }) + "/";
-        pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId})` + ext);
+        const baseCachePath = this.imageCacheServerSimulator._getBaseCachePath();
+        for (const basePath of new Set([this.settings.imageCacheDir, baseCachePath])) {
+          const flatPath = this.nodeModules.path.join(basePath, attachmentId + ext);
+          if (this.nodeModules.fs.existsSync(flatPath)) return flatPath;
+        }
+        const resolvedCachePath = this.imageCacheServerSimulator.resolveNewCachePath({ channelId });
+        if (!resolvedCachePath) return null;
+        const joinBase = resolvedCachePath + "/";
+        let pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId})` + ext);
         if (this.nodeModules.fs.existsSync(pathname)) return pathname;
         const record = this.messageRecord[messageId];
-        if (record && this.settings.addUserIdToSavedMediaFilename) {
-          pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId} by ${record.message.author.id})` + ext);
+        const authorId = record?.message?.author?.id || this.cachedMessagesMap.get(messageId)?.author?.id;
+        if (authorId) {
+          pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId} by ${authorId})` + ext);
           if (this.nodeModules.fs.existsSync(pathname)) return pathname;
         }
         return null;
@@ -1673,6 +1737,7 @@ module.exports = class MessageLoggerV2 {
             id: 'maxShownEdits',
             type: 'textbox',
             validator: 'number',
+            min: 0,
             action: 'forceUpdateContent'
           },
           {
@@ -1752,6 +1817,7 @@ module.exports = class MessageLoggerV2 {
             note: 'Enter a hex color. Leave blank to use the built-in red.',
             id: 'deletedMessageColor',
             type: 'textbox',
+            validator: 'hexColor',
             action: 'refreshDeletedStyle'
           },
           {
@@ -1773,7 +1839,8 @@ module.exports = class MessageLoggerV2 {
             name: 'Media cache path (optional)',
             note: 'Uses this existing folder instead of MLV2_IMAGE_CACHE.',
             id: 'newCacheAllImagesPath',
-            type: 'textbox'
+            type: 'textbox',
+            validator: 'cachePath'
           },
           {
             name: "Cache all attachment types",
@@ -1784,9 +1851,12 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Max cache file size (MB, 0 = no limit)',
-            note: 'Files larger than this will not be cached',
+            note: 'Skips oversized attachment files. Blank or 0 disables the limit.',
             id: 'maxCacheFileSize',
-            type: 'textbox'
+            type: 'textbox',
+            validator: 'number',
+            emptyValue: 0,
+            min: 0
           },
           {
             name: 'Display open logs button next to the search box top right in channels',
@@ -1834,6 +1904,7 @@ module.exports = class MessageLoggerV2 {
             id: 'messageCacheCap',
             type: 'textbox',
             validator: 'number',
+            min: 1,
             action: 'resetDataInterval'
           },
           {
@@ -1842,6 +1913,7 @@ module.exports = class MessageLoggerV2 {
             id: 'savedMessagesCap',
             type: 'textbox',
             validator: 'number',
+            min: 0,
             action: 'resetDataInterval'
           },
           {
@@ -1849,7 +1921,8 @@ module.exports = class MessageLoggerV2 {
             note: 'How many messages will show before the LOAD MORE button will show',
             id: 'renderCap',
             type: 'textbox',
-            validator: 'number'
+            validator: 'number',
+            min: 0
           }
         ]
       },
@@ -1949,11 +2022,48 @@ module.exports = class MessageLoggerV2 {
       }
       else if (config.validator === 'number') {
         setting.onChange = val => {
-          if (Number.isNaN(Number(val))) return this.showToast('Value must be a number!', { type: 'error' });
-          this.settings[config.id] = Number.parseInt(val);
-          if (config.action && actions[config.action]) {
-            actions[config.action](Number.parseInt(val));
+          const trimmed = String(val ?? '').trim();
+          if (trimmed === '' && config.emptyValue === undefined) {
+            return this.showToast('Value must be a whole number!', { type: 'error' });
           }
+          const parsed = trimmed === '' && config.emptyValue !== undefined
+            ? config.emptyValue
+            : Number(trimmed);
+          if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+            return this.showToast('Value must be a whole number!', { type: 'error' });
+          }
+          if (config.min !== undefined && parsed < config.min) {
+            return this.showToast(`Value must be at least ${config.min}!`, { type: 'error' });
+          }
+          this.settings[config.id] = parsed;
+          if (config.action && actions[config.action]) {
+            actions[config.action](parsed);
+          }
+          this.saveSettings();
+        };
+      }
+      else if (config.validator === 'cachePath') {
+        setting.onChange = val => {
+          const trimmed = String(val ?? '').trim();
+          try {
+            if (trimmed && !this.nodeModules.fs.statSync(trimmed).isDirectory()) {
+              return this.showToast('Cache path must be an existing folder!', { type: 'error' });
+            }
+          } catch {
+            return this.showToast('Cache path must be an existing folder!', { type: 'error' });
+          }
+          this.settings[config.id] = trimmed;
+          this.saveSettings();
+        };
+      }
+      else if (config.validator === 'hexColor') {
+        setting.onChange = val => {
+          const trimmed = String(val ?? '').trim();
+          if (trimmed && !/^#?[0-9a-f]{6}$/i.test(trimmed)) {
+            return this.showToast('Color must be a 6-digit hex value!', { type: 'error' });
+          }
+          this.settings[config.id] = trimmed && !trimmed.startsWith('#') ? `#${trimmed}` : trimmed;
+          if (config.action && actions[config.action]) actions[config.action](this.settings[config.id]);
           this.saveSettings();
         };
       }
@@ -4005,7 +4115,8 @@ module.exports = class MessageLoggerV2 {
       if (!Number(attachmentId)) attachmentId = messageId;
       const filePath = this.imageCacheServerSimulator.resolveNewCachePath({ channelId: channelId, serverId: serverId });
       this.nodeModules.fs.mkdirSync(filePath, { recursive: true });
-      this.nodeModules.fs.writeFileSync(filePath + `/${attachmentId} (${messageId}${(this.settings.addUserIdToSavedMediaFilename && this.messageRecord[messageId]?.message?.author?.id) ? (" by " + this.messageRecord[messageId].message.author.id) : ""
+      const authorId = this.messageRecord[messageId]?.message?.author?.id || this.cachedMessagesMap.get(messageId)?.author?.id;
+      this.nodeModules.fs.writeFileSync(filePath + `/${attachmentId} (${messageId}${(this.settings.addUserIdToSavedMediaFilename && authorId) ? (" by " + authorId) : ""
       })${fileExtension}`, finalData, { encoding: null });
       Logger.log(`Cached image: ${attachmentId}${fileExtension}`);
     } catch (e) {
@@ -7534,10 +7645,13 @@ module.exports = class MessageLoggerV2 {
           () => {
             const parsedUrl = new URL(matched.input);
             const parsedFile = this.nodeModules.path.parse(parsedUrl.pathname);
-            const targetPath = this.nodeModules.fs.existsSync(this.settings.imageCacheDir + `/${attachmentId}${parsedFile.ext}`) ?
-              this.settings.imageCacheDir + `/${attachmentId}${parsedFile.ext}` :
-              this.imageCacheServerSimulator.resolveNewCachePath({ channelId: channelId, serverId: undefined }) + "/" + attachmentId + ` (${element.messageId})` + parsedFile.ext;
-            this.nodeModules.electron.shell.showItemInFolder(this.nodeModules.path.resolve(targetPath));
+            const targetPath = this.imageCacheServerSimulator._resolveImagePath(
+              attachmentId,
+              parsedFile.ext,
+              channelId,
+              element.messageId
+            );
+            if (targetPath) this.nodeModules.electron.shell.showItemInFolder(this.nodeModules.path.resolve(targetPath));
           },
           this.obfuscatedClass('reveal-in-folder')
         )

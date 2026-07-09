@@ -67,7 +67,7 @@ The whitelist and blacklist are managed from the **Message Logger** submenu in s
 | Show notifications to whitelisted only | Off | Restricts logger notifications to the notification whitelist. |
 | Media cache path | Empty | Uses a custom existing directory instead of `MLV2_IMAGE_CACHE`. |
 | Cache all attachment types | Off | Also caches videos, audio, and other non-image files. |
-| Max cache file size | `0` MB | Skips larger files; `0` disables the size limit. |
+| Max cache file size | `0` MB | Skips larger attachment files; blank or `0` disables the limit. Embed images and stickers are unaffected. |
 | Display open logs button | On | Shows the logger button beside channel search. |
 | Block spam edit notifications | Off | Reduces repeated edit notifications from rapid edits. |
 
