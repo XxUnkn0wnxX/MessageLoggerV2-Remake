@@ -3967,18 +3967,11 @@ module.exports = class MessageLoggerV2 {
     const channelType = liveChannel?.type ?? location.channelType;
     if (![10, 11, 12].includes(channelType)) return false;
     const threadId = liveChannel?.id || location.channelId || message.channel_id;
-    const loggedIds = new Set([message.id]);
-    for (const map of [this.deletedMessageRecord, this.editedMessageRecord, this.purgedMessageRecord]) {
-      if (!Array.isArray(map?.[threadId])) continue;
-      map[threadId].forEach(id => loggedIds.add(id));
-    }
-    let oldestId = null;
-    for (const id of loggedIds) {
-      const saved = this.getSavedMessage(id);
-      if (!saved?.message || saved.message.channel_id !== threadId) continue;
-      if (oldestId === null || BigInt(id) < BigInt(oldestId)) oldestId = id;
-    }
-    return oldestId === message.id;
+    const threadRecord = this.messageRecord?.[threadId];
+    const starterMessageId = record?.delete_data?.forum_metadata?.starterMessageId
+      || threadRecord?.delete_data?.forum_metadata?.starterMessageId
+      || this.forumThreadMetadataCache?.get(threadId)?.starterMessageId;
+    return !!starterMessageId && starterMessageId === message.id;
   }
   getForumThreadDeleteLocationName(record, message) {
     const threadRecord = message?.channel_id ? this.messageRecord?.[message.channel_id] : null;
