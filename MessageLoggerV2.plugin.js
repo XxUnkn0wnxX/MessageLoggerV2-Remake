@@ -281,6 +281,10 @@ module.exports = class MessageLoggerV2 {
       clearTimeout(this.updateTimeout);
       clearTimeout(this.saveBackupTimeout);
       clearTimeout(this.requestedDataSave);
+      for (const context of this._destructiveChannelDeleteContexts?.values?.() || []) {
+        clearTimeout(context.cleanupTimer);
+      }
+      this._destructiveChannelDeleteContexts?.clear?.();
       this._clearNativeNotificationQueue();
       if (this.menu?.filterSetTimeout) clearTimeout(this.menu.filterSetTimeout);
       if (this.keydownListener) {
@@ -555,6 +559,7 @@ module.exports = class MessageLoggerV2 {
       showHiddenTab: false,
       messageCacheCap: 1000,
       savedMessagesCap: 1000,
+      channelDeleteCaptureCap: 25,
       reverseOrder: true,
       onlyLogWhitelist: true,
       whitelist: [],
@@ -654,11 +659,16 @@ module.exports = class MessageLoggerV2 {
       maxCacheFileSize: { fallback: 0, min: 0 },
       messageCacheCap: { fallback: defaultSettings.messageCacheCap, min: 1 },
       savedMessagesCap: { fallback: defaultSettings.savedMessagesCap, min: 0 },
+      channelDeleteCaptureCap: { fallback: defaultSettings.channelDeleteCaptureCap, min: 0, emptyValue: 0 },
       renderCap: { fallback: defaultSettings.renderCap, min: 0 }
     };
     for (const [id, limits] of Object.entries(numericSettings)) {
       const raw = this.settings[id];
-      const parsed = raw === null || String(raw).trim() === '' ? limits.fallback : Number(raw);
+      const parsed = raw === undefined
+        ? limits.fallback
+        : raw === null || String(raw).trim() === ''
+          ? limits.emptyValue ?? limits.fallback
+          : Number(raw);
       const normalized = Number.isFinite(parsed) && Number.isInteger(parsed) && parsed >= limits.min
         ? parsed
         : limits.fallback;
@@ -962,6 +972,7 @@ module.exports = class MessageLoggerV2 {
     this.editHistoryAntiSpam = {};
     this.localDeletes = [];
     this.cacheDeletionMessageIds = new Set();
+    this._destructiveChannelDeleteContexts = new Map();
     const defaultImageCacheDir = this.pluginDir + '/MLV2_IMAGE_CACHE';
     this.settings.imageCacheDir = defaultImageCacheDir;
     const imageCacheDirFailure = () => {
@@ -1979,6 +1990,19 @@ module.exports = class MessageLoggerV2 {
             validator: 'number',
             min: 0,
             action: 'resetDataInterval'
+          },
+          {
+            name: 'Deleted channel capture cap',
+            note: React.createElement(
+              'span',
+              { style: { color: 'var(--status-warning)' } },
+              'Limits the total forum posts, threads, and messages captured when a forum or text channel is deleted. Blank or 0 is unlimited and may freeze or crash Discord on large channels.'
+            ),
+            id: 'channelDeleteCaptureCap',
+            type: 'textbox',
+            validator: 'number',
+            min: 0,
+            emptyValue: 0
           },
           {
             name: 'Menu message render cap',
@@ -3630,6 +3654,212 @@ module.exports = class MessageLoggerV2 {
     this.forumThreadMetadataCache.set(threadId, metadata);
     return metadata;
   }
+  getCachedMessagesForDeletedChannel(channelId) {
+    if (!channelId) return [];
+    const messages = new Map();
+    const addMessage = message => {
+      if (!message?.id || message.channel_id !== channelId) return;
+      if (message.flags == 64) return;
+      if (message.type !== 0 && message.type !== 19 && (message.type !== 20 || (message.flags & 64) === 64)) return;
+      if (this.isThreadCreatedSystemMessage(message)) return;
+      messages.set(message.id, message);
+    };
+    const addCollection = collection => {
+      if (!collection) return;
+      if (Array.isArray(collection)) return collection.forEach(addMessage);
+      if (collection instanceof Map) return collection.forEach(addMessage);
+      if (typeof collection.toArray === 'function') return collection.toArray().forEach(addMessage);
+      if (typeof collection.values === 'function' && (typeof window === 'undefined' || collection !== window)) {
+        return Array.from(collection.values()).forEach(addMessage);
+      }
+      if (typeof collection === 'object') Object.values(collection).forEach(addMessage);
+    };
+    addCollection(this.cachedMessageRecord);
+    const channelMessages = this.channelMessages?.[channelId];
+    addCollection(channelMessages?._array);
+    addCollection(channelMessages?._map);
+    addCollection(channelMessages?._messages);
+    addCollection(channelMessages?.messages);
+    const storeMessages = this.messageStore?.getMessages?.(channelId);
+    addCollection(storeMessages?._array);
+    addCollection(storeMessages?._map);
+    addCollection(storeMessages);
+    return Array.from(messages.values()).sort((left, right) => Number(right.id) - Number(left.id));
+  }
+  createDeletedChannelCaptureContext(channel, guild) {
+    const configuredCap = Number(this.settings.channelDeleteCaptureCap);
+    const cap = Number.isInteger(configuredCap) && configuredCap >= 0 ? configuredCap : 25;
+    const parentMessages = this.getCachedMessagesForDeletedChannel(channel.id);
+    const locations = new Map(parentMessages.map(message => [
+      message.id,
+      this.getMessageLocationSnapshot(message, channel)
+    ]));
+    return {
+      channel,
+      guild,
+      cap,
+      remaining: cap === 0 ? Infinity : cap,
+      captured: 0,
+      threadIds: new Set(),
+      parentMessages,
+      locations,
+      captureEnabled: !(this.settings.ignoreLocalDeletes && this.isLocalDeleteEvent(channel.id)),
+      cleanupTimer: null
+    };
+  }
+  hasDeletedChannelCaptureSlot(context) {
+    return !!context && (context.remaining === Infinity || context.remaining > 0);
+  }
+  consumeDeletedChannelCaptureSlot(context) {
+    if (!this.hasDeletedChannelCaptureSlot(context)) return false;
+    if (context.remaining !== Infinity) context.remaining--;
+    context.captured++;
+    return true;
+  }
+  shouldCaptureDeletedChannelMessage(message) {
+    if (!message?.id || !message.channel_id) return false;
+    if (message.flags == 64) return false;
+    if (message.type !== 0 && message.type !== 19 && (message.type !== 20 || (message.flags & 64) === 64)) return false;
+    if (this.isThreadCreatedSystemMessage(message)) return false;
+    if (this.shouldIgnoreMessageAuthor(message) || this.shouldIgnoreSelfMessage(message)) return false;
+    return true;
+  }
+  saveDeletedChannelCaptureMessage(message, targetMap, context, options = {}) {
+    if (!context?.captureEnabled || !this.hasDeletedChannelCaptureSlot(context)) return false;
+    if (!this.shouldCaptureDeletedChannelMessage(message)) return false;
+    const targetSet = targetMap === this.deletedMessageRecord ? this.deletedMessageSet : this.purgedMessageSet;
+    if (targetSet.get(message.channel_id)?.has(message.id)) return false;
+    this.saveDeletedMessage(message, targetMap);
+    const record = this.messageRecord[message.id];
+    if (!record) return false;
+    const location = options.location || this.getMessageLocationSnapshot(message, options.channel || null);
+    if (location) {
+      record.saved_location = location;
+      if (record.delete_data) record.delete_data.location = location;
+    }
+    if (record.delete_data && options.threadMetadata) {
+      record.delete_data.forum_parent_id = options.threadMetadata.parentId;
+      record.delete_data.forum_metadata = options.threadMetadata;
+      record.delete_data.forum_name = options.threadMetadata.name || options.channel?.name || null;
+      record.delete_data.forum_thread_message_delete = true;
+      if (options.threadRoot) record.delete_data.forum_thread_delete = true;
+    }
+    return this.consumeDeletedChannelCaptureSlot(context);
+  }
+  getDeletedChannelThreadMetadata(channel, context, starterMessage = null) {
+    const existing = this.cacheForumThreadMetadata(channel, starterMessage)
+      || this.forumThreadMetadataCache?.get(channel.id)
+      || {};
+    const parent = context.channel;
+    const guild = context.guild;
+    const parentPath = guild?.name && parent?.name
+      ? `${guild.name}, #${parent.name}`
+      : existing.parentPath || null;
+    const metadata = {
+      ...existing,
+      id: channel.id,
+      parentId: parent.id,
+      parentType: parent.type,
+      threadType: channel.type,
+      isForumParent: parent.type === 15 || parent.type === 16,
+      guildId: channel.guild_id || parent.guild_id || guild?.id || existing.guildId || null,
+      guildName: guild?.name || existing.guildName || null,
+      parentName: parent.name || existing.parentName || null,
+      name: channel.name || existing.name || null,
+      ownerId: channel.owner_id || channel.ownerId || existing.ownerId || null,
+      parentPath,
+      path: parentPath && (channel.name || existing.name)
+        ? `${parentPath} > ${channel.name || existing.name}`
+        : existing.path || parentPath,
+      cachedAt: Date.now()
+    };
+    this.forumThreadMetadataCache?.set(channel.id, metadata);
+    return metadata;
+  }
+  captureThreadFromDeletedChannel(channel, context) {
+    if (!channel?.id || !context?.captureEnabled) return 0;
+    context.threadIds.add(channel.id);
+    const messages = this.getCachedMessagesForDeletedChannel(channel.id);
+    const root = this.getForumThreadDeleteMessage(channel);
+    const metadata = this.getDeletedChannelThreadMetadata(channel, context, root || messages.at(-1) || null);
+    const location = {
+      guildId: metadata.guildId || channel.guild_id || null,
+      guildName: metadata.guildName || context.guild?.name || null,
+      channelId: channel.id,
+      channelName: metadata.name || channel.name || null,
+      channelType: channel.type ?? metadata.threadType ?? null,
+      parentId: metadata.parentId || context.channel.id,
+      parentName: metadata.parentName || context.channel.name || null,
+      parentType: metadata.parentType ?? context.channel.type ?? null,
+      path: metadata.path || null,
+      parentPath: metadata.parentPath || null,
+      cachedAt: Date.now()
+    };
+    const before = context.captured;
+    if (root) {
+      this.saveDeletedChannelCaptureMessage(root, this.purgedMessageRecord, context, {
+        channel,
+        location,
+        threadMetadata: metadata,
+        threadRoot: true
+      });
+    }
+    for (const message of messages) {
+      if (!this.hasDeletedChannelCaptureSlot(context)) break;
+      if (message.id === channel.id) continue;
+      this.saveDeletedChannelCaptureMessage(message, this.purgedMessageRecord, context, {
+        channel,
+        location,
+        threadMetadata: metadata
+      });
+    }
+    const rootRecord = this.messageRecord[channel.id];
+    if (rootRecord?.delete_data) {
+      rootRecord.delete_data.forum_parent_id = context.channel.id;
+      rootRecord.delete_data.forum_thread_delete = true;
+      rootRecord.delete_data.forum_metadata = metadata;
+      rootRecord.delete_data.forum_name = metadata.name || channel.name || null;
+    }
+    return context.captured - before;
+  }
+  captureMessagesFromDeletedChannel(context) {
+    if (!context?.captureEnabled) return 0;
+    const before = context.captured;
+    for (const message of context.parentMessages) {
+      if (!this.hasDeletedChannelCaptureSlot(context)) break;
+      this.saveDeletedChannelCaptureMessage(message, this.purgedMessageRecord, context, {
+        channel: context.channel,
+        location: context.locations.get(message.id)
+      });
+    }
+    return context.captured - before;
+  }
+  handleDeletedGuildChannel(dispatch, callDefault, args) {
+    const channel = dispatch.channel || this.tools.getChannel(dispatch.channelId || dispatch.id);
+    if (!channel?.id || !channel.guild_id || [10, 11, 12].includes(channel.type)) {
+      return callDefault(...args);
+    }
+    const guild = this.tools.getServer(channel.guild_id);
+    const context = this.createDeletedChannelCaptureContext(channel, guild);
+    this._destructiveChannelDeleteContexts.set(channel.id, context);
+    const result = callDefault(...args);
+    this.captureMessagesFromDeletedChannel(context);
+    if (context.captured > 0) {
+      if (this._shouldShowToast(channel, guild, 'deleted', this.isLocalDeleteEvent(channel.id))) {
+        this._notifyEvent('bulkDelete', channel, guild, undefined, { count: context.captured });
+      }
+      this.saveData();
+      this.scheduleLoggerMenuRefresh();
+      Logger.log(`Captured ${context.captured} record${context.captured === 1 ? '' : 's'} from deleted channel ${channel.id} with cap ${context.cap || 'unlimited'}.`);
+    }
+    context.cleanupTimer = setTimeout(() => {
+      if (this._destructiveChannelDeleteContexts.get(channel.id) === context) {
+        this._destructiveChannelDeleteContexts.delete(channel.id);
+      }
+    }, 1500);
+    context.cleanupTimer.unref?.();
+    return result;
+  }
   handleForumThreadDelete(channel, guild, callDefault, args) {
     const threadId = channel?.id;
     if (!threadId) return callDefault(...args);
@@ -4871,6 +5101,16 @@ module.exports = class MessageLoggerV2 {
       }
       if (dispatch.type === 'THREAD_CREATE' || dispatch.type === 'THREAD_UPDATE' || dispatch.type === 'THREAD_LIST_SYNC') {
         return this.handleForumThreadUiEvent(dispatch, callDefault, args);
+      }
+      if (dispatch.type === 'CHANNEL_DELETE') {
+        return this.handleDeletedGuildChannel(dispatch, callDefault, args);
+      }
+      if (dispatch.type === 'THREAD_DELETE' && dispatch.channel?.parent_id) {
+        const destructiveContext = this._destructiveChannelDeleteContexts?.get(dispatch.channel.parent_id);
+        if (destructiveContext) {
+          this.captureThreadFromDeletedChannel(dispatch.channel, destructiveContext);
+          return callDefault(...args);
+        }
       }
       if (dispatch.ML2 && (dispatch.type === 'MESSAGE_DELETE' || dispatch.type === 'MESSAGE_UPDATE')) return callDefault(...args);
       if (dispatch.type !== 'MESSAGE_CREATE' && dispatch.type !== 'MESSAGE_DELETE' && dispatch.type !== 'MESSAGE_DELETE_BULK' && dispatch.type !== 'MESSAGE_UPDATE' && dispatch.type !== 'LOAD_MESSAGES_SUCCESS' && dispatch.type !== 'THREAD_DELETE') return callDefault(...args);

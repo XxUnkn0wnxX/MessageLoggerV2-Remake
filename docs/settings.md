@@ -118,6 +118,7 @@ The notification whitelist and blacklist are managed from the same server, chann
 | --- | --- | --- |
 | Cached messages cap | `1000` | Maximum sent messages retained in the working cache. |
 | Saved messages cap | `1000` | Separate maximum for deleted, edited, and purged records. |
+| Deleted channel capture cap | `25` | Shared limit for forum posts, channel threads, and ordinary messages captured under **Purged** when their parent forum or text channel is deleted. Thread roots are captured before ordinary channel messages. Blank or `0` is unlimited and can freeze or crash Discord on large channels. |
 | Menu message render cap | `50` | Number rendered before **Load More** appears. |
 
 Caps are enforced periodically. Increasing a cap does not restore records that were already removed.

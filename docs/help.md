@@ -143,6 +143,7 @@ Notification settings affect alerts only. Logging scope is controlled separately
 - A restored forum card opens a logger view limited to that thread.
 - **Automatically refresh new forum posts** uses Discord's native **New Post(s)** control so new cards appear without leaving and reopening the forum.
 - Fully deleted forum cards and thread entries use an anchor system: Discord must have at least one live forum post or thread entry whose current layout can be cloned. If the list is empty, deleted items remain logged but are not rendered until a live item exists.
+- Deleting a parent forum or text channel captures nested forum posts or threads first, then ordinary channel messages under **Purged** with one configurable event cap. The default is `25`; blank or `0` is unlimited and unsafe for large channels.
 - Parent-channel “started a thread” system messages are left to Discord and are not logged.
 - Message-history caching and hierarchical media storage stay enabled internally so complete post/thread deletions do not lose unloaded messages or media paths.
 - Flat media-cache files from older versions or forks remain supported for rendering.
