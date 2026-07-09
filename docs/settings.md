@@ -23,7 +23,7 @@ The whitelist and blacklist are managed from the **Message Logger** submenu in s
 | Ignore muted channels | On | Skips muted channels unless the channel is whitelisted or an override applies. |
 | Ignore bots | On | Skips messages authored by bots. |
 | Ignore messages posted by you | Off | Applies author filtering per message, including messages inside forums and threads. |
-| Ignore message edits from you | Off | Skips edits to messages authored by the local user. |
+| Ignore message edits from you | Off | Skips edit-history logging for your messages while keeping their current deletion baseline updated. |
 | Ignore message deletes from you | Off | Skips deletion actions initiated by the local client. For a locally deleted forum post or thread, the root deletion is not logged. |
 | Ignore blocked users | On | Skips messages from blocked users, excluding the local user. |
 | Ignore NSFW channels | Off | Skips unwhitelisted NSFW channels when enabled. |

@@ -82,6 +82,7 @@ Right-click saved messages in the logger or channel view to access applicable ac
 ### Media-only records
 
 - Attachment-only messages retain the same hide, remove, and context-menu actions as text messages.
+- Media added later through a forum post's **Add to Post** action is retained from the message update.
 - Supported image and animated stickers render as media when their source or local cache is available.
 - Embeds, voice messages, non-image files, and unsupported stickers show a compact reference in the logger window.
 - Restored channel messages retain their saved payload so Discord can render supported content natively.

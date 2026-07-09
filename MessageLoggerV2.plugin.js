@@ -1613,7 +1613,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Ignore message edits from you',
-            note: 'Skips edits to messages authored by your account.',
+            note: 'Skips edit history but keeps the current message ready for later deletions.',
             id: 'ignoreLocalEdits',
             type: 'switch'
           },
@@ -2179,6 +2179,42 @@ module.exports = class MessageLoggerV2 {
       || message?.embeds?.length
       || this.getMessageStickerItems(message).length
     );
+  }
+  getMessageMediaCacheKeys(message) {
+    const keys = new Set();
+    for (const attachment of message?.attachments || []) {
+      const key = attachment?.id || attachment?.url || attachment?.proxy_url;
+      if (key) keys.add(`attachment:${key}`);
+    }
+    for (const embed of message?.embeds || []) {
+      const key = embed?.image?.url || embed?.image?.proxy_url;
+      if (key) keys.add(`embed:${key}`);
+    }
+    for (const sticker of this.getMessageStickerItems(message)) {
+      const key = sticker?.id || sticker?.url || sticker?.asset_url || sticker?.assetUrl;
+      if (key) keys.add(`sticker:${key}`);
+    }
+    return keys;
+  }
+  createMessageUpdateSnapshot(previous, update) {
+    const base = previous ? structuredClone(previous) : {};
+    const incoming = structuredClone(update || {});
+    return this.cleanupMessageObject({ ...base, ...incoming });
+  }
+  syncMessageUpdatePayload(update, previous, records = []) {
+    const previousMediaKeys = this.getMessageMediaCacheKeys(previous);
+    const current = this.createMessageUpdateSnapshot(previous, update);
+    const cacheIndex = this.cachedMessageRecord.findIndex(message => message.id === current.id);
+    if (cacheIndex === -1) this.cachedMessageRecord.push(current);
+    else this.cachedMessageRecord[cacheIndex] = current;
+    this.cachedMessageIds.add(current.id);
+    this.cachedMessagesMap.set(current.id, current);
+    for (const record of new Set(records.filter(Boolean))) {
+      record.message = structuredClone(current);
+    }
+    const hasNewMedia = Array.from(this.getMessageMediaCacheKeys(current)).some(key => !previousMediaKeys.has(key));
+    if (hasNewMedia && this.settings.cacheAllImages) this.cacheMessageImages(current);
+    return current;
   }
   getStickerMedia(sticker) {
     const id = sticker?.id;
@@ -4241,7 +4277,15 @@ module.exports = class MessageLoggerV2 {
       if (author && isLocalUser && this.settings.ignoreSelf && dispatch.type === 'MESSAGE_CREATE') return callDefault(...args);
       if (author && this.settings.ignoreBlockedUsers && this.tools.isBlocked(author.id) && !isLocalUser) return callDefault(...args);
       if (author?.avatar === 'clyde') return callDefault(...args);
-      if (this.settings.ignoreLocalEdits && dispatch.type === 'MESSAGE_UPDATE' && isLocalUser) return callDefault(...args);
+      if (this.settings.ignoreLocalEdits && dispatch.type === 'MESSAGE_UPDATE' && isLocalUser) {
+        const last = this.getCachedMessage(dispatch.message.id, channel.id);
+        const savedRecord = this.messageRecord[dispatch.message.id];
+        if (last || savedRecord) {
+          this.syncMessageUpdatePayload(dispatch.message, savedRecord?.message || last, [savedRecord]);
+          if (savedRecord) this.saveData();
+        }
+        return callDefault(...args);
+      }
       if (this.settings.ignoreLocalDeletes && dispatch.type === 'MESSAGE_DELETE' && this.localDeletes.includes(dispatch.id)) return callDefault(...args);
       let guildIsMutedReturn = false;
       let channelIgnoreReturn = false;
@@ -4301,10 +4345,10 @@ module.exports = class MessageLoggerV2 {
           if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: dispatch.id });
         } else if (dispatch.type === 'MESSAGE_UPDATE') {
           if (!dispatch.message.edited_timestamp) {
-            if (dispatch.message.embeds) {
-              const last = this.getCachedMessage(dispatch.message.id);
-              if (last) last.embeds = dispatch.message.embeds.map(this.cleanupEmbed);
-            }
+            const last = this.getCachedMessage(dispatch.message.id);
+            const savedRecord = this.messageRecord[dispatch.message.id];
+            this.syncMessageUpdatePayload(dispatch.message, savedRecord?.message || last, [savedRecord]);
+            if (savedRecord) this.saveData();
             return callDefault(...args);
           }
           const isSaved = this.getEditedMessage(dispatch.message.id, channel.id);
@@ -4451,36 +4495,58 @@ module.exports = class MessageLoggerV2 {
         this.saveData();
       } else if (dispatch.type == 'MESSAGE_UPDATE') {
         if (!dispatch.message.edited_timestamp) {
-          if (dispatch.message.embeds) {
-            const last = this.getCachedMessage(dispatch.message.id);
-            if (last) last.embeds = dispatch.message.embeds.map(this.cleanupEmbed);
-          }
+          const last = this.getCachedMessage(dispatch.message.id);
+          const savedRecord = this.messageRecord[dispatch.message.id];
+          this.syncMessageUpdatePayload(dispatch.message, savedRecord?.message || last, [savedRecord]);
+          if (savedRecord) this.saveData();
           return callDefault(...args);
-        }
-        if (this.settings.showEditedCount) {
-          if (!this.editedChatMessagesCount[channel.id]) this.editedChatMessagesCount[channel.id] = 0;
-          if (!this.selectedChannel || this.selectedChannel.id != channel.id) this.editedChatMessagesCount[channel.id]++;
         }
         if (this.settings.aggresiveMessageCaching) this._ensureChannelCached(channel.id);
         const last = this.getCachedMessage(dispatch.message.id, channel.id);
         const lastEditedSaved = this.getEditedMessage(dispatch.message.id, channel.id);
         if (!last && !lastEditedSaved) return callDefault(...args);
+        const previousMessage = lastEditedSaved?.message || last;
         let ghostPinged = false;
-        const currentContent = lastEditedSaved ? lastEditedSaved.message.content : last.content;
+        const currentContent = previousMessage.content;
         let loggedAttachmentsToAdd = [];
         if (currentContent === dispatch.message.content) {
-          if ((lastEditedSaved ? lastEditedSaved.message.attachments : last.attachments) === dispatch.message.attachments) {
+          const previousAttachments = previousMessage.attachments || [];
+          const updatedAttachments = dispatch.message.attachments || previousAttachments;
+          const attachmentsChanged = previousAttachments.length !== updatedAttachments.length
+            || previousAttachments.some((attachment, index) => attachment.id !== updatedAttachments[index]?.id);
+          if (!attachmentsChanged) {
+            const currentSavedRecord = this.messageRecord[dispatch.message.id];
+            this.syncMessageUpdatePayload(
+              dispatch.message,
+              previousMessage,
+              [lastEditedSaved, currentSavedRecord]
+            );
+            if (currentSavedRecord) this.saveData();
             return callDefault(...args);
           }
           else {
             const { content: generatedContent, logged_attachments } = this._getChangedAttachments(
-              last.attachments, dispatch.message.attachments,
+              previousAttachments, updatedAttachments,
               dispatch.message.id, dispatch.message.channel_id, dispatch.message.guild_id
             );
+            if (!generatedContent) {
+              const currentSavedRecord = this.messageRecord[dispatch.message.id];
+              this.syncMessageUpdatePayload(
+                dispatch.message,
+                previousMessage,
+                [lastEditedSaved, currentSavedRecord]
+              );
+              if (currentSavedRecord) this.saveData();
+              return callDefault(...args);
+            }
             if (lastEditedSaved) lastEditedSaved.message.content += "\n" + generatedContent;
             else last.content += "\n" + generatedContent;
             loggedAttachmentsToAdd = logged_attachments;
           }
+        }
+        if (this.settings.showEditedCount) {
+          if (!this.editedChatMessagesCount[channel.id]) this.editedChatMessagesCount[channel.id] = 0;
+          if (!this.selectedChannel || this.selectedChannel.id != channel.id) this.editedChatMessagesCount[channel.id]++;
         }
         if (lastEditedSaved) {
           lastEditedSaved.edit_history.push({
@@ -4511,6 +4577,12 @@ module.exports = class MessageLoggerV2 {
           this.editedMessageRecord[channel.id].push(data.message.id);
           this._addToChannelSet(this.editedMessageSet, channel.id, data.message.id);
         }
+        const currentSavedRecord = this.messageRecord[dispatch.message.id];
+        this.syncMessageUpdatePayload(
+          dispatch.message,
+          previousMessage,
+          [lastEditedSaved, currentSavedRecord]
+        );
         if (!notificationsBlacklisted && notificationsWhitelisted) {
           if (guild ? this.settings.toastToggles.edited && ((isLocalUser && !this.settings.toastToggles.disableToastsForLocal) || !isLocalUser) : this.settings.toastTogglesDMs.edited && !isLocalUser) {
             if (!this.settings.blockSpamEdit) {
