@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.2.10
+ * @version 2.8.0.2.11
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -281,6 +281,7 @@ module.exports = class MessageLoggerV2 {
       clearTimeout(this.updateTimeout);
       clearTimeout(this.saveBackupTimeout);
       clearTimeout(this.requestedDataSave);
+      this.requestedDataSave = 0;
       for (const context of this._destructiveChannelDeleteContexts?.values?.() || []) {
         clearTimeout(context.cleanupTimer);
       }
@@ -320,7 +321,7 @@ module.exports = class MessageLoggerV2 {
         this.imageCacheServerSimulator.cleanUp();
       }
       if (!this.settings?.dontSaveData && this.messageRecord) {
-        this.saveData();
+        this.handleDataSaving(false, true);
       }
       if (this._globalUpdateCallbackMessage && this.dispatcher) {
         this.dispatcher.unsubscribe('MLV2_FORCE_UPDATE_MESSAGE', this._globalUpdateCallbackMessage);
@@ -368,6 +369,14 @@ module.exports = class MessageLoggerV2 {
   }
   getChanges() {
     return [
+      {
+        title: 'Reliability',
+        type: 'fixed',
+        items: [
+          'Flushes pending log changes synchronously before plugin shutdown or hot reload.',
+          'Correctly expires stale edit-notification spam tracking regardless of media-cache settings.'
+        ]
+      },
       {
         title: 'Anti Nuke recovery',
         type: 'added',
@@ -2290,7 +2299,7 @@ module.exports = class MessageLoggerV2 {
   saveSettings() {
     Data.save(this.getName(), 'settings', this.settings);
   }
-  handleDataSaving() {
+  handleDataSaving(scheduleBackup = true, synchronous = false) {
     if (!this.handleDataSaving.errorPageClass) {
       const errorPageModule = DiscordModules.ErrorPageClasses;
       this.handleDataSaving.errorPageClass = errorPageModule?.errorPage ? ('.' + errorPageModule.errorPage) : '.error-page-not-found';
@@ -2302,7 +2311,7 @@ module.exports = class MessageLoggerV2 {
         UI.showToast('There has been an error saving the data file', { type: "error" });
         Logger.error('There has been an error saving the data file', err);
       }
-      if (this.settings.autoBackup) {
+      if (scheduleBackup && this.settings.autoBackup) {
         if (this.saveBackupTimeout) this.autoBackupSaveInterupts++;
         if (this.autoBackupSaveInterupts < 4) {
           if (this.saveBackupTimeout) clearTimeout(this.saveBackupTimeout);
@@ -2311,12 +2320,12 @@ module.exports = class MessageLoggerV2 {
       }
       this.requestedDataSave = 0;
     };
-    this.efficientlySaveData(this.getName() + 'Data', 'data', this._getDataPayload(), callback);
+    this.efficientlySaveData(this.getName() + 'Data', 'data', this._getDataPayload(), callback, synchronous);
   }
   saveData() {
     if (!this.settings.dontSaveData && !this.requestedDataSave) this.requestedDataSave = setTimeout(() => this.handleDataSaving(), 1000);
   }
-  async efficientlySaveData(name, key, data, callback) {
+  async efficientlySaveData(name, key, data, callback, synchronous = false) {
     try {
       let loadedData;
       try {
@@ -2326,7 +2335,9 @@ module.exports = class MessageLoggerV2 {
       const filePath = this.nodeModules.path.join(this.pluginDir, `${name}.config.json`);
       const serializedData = JSON.stringify({ [key]: data });
       const fs = this.nodeModules.fs;
-      if (fs?.promises?.writeFile) {
+      if (synchronous && typeof fs?.writeFileSync === "function") {
+        fs.writeFileSync(filePath, serializedData, "utf8");
+      } else if (fs?.promises?.writeFile) {
         await fs.promises.writeFile(filePath, serializedData, "utf8");
       } else if (typeof fs?.writeFile === "function") {
         await new Promise((resolve, reject) =>
@@ -5296,8 +5307,7 @@ module.exports = class MessageLoggerV2 {
       const purgedMessages = extractAllMessageIds(this.purgedMessageRecord);
       for (let map of [deletedMessages, editedMessages, purgedMessages]) if (map.length > this.settings.savedMessagesCap) deleteMessages(map);
       if (changed) this.saveData();
-      if (!this.settings.cacheAllImages) return;
-      for (let id in this.editHistoryAntiSpam) if (Date.now() - this.editHistoryAntiSpam[id].times[0] < 10 * 60 * 1000) delete this.editHistoryAntiSpam[id];
+      for (let id in this.editHistoryAntiSpam) if (Date.now() - this.editHistoryAntiSpam[id].times[0] > 10 * 60 * 1000) delete this.editHistoryAntiSpam[id];
     } catch (e) {
       Logger.error('Error clearing out data', e);
     }
