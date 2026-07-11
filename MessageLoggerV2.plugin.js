@@ -750,6 +750,7 @@ module.exports = class MessageLoggerV2 {
       fs: require('fs'),
       path: require('path')
     };
+    this.cleanUpStaleDataTempFiles();
     const guildStore_ = DiscordModules.GuildStore;
     this.imageCacheServerSimulator = {
       "cached": {},
@@ -2298,6 +2299,39 @@ module.exports = class MessageLoggerV2 {
   }
   saveSettings() {
     Data.save(this.getName(), 'settings', this.settings);
+  }
+  cleanUpStaleDataTempFiles() {
+    try {
+      const fs = this.nodeModules.fs;
+      const path = this.nodeModules.path;
+      const staleAfterMs = 60 * 1000;
+      const prefixes = [
+        `${this.getName()}Data.config.json.tmp-`,
+        `${this.getName()}DataBackup.config.json.tmp-`
+      ];
+      const staleFiles = fs.readdirSync(this.pluginDir)
+        .filter(fileName => {
+          if (!prefixes.some(prefix => fileName.startsWith(prefix))) return false;
+          try {
+            const stat = fs.statSync(path.join(this.pluginDir, fileName));
+            return stat.isFile() && Date.now() - stat.mtimeMs > staleAfterMs;
+          } catch {
+            return false;
+          }
+        });
+      let removed = 0;
+      for (const fileName of staleFiles) {
+        try {
+          fs.unlinkSync(path.join(this.pluginDir, fileName));
+          removed++;
+        } catch (error) {
+          Logger.warn(`Unable to remove stale data write temp file ${fileName}:`, error);
+        }
+      }
+      if (removed) Logger.log(`Removed ${removed} stale data write temp file${removed === 1 ? '' : 's'}.`);
+    } catch (error) {
+      Logger.warn('Unable to clean stale data write temp files:', error);
+    }
   }
   handleDataSaving(scheduleBackup = true, synchronous = false) {
     if (!this.handleDataSaving.errorPageClass) {

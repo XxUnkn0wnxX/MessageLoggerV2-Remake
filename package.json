@@ -1,0 +1,10 @@
+{
+  "name": "messageloggerv2-remake",
+  "private": true,
+  "scripts": {
+    "check": "node --check MessageLoggerV2.plugin.js",
+    "test": "node --check MessageLoggerV2.plugin.js && node --test tests/*.test.js",
+    "test:persistence": "node --test tests/persistence.test.js",
+    "test:runtime-contracts": "node --test tests/source-contracts.test.js"
+  }
+}
