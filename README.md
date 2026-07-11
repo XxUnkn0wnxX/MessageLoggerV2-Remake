@@ -30,6 +30,7 @@ The default scope is whitelist-only, although the selected channel and DMs have 
 - [Settings reference](docs/settings.md)
 - [Help and usage](docs/help.md)
 - [Official test matrix](docs/tests.md)
+- [Project TODO](TODO.md)
 
 The same help pages are available inside Discord from **MessageLoggerV2 Settings > Help** or the question-mark button in the logger window.
 
