@@ -2326,6 +2326,7 @@ module.exports = class MessageLoggerV2 {
     if (!this.settings.dontSaveData && !this.requestedDataSave) this.requestedDataSave = setTimeout(() => this.handleDataSaving(), 1000);
   }
   async efficientlySaveData(name, key, data, callback, synchronous = false) {
+    let tempPath;
     try {
       let loadedData;
       try {
@@ -2335,21 +2336,35 @@ module.exports = class MessageLoggerV2 {
       const filePath = this.nodeModules.path.join(this.pluginDir, `${name}.config.json`);
       const serializedData = JSON.stringify({ [key]: data });
       const fs = this.nodeModules.fs;
-      if (synchronous && typeof fs?.writeFileSync === "function") {
-        fs.writeFileSync(filePath, serializedData, "utf8");
-      } else if (fs?.promises?.writeFile) {
-        await fs.promises.writeFile(filePath, serializedData, "utf8");
-      } else if (typeof fs?.writeFile === "function") {
+      const tempSuffix = `.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      tempPath = filePath + tempSuffix;
+      if (synchronous && typeof fs?.writeFileSync === "function" && typeof fs?.renameSync === "function") {
+        fs.writeFileSync(tempPath, serializedData, "utf8");
+        fs.renameSync(tempPath, filePath);
+      } else if (fs?.promises?.writeFile && fs?.promises?.rename) {
+        await fs.promises.writeFile(tempPath, serializedData, "utf8");
+        await fs.promises.rename(tempPath, filePath);
+      } else if (typeof fs?.writeFile === "function" && typeof fs?.rename === "function") {
         await new Promise((resolve, reject) =>
-          fs.writeFile(filePath, serializedData, "utf8", err => (err ? reject(err) : resolve()))
+          fs.writeFile(tempPath, serializedData, "utf8", err => (err ? reject(err) : resolve()))
         );
-      } else if (typeof fs?.writeFileSync === "function") {
-        fs.writeFileSync(filePath, serializedData, "utf8");
+        await new Promise((resolve, reject) =>
+          fs.rename(tempPath, filePath, err => (err ? reject(err) : resolve()))
+        );
       } else {
-        throw new TypeError("No supported filesystem write method");
+        throw new TypeError("No supported atomic filesystem write method");
       }
+      tempPath = null;
       if (callback) callback(null);
     } catch (e) {
+      if (tempPath) {
+        try {
+          const fs = this.nodeModules.fs;
+          if (typeof fs?.unlinkSync === "function") fs.unlinkSync(tempPath);
+          else if (fs?.promises?.unlink) await fs.promises.unlink(tempPath);
+          else if (typeof fs?.unlink === "function") await new Promise(resolve => fs.unlink(tempPath, () => resolve()));
+        } catch { }
+      }
       UI.showToast('There has been an error saving the data file', { type: "error" });
       Logger.error('Error saving data file', e);
       if (callback) callback(e);
