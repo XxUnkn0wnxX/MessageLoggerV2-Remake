@@ -74,6 +74,8 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Cache all attachment types | Off | Also caches videos, audio, and other non-image files. |
 | Max cache file size | `0` MB | Skips larger attachment files; blank or `0` disables the limit. Embed images and stickers are unaffected. |
 | Display open logs button | On | Shows the logger button beside channel search. |
+| Open all logs keybind | `Ctrl+M` | Uses BetterDiscord's native keybind recorder. The shortcut clears any stale logger filter before opening; clear the recorder to disable it. Unsafe or overlapping captures are rejected inline. |
+| Open selected channel logs keybind | `Ctrl+N` | Uses BetterDiscord's native keybind recorder and resolves the selected channel when pressed. It also refilters an already-open logger; clear the recorder to disable it. Unsafe or overlapping captures are rejected inline. |
 | Automatically refresh new forum posts | On | Uses Discord's native **New Post(s)** control so cards appear without leaving and reopening the forum. |
 | Block spam edit notifications | Off | Reduces repeated edit notifications from rapid edits. |
 
@@ -88,7 +90,9 @@ BetterDiscord stores the plugin's data beside the installed plugin:
 
 The two locked legacy cache settings remain present in `MessageLoggerV2.config.json` with a value of `true`. Editing either value to `false` does not disable the fork's required caching behavior; the plugin restores and saves `true` the next time it starts.
 
-At startup, the plugin fills every missing setting from the current defaults and repairs invalid types, nested toast options, numeric bounds, lists, colors, and the automatic-backup interval before saving the canonical config. Valid custom values are retained, including paths, colors, caps, lists, and backup intervals within range. Unknown top-level and nested keys are also retained for compatibility with other forks.
+At startup, the plugin fills every missing setting from the current defaults and repairs invalid types, nested toast options, numeric bounds, lists, colors, keybind arrays, and the automatic-backup interval before saving the canonical config. Valid custom values are retained, including paths, colors, caps, lists, keybinds, cleared/disabled keybinds, and backup intervals within range. Unknown top-level and nested keys are also retained for compatibility with other forks.
+
+Logger keybinds accept modifiers plus exactly one trigger key; `F1` through `F24` can also be used without a modifier. Modifier-only, bare printable/navigation, multi-trigger, identical, and subset/overlapping bindings are rejected so a shortcut cannot hijack ordinary chat input or make the other logger action unreachable.
 
 If the JSON itself is damaged, the plugin repairs common extra, trailing, or missing commas and missing, extra, or mismatched braces/brackets. When the complete document cannot be rebuilt directly, valid settings are ingested individually and only missing or invalid owned keys receive defaults. The exact damaged source is saved as `MessageLoggerV2.config.corrupt-backup.json`, then the recovered config is rewritten through a same-directory temporary file and atomic rename. Commas and brackets inside quoted values are never treated as structure. The first-user help appears only when `MessageLoggerV2.config.json` did not exist and a new all-default config was generated; an existing legacy, incomplete, or repaired config never triggers it.
 

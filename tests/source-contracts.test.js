@@ -38,6 +38,8 @@ test('all fresh-install settings defaults remain stable', () => {
     ignoreLocalDeletes: false,
     alwaysLogGhostPings: false,
     showOpenLogsButton: true,
+    openLogsKeybind: ['Control', 'm'],
+    openFilteredLogsKeybind: ['Control', 'n'],
     showHiddenTab: false,
     messageCacheCap: 1000,
     savedMessagesCap: 1000,
@@ -133,6 +135,8 @@ test('all fresh-install settings defaults remain stable', () => {
     deletedMessageColor: '#12abef',
     newCacheAllImagesPath: '/custom/cache',
     contextmenuSubmenuName: 'My Logger',
+    openLogsKeybind: ['Alt', 'l'],
+    openFilteredLogsKeybind: [],
     whitelist: ['guild-a', 'channel-b'],
     forkSpecificSetting: { enabled: true }
   });
@@ -140,7 +144,26 @@ test('all fresh-install settings defaults remain stable', () => {
   const before = structuredClone(customized);
   assert.equal(plugin.normalizeSettingsAgainstDefaults(customized, defaults), false);
   assert.equal(plugin.ensureAutoBackupIntervalSetting(customized), false);
+  assert.deepEqual(plugin.ensureLoggerKeybindSettings(customized, defaults), []);
   assert.deepEqual(customized, before);
+});
+
+test('native BetterDiscord keybind recorders drive capture-phase logger shortcuts', () => {
+  assert.match(source, /name: 'Open all logs keybind'[\s\S]*?id: 'openLogsKeybind'[\s\S]*?type: 'keybind'[\s\S]*?validator: 'loggerKeybind'[\s\S]*?max: 4[\s\S]*?clearable: true/);
+  assert.match(source, /name: 'Open selected channel logs keybind'[\s\S]*?id: 'openFilteredLogsKeybind'[\s\S]*?type: 'keybind'[\s\S]*?validator: 'loggerKeybind'[\s\S]*?max: 4[\s\S]*?clearable: true/);
+  const recorder = source.slice(source.indexOf('createValidatedLoggerKeybindRecorder(config)'), source.indexOf('normalizeAutoBackupIntervalSeconds(value)'));
+  assert.match(recorder, /Components\.KeybindInput/);
+  assert.match(recorder, /plugin\._pressedShortcutKeys\?\.clear\?\.\(\)/);
+  assert.match(recorder, /plugin\.validateLoggerKeybind\(capturedValue, config\.id\)/);
+  assert.match(recorder, /setRevision\(current => current \+ 1\)/);
+  assert.match(recorder, /color: 'var\(--status-danger\)'/);
+  assert.match(source, /document\.addEventListener\('keydown', this\.shortcutKeydownListener, true\)/);
+  assert.match(source, /document\.addEventListener\('keyup', this\.shortcutKeyupListener, true\)/);
+  assert.match(source, /document\.removeEventListener\('keydown', this\.shortcutKeydownListener, true\)/);
+  assert.match(source, /document\.removeEventListener\('keyup', this\.shortcutKeyupListener, true\)/);
+  assert.match(source, /window\.addEventListener\('blur', this\.shortcutBlurListener\)/);
+  assert.match(source, /window\.removeEventListener\('blur', this\.shortcutBlurListener\)/);
+  assert.match(source, /this\.ensureLoggerKeybindSettings\(this\.settings, defaultSettings\)/);
 });
 
 test('required legacy cache toggles stay visible, locked, and forced on', () => {

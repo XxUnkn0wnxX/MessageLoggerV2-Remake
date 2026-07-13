@@ -12,7 +12,7 @@ A maintained BetterDiscord message logger for deleted, edited, purged, and ghost
 - Deleted, edited, purged, and ghost-ping history, plus a bounded memory-only **Sent** tab that clears on reload.
 - In-chat restoration of logged deleted and purged messages, saved edit history, configurable tints, and unseen-event counts.
 - Attachment-only messages, embeds, stickers, voice messages, and other file references remain manageable in logger views.
-- Search filters, scoped log views, context-menu actions, a Hidden tab, permanent removal controls, and configurable record/render caps.
+- Search filters, scoped log views, context-menu actions, native captured keybinds for all/current-channel logs, a Hidden tab, permanent removal controls, and configurable record/render caps.
 
 ### 🧵 Forums, threads, and channel recovery
 

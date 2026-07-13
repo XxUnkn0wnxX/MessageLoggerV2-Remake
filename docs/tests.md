@@ -38,7 +38,7 @@ npm run test:runtime-contracts
 | --- | --- | --- |
 | AT-01 | Plugin source | The distributed plugin parses successfully with `node --check`. |
 | AT-02 | Metadata and updates | Source and update URLs continue to target this fork's `main` branch. |
-| AT-03 | Settings defaults | Every fresh-install toggle, cap, list, nested toast option, locked legacy cache toggle, bounded automatic-backup interval, and opt-in debug control remains stable. |
+| AT-03 | Settings defaults | Every fresh-install toggle, cap, list, nested toast option, captured keybind, locked legacy cache toggle, bounded automatic-backup interval, and opt-in debug control remains stable. |
 | AT-04 | Primary persistence | Normal saves atomically replace the primary JSON file without leaving temp files. |
 | AT-05 | Shutdown persistence | Synchronous shutdown saves use the same atomic replacement path. |
 | AT-06 | Backup persistence | Backup data writes to its own atomic destination. |
@@ -67,6 +67,7 @@ npm run test:runtime-contracts
 | AT-29 | Backup diagnostics | Console and routed-toast debug controls remain independent and off by default; backup events use the warning type and follow the selected native-notification or custom-toast route. |
 | AT-30 | High-impact setting feedback | Every settings callback runs once. Logging scope, automatic backup, media caching, Anti-Nuke, automatic update, local-only rendering, and cached-file deletion actions log explicit states and follow the selected route; same-setting alerts replace stale ones, do not pause on hover, dismiss immediately on native-card or custom-toast left/right clicks, enabled uses info, disabled uses a theme-neutral presentation, debug remains warning, and errors remain red. |
 | AT-31 | Settings config recovery | Strict JSON remains untouched; extra, trailing, and missing commas, missing/extra/mismatched brackets, isolated invalid values, missing outer structure, and severe mixed corruption preserve recoverable owned and fork-specific settings, default only unrecoverable owned keys, atomically rewrite the config, retain the exact corrupt source, and never classify an existing config as a first install. |
+| AT-32 | Logger keybinds | Native keybind arrays normalize safely; missing, unsafe, conflicting, or invalid config values receive safe defaults; empty arrays remain disabled; exact order-independent matches ignore repeats and extra held keys; recorder changes and modifier release clear stale chords; all-logs clears stale filters; selected-channel logs resolve the live channel and either refilter an open logger or reopen after a stale modal flag. |
 
 ## 💬 Live Discord Matrix
 
@@ -90,6 +91,7 @@ The following behavior depends on Discord's current Webpack exports, Flux events
 | RT-14 | Backup diagnostics | Open the warning-colored **Debug** group and verify both toggles default off. Enable console-only, toast-only, then both; schedule a backup and confirm queue, reschedule, cancellation, start, retry, and completion events use only the selected destinations. |
 | RT-15 | High-impact setting feedback | In both BetterDiscord-notification and custom-toast modes, toggle each high-impact setting listed in AT-30. Confirm exactly one console entry and alert per change, then toggle one setting rapidly and confirm only its latest alert remains. Verify hover does not pause the visible countdown or expiry, native cards and custom toasts dismiss immediately on both left and right click, enabled is info blue, disabled is theme-neutral grey or a neutral native icon/card, and the setting's existing behavior still applies. |
 | RT-16 | Settings config recovery | With a copied config and Discord fully closed, introduce representative comma/bracket damage while leaving several custom values intact. Relaunch and confirm valid values survive, invalid/missing keys use defaults, the canonical config and exact corrupt backup are written, and no first-user help appears. Separately test a disposable profile with no config: the help must match **First Setup**, use current setting/context-menu names, show one full-width **OK** button, and dismiss without opening the logger. |
+| RT-17 | Logger keybinds | Under **Misc settings**, confirm `Ctrl+M` opens all logs and clears an old filter, while `Ctrl+N` filters to the currently selected channel. Capture distinct safe combinations for both, verify they work while chat is focused and after a Discord reload, then clear one recorder and confirm only that shortcut is disabled. Also try a bare printable key, modifier-only chord, and overlapping chord; each must show an inline error and retain the prior saved binding. |
 
 ## 🔍 Audit Policy
 
@@ -105,6 +107,7 @@ The following behavior depends on Discord's current Webpack exports, Flux events
 tests/
   helpers/plugin-harness.js
   anti-nuke.test.js
+  keybinds.test.js
   media.test.js
   no-save-merge.test.js
   persistence.test.js

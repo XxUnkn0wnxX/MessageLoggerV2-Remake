@@ -18,9 +18,11 @@ Logged message content and any enabled media cache remain local to this device. 
 - Right-click that button to open logs filtered to the selected channel.
 - Use **Message Logger > Open Logs** from supported context menus.
 - Use **Open Log For Guild**, **Channel**, **Thread**, **DM**, or **User** where available.
-- Default shortcuts:
-  - `Ctrl+M`: open the logger.
-  - `Ctrl+N`: open the logger filtered to the selected channel.
+- Keyboard shortcuts are captured under **Misc settings**:
+  - `Ctrl+M` by default: clear any old filter and open all logs.
+  - `Ctrl+N` by default: open logs filtered to the channel selected when the shortcut is pressed.
+  - Custom printable/navigation shortcuts require modifiers and exactly one trigger key; `F1` through `F24` may be used alone. Overlapping bindings are rejected inline.
+  - Clear either recorder to disable that shortcut.
 
 ## 📑 Logger Tabs
 

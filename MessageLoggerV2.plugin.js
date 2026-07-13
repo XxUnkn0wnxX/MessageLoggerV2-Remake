@@ -18,6 +18,11 @@ const DATA_SCHEMA_VERSION = 1;
 const DEFAULT_AUTO_BACKUP_INTERVAL_SECONDS = 20;
 const MIN_AUTO_BACKUP_INTERVAL_SECONDS = 10;
 const MAX_AUTO_BACKUP_INTERVAL_SECONDS = 86400;
+// BetterDiscord's native keybind recorder persists KeyboardEvent.key values as an array.
+// Keep the legacy advertised shortcuts as defaults while allowing either binding to be
+// customized—or cleared to disable it—without introducing a fork-only settings component.
+const LOGGER_KEYBIND_SETTING_IDS = Object.freeze(['openLogsKeybind', 'openFilteredLogsKeybind']);
+const LOGGER_KEYBIND_MODIFIERS = Object.freeze(['Control', 'Shift', 'Alt', 'Meta']);
 const { React, ReactDOM, Webpack, UI, Plugins, DOM, Patcher, Components, ContextMenu, Utils, Hooks, ReactUtils, Logger } = new BdApi('MessageLoggerV2');
 const { Data } = BdApi;
 const { Filters } = Webpack;
@@ -306,6 +311,16 @@ module.exports = class MessageLoggerV2 {
       if (this.keyupListener) {
         document.removeEventListener('keyup', this.keyupListener);
       }
+      if (this.shortcutKeydownListener) {
+        document.removeEventListener('keydown', this.shortcutKeydownListener, true);
+      }
+      if (this.shortcutKeyupListener) {
+        document.removeEventListener('keyup', this.shortcutKeyupListener, true);
+      }
+      if (this.shortcutBlurListener) {
+        window.removeEventListener('blur', this.shortcutBlurListener);
+      }
+      this._pressedShortcutKeys?.clear?.();
       this.removeOpenLogsButton();
       if (this.style?.css) {
         DOM.removeStyle(this.style.css);
@@ -432,6 +447,7 @@ module.exports = class MessageLoggerV2 {
         title: 'Compatibility and interface',
         type: 'fixed',
         items: [
+          'Restores the advertised logger shortcuts and adds native BetterDiscord capture controls for custom or disabled bindings.',
           'Uses Discord native forum refresh behavior and repairs deleted tint, jump, context-menu, purge, and restore edge cases.',
           'Improves settings validation, accordion navigation, help screens, documentation, and legacy cache compatibility.',
           'Restores the legacy aggressive message caching and new cache system controls as locked-on indicators and resets false config values at startup.',
@@ -603,6 +619,8 @@ module.exports = class MessageLoggerV2 {
       ignoreLocalDeletes: false,
       alwaysLogGhostPings: false,
       showOpenLogsButton: true,
+      openLogsKeybind: ['Control', 'm'],
+      openFilteredLogsKeybind: ['Control', 'n'],
       showHiddenTab: false,
       messageCacheCap: 1000,
       savedMessagesCap: 1000,
@@ -723,6 +741,17 @@ module.exports = class MessageLoggerV2 {
         });
       }
       settingsChanged = true;
+    }
+    // Validate native-recorder arrays before the general array normalizer can discard bad
+    // members. Missing keys are a normal upgrade path; malformed manual config values are
+    // restored to the advertised Ctrl+M/N defaults and recorded in the console.
+    const keybindRepairs = this.ensureLoggerKeybindSettings(this.settings, defaultSettings);
+    if (keybindRepairs.length) {
+      settingsChanged = true;
+      const invalidRepairs = keybindRepairs.filter(repair => repair.reason !== 'missing');
+      if (invalidRepairs.length) {
+        Logger.warn('Invalid logger keybind settings in config; restored safe values.', invalidRepairs);
+      }
     }
     const hadAntiNukeThreadCap = Object.prototype.hasOwnProperty.call(this.settings, 'antiNukeThreadCap');
     const hadAntiNukeMessageCap = Object.prototype.hasOwnProperty.call(this.settings, 'antiNukeMessageCap');
@@ -1657,6 +1686,17 @@ module.exports = class MessageLoggerV2 {
       if (e.keyCode === 46) this.menu.deleteKeyDown = false;
     };
     document.addEventListener('keyup', this.keyupListener);
+    // BetterDiscord's native recorder listens during window capture, which precedes document
+    // capture regardless of registration order. While recording, it stops propagation before
+    // these listeners run. Otherwise, the logger claims only exact configured matches before
+    // Discord consumes them for an unrelated shortcut.
+    this._pressedShortcutKeys = new Set();
+    this.shortcutKeydownListener = event => this.handleLoggerShortcutKeydown(event);
+    this.shortcutKeyupListener = event => this.handleLoggerShortcutKeyup(event);
+    this.shortcutBlurListener = () => this._pressedShortcutKeys.clear();
+    document.addEventListener('keydown', this.shortcutKeydownListener, true);
+    document.addEventListener('keyup', this.shortcutKeyupListener, true);
+    window.addEventListener('blur', this.shortcutBlurListener);
     this.menu.shownMessages = -1;
     this.Tooltip = Components.Tooltip;
     this.addOpenLogsButton();
@@ -1813,6 +1853,212 @@ module.exports = class MessageLoggerV2 {
     }
     if (current.value === undefined) current.value = this.settings[current.id];
     return this.buildSetting(current);
+  }
+  normalizeLoggerShortcutKey(key) {
+    if (typeof key !== 'string' || !key.length) return null;
+    // KeyboardEvent.key varies in letter case when Shift is held and some manually edited
+    // configs use familiar aliases. Normalize only the matching representation; the native
+    // recorder remains responsible for displaying the user's captured key order.
+    if (key.length === 1) return key.toLowerCase();
+    const aliases = {
+      ctrl: 'Control',
+      control: 'Control',
+      shift: 'Shift',
+      alt: 'Alt',
+      option: 'Alt',
+      meta: 'Meta',
+      cmd: 'Meta',
+      command: 'Meta',
+      os: 'Meta',
+      esc: 'Escape',
+      escape: 'Escape',
+      return: 'Enter',
+      enter: 'Enter',
+      space: ' ',
+      spacebar: ' '
+    };
+    const trimmed = key.trim();
+    const alias = aliases[trimmed.toLowerCase()];
+    if (alias) return alias;
+    if (/^f(?:[1-9]|1\d|2[0-4])$/i.test(trimmed)) return trimmed.toUpperCase();
+    // Standard named KeyboardEvent.key values are PascalCase (ArrowUp, PageDown,
+    // MediaPlayPause, and similar). Reject arbitrary lowercase config strings and browser
+    // sentinel values that can never be useful bindings.
+    if (trimmed === 'Unidentified' || trimmed === 'Dead' || !/^[A-Z][A-Za-z0-9]*$/.test(trimmed)) return null;
+    return trimmed;
+  }
+  normalizeLoggerKeybind(value) {
+    // BetterDiscord records at most four keys. An empty array is deliberately valid and
+    // means the user cleared/disabled this shortcut through the native recorder.
+    if (!Array.isArray(value) || value.length > 4) return null;
+    const normalized = [];
+    for (const key of value) {
+      const normalizedKey = this.normalizeLoggerShortcutKey(key);
+      if (!normalizedKey || normalized.includes(normalizedKey)) return null;
+      normalized.push(normalizedKey);
+    }
+    return normalized;
+  }
+  loggerKeybindsConflict(first, second) {
+    const firstKeys = this.normalizeLoggerKeybind(first);
+    const secondKeys = this.normalizeLoggerKeybind(second);
+    if (!firstKeys?.length || !secondKeys?.length) return false;
+    const firstSet = new Set(firstKeys);
+    const secondSet = new Set(secondKeys);
+    // Subsets are conflicts too: a Ctrl+M action would fire before the user can complete a
+    // Ctrl+Shift+M binding. Preventing these pairs keeps every captured shortcut reachable.
+    return firstKeys.every(key => secondSet.has(key)) || secondKeys.every(key => firstSet.has(key));
+  }
+  validateLoggerKeybind(value, settingId = null, settings = this.settings, checkConflict = true) {
+    const normalized = this.normalizeLoggerKeybind(value);
+    if (!normalized) return { valid: false, message: 'Keybind capture was invalid.' };
+    if (!normalized.length) return { valid: true, value: [] };
+    const triggerKeys = normalized.filter(key => !LOGGER_KEYBIND_MODIFIERS.includes(key));
+    const modifierKeys = normalized.filter(key => LOGGER_KEYBIND_MODIFIERS.includes(key));
+    if (triggerKeys.length !== 1) {
+      return { valid: false, message: 'Use modifiers plus exactly one non-modifier key.' };
+    }
+    // A bare printable or navigation key would hijack normal chat/UI input. Function keys are
+    // the one safe modifier-free option because they are not used to enter message text.
+    if (!modifierKeys.length && !/^F(?:[1-9]|1\d|2[0-4])$/.test(triggerKeys[0])) {
+      return { valid: false, message: 'Use Ctrl, Alt, Shift, or Command with the key (or use F1-F24 alone).' };
+    }
+    if (checkConflict && settingId && settings) {
+      const otherId = LOGGER_KEYBIND_SETTING_IDS.find(id => id !== settingId);
+      if (otherId && this.loggerKeybindsConflict(normalized, settings[otherId])) {
+        return { valid: false, message: 'This overlaps the other logger keybind. Record a distinct combination.' };
+      }
+    }
+    return { valid: true, value: normalized };
+  }
+  ensureLoggerKeybindSettings(settings = this.settings, defaults = {}) {
+    const hardcodedDefaults = {
+      openLogsKeybind: ['Control', 'm'],
+      openFilteredLogsKeybind: ['Control', 'n']
+    };
+    const repairs = [];
+    for (const id of LOGGER_KEYBIND_SETTING_IDS) {
+      const configured = settings[id];
+      const fallback = this.normalizeLoggerKeybind(defaults[id]) || hardcodedDefaults[id].slice();
+      if (configured === undefined) {
+        settings[id] = fallback.slice();
+        repairs.push({ id, reason: 'missing', savedValue: settings[id] });
+        continue;
+      }
+      const validation = this.validateLoggerKeybind(configured, id, settings, false);
+      if (!validation.valid) {
+        settings[id] = fallback.slice();
+        repairs.push({
+          id,
+          reason: 'invalid',
+          message: validation.message,
+          configuredValue: configured,
+          savedValue: settings[id]
+        });
+        continue;
+      }
+      const normalized = validation.value;
+      if (JSON.stringify(configured) === JSON.stringify(normalized)) continue;
+      settings[id] = normalized;
+      repairs.push({ id, reason: 'normalized', configuredValue: configured, savedValue: normalized });
+    }
+    if (this.loggerKeybindsConflict(settings.openLogsKeybind, settings.openFilteredLogsKeybind)) {
+      const filteredFallback = this.normalizeLoggerKeybind(defaults.openFilteredLogsKeybind)
+        || hardcodedDefaults.openFilteredLogsKeybind.slice();
+      if (!this.loggerKeybindsConflict(settings.openLogsKeybind, filteredFallback)) {
+        const configuredValue = settings.openFilteredLogsKeybind;
+        settings.openFilteredLogsKeybind = filteredFallback.slice();
+        repairs.push({
+          id: 'openFilteredLogsKeybind',
+          reason: 'conflict',
+          configuredValue,
+          savedValue: settings.openFilteredLogsKeybind
+        });
+      } else {
+        for (const id of LOGGER_KEYBIND_SETTING_IDS) {
+          const configuredValue = settings[id];
+          settings[id] = (this.normalizeLoggerKeybind(defaults[id]) || hardcodedDefaults[id]).slice();
+          repairs.push({ id, reason: 'conflict', configuredValue, savedValue: settings[id] });
+        }
+      }
+    }
+    return repairs;
+  }
+  formatLoggerKeybind(value) {
+    const normalized = this.normalizeLoggerKeybind(value);
+    if (!normalized?.length) return 'Disabled';
+    return normalized.map(key => key === 'Control' ? 'Ctrl' : key === ' ' ? 'Space' : key).join(' + ');
+  }
+  loggerKeybindMatchesPressed(value, pressedKeys = this._pressedShortcutKeys) {
+    const validation = this.validateLoggerKeybind(value, null, null, false);
+    const normalized = validation.valid ? validation.value : null;
+    if (!normalized?.length || !pressedKeys || normalized.length !== pressedKeys.size) return false;
+    return normalized.every(key => pressedKeys.has(key));
+  }
+  handleLoggerShortcutKeydown(event) {
+    if (!event || event.repeat || event.isComposing || !this._pressedShortcutKeys) return false;
+    const key = this.normalizeLoggerShortcutKey(event.key);
+    if (!key) return false;
+    this._pressedShortcutKeys.add(key);
+    const openAll = this.loggerKeybindMatchesPressed(this.settings?.openLogsKeybind);
+    const openFiltered = !openAll && this.loggerKeybindMatchesPressed(this.settings?.openFilteredLogsKeybind);
+    if (!openAll && !openFiltered) return false;
+    // Consume only an exact configured match. Unrelated Discord and plugin keybinds continue
+    // through the normal event path, including partial combinations while keys are held.
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+    this.openLogsFromShortcut(openFiltered);
+    return true;
+  }
+  handleLoggerShortcutKeyup(event) {
+    if (!event || !this._pressedShortcutKeys) return false;
+    const key = this.normalizeLoggerShortcutKey(event.key);
+    if (!key) return false;
+    // Chromium can omit a companion keyup while Meta or another modifier owns an OS-level
+    // combination. Releasing any primary modifier clears the complete chord so a stale
+    // character cannot poison every later exact-match check until the window loses focus.
+    if (LOGGER_KEYBIND_MODIFIERS.includes(key)) {
+      const wasPressed = this._pressedShortcutKeys.has(key);
+      this._pressedShortcutKeys.clear();
+      return wasPressed;
+    }
+    return this._pressedShortcutKeys.delete(key);
+  }
+  openLogsFromShortcut(filterSelectedChannel = false) {
+    if (!this.menu) return false;
+    if (filterSelectedChannel) {
+      // Resolve the channel when the shortcut fires. `this.selectedChannel` is maintained by
+      // UI observations and can briefly lag behind a fast navigation action.
+      const selectedChannel = this.getSelectedTextChannel?.() || this.selectedChannel;
+      if (!selectedChannel?.id) {
+        Logger.warn('Filtered logger shortcut was pressed without a selected text channel.');
+        this.showToast('Select a channel before using the filtered logger shortcut.', { type: 'warning' });
+        return false;
+      }
+      this.menu.filter = `channel:${selectedChannel.id}`;
+    } else {
+      // "Open all logs" must clear a filter left by a prior channel shortcut or context-menu
+      // action; otherwise the old Ctrl+M description would still be misleading.
+      this.menu.filter = '';
+    }
+    this.menu.scrollPosition = 0;
+    const loggerModalOpen = this.ModalStack?.hasModalOpen
+      ? this.ModalStack.hasModalOpen(this.style.menu)
+      : this.menu.open;
+    if (loggerModalOpen) {
+      this.menu.open = true;
+      this.refilterMessages();
+      return true;
+    }
+    // patchModal deliberately delays cleanup so Discord's modal store can settle. If a
+    // shortcut lands in that window, reset only stale render state while retaining the new
+    // desired filter, then reopen instead of refiltering detached DOM.
+    this.menu.open = false;
+    this.menu.shownMessages = -1;
+    if (this.menu.messages) this.menu.messages.length = 0;
+    this.openWindow();
+    return true;
   }
   ensureRequiredLegacySettings(settings = this.settings) {
     let changed = false;
@@ -2325,6 +2571,66 @@ module.exports = class MessageLoggerV2 {
     }
     return React.createElement(InlineValidatedNumberInput);
   }
+  createValidatedLoggerKeybindRecorder(config) {
+    const plugin = this;
+    function ValidatedLoggerKeybindRecorder() {
+      const [value, setValue] = React.useState(() => plugin.normalizeLoggerKeybind(plugin.settings[config.id]) || []);
+      const [error, setError] = React.useState('');
+      const [revision, setRevision] = React.useState(0);
+      const onChange = capturedValue => {
+        // BetterDiscord stops recorder key events at window capture. Clear any chord that
+        // predated recording so a swallowed keyup cannot remain in the document-level set.
+        plugin._pressedShortcutKeys?.clear?.();
+        const validation = plugin.validateLoggerKeybind(capturedValue, config.id);
+        if (!validation.valid) {
+          Logger.warn(`Rejected unsafe ${config.id} capture.`, {
+            capturedValue,
+            reason: validation.message
+          });
+          setError(validation.message);
+          // The native recorder owns internal display state. Remount it with the last saved
+          // value so a rejected capture is visibly reverted instead of looking active.
+          setRevision(current => current + 1);
+          return;
+        }
+        plugin.settings[config.id] = validation.value;
+        plugin.saveSettings();
+        setValue(validation.value);
+        setError('');
+      };
+      if (typeof Components.KeybindInput !== 'function') {
+        return React.createElement(
+          'div',
+          { style: { color: 'var(--status-danger)' } },
+          'BetterDiscord keybind recorder is unavailable in this build.'
+        );
+      }
+      return React.createElement(
+        'div',
+        {
+          onMouseDown: () => plugin._pressedShortcutKeys?.clear?.(),
+          style: { display: 'flex', flexDirection: 'column', alignItems: 'stretch' }
+        },
+        React.createElement(Components.KeybindInput, {
+          key: `${config.id}:${revision}`,
+          value,
+          onChange,
+          max: config.max ?? 4,
+          clearable: config.clearable !== false
+        }),
+        error ? React.createElement(
+          'div',
+          {
+            role: 'alert',
+            'aria-live': 'polite',
+            style: { color: 'var(--status-danger)', fontSize: '12px', marginTop: '4px' }
+          },
+          error
+        ) : null
+      );
+    }
+    return React.createElement(ValidatedLoggerKeybindRecorder);
+  }
   normalizeAutoBackupIntervalSeconds(value) {
     const parsed = typeof value === 'number' ? value : Number(String(value ?? '').trim());
     return Number.isInteger(parsed)
@@ -2680,6 +2986,24 @@ module.exports = class MessageLoggerV2 {
             action: 'toggleLogsButton'
           },
           {
+            name: 'Open all logs keybind',
+            note: 'Defaults to Ctrl + M. Record modifiers plus one key (or F1-F24 alone); unsafe or overlapping captures are rejected. Clear it to disable this shortcut.',
+            id: 'openLogsKeybind',
+            type: 'keybind',
+            validator: 'loggerKeybind',
+            max: 4,
+            clearable: true
+          },
+          {
+            name: 'Open selected channel logs keybind',
+            note: 'Defaults to Ctrl + N. Record a distinct safe combination; the selected channel is resolved when pressed. Clear it to disable this shortcut.',
+            id: 'openFilteredLogsKeybind',
+            type: 'keybind',
+            validator: 'loggerKeybind',
+            max: 4,
+            clearable: true
+          },
+          {
             name: 'Automatically refresh new forum posts',
             note: "Uses Discord's native New Post control so cards appear without leaving the forum.",
             id: 'autoRefreshForumPosts',
@@ -2930,7 +3254,14 @@ module.exports = class MessageLoggerV2 {
     };
     const createSettingFromConfig = (config) => {
       const setting = { ...config };
-      if (config.parent) {
+      if (config.validator === 'loggerKeybind') {
+        // Retain BetterDiscord's native recorder while wrapping only its value callback with
+        // logger-specific safety/conflict validation and inline rejection feedback.
+        setting.type = 'custom';
+        setting.children = this.createValidatedLoggerKeybindRecorder(config);
+        setting.onChange = () => {};
+      }
+      else if (config.parent) {
         setting.value = this.settings[config.parent][config.id];
         setting.onChange = val => {
           this.settings[config.parent][config.id] = val;
@@ -10115,8 +10446,8 @@ module.exports = class MessageLoggerV2 {
                         Separate the search tags with commas.
                         Example: server: tom's bd stuff, message: heck
                         Shortcut help:
-                        "Ctrl + M" (default) - Open message log.
-                        "Ctrl + N" (default) - Open message log with selected channel filtered.\n\n</div>`.replaceAll('\n', '</br>')
+                        "${this.formatLoggerKeybind(this.settings.openLogsKeybind)}" - Open all message logs.
+                        "${this.formatLoggerKeybind(this.settings.openFilteredLogsKeybind)}" - Open message logs with the currently selected channel filtered.\n\n</div>`.replaceAll('\n', '</br>')
             ),
             extraHelp
           ])

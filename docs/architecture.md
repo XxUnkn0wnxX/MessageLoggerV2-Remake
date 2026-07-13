@@ -7,11 +7,12 @@ This document maps the major responsibilities inside the distributed `MessageLog
 - `start`, `initialize`, and `stop` own plugin startup, module readiness, timers, patches, synchronous shutdown persistence, and cleanup.
 - `DiscordModules` lazily resolves Discord Webpack exports. Missing-module fixes must follow the runtime trace workflow in `AGENTS.md`; do not hide lookup warnings without proving the live export path.
 - `getChanges`, `checkNewUpdate`, and `performUpdate` provide the in-plugin changelog and maintained-fork updater.
-- Startup settings normalization preserves old installations, migrates legacy caps, and forces the two locked cache compatibility settings on. `loadSettingsConfigForStartup`, `parseRecoverableSettingsJson`, and `recoverSettingsConfigText` run before BetterDiscord can mistake invalid JSON for an empty first-install cache; they repair common comma/bracket damage, salvage valid individual settings, atomically rewrite the config, and retain the exact corrupt source as a recovery backup.
+- Startup settings normalization preserves old installations, migrates legacy caps, validates captured keybind arrays, and forces the two locked cache compatibility settings on. `loadSettingsConfigForStartup`, `parseRecoverableSettingsJson`, and `recoverSettingsConfigText` run before BetterDiscord can mistake invalid JSON for an empty first-install cache; they repair common comma/bracket damage, salvage valid individual settings, atomically rewrite the config, and retain the exact corrupt source as a recovery backup.
 
 ## ⚙️ Settings and Scope Policy
 
 - `getSettingsPanel`, `createSetting`, and `createGroup` build the accordion settings interface. `buildSetting` assigns changes only to BetterDiscord's panel-level callback because BetterDiscord invokes both item-level and panel-level callbacks when both are supplied.
+- Logger shortcuts embed BetterDiscord's native `KeybindInput` recorder inside the standard settings row. A thin validation wrapper rejects unsafe or overlapping chords inline and clears stale pressed state whenever capture finishes. Capture-phase document listeners compare normalized, order-independent pressed-key sets; the recorder's window-capture listener always precedes document capture and suppresses those events while a new binding is being recorded.
 - The standalone warning-colored Debug group keeps console and routed-toast diagnostics independently opt-in. `reportDebugEvent` is the shared router and currently accepts only automatic-backup lifecycle events.
 - `reportSettingState` keeps console detail and routed alerts aligned. `reportMajorSettingChange` deliberately covers only broad logging, persistence, media, update, and destructive settings; enabled states route as info and disabled states route through the theme-neutral presentation. Per-setting replacement keys discard obsolete alerts after rapid changes.
 - Logging scope combines whitelist, blacklist, muted server/channel, NSFW, selected-channel, and DM rules.
@@ -86,6 +87,7 @@ This document maps the major responsibilities inside the distributed `MessageLog
 
 - The logger window provides deleted, edited, purged, sent, ghost-ping, and optional Hidden tabs.
 - Filters support server, channel, user, content/message, and media predicates.
+- The all-logs shortcut clears stale filters; the selected-channel shortcut resolves the current channel at invocation time and refilters an already-open logger. Empty recorder arrays disable their shortcut.
 - Hide/unhide changes visibility without deleting records; Remove From Log and Clear Log permanently update records, indexes, restored entries, and optional cached files.
 - Context-menu injections expose scope lists and record actions while preserving Discord and other plugins' native items.
 

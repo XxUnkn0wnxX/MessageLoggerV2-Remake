@@ -14,6 +14,8 @@ const defaults = {
   flags: 0,
   messageCacheCap: 1000,
   savedMessagesCap: 1000,
+  openLogsKeybind: ['Control', 'm'],
+  openFilteredLogsKeybind: ['Control', 'n'],
   toastToggles: {
     sent: false,
     edited: true
@@ -29,12 +31,39 @@ function temporaryDirectory(t) {
 }
 
 function normalizeRecovered(plugin, settings) {
+  plugin.ensureLoggerKeybindSettings(settings, defaults);
   plugin.normalizeSettingsAgainstDefaults(settings, defaults);
   plugin.ensureRequiredLegacySettings(settings);
   return settings;
 }
 
 test.beforeEach(resetHarness);
+
+test('legacy configs gain shortcut defaults while valid custom and cleared bindings survive normalization', () => {
+  const plugin = createPlugin();
+  const legacy = { flags: 2 };
+  normalizeRecovered(plugin, legacy);
+  assert.deepEqual(legacy.openLogsKeybind, ['Control', 'm']);
+  assert.deepEqual(legacy.openFilteredLogsKeybind, ['Control', 'n']);
+
+  const customized = {
+    openLogsKeybind: ['Alt', 'L'],
+    openFilteredLogsKeybind: [],
+    flags: 2
+  };
+  normalizeRecovered(plugin, customized);
+  assert.deepEqual(customized.openLogsKeybind, ['Alt', 'l']);
+  assert.deepEqual(customized.openFilteredLogsKeybind, []);
+
+  const invalid = {
+    openLogsKeybind: 'Control+m',
+    openFilteredLogsKeybind: ['Control', 123],
+    flags: 2
+  };
+  normalizeRecovered(plugin, invalid);
+  assert.deepEqual(invalid.openLogsKeybind, ['Control', 'm']);
+  assert.deepEqual(invalid.openFilteredLogsKeybind, ['Control', 'n']);
+});
 
 test('a trailing comma preserves existing settings and restores only missing defaults', () => {
   const plugin = createPlugin();
