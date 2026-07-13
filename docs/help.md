@@ -98,11 +98,12 @@ Right-click saved messages in the logger or channel view to access applicable ac
 - Copy content or message ID.
 - Open related logs.
 
-**Hide** preserves the record and moves it to the Hidden tab. Red **Delete** actions permanently delete the stored logger record; their confirmation identifies the action as local to the logger.
+**Hide** preserves the record and moves it to the Hidden tab. Red **Delete** permanently deletes the stored logger record. Direct restored-item and logger-window Delete actions confirm first; **Delete** inside the injected **Message Logger** submenu removes immediately because that submenu is already a logger-only action.
 
 The same permanent-delete flow applies to restored chat messages, logger rows, forum cards, sidebar threads, and thread-browser cards:
 
 - Right-click the saved item and choose red **Delete** to confirm removal.
+- Choosing **Delete** inside the nested **Message Logger** submenu removes the saved record immediately.
 - Hold Shift while hovering to reveal Trash; Shift-click removes immediately without selecting text.
 - If Discord hides Delete or Trash because you lack permission, the logger adds a matching local-only action for that exact restored row.
 - Normal live Discord messages remain untouched. Logger fallbacks never grant or call a server delete.
@@ -168,9 +169,10 @@ Notification settings affect alerts only. Logging scope is controlled separately
 - Child messages can be hidden, unhidden, or removed individually while the root remains.
 - Child records jump to their live thread message when it still exists; otherwise they fall back to the restored parent. No live thread or parent means no Jump action.
 - A restored forum card opens a logger view limited to that thread.
+- Saved preview mentions on restored forum cards and thread-browser entries use Discord's normal rendered mention markup.
 - Fully restored cards, thread entries, and logger rows are DOM clones, so the logger provides their Trash control.
   - It reuses Discord's observed Delete action when possible; otherwise it combines a current native toolbar button with Discord's Trash icon.
-  - Trash appears only while Shift is held and removes immediately. Right-click **Delete** still confirms first, including root-and-child removal.
+  - Trash appears only while Shift is held and removes immediately. Direct right-click **Delete** still confirms first, including root-and-child removal; nested **Message Logger > Delete** is immediate.
 - **Automatically refresh new forum posts** uses Discord's native **New Post(s)** control so new cards appear without leaving and reopening the forum.
 - Fully deleted cards and thread entries need at least one live item as a layout anchor. Without one, they remain logged but unrendered.
 - **Anti Nuke** captures a deleted parent forum or text channel under **Purged** and bypasses normal scope rules.

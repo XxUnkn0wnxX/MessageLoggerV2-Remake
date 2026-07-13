@@ -226,8 +226,28 @@ test('native and cloned Trash actions remain scoped to indexed logger deletions'
   assert.match(source, /wireNativeRestoredMessageDeleteControl[\s\S]*isIndexedSavedDeletedRecord\(record, messageId\)[\s\S]*nativeDeletePresent[\s\S]*existing\.parentElement !== actionRow[\s\S]*const replacement = this\.createCopiedNativeDeleteControl\(record, \{ inline: true \}\)[\s\S]*actionRow\.appendChild\(replacement\)[\s\S]*cleanupCopiedNativeDeleteControls\(existing\)[\s\S]*existing\.remove\(\)[\s\S]*getNativeMessageToolbarActionRow\(toolbar\)\.appendChild\(control\)/);
   assert.match(source, /shouldAddPermissionIndependentContextDelete\(record, messageId, channelId, nativeDeletePresent = false\)[\s\S]*isIndexedSavedDeletedRecord\(record, messageId\)/);
   assert.match(source, /id: 'mlv2-delete-saved-record'[\s\S]*danger: true[\s\S]*requestSavedDeletedRecordRemoval\(channelId, messageId, false\)/);
+  const loggerSubmenuRecords = source.slice(
+    source.indexOf('const addSavedRecordItems ='),
+    source.indexOf("this.unpatches.push(ContextMenu.patch('message'")
+  );
+  assert.match(loggerSubmenuRecords, /requestSavedDeletedRecordRemoval\(channelId, messageId, true, 'Message Logger submenu Delete'\)/);
+  assert.doesNotMatch(loggerSubmenuRecords, /requestSavedDeletedRecordRemoval\(channelId, messageId, false\)/);
+  assert.match(source, /requestSavedDeletedRecordRemoval\(channelId, messageId, immediate = false, immediateSource = 'Shift-click Trash'\)[\s\S]*source: immediateSource/);
   assert.doesNotMatch(source, /restoredDeleteButton[\s\S]{0,1000}innerHTML\s*=\s*['"]<svg/);
   assert.match(source, /removeSavedDeletedRecordFromLog\(channelId, messageId[\s\S]*deleteMessageFromRecords\(id\)[\s\S]*ML2: true/);
+});
+
+test('restored forum and thread previews use native parsed markup', () => {
+  const restoredPreviews = source.slice(
+    source.indexOf('const appendRestoredPreviewMarkup ='),
+    source.indexOf('const restoreDeletedThreadBrowserCards =')
+  );
+  assert.match(restoredPreviews, /appendRestoredPreviewMarkup[\s\S]*this\.formatMarkup\(preview, channelId\)/);
+  assert.match(restoredPreviews, /formatted\.style\.display = 'contents'/);
+  assert.match(restoredPreviews, /appendRestoredPreviewMarkup\(content, message\.content \|\| titleText, message\.channel_id\)/);
+  assert.match(restoredPreviews, /appendRestoredPreviewMarkup\(subtext, getForumRecordPreview\(record\), record\.message\.channel_id\)/);
+  assert.doesNotMatch(restoredPreviews, /content\.textContent = message\.content/);
+  assert.doesNotMatch(restoredPreviews, /subtext\.textContent = `\$\{record\.message\.author/);
 });
 
 test('logger jump-availability tint stays scoped to the logger window', () => {

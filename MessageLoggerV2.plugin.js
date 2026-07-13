@@ -8280,7 +8280,7 @@ module.exports = class MessageLoggerV2 {
     }
     return true;
   }
-  requestSavedDeletedRecordRemoval(channelId, messageId, immediate = false) {
+  requestSavedDeletedRecordRemoval(channelId, messageId, immediate = false, immediateSource = 'Shift-click Trash') {
     const id = String(messageId ?? '');
     const record = this.messageRecord?.[id];
     if (!record?.delete_data || !this.isIndexedSavedDeletedRecord(record, id)) return false;
@@ -8289,7 +8289,7 @@ module.exports = class MessageLoggerV2 {
       return false;
     }
     if (immediate) {
-      return this.removeSavedDeletedRecordFromLog(channelId, id, { source: 'Shift-click Trash' });
+      return this.removeSavedDeletedRecordFromLog(channelId, id, { source: immediateSource });
     }
     const rootType = record.delete_data.forum_thread_delete
       ? this.getSavedThreadRootTypeLabel(record)
@@ -9585,6 +9585,22 @@ module.exports = class MessageLoggerV2 {
       }
       return null;
     };
+    const appendRestoredPreviewMarkup = (target, value, channelId) => {
+      const preview = String(value ?? '');
+      if (!preview) return target;
+      // Restored forum/thread entries are DOM clones rather than Discord message components.
+      // Feed only their saved preview through the same native parser used by the logger window
+      // so user mentions and other inline markup render normally without interpreting the
+      // separately appended author/deletion labels as message Markdown.
+      const formatted = this.formatMarkup(preview, channelId);
+      if (!formatted) {
+        target.appendChild(document.createTextNode(preview));
+        return target;
+      }
+      formatted.style.display = 'contents';
+      target.appendChild(formatted);
+      return target;
+    };
     const copyStyle = (source, selector) => source?.querySelector?.(selector)?.getAttribute?.('style') || null;
     const createAnchoredRestoredForumCard = (record, sourceCard, sourceLi, parentChannel) => {
       if (!sourceCard || !sourceLi || !parentChannel?.id) return null;
@@ -9641,7 +9657,7 @@ module.exports = class MessageLoggerV2 {
       const content = document.createElement('div');
       content.id = `message-content-${threadId}`;
       content.className = copyClass(sourceCard, '[id^="message-content-"]', this.classes.messageContent || 'messageContent_c19a55');
-      content.textContent = message.content || titleText;
+      appendRestoredPreviewMarkup(content, message.content || titleText, message.channel_id);
 
       const footer = document.createElement('div');
       footer.className = copyClass(sourceCard, '.footer_faa96b', 'footer_faa96b');
@@ -9766,7 +9782,10 @@ module.exports = class MessageLoggerV2 {
       const subtext = card.querySelector('[class*="subtext_"]');
       if (subtext) {
         const deletedAt = record.delete_data?.time ? this.createTimeStamp(record.delete_data.time) : this.createTimeStamp();
-        subtext.textContent = `${record.message.author?.username || 'Unknown'}: ${getForumRecordPreview(record)} \u2022 Deleted ${deletedAt}`;
+        subtext.textContent = '';
+        subtext.appendChild(document.createTextNode(`${record.message.author?.username || 'Unknown'}: `));
+        appendRestoredPreviewMarkup(subtext, getForumRecordPreview(record), record.message.channel_id);
+        subtext.appendChild(document.createTextNode(` \u2022 Deleted ${deletedAt}`));
       }
       card.querySelector('[class*="facepile_"]')?.remove();
       wireRestoredForumCard(card, record);
@@ -11658,7 +11677,10 @@ module.exports = class MessageLoggerV2 {
           this.getSavedThreadRemovalLabel(record),
           () => {
             if (record.delete_data) {
-              this.requestSavedDeletedRecordRemoval(channelId, messageId, false);
+              // Delete inside the injected Message Logger submenu is already an explicit local
+              // logger action. Keep it one-step while direct restored-item and top-level native
+              // Delete actions continue using their confirmation flows.
+              this.requestSavedDeletedRecordRemoval(channelId, messageId, true, 'Message Logger submenu Delete');
               return;
             }
             this.deleteMessageFromRecords(messageId);

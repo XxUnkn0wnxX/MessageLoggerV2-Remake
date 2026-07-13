@@ -429,6 +429,20 @@ test('local Delete confirms without Shift and Shift activation removes immediate
   assert.equal(shifted.plugin.messageRecord[shifted.messageId], undefined);
 
   resetHarness();
+  const submenu = createNativeDeletePlugin();
+  assert.equal(submenu.plugin.requestSavedDeletedRecordRemoval(
+    submenu.channelId,
+    submenu.messageId,
+    true,
+    'Message Logger submenu Delete'
+  ), true);
+  assert.equal(confirmationEvents.length, 0);
+  assert.equal(submenu.plugin.messageRecord[submenu.messageId], undefined);
+  assert.equal(loggerEvents.some(event => (
+    event[0] === 'log' && String(event[1]).includes('Message Logger submenu Delete')
+  )), true);
+
+  resetHarness();
   const mismatched = createNativeDeletePlugin();
   assert.equal(mismatched.plugin.requestSavedDeletedRecordRemoval('wrong-channel', mismatched.messageId, false), false);
   assert.equal(confirmationEvents.length, 0);

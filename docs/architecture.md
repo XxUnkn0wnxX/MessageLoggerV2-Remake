@@ -76,7 +76,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 
 - Forum/thread metadata snapshots preserve parent IDs, names, types, paths, starter IDs, and card information after live Discord objects disappear.
 - Complete root deletion stores the root and eligible children under the thread ID; root hide/unhide/remove actions cascade through `getForumThreadRecordIds`.
-- Restored forum cards, channel sidebar entries, and thread-browser entries require a live Discord item as a DOM/React layout anchor.
+- Restored forum cards, channel sidebar entries, and thread-browser entries require a live Discord item as a DOM/React layout anchor. Their saved preview text is passed through the logger's native markup parser so mentions render without parsing the separately generated author and deletion labels.
 - Thread-scoped logger views, context labels, jump routing, tinting, and suppression must continue distinguishing forum posts from ordinary channel threads.
 
 ## 🛡️ Anti-Nuke Recovery
@@ -107,7 +107,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
   - The logger copies an observed Delete action when available. Otherwise it combines a current native toolbar button with Discord's Trash icon; ambiguous icon exports are rejected.
   - Logger controls retain neither Discord's live callback nor message props. Their host, SVG, and paths use `--text-feedback-critical` with `--status-danger` fallback.
   - Permission fallbacks mount in the lowest shared action row. An early outer fallback is rebuilt there rather than moved, protecting its React icon root.
-  - A root marker shows Trash only while Shift is held. Right-click **Delete** confirms; Shift-click removes immediately. A Shift-only `mousedown` guard prevents text selection.
+  - A root marker shows Trash only while Shift is held. Direct right-click **Delete** confirms; Shift-click and the injected logger submenu's explicit **Delete** remove immediately. A Shift-only `mousedown` guard prevents text selection.
   - Nested mutations resolve to their closest toolbar so native Trash replaces a fallback instead of duplicating it. Both paths share the same record/index/media/UI cleanup helper.
 - Sorted ID caches accelerate logger rendering and must be invalidated when category indexes change.
 - Jump uses live message routes when available, restored forum/thread parents as fallback, and is absent when no destination exists.
