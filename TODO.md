@@ -9,7 +9,7 @@ Status markers:
 
 ## 💾 Preserve Data After No-Save Sessions
 
-Status: Implemented; live validation pending
+Status: Implemented and live validated
 
 ### Problem
 
@@ -38,13 +38,13 @@ When **Disable saving data** is enabled, reloading the plugin or Discord starts 
 
 ### Validation
 
-- [ ] Create a known saved record while normal saving is enabled.
-- [ ] Enable **Disable saving data**, then reload Discord or the plugin.
-- [ ] Create deleted, edited, purged, and forum/thread test records.
-- [ ] Re-enable saving.
-- [ ] Confirm original and temporary records remain in their correct tabs after another reload.
-- [ ] Confirm hidden state and forum/thread root-child relationships survive the merge.
-- [ ] Confirm **Remove From Log** still removes the correct merged records.
+- [x] Create a known saved record while normal saving is enabled.
+- [x] Enable **Disable saving data**, then reload Discord or the plugin.
+- [x] Create deleted, edited, purged, and forum/thread test records.
+- [x] Re-enable saving.
+- [x] Confirm original and temporary records remain in their correct tabs after another reload.
+- [x] Confirm hidden state and forum/thread root-child relationships survive the merge.
+- [x] Confirm **Remove From Log** still removes the correct merged records.
 
 ## ✅ Completed: Cross-Fork Data Normalization
 
