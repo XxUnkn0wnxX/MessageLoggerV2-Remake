@@ -55,6 +55,9 @@ Status: Implemented; live validation pending
 - [x] Fill missing optional enhanced fields with safe empty values.
 - [x] Rebuild missing or misplaced deleted, edited, and purged channel indexes from canonical records.
 - [x] Keep de-duplication scoped to message IDs, individual category indexes, edit entries, and attachment identities.
+- [x] Keep canonical output stable when DM, deleted-channel, or referenced-message channels are absent from Discord's live store.
+- [x] Keep Discord renderer mutations isolated from canonical saved message and user objects.
+- [x] Initialize newly captured records with every canonical empty collection used by normalization.
 - [x] Atomically rewrite the complete primary payload while retaining the previous backup as a recovery point.
 - [x] Normalize a valid backup and restore the primary when the primary is missing or invalid.
 - [x] Preserve opaque top-level metadata owned by other forks, including across no-save merges.

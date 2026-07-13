@@ -110,3 +110,32 @@ test('forum and channel-thread context labels remain distinct', () => {
   assert.equal(plugin.getSavedThreadRootTypeLabel(thread), 'Thread');
   assert.equal(plugin.getSavedThreadVisibilityLabel(thread, false), 'Unhide Thread');
 });
+
+test('newly captured records already match the canonical persisted shape', () => {
+  const plugin = createPlugin({
+    localUser: { id: 'local-user' },
+    tools: { isMentioned: () => false },
+    getMessageLocationSnapshot: () => null,
+    cleanupMessageObject: message => structuredClone(message)
+  });
+  const message = {
+    id: '100',
+    channel_id: 'channel',
+    guild_id: null,
+    content: 'new record',
+    timestamp: 100,
+    attachments: [],
+    embeds: [],
+    author: { id: 'user', username: 'User', public_flags: 0 }
+  };
+  const savedRecord = plugin.createMiniFormattedData(message);
+  const payload = {
+    ...plugin.createDefaultDataPayload(),
+    messageRecord: { '100': savedRecord },
+    deletedMessageRecord: { channel: ['100'] }
+  };
+  const normalized = plugin.normalizePersistedDataPayload(payload);
+
+  assert.deepEqual(savedRecord.logged_attachments, []);
+  assert.equal(JSON.stringify(normalized), JSON.stringify(payload));
+});

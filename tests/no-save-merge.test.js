@@ -252,6 +252,100 @@ test('data rewritten by a legacy fork can round-trip back into the enhanced sche
   assert.equal(normalizedRecord.editHistory, undefined);
 });
 
+test('canonical normalization stays stable as Discord channel availability changes', () => {
+  let channelsAvailable = true;
+  const plugin = createMergePlugin({
+    ChannelStore: {
+      getChannel(channelId) {
+        if (!channelsAvailable) return null;
+        if (channelId === 'dm-channel') return { id: channelId, guild_id: null };
+        if (channelId === 'guild-channel') return { id: channelId, guild_id: 'guild-a' };
+        return null;
+      }
+    },
+    UserStore: { getUser() { return null; } },
+    messageStore: { getMessage() { return null; } }
+  });
+  const author = {
+    id: 'user-a',
+    username: 'User A',
+    discriminator: '0001',
+    avatar: null,
+    bot: false,
+    public_flags: 0
+  };
+  const message = (id, channelId, extra = {}) => ({
+    id,
+    channel_id: channelId,
+    content: id,
+    timestamp: Number(id),
+    attachments: [],
+    embeds: [],
+    mentions: [],
+    mention_roles: [],
+    reactions: [],
+    stickers: [],
+    sticker_items: [],
+    author,
+    type: 0,
+    flags: 0,
+    ...extra
+  });
+  const current = payload({
+    '100': {
+      ...record('100', 'dm-channel', { delete_data: { time: 100 } }),
+      message: message('100', 'dm-channel', { guild_id: null })
+    },
+    '200': {
+      ...record('200', 'guild-channel', { delete_data: { time: 200 } }),
+      message: message('200', 'guild-channel')
+    },
+    '300': {
+      ...record('300', 'dm-channel', { delete_data: { time: 300 } }),
+      message: message('300', 'dm-channel', {
+        guild_id: null,
+        type: 19,
+        message_reference: { channel_id: 'dm-channel', message_id: '301' },
+        referenced_message: message('301', 'dm-channel', { guild_id: null })
+      })
+    },
+    // Shared data can contain a guild/channel saved by another Discord client that the
+    // current account cannot resolve. Its persisted location ID remains authoritative.
+    '350': {
+      ...record('350', 'foreign-channel', { delete_data: { time: 350 } }),
+      message: message('350', 'foreign-channel', { guild_id: 'foreign-guild' })
+    }
+  }, { deleted: { 'dm-channel': ['100', '300'], 'guild-channel': ['200'], 'foreign-channel': ['350'] } });
+
+  const withChannels = plugin.normalizePersistedDataPayload(current);
+  channelsAvailable = false;
+  const withoutChannels = plugin.normalizePersistedDataPayload(withChannels);
+
+  assert.equal(withChannels.messageRecord['100'].message.guild_id, null);
+  assert.equal(withChannels.messageRecord['200'].message.guild_id, null);
+  assert.equal(withChannels.messageRecord['300'].message.referenced_message.guild_id, null);
+  assert.equal(withChannels.messageRecord['350'].message.guild_id, 'foreign-guild');
+  assert.equal(JSON.stringify(withoutChannels), JSON.stringify(withChannels));
+
+  // Normal live capture can still enrich a new message from the current client's store;
+  // only persisted-file normalization is isolated from that transient runtime state.
+  channelsAvailable = true;
+  assert.equal(plugin.cleanupMessageObject(message('250', 'guild-channel')).guild_id, 'guild-a');
+
+  const deletedChannelRecord = payload({
+    '400': {
+      ...record('400', 'deleted-channel', { delete_data: { time: 400, anti_nuke: true } }),
+      message: message('400', 'deleted-channel')
+    }
+  }, { purged: { 'deleted-channel': ['400'] } });
+  const normalizedWhileMissing = plugin.normalizePersistedDataPayload(deletedChannelRecord);
+  channelsAvailable = true;
+  const normalizedAfterStoreChange = plugin.normalizePersistedDataPayload(normalizedWhileMissing);
+
+  assert.equal(normalizedWhileMissing.messageRecord['400'].message.guild_id, null);
+  assert.equal(JSON.stringify(normalizedAfterStoreChange), JSON.stringify(normalizedWhileMissing));
+});
+
 test('normalization scopes de-duplication to message IDs and independent category indexes', () => {
   const plugin = createNormalizationPlugin();
   const sameAuthor = { id: 'user-1', username: 'same-user' };

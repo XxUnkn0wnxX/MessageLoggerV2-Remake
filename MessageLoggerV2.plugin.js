@@ -2555,7 +2555,10 @@ module.exports = class MessageLoggerV2 {
       // dropping otherwise recoverable history and atomically rewriting that loss.
       this.normalizeLegacyDeleteData(record);
       this.normalizeLegacyEditHistory(record);
-      record.message = this.cleanupMessageObject(record.message);
+      // Persisted records may belong to another Discord client/account. Normalization must
+      // not enrich them from this client's transient ChannelStore or identical input can
+      // produce different JSON on each reload as foreign channels appear or disappear.
+      record.message = this.cleanupMessageObject(record.message, { resolveGuildFromStore: false });
       const canonicalMessageId = String(record.message.id || messageId);
       canonicalMessageIds.set(messageId, canonicalMessageId);
       record.message.id = canonicalMessageId;
@@ -3356,21 +3359,26 @@ module.exports = class MessageLoggerV2 {
     );
   }
   getCacheOnlyMessage(message) {
-    if (!this.settings.onlyRenderCachedAttachments || !message?.attachments?.length) return message;
+    if (!message) return message;
+    // Discord may enrich rendered message/user objects in place (for example by adding the
+    // camelCase publicFlags field). Always give the renderer a detached copy so viewing a
+    // restored record cannot dirty the canonical payload and retrigger migration on reload.
+    const renderMessage = structuredClone(message);
+    if (!this.settings.onlyRenderCachedAttachments || !renderMessage.attachments?.length) return renderMessage;
     const attachments = [];
     const unavailable = [];
-    for (const attachment of message.attachments) {
-      if (this.isAttachmentLocallyCached(attachment, message)) attachments.push(attachment);
+    for (const attachment of renderMessage.attachments) {
+      if (this.isAttachmentLocallyCached(attachment, renderMessage)) attachments.push(attachment);
       else unavailable.push(attachment);
     }
-    if (attachments.length === message.attachments.length) return message;
+    if (attachments.length === renderMessage.attachments.length) return renderMessage;
     const placeholders = unavailable.map(attachment =>
       `[Attachment not cached: ${attachment.filename || 'unknown file'}]`
     );
     return {
-      ...message,
+      ...renderMessage,
       attachments,
-      content: [message.content, ...placeholders].filter(Boolean).join('\n')
+      content: [renderMessage.content, ...placeholders].filter(Boolean).join('\n')
     };
   }
   refreshCacheOnlyMessage(message) {
@@ -3487,7 +3495,7 @@ module.exports = class MessageLoggerV2 {
       public_flags: user.publicFlags === undefined ? user.public_flags : user.publicFlags
     };
   }
-  cleanupMessageObject(message) {
+  cleanupMessageObject(message, options = {}) {
     let mentionEveryone;
     if (typeof message.mention_everyone === 'boolean') {
       mentionEveryone = message.mention_everyone;
@@ -3496,6 +3504,15 @@ module.exports = class MessageLoggerV2 {
     } else {
       mentionEveryone = false;
     }
+    // Persist an explicit null once a record has no known guild. Consulting ChannelStore
+    // again for an already-canonical null made DM/deleted-channel records alternate between
+    // null and an omitted property as Discord loaded or evicted channels. That byte-level
+    // drift falsely retriggered whole-file legacy migration on every plugin reload.
+    let guildId;
+    if (Object.prototype.hasOwnProperty.call(message, 'guild_id')) guildId = message.guild_id;
+    else if (Object.prototype.hasOwnProperty.call(message, 'guildId')) guildId = message.guildId;
+    else if (options.resolveGuildFromStore !== false) guildId = this.ChannelStore.getChannel(message.channel_id)?.guild_id;
+    if (typeof guildId !== 'string' || !guildId) guildId = null;
     const stickerItems = this.getMessageStickerItems(message);
     const ret = {
       mention_everyone: mentionEveryone,
@@ -3507,7 +3524,7 @@ module.exports = class MessageLoggerV2 {
         if (!e.me) delete e.me;
         return e;
       }),
-      guild_id: message.guild_id || this.ChannelStore.getChannel(message.channel_id)?.guild_id,
+      guild_id: guildId,
       content: message.content,
       type: message.type,
       embeds: message.embeds || [],
@@ -3531,10 +3548,10 @@ module.exports = class MessageLoggerV2 {
       ret.message_reference = message.message_reference || message.messageReference;
       if (ret.message_reference) {
         if (message.referenced_message) {
-          ret.referenced_message = this.cleanupMessageObject(message.referenced_message);
+          ret.referenced_message = this.cleanupMessageObject(message.referenced_message, options);
         } else {
           const refMsg = this.messageStore.getMessage(ret.message_reference.channel_id, ret.message_reference.message_id);
-          if (refMsg) ret.referenced_message = this.cleanupMessageObject(refMsg);
+          if (refMsg) ret.referenced_message = this.cleanupMessageObject(refMsg, options);
         }
       }
     }
@@ -3548,7 +3565,11 @@ module.exports = class MessageLoggerV2 {
       saved_location: this.getMessageLocationSnapshot(message),
       local_mentioned: this.tools.isMentioned(message, this.localUser.id),
       delete_data: null,
-      edit_history: null
+      edit_history: null,
+      // Keep freshly captured runtime records byte-compatible with normalized persisted
+      // records. Omitting this empty collection made the next startup add it and falsely
+      // identify every newly logged message as legacy data after a Discord shutdown.
+      logged_attachments: []
     };
     return obj;
   }

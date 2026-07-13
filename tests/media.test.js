@@ -55,6 +55,26 @@ test('cache-only rendering preserves cached files and names unavailable files', 
   assert.equal(message.attachments.length, 2);
 });
 
+test('rendered message copies cannot mutate canonical saved records', () => {
+  const plugin = createPlugin({ settings: { onlyRenderCachedAttachments: false } });
+  const saved = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [],
+    author: { id: 'user', username: 'User', public_flags: 128 }
+  };
+
+  const rendered = plugin.getCacheOnlyMessage(saved);
+  rendered.author.publicFlags = 128;
+  delete rendered.author.public_flags;
+  rendered.content = 'renderer mutation';
+
+  assert.notEqual(rendered, saved);
+  assert.deepEqual(saved.author, { id: 'user', username: 'User', public_flags: 128 });
+  assert.equal(saved.content, 'body');
+});
+
 test('record media IDs cover messages, attachments, stickers, embeds, and later updates', () => {
   const plugin = createPlugin();
   const record = {

@@ -57,13 +57,13 @@ npm run test:runtime-contracts
 | AT-19 | Anti-Nuke eligibility | Thread-created system messages, ephemeral records, and unsupported message types are excluded. |
 | AT-20 | Supported payloads | Text, attachments, embeds, and sticker-only messages remain eligible for logging. |
 | AT-21 | Media identity | Attachments, embed images, stickers, and later-added media retain stable cache keys and record IDs. |
-| AT-22 | Cache-only rendering | Cached attachments remain mounted while uncached files receive filename placeholders. |
+| AT-22 | Cache-only rendering | Rendered messages are detached from canonical saved records, cached attachments remain mounted, and uncached files receive filename placeholders. |
 | AT-23 | Sticker media | Supported static and animated sticker formats render; unsupported formats are rejected. |
 | AT-24 | Cached-file deletion | Removing a record deletes only its related local media files and preserves unrelated files. |
 | AT-25 | No-save merge | Disk and session payloads merge deterministically with de-duplicated deleted, edited, and purged indexes. |
 | AT-26 | No-save failure safety | Empty sessions, corrupt sources, failed renames, and stale in-flight writes cannot erase or replace existing history. |
 | AT-27 | No-save state | No-reload toggles retain existing behavior; reload recovery preserves hidden, forum/thread, suppression, cap, and backup ordering contracts. |
-| AT-28 | Cross-fork normalization | Legacy aliases, mixed enhanced fields, missing derived maps, scoped de-duplication, canonical output shape, whole-file atomic migration, routed errors, missing-primary backup restoration, opaque fork extensions, newer-schema fail-closed behavior, and legacy round trips remain covered. |
+| AT-28 | Cross-fork normalization | Legacy aliases, mixed enhanced fields, missing derived maps, scoped de-duplication, canonical defaults on newly captured records, idempotent output across changing Discord channel-store availability, canonical output shape, whole-file atomic migration, routed errors, missing-primary backup restoration, opaque fork extensions, newer-schema fail-closed behavior, and legacy round trips remain covered. |
 
 ## 💬 Live Discord Matrix
 
