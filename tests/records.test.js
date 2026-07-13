@@ -51,6 +51,65 @@ function createRecordPlugin() {
 
 test.beforeEach(resetHarness);
 
+test('logger viewer double-click jumps only valid non-interactive saved messages', () => {
+  let doubleClick;
+  const interactive = {};
+  const element = {
+    addEventListener(type, handler) {
+      if (type === 'dblclick') doubleClick = handler;
+    },
+    contains(node) { return node === interactive; }
+  };
+  const record = { message: { id: 'message', channel_id: 'channel' } };
+  const jumps = [];
+  const plugin = createPlugin({ menu: { deleteKeyDown: false } });
+  plugin.canJumpToSavedRecord = candidate => candidate === record && candidate.valid !== false;
+  plugin.jumpToSavedRecord = candidate => jumps.push(candidate);
+
+  assert.equal(plugin.wireLoggerViewerDoubleClick(element, record), true);
+  assert.equal(typeof doubleClick, 'function');
+
+  let prevented = 0;
+  let stopped = 0;
+  const plainEvent = {
+    target: { closest: () => null },
+    preventDefault() { prevented++; },
+    stopPropagation() { stopped++; }
+  };
+  doubleClick(plainEvent);
+  assert.deepEqual(jumps, [record]);
+  assert.equal(prevented, 1);
+  assert.equal(stopped, 1);
+
+  record.valid = false;
+  doubleClick(plainEvent);
+  assert.equal(jumps.length, 1);
+  assert.equal(prevented, 1);
+
+  record.valid = true;
+  doubleClick({ target: { closest: () => interactive } });
+  assert.equal(jumps.length, 1);
+
+  plugin.menu.deleteKeyDown = true;
+  doubleClick(plainEvent);
+  assert.equal(jumps.length, 1);
+  assert.equal(plugin.wireLoggerViewerDoubleClick(element, null), false);
+});
+
+test('logger viewer marks only jumpable saved-message authors', () => {
+  const added = [];
+  const author = { classList: { add: value => added.push(value) } };
+  const valid = { message: { id: 'valid', channel_id: 'channel' } };
+  const unavailable = { message: { id: 'unavailable', channel_id: 'deleted-channel' } };
+  const plugin = createPlugin({ style: { jumpAvailableAuthor: 'jump-available' } });
+  plugin.canJumpToSavedRecord = record => record === valid;
+
+  assert.equal(plugin.markLoggerViewerJumpAvailableAuthor(author, valid), true);
+  assert.equal(plugin.markLoggerViewerJumpAvailableAuthor(author, unavailable), false);
+  assert.equal(plugin.markLoggerViewerJumpAvailableAuthor(null, valid), false);
+  assert.deepEqual(added, ['jump-available']);
+});
+
 test('hiding and unhiding a forum or thread root cascades to its children', () => {
   const { plugin, root, child, rootId, dispatches } = createRecordPlugin();
 

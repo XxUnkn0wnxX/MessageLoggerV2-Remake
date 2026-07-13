@@ -10,6 +10,8 @@ MessageLoggerV2 starts in whitelist-only mode.
 
 To log all eligible unmuted servers instead, disable **Only log whitelist** under **Ignores and overrides**. The selected channel and DMs also have enabled-by-default logging overrides; see the [settings reference](settings.md#logging-scope).
 
+Default shortcuts are `Ctrl+M` for all logs, `Ctrl+N` for the selected channel, and `Ctrl+S` for the selected server. They can be changed under Misc settings; the server shortcut is unavailable in DMs.
+
 Logged message content and any enabled media cache remain local to this device. Review **Cache media locally** and **Disable saving data** under Misc settings if needed.
 
 ## 📂 Opening Logs
@@ -74,6 +76,8 @@ Hold `Delete` and left-click:
 Right-click a timestamp for group-level actions.
 
 ### Message actions
+
+Double-click a saved message row to jump to its Discord location when one remains available. A warning-orange username in the logger window marks a valid destination; the normal username color means no jump target remains. Links, avatars, media, and Delete controls retain their own actions. Deleted-channel Anti-Nuke records and other records without a live message channel or saved forum/thread parent do nothing.
 
 Right-click saved messages in the logger or channel view to access applicable actions:
 

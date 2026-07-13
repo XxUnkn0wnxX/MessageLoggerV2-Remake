@@ -230,6 +230,12 @@ test('native and cloned Trash actions remain scoped to indexed logger deletions'
   assert.match(source, /removeSavedDeletedRecordFromLog\(channelId, messageId[\s\S]*deleteMessageFromRecords\(id\)[\s\S]*ML2: true/);
 });
 
+test('logger jump-availability tint stays scoped to the logger window', () => {
+  assert.match(source, /style\.jumpAvailableAuthor = this\.obfuscatedClass\('ml2-jump-available-author'\)/);
+  assert.match(source, /#app-mount \.\$\{this\.style\.menuRoot\} \.\$\{this\.style\.jumpAvailableAuthor\}[\s\S]*color: var\(--text-warning, var\(--status-warning\)\) !important/);
+  assert.doesNotMatch(source, /#app-mount \.\$\{this\.style\.jumpAvailableAuthor\}\s*\{/);
+});
+
 test('logger submenus prefer visible Copy ID rows and retain action fallbacks', () => {
   assert.match(source, /const insertLoggerGroupAt = \(menu, index, loggerSubmenu\) =>[\s\S]*type: 'group'[\s\S]*items: \[loggerSubmenu\]/);
   assert.match(source, /const insertLoggerSubmenuBeforeCopyId = \(menu, loggerSubmenu\) =>/);
@@ -308,6 +314,10 @@ test('first-install help matches the current logging-scope onboarding', () => {
   assert.match(source, /Open the <strong>Message Logger<\/strong> submenu/);
   assert.match(source, /Only log whitelist<\/strong> under <strong>Ignores and overrides/);
   assert.match(source, /Always log selected channel<\/strong> and <strong>Always log DMs/);
+  assert.match(source, /Default shortcuts: <strong>Ctrl\+M<\/strong> toggles all logs/);
+  assert.match(source, /<strong>Ctrl\+N<\/strong> toggles the selected channel/);
+  assert.match(source, /<strong>Ctrl\+S<\/strong> toggles the selected server/);
+  assert.match(source, /server shortcut is unavailable in DMs/);
   assert.match(source, /Cache media locally<\/strong> and <strong>Disable saving data/);
   assert.match(source, /<div class="\$\{this\.style\.textIndent\} \$\{this\.style\.startupHelpTitle\}">/);
   assert.doesNotMatch(source, /startupHelpIntro|ml2-startup-help-intro/);

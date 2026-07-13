@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.1.3
+ * @version 2.8.1.4
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -410,11 +410,11 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Context menu reshuffling',
-        type: 'fixed',
+        title: 'Logger jump shortcuts',
+        type: 'added',
         items: [
-          'Places MessageLogger directly above visible Copy ID actions across message, user, channel, DM, and server menus.',
-          'Keeps destructive-action and final-group fallbacks stable when Discord omits Copy ID actions.'
+          'Double-clicks jumpable saved messages in the logger window to their Discord location.',
+          'Warning-colored usernames identify records that still have a valid jump destination.'
         ]
       }
     ];
@@ -1267,6 +1267,7 @@ module.exports = class MessageLoggerV2 {
     this.style.deletedAlt = this.obfuscatedClass('ml2-deleted-alt');
     this.style.deletedForumText = this.obfuscatedClass('ml2-deleted-forum-text');
     this.style.forumLogPath = this.obfuscatedClass('ml2-forum-log-path');
+    this.style.jumpAvailableAuthor = this.obfuscatedClass('ml2-jump-available-author');
     this.style.edited = this.obfuscatedClass('ml2-edited');
     this.style.editedCompact = this.obfuscatedClass('ml2-edited-compact');
     this.style.tab = this.obfuscatedClass('ml2-tab');
@@ -1373,6 +1374,11 @@ module.exports = class MessageLoggerV2 {
                     html #app-mount .${this.style.forumLogPath} {
                       color: ${this.settings.deletedMessageColor || "#f04747"} !important;
                       font-weight: 700 !important;
+                    }
+                    /* Only the main logger viewer uses this native warning tint. It gives
+                       valid jump destinations a clear cue without recoloring Discord chat. */
+                    html #app-mount .${this.style.menuRoot} .${this.style.jumpAvailableAuthor} {
+                      color: var(--text-warning, var(--status-warning)) !important;
                     }
                     html #app-mount .${this.style.restoredForumCard}.${this.style.restoredForumJump},
                     html #app-mount .${this.style.restoredThreadEntry}.${this.style.restoredForumJump},
@@ -5916,6 +5922,27 @@ module.exports = class MessageLoggerV2 {
     if (!message) return;
     this.jumpToMessage(message.channel_id, message.id, message.guild_id);
   }
+  wireLoggerViewerDoubleClick(element, record) {
+    if (!element?.addEventListener || !record) return false;
+    element.addEventListener('dblclick', event => {
+      // Delete-key clicks and controls with their own actions keep priority over row navigation.
+      if (this.menu?.deleteKeyDown || !this.canJumpToSavedRecord(record)) return;
+      const target = event?.target;
+      const interactive = target?.closest?.(
+        'a, button, img, video, audio, input, textarea, select, [contenteditable="true"], [role="button"], [data-ml2-native-delete-host="true"], [data-ml2-attachment-message-id]'
+      );
+      if (interactive && (!element.contains || element.contains(interactive))) return;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      this.jumpToSavedRecord(record);
+    });
+    return true;
+  }
+  markLoggerViewerJumpAvailableAuthor(element, record) {
+    if (!element?.classList || !record || !this.canJumpToSavedRecord(record)) return false;
+    element.classList.add(this.style.jumpAvailableAuthor);
+    return true;
+  }
   rememberLocalDeleteId(id) {
     if (!id) return;
     id = String(id);
@@ -6755,6 +6782,7 @@ module.exports = class MessageLoggerV2 {
            3. Add that location to the whitelist.</br></br>
            To log all eligible unmuted servers and channels, disable <strong>Only log whitelist</strong> under <strong>Ignores and overrides</strong>.</br>
            <strong>Always log selected channel</strong> and <strong>Always log DMs</strong> are enabled by default and can override the normal whitelist, blacklist, mute, and NSFW scope rules for their targets.</br>
+           Default shortcuts: <strong>Ctrl+M</strong> toggles all logs, <strong>Ctrl+N</strong> toggles the selected channel, and <strong>Ctrl+S</strong> toggles the selected server. Change them under Misc settings; the server shortcut is unavailable in DMs.</br>
            Logged message content and any enabled media cache remain local to this device. Review <strong>Cache media locally</strong> and <strong>Disable saving data</strong> under Misc settings if needed.
          </div></br>`
       : '';
@@ -6805,6 +6833,10 @@ module.exports = class MessageLoggerV2 {
                                     RIGHT-CLICK:</br>
                                     <div class="${this.style.textIndent}">
                                         Right-clicking the timestamp opens up options for the entire message group
+                                    </div></br>
+                                    DOUBLE-CLICK:</br>
+                                    <div class="${this.style.textIndent}">
+                                        Double-clicking a logged message jumps to its Discord location when available. A warning-orange username marks an available destination
                                     </div></br>
                                 </div>
                                 <strong>Toasts:</strong></br>
@@ -10314,6 +10346,7 @@ module.exports = class MessageLoggerV2 {
         this._openUserContextMenu(e, author, channel);
       });
       const nameLink = element.getElementsByClassName(classes.extra[10])[0];
+      this.markLoggerViewerJumpAvailableAuthor(nameLink, record);
       nameLink.addEventListener('click', () => {
         if (noUserInfo) return this.showToast('Could not get user info!', { type: 'error' });
         setTimeout(() => {
@@ -10634,6 +10667,7 @@ module.exports = class MessageLoggerV2 {
       this.scheduleLoggerMenuRefresh();
       this.saveData();
     });
+    if (record) this.wireLoggerViewerDoubleClick(element, record);
     if (record?.delete_data) {
       // Logger windows and deleted-thread modals render their own DOM rows, so they receive the
       // same presentation-only native Delete control as restored forum/thread clones.
