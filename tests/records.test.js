@@ -112,7 +112,7 @@ test('forum and channel-thread context labels remain distinct', () => {
 
   assert.equal(plugin.getSavedThreadRootTypeLabel(forum), 'Forum Post');
   assert.equal(plugin.getSavedThreadVisibilityLabel(forum, true), 'Hide Forum Post');
-  assert.equal(plugin.getSavedThreadRemovalLabel(forum), 'Remove Forum Post From Log');
+  assert.equal(plugin.getSavedThreadRemovalLabel(forum), 'Delete');
   assert.equal(plugin.getSavedThreadRootTypeLabel(thread), 'Thread');
   assert.equal(plugin.getSavedThreadVisibilityLabel(thread, false), 'Unhide Thread');
 });
@@ -205,6 +205,44 @@ test('native Trash consumes only exact indexed saved deletions', () => {
   assert.equal(plugin.editModifiers[messageId], undefined);
   assert.equal(getSaves(), 1);
   assert.deepEqual(dispatches, [{ type: 'MESSAGE_DELETE', id: messageId, channelId, ML2: true }]);
+});
+
+test('permission-independent context Delete is limited to exact indexed saved deletions', () => {
+  const exact = createNativeDeletePlugin();
+  assert.equal(exact.plugin.shouldAddPermissionIndependentContextDelete(
+    exact.record,
+    exact.messageId,
+    exact.channelId,
+    false
+  ), true);
+  assert.equal(exact.plugin.shouldAddPermissionIndependentContextDelete(
+    exact.record,
+    exact.messageId,
+    exact.channelId,
+    true
+  ), false, 'Discord native Delete must never be duplicated');
+  assert.equal(exact.plugin.shouldAddPermissionIndependentContextDelete(
+    exact.record,
+    exact.messageId,
+    'wrong-channel',
+    false
+  ), false);
+
+  const unindexed = createNativeDeletePlugin();
+  unindexed.plugin.deletedMessageRecord = {};
+  unindexed.plugin.deletedMessageSet = new Map();
+  assert.equal(unindexed.plugin.shouldAddPermissionIndependentContextDelete(
+    unindexed.record,
+    unindexed.messageId,
+    unindexed.channelId,
+    false
+  ), false);
+  assert.equal(exact.plugin.shouldAddPermissionIndependentContextDelete(
+    { message: { id: 'edit', channel_id: exact.channelId }, edit_history: [{}] },
+    'edit',
+    exact.channelId,
+    false
+  ), false);
 });
 
 test('native MessageActions wrapper calls Discord only for non-logger deletions', async () => {
@@ -452,6 +490,102 @@ test('permission-independent Delete presentation uses a native toolbar shape and
   assert.equal(refreshes, 1);
 });
 
+test('native Delete icon resolver accepts only unambiguous callable exports', () => {
+  const plugin = createPlugin();
+  const NativeTrashIcon = function NativeTrashIcon() {};
+
+  assert.equal(plugin.resolveNativeDeleteIconExport(NativeTrashIcon), NativeTrashIcon);
+  assert.equal(plugin.resolveNativeDeleteIconExport({ default: NativeTrashIcon }), NativeTrashIcon);
+  assert.equal(plugin.resolveNativeDeleteIconExport({ u: NativeTrashIcon }), NativeTrashIcon);
+  assert.equal(plugin.resolveNativeDeleteIconExport({ a() {}, b() {} }), null);
+  assert.equal(plugin.resolveNativeDeleteIconExport({ u: 'not callable' }), null);
+});
+
+test('permission-independent inline Delete is the direct native toolbar action', () => {
+  const attributes = new Map();
+  const listeners = new Map();
+  const host = {
+    className: '',
+    tabIndex: null,
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    addEventListener(name, callback) { listeners.set(name, callback); },
+    replaceChildren() {}
+  };
+  const NativeTrashIcon = function NativeTrashIcon() {};
+  const root = {
+    rendered: null,
+    render(child) { this.rendered = child; },
+    unmount() {}
+  };
+  ReactDOM.createRoot = target => {
+    assert.equal(target, host);
+    return root;
+  };
+  const activations = [];
+  const plugin = createPlugin({
+    style: { restoredDeleteButton: 'logger-delete', restoredInlineDeleteButton: 'inline-delete' },
+    _nativeDeleteButtonPresentation: {
+      tagName: 'div',
+      className: 'native-toolbar-action',
+      role: 'button',
+      label: 'Delete',
+      useNativeTrashIcon: true,
+      iconClassName: 'native-trash-icon',
+      iconWidth: '24',
+      iconHeight: '24',
+      iconViewBox: '0 0 24 24'
+    },
+    getNativeDeleteIconComponent: () => NativeTrashIcon,
+    handleCopiedNativeDeleteActivation(event, channelId, messageId) {
+      activations.push({ event, channelId, messageId });
+    }
+  });
+  let createdTag = '';
+  const previousDocument = global.document;
+  global.document = {
+    createElement(tagName) {
+      createdTag = tagName;
+      return host;
+    }
+  };
+  try {
+    assert.equal(plugin.createCopiedNativeDeleteControl({
+      message: { id: 'inline-message', channel_id: 'inline-channel' },
+      delete_data: {}
+    }, { inline: true }), host);
+  } finally {
+    global.document = previousDocument;
+  }
+
+  assert.equal(createdTag, 'div');
+  assert.match(host.className, /logger-delete/);
+  assert.match(host.className, /inline-delete/);
+  assert.match(host.className, /native-toolbar-action/);
+  assert.equal(attributes.get('data-ml2-inline-delete-control'), 'true');
+  assert.equal(attributes.get('aria-label'), 'Delete');
+  assert.equal(attributes.get('title'), 'Delete');
+  assert.equal(attributes.get('role'), 'button');
+  assert.equal(host.tabIndex, 0);
+  assert.equal(root.rendered.type, NativeTrashIcon, 'the TrashIcon must mount directly inside the toolbar action');
+  assert.equal(root.rendered.props.className, 'native-trash-icon');
+  assert.equal(plugin._copiedDeleteControlRoots.get(host), root);
+
+  const clickEvent = { shiftKey: true };
+  listeners.get('click')(clickEvent);
+  assert.deepEqual(activations.at(-1), {
+    event: clickEvent,
+    channelId: 'inline-channel',
+    messageId: 'inline-message'
+  });
+  const keyEvent = { key: 'Enter', shiftKey: false };
+  listeners.get('keydown')(keyEvent);
+  assert.deepEqual(activations.at(-1), {
+    event: keyEvent,
+    channelId: 'inline-channel',
+    messageId: 'inline-message'
+  });
+});
+
 test('native toolbar discovery includes the closest toolbar for nested action mutations', () => {
   const toolbarClass = 'buttons_hash';
   const toolbar = {
@@ -469,6 +603,80 @@ test('native toolbar discovery includes the closest toolbar for nested action mu
   const plugin = createPlugin({ _nativeDeleteToolbarClass: toolbarClass });
 
   assert.deepEqual(plugin.getNativeMessageToolbarNodes(nestedActionWrapper), [toolbar]);
+});
+
+test('permission-independent Trash mounts in the shared native action row', () => {
+  const toolbar = {
+    contains(node) { return node === actionRow || actionRow.contains(node); },
+    querySelectorAll() { return [firstAction, secondAction]; }
+  };
+  const actionRow = {
+    parentElement: toolbar,
+    contains(node) {
+      return node === firstWrapper || node === secondWrapper
+        || firstWrapper.contains(node) || secondWrapper.contains(node);
+    }
+  };
+  const makeWrapper = () => ({
+    parentElement: actionRow,
+    action: null,
+    contains(node) { return node === this.action; }
+  });
+  const firstWrapper = makeWrapper();
+  const secondWrapper = makeWrapper();
+  const makeAction = wrapper => ({
+    parentElement: wrapper,
+    querySelector: selector => selector === 'svg' ? {} : null,
+    closest: () => null
+  });
+  const firstAction = firstWrapper.action = makeAction(firstWrapper);
+  const secondAction = secondWrapper.action = makeAction(secondWrapper);
+  const plugin = createPlugin();
+
+  assert.equal(plugin.getNativeMessageToolbarActionRow(toolbar), actionRow);
+  toolbar.querySelectorAll = () => [firstAction];
+  assert.equal(plugin.getNativeMessageToolbarActionRow(toolbar), toolbar, 'one action is not enough to identify a shared row safely');
+});
+
+test('an early outer-toolbar fallback is rebuilt in the action row without moving its React root', () => {
+  const channelId = 'rehome-channel';
+  const messageId = 'rehome-message';
+  const toolbar = {};
+  const existing = {
+    parentElement: toolbar,
+    remove() { this.removed = true; }
+  };
+  const replacement = { parentElement: null };
+  const actionRow = {
+    appendChild(node) {
+      node.parentElement = this;
+      this.appended = node;
+    }
+  };
+  toolbar.querySelector = () => existing;
+  toolbar.querySelectorAll = () => [];
+  const plugin = createPlugin({
+    messageRecord: {
+      [messageId]: { message: { id: messageId, channel_id: channelId }, delete_data: { hidden: false } }
+    },
+    deletedMessageRecord: { [channelId]: [messageId] },
+    deletedMessageSet: new Map([[channelId, new Set([messageId])]]),
+    purgedMessageRecord: {},
+    purgedMessageSet: new Map(),
+    inspectNativeDestructiveMessageCandidate: () => null,
+    getNativeMessageToolbarActionRow: () => actionRow,
+    createCopiedNativeDeleteControl: (_record, options) => {
+      assert.equal(options.inline, true);
+      return replacement;
+    },
+    cleanupCopiedNativeDeleteControls(host) { this.cleanedHost = host; }
+  });
+
+  assert.equal(plugin.wireNativeRestoredMessageDeleteControl(toolbar, channelId, messageId), true);
+  assert.equal(actionRow.appended, replacement);
+  assert.equal(replacement.parentElement, actionRow);
+  assert.equal(plugin.cleanedHost, existing);
+  assert.equal(existing.removed, true);
 });
 
 test('permission-independent toolbar fallback is owned only by exact indexed logger records', () => {

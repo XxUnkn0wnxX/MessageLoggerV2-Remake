@@ -76,14 +76,14 @@ Right-click saved messages in the logger or channel view to access applicable ac
 - Jump to message.
 - Hide or unhide the record.
 - Hide or unhide edits.
-- Remove from log.
+- Delete the saved logger record.
 - Add or remove deleted tint.
 - Copy content or message ID.
 - Open related logs.
 
-**Hide** preserves the record and moves it to the Hidden tab. **Remove From Log** permanently deletes the stored record.
+**Hide** preserves the record and moves it to the Hidden tab. Red **Delete** actions permanently delete the stored logger record; their confirmation identifies the action as local to the logger.
 
-On a restored deleted message in chat, hold Shift while hovering to expose Trash, then Shift-click it to perform **Remove From Log** immediately. For the confirmed path, right-click the restored item and choose **Delete**. If Discord omits Trash because you did not post the message and lack moderation permissions, the logger adds a matching local-only Shift action to that restored row. Normal live Discord messages are not intercepted, and the fallback never grants or invokes a server delete.
+On a restored deleted message in chat, hold Shift while hovering to expose Trash, then Shift-click it to delete the saved logger record immediately. For the confirmed path, right-click the restored item and choose the red **Delete**. If permissions hide Discord's top-level Delete or Trash because you did not post the message and lack moderation permissions, the logger adds matching local-only context and Shift actions to that exact restored row. Normal live Discord messages are not intercepted, and the fallbacks never grant or invoke a server delete.
 
 ### Media-only records
 

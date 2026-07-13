@@ -454,6 +454,7 @@ module.exports = class MessageLoggerV2 {
           'Restores the advertised logger shortcuts and adds native BetterDiscord capture controls for custom or disabled bindings.',
           'Lets Discord\'s native Trash action remove restored messages from the local log, adds the local-only fallback only when native Trash is absent, and shows matching Trash controls only while Shift is held; ordinary right-click Delete still confirms.',
           'Keeps Discord\'s native Delete confirmation lifecycle intact after plugin hot reloads when Trash performs a local-only logger removal.',
+          'Resolves minified single-function Trash icon exports, keeps every logger-owned Trash glyph danger-red, adds a top-level local Delete when permissions hide Discord\'s item, and standardizes permanent logger actions as red Delete entries.',
           'Uses Discord native forum refresh behavior and repairs deleted tint, jump, context-menu, purge, and restore edge cases.',
           'Improves settings validation, accordion navigation, help screens, documentation, and legacy cache compatibility.',
           'Restores the legacy aggressive message caching and new cache system controls as locked-on indicators and resets false config values at startup.',
@@ -1438,6 +1439,19 @@ module.exports = class MessageLoggerV2 {
                       transition: opacity 120ms ease !important;
                       z-index: 3 !important;
                     }
+                    /* Every logger-owned permanent Delete affordance uses Discord's native,
+                       theme-aware destructive color, regardless of which toolbar was copied. */
+                    html #app-mount .${this.style.restoredDeleteButton},
+                    html #app-mount .${this.style.restoredDeleteButton} button,
+                    html #app-mount .${this.style.restoredDeleteButton} [role="button"],
+                    html #app-mount .${this.style.restoredDeleteButton} svg {
+                      color: var(--text-feedback-critical, var(--status-danger)) !important;
+                    }
+                    /* Discord's current TrashIcon paths set their own neutral fill instead of
+                       inheriting the SVG color. Override only paths inside logger-owned controls. */
+                    html #app-mount .${this.style.restoredDeleteButton} path {
+                      fill: var(--text-feedback-critical, var(--status-danger)) !important;
+                    }
                     html #app-mount .${this.style.restoredThreadEntry} > .${this.style.restoredDeleteButton} {
                       top: 50% !important;
                       transform: translateY(-50%) !important;
@@ -1482,6 +1496,8 @@ module.exports = class MessageLoggerV2 {
                       z-index: auto !important;
                     }
                     html.${this.style.shiftDeleteActive} #app-mount .${this.style.restoredDeleteButton}.${this.style.restoredInlineDeleteButton} {
+                      /* Inline fallbacks are the native action element itself, so restoring its
+                         native flex layout keeps it centered inside Discord's toolbar. */
                       display: flex !important;
                       opacity: 1 !important;
                       pointer-events: auto !important;
@@ -5439,9 +5455,9 @@ module.exports = class MessageLoggerV2 {
     return `${hidden ? 'Hide' : 'Unhide'} ${this.getSavedThreadRootTypeLabel(record)}`;
   }
   getSavedThreadRemovalLabel(record) {
-    return record?.delete_data?.forum_thread_delete
-      ? `Remove ${this.getSavedThreadRootTypeLabel(record)} From Log`
-      : 'Remove From Log';
+    // Keep every permanent record-removal action aligned with Discord's destructive wording.
+    // Confirmation copy still explains that saved logger data—not a live server message—is deleted.
+    return this.getNativeDeleteLabel();
   }
   setSavedThreadHidden(record, hidden) {
     const message = record?.message;
@@ -7570,10 +7586,22 @@ module.exports = class MessageLoggerV2 {
     }
     return deleted;
   }
-  getNativeDeleteIconComponent() {
-    const icon = DiscordModules.TrashIcon || DiscordModules.TrashIconFallback;
+  resolveNativeDeleteIconExport(icon) {
     if (typeof icon === 'function') return icon;
     if (typeof icon?.default === 'function') return icon.default;
+    if (!icon || typeof icon !== 'object') return null;
+    // Some Discord builds expose the source-matched icon as a minified module object such as
+    // `{u: function}`. Accept only an unambiguous single callable export so a bundle change can
+    // never make an unrelated export masquerade as Discord's destructive Trash icon.
+    const callableExports = Object.values(icon).filter(value => typeof value === 'function');
+    if (callableExports.length === 1) return callableExports[0];
+    return null;
+  }
+  getNativeDeleteIconComponent() {
+    const direct = this.resolveNativeDeleteIconExport(DiscordModules.TrashIcon);
+    if (direct) return direct;
+    const fallback = this.resolveNativeDeleteIconExport(DiscordModules.TrashIconFallback);
+    if (fallback) return fallback;
     return null;
   }
   setRestoredDeleteShiftActive(active) {
@@ -7616,6 +7644,23 @@ module.exports = class MessageLoggerV2 {
       for (const toolbar of root.getElementsByClassName(toolbarClass)) toolbars.add(toolbar);
     }
     return Array.from(toolbars);
+  }
+  getNativeMessageToolbarActionRow(toolbar) {
+    if (!toolbar?.querySelectorAll) return toolbar;
+    const candidates = Array.from(toolbar.querySelectorAll('button, [role="button"]'))
+      .filter(candidate => (
+        candidate.querySelector?.('svg')
+        && !candidate.closest?.('[data-ml2-native-delete-host="true"]')
+      ));
+    // Current Discord toolbars keep the visible actions inside a nested grid while the outer
+    // `buttons` node owns positioning. Use the lowest shared native-action ancestor so the local
+    // Trash joins that grid instead of becoming a stretched second row under it.
+    if (candidates.length < 2) return toolbar;
+    let actionRow = candidates[0].parentElement;
+    while (actionRow && actionRow !== toolbar && !candidates.every(candidate => actionRow.contains?.(candidate))) {
+      actionRow = actionRow.parentElement;
+    }
+    return actionRow && toolbar.contains?.(actionRow) ? actionRow : toolbar;
   }
   inspectNativeDestructiveMessageCandidate(candidate) {
     if (!candidate?.querySelector?.('svg')) return null;
@@ -7683,10 +7728,24 @@ module.exports = class MessageLoggerV2 {
       }
       return true;
     }
-    if (existing) return true;
+    if (existing) {
+      const actionRow = this.getNativeMessageToolbarActionRow(toolbar);
+      // Discord can expose the outer toolbar before its inner action grid has enough children to
+      // identify safely. Build a fresh final-position control instead of moving its live React
+      // root: the removal observer would otherwise unmount the Trash icon from the moved host.
+      if (actionRow && actionRow !== toolbar && existing.parentElement !== actionRow) {
+        const replacement = this.createCopiedNativeDeleteControl(record, { inline: true });
+        if (replacement) {
+          actionRow.appendChild(replacement);
+          this.cleanupCopiedNativeDeleteControls(existing);
+          existing.remove();
+        }
+      }
+      return true;
+    }
     const control = this.createCopiedNativeDeleteControl(record, { inline: true });
     if (!control) return false;
-    toolbar.appendChild(control);
+    this.getNativeMessageToolbarActionRow(toolbar).appendChild(control);
     return true;
   }
   captureNativeDeleteButtonPresentation(root = document) {
@@ -7786,27 +7845,78 @@ module.exports = class MessageLoggerV2 {
   createCopiedNativeDeleteControl(record, options = {}) {
     const message = record?.message;
     if (!message?.id || !message?.channel_id || !record?.delete_data) return null;
-    const host = document.createElement('div');
+    const presentation = this._nativeDeleteButtonPresentation;
+    const tagName = presentation?.tagName === 'button' ? 'button' : presentation?.tagName || 'div';
+    // An inline permission fallback must itself be the toolbar action. Wrapping it in a React
+    // mount node makes Discord lay the wrapper out as a separate row under the toolbar.
+    const host = document.createElement(options.inline && presentation ? tagName : 'div');
     host.className = this.joinClassNames(
       this.style.restoredDeleteButton,
-      options.inline && this.style.restoredInlineDeleteButton
+      options.inline && this.style.restoredInlineDeleteButton,
+      options.inline && presentation?.className
     );
     host.setAttribute('data-ml2-native-delete-host', 'true');
     host.setAttribute('data-ml2-remove-from-log', message.id);
     host.setAttribute('data-ml2-message-id', message.id);
     host.setAttribute('data-ml2-channel-id', message.channel_id);
     if (options.inline) host.setAttribute('data-ml2-inline-delete-control', 'true');
-    const presentation = this._nativeDeleteButtonPresentation;
-    if (!presentation || typeof ReactDOM.createRoot !== 'function') {
+    if (!presentation) {
       host.setAttribute('data-ml2-pending-delete-control', 'true');
       return host;
     }
     const innerHTML = presentation.useNativeTrashIcon
       ? ''
       : this.sanitizeNativeDeleteMarkup(presentation.innerHTML);
+    const activate = event => this.handleCopiedNativeDeleteActivation(event, message.channel_id, message.id);
+    if (options.inline) {
+      // Keep the permission-independent action as a direct native-toolbar child. A title supplies
+      // the captured localized label without reintroducing the tooltip wrapper that broke layout.
+      host.setAttribute('aria-label', presentation.label);
+      host.setAttribute('title', presentation.label);
+      if (presentation.role) host.setAttribute('role', presentation.role);
+      host.tabIndex = 0;
+      if (tagName === 'button') host.setAttribute('type', 'button');
+      host.addEventListener('click', activate);
+      if (tagName !== 'button' && presentation.role === 'button') {
+        host.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') activate(event);
+        });
+      }
+      if (!presentation.useNativeTrashIcon) {
+        // Exact native captures already contain Discord's Trash SVG; sanitization strips live
+        // identifiers and event attributes before the copied markup enters the logger-owned host.
+        host.innerHTML = innerHTML;
+        return host;
+      }
+      const TrashIcon = this.getNativeDeleteIconComponent();
+      if (!TrashIcon || typeof ReactDOM.createRoot !== 'function') {
+        host.setAttribute('data-ml2-pending-delete-control', 'true');
+        return host;
+      }
+      let root = null;
+      try {
+        root = ReactDOM.createRoot(host);
+        root.render(React.createElement(TrashIcon, {
+          'aria-hidden': true,
+          className: presentation.iconClassName,
+          width: presentation.iconWidth,
+          height: presentation.iconHeight,
+          viewBox: presentation.iconViewBox
+        }));
+        (this._copiedDeleteControlRoots ||= new Map()).set(host, root);
+      } catch (error) {
+        try { root?.unmount?.(); } catch {}
+        host.replaceChildren();
+        host.setAttribute('data-ml2-pending-delete-control', 'true');
+        Logger.warn('Could not mount Discord-native inline Delete control on a restored logger item:', error);
+      }
+      return host;
+    }
+    if (typeof ReactDOM.createRoot !== 'function') {
+      host.setAttribute('data-ml2-pending-delete-control', 'true');
+      return host;
+    }
     const renderAction = tooltipProps => {
-      const tagName = presentation.tagName === 'button' ? 'button' : presentation.tagName || 'div';
-      const activate = event => this.handleCopiedNativeDeleteActivation(event, message.channel_id, message.id);
       const actionProps = {
         ...tooltipProps,
         className: this.joinClassNames(presentation.className, tooltipProps?.className),
@@ -7899,6 +8009,14 @@ module.exports = class MessageLoggerV2 {
     const indexedRecords = [this.deletedMessageRecord, this.purgedMessageRecord];
     return indexedRecords.some(map => Array.isArray(map?.[channelId]) && map[channelId].includes(id));
   }
+  shouldAddPermissionIndependentContextDelete(record, messageId, channelId, nativeDeletePresent = false) {
+    if (nativeDeletePresent || !record?.delete_data) return false;
+    if (String(record.message?.id ?? '') !== String(messageId ?? '')) return false;
+    if (String(record.message?.channel_id ?? '') !== String(channelId ?? '')) return false;
+    // Context-menu permissions are irrelevant only for exact saved deletions. Live, edit-only,
+    // unindexed, and mismatched records must retain Discord's original menu and permission rules.
+    return this.isIndexedSavedDeletedRecord(record, messageId);
+  }
   processNativeMessageDeleteAction(args, original) {
     const channelId = args?.[0];
     const messageId = args?.[1];
@@ -7909,7 +8027,7 @@ module.exports = class MessageLoggerV2 {
     }
     // Discord has already handled its normal confirmation before this action runs, while
     // Shift-click reaches it directly. Consume only an exact indexed logger deletion and
-    // translate it into the same local cleanup as Remove From Log. Every live message keeps
+    // translate it into the same local Delete cleanup. Every live message keeps
     // Discord's original network-delete path below.
     if (this.handleNativeSavedRecordDelete(channelId, messageId)) {
       // Discord's native confirmation waits on the async delete contract before dismissing.
@@ -7931,7 +8049,7 @@ module.exports = class MessageLoggerV2 {
 
     // Snapshot every UI decision before deleteMessageFromRecords removes the canonical record.
     // Root removal deliberately uses its existing cascade so children, indexes, cached-media
-    // cleanup, suppression, and modal state stay consistent with Remove From Log.
+    // cleanup, suppression, and modal state stay consistent with other logger Delete actions.
     const removesThreadRoot = !!record.delete_data.forum_thread_delete;
     const wasMounted = !record.delete_data.hidden;
     const shouldRefreshChannelCache = !removesThreadRoot
@@ -9200,8 +9318,8 @@ module.exports = class MessageLoggerV2 {
       menuItems.push(
         {
           type: 'item',
-          label: record.delete_data ? this.getNativeDeleteLabel() : this.getSavedThreadRemovalLabel(record),
-          icon: record.delete_data ? this.getNativeDeleteIconComponent() || undefined : undefined,
+          label: this.getSavedThreadRemovalLabel(record),
+          icon: this.getNativeDeleteIconComponent() || undefined,
           danger: true,
           action: () => {
             ContextMenu.close();
@@ -10271,9 +10389,9 @@ module.exports = class MessageLoggerV2 {
           menuItems.push(
             {
               type: 'item',
-              label: record.delete_data ? this.getNativeDeleteLabel() : this.getSavedThreadRemovalLabel(record),
-              icon: record.delete_data ? this.getNativeDeleteIconComponent() || undefined : undefined,
-              danger: !!record.delete_data,
+              label: this.getSavedThreadRemovalLabel(record),
+              icon: this.getNativeDeleteIconComponent() || undefined,
+              danger: true,
               action: () => {
                 ContextMenu.close();
                 if (record.delete_data) {
@@ -11264,7 +11382,7 @@ module.exports = class MessageLoggerV2 {
           }
         }
         addElement(
-          record.delete_data ? this.getNativeDeleteLabel() : this.getSavedThreadRemovalLabel(record),
+          this.getSavedThreadRemovalLabel(record),
           () => {
             if (record.delete_data) {
               this.requestSavedDeletedRecordRemoval(channelId, messageId, false);
@@ -11277,8 +11395,8 @@ module.exports = class MessageLoggerV2 {
           },
           {
             className: DiscordModules.ColorClasses?.colorDanger,
-            danger: !!record.delete_data,
-            icon: record.delete_data ? this.getNativeDeleteIconComponent() || undefined : undefined
+            danger: true,
+            icon: this.getNativeDeleteIconComponent() || undefined
           }
         );
       } catch (err) {
@@ -11302,15 +11420,51 @@ module.exports = class MessageLoggerV2 {
         pruneNativeDeletedOptions: true,
         editTarget: props.target
       });
+      const nativeDeleteGroup = findMenuGroupByChildId(ret, 'delete');
+      if (this.shouldAddPermissionIndependentContextDelete(
+        record,
+        messageId,
+        channelId,
+        !!nativeDeleteGroup
+      )) {
+        // Discord omits its top-level Delete when this account lacks server-delete permission.
+        // Restore only the local logger equivalent and route it through the same confirmation.
+        const permissionIndependentDelete = {
+          id: 'mlv2-delete-saved-record',
+          type: 'item',
+          label: this.getNativeDeleteLabel(),
+          icon: this.getNativeDeleteIconComponent() || undefined,
+          danger: true,
+          action: () => this.requestSavedDeletedRecordRemoval(channelId, messageId, false)
+        };
+        const reportGroup = findMenuGroupByChildId(ret, 'report');
+        const reportIndex = reportGroup?.findIndex(item => menuIdMatches(item?.props?.id, 'report'));
+        if (reportGroup && reportIndex >= 0) {
+          reportGroup.splice(
+            reportIndex + 1,
+            0,
+            ...ContextMenu.buildMenuChildren([permissionIndependentDelete])
+          );
+        } else {
+          menu.push(ContextMenu.buildMenuChildren([{
+            type: 'group',
+            items: [permissionIndependentDelete]
+          }]));
+        }
+      }
       const loggerSubmenu = {
         id: 'mlv2-message-logger',
         type: 'submenu',
         label: this.settings.contextmenuSubmenuName?.trim() || 'Message Logger',
         items: newItems
       };
-      const actionGroup = findMenuGroupByChildId(ret, 'delete') || findMenuGroupByChildId(ret, 'report');
+      const actionGroup = nativeDeleteGroup
+        || findMenuGroupByChildId(ret, 'mlv2-delete-saved-record')
+        || findMenuGroupByChildId(ret, 'report');
       const actionIndex = actionGroup?.findIndex(item =>
-        menuIdMatches(item?.props?.id, 'delete') || menuIdMatches(item?.props?.id, 'report')
+        menuIdMatches(item?.props?.id, 'delete')
+        || menuIdMatches(item?.props?.id, 'mlv2-delete-saved-record')
+        || menuIdMatches(item?.props?.id, 'report')
       );
       if (actionGroup && actionIndex >= 0) {
         actionGroup.splice(actionIndex + 1, 0, ContextMenu.buildMenuChildren([
@@ -11487,7 +11641,7 @@ module.exports = class MessageLoggerV2 {
           this.obfuscatedClass('copy-to')
         );
         addElement(
-          'Remove From Log',
+          this.getSavedThreadRemovalLabel(record),
           () => {
             this.deleteMessageFromRecords(messageId);
             this.scheduleLoggerMenuRefresh();
@@ -11495,7 +11649,11 @@ module.exports = class MessageLoggerV2 {
             if (record.delete_data) this.dispatcher.dispatch({ type: 'MESSAGE_DELETE', id: messageId, channelId: channelId, ML2: true });
             else this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
           },
-          this.obfuscatedClass('remove')
+          {
+            className: DiscordModules.ColorClasses?.colorDanger,
+            danger: true,
+            icon: this.getNativeDeleteIconComponent() || undefined
+          }
         );
         addElement(
           'Reveal in folder',

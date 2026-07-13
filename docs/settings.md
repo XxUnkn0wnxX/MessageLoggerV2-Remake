@@ -102,7 +102,7 @@ When a data file was written by a legacy or different MessageLoggerV2 fork, the 
 
 If the primary is missing or invalid, a valid backup is normalized and used to atomically recreate the primary. The selected notification mode reports **Valid backup loaded. Rebuilding the main data file.**, followed by a recovery-specific success or error; the console records the reason and detailed failure information. The backup itself is deliberately left untouched during that recovery as a rollback copy, and a later normal backup can update it after the restored primary is active. A data or backup schema created by a newer version of this fork is never downgraded: loading and saving fail closed until the plugin is updated.
 
-Disabling a display option does not necessarily delete its stored records. Use **Remove From Log** or **Clear log** when permanent removal is intended.
+Disabling a display option does not necessarily delete its stored records. Use the red **Delete** action or **Clear log** when permanent removal is intended.
 
 ## 🔔 Toast Notifications
 

@@ -175,6 +175,7 @@ test('native and cloned Trash actions remain scoped to indexed logger deletions'
   assert.match(source, /MessageToolbarClasses: lazyGet[\s\S]*messageListItem[\s\S]*buttons/);
   assert.match(source, /getNativeDeleteToolbarClass\(\)[\s\S]*DiscordModules\.MessageToolbarClasses/);
   assert.match(source, /getNativeMessageToolbarNodes\(root = document\)[\s\S]*ancestor\.classList[\s\S]*getElementsByClassName/);
+  assert.match(source, /getNativeMessageToolbarActionRow\(toolbar\)[\s\S]*lowest shared native-action ancestor[\s\S]*candidates\.every/);
   assert.match(source, /captureNativeDeleteButtonPresentation\(root = document\)[\s\S]*inspectNativeDeleteCandidate/);
   const copiedControl = source.slice(
     source.indexOf('createCopiedNativeDeleteControl(record, options = {})'),
@@ -185,9 +186,17 @@ test('native and cloned Trash actions remain scoped to indexed logger deletions'
   assert.match(copiedControl, /handleCopiedNativeDeleteActivation\(event, message\.channel_id, message\.id\)/);
   assert.match(source, /handleCopiedNativeDeleteActivation\(event, channelId, messageId\)[\s\S]*stopPropagation[\s\S]*requestSavedDeletedRecordRemoval\(channelId, messageId, !!event\.shiftKey\)/);
   assert.match(source, /TrashIcon: lazyGet[\s\S]*getNativeDeleteIconComponent\(\)/);
+  assert.match(source, /resolveNativeDeleteIconExport\(icon\)[\s\S]*Object\.values\(icon\)[\s\S]*callableExports\.length === 1/);
+  assert.doesNotMatch(source, /Remove From Log/);
   assert.match(source, /shiftDeleteActive = this\.obfuscatedClass\('MLv2-shift-delete-active'\)/);
   assert.match(source, /html\.\$\{this\.style\.shiftDeleteActive\} #app-mount \.\$\{this\.style\.restoredForumCard\}:hover > \.\$\{this\.style\.restoredDeleteButton\}/);
+  assert.match(source, /restoredDeleteButton},[\s\S]*restoredDeleteButton} button,[\s\S]*restoredDeleteButton} \[role="button"\],[\s\S]*color: var\(--text-feedback-critical, var\(--status-danger\)\) !important/);
+  assert.match(source, /restoredDeleteButton} path[\s\S]*fill: var\(--text-feedback-critical, var\(--status-danger\)\) !important/);
   assert.match(source, /restoredInlineDeleteButton}[\s\S]*display: none !important[\s\S]*shiftDeleteActive[\s\S]*display: flex !important/);
+  assert.match(copiedControl, /document\.createElement\(options\.inline && presentation \? tagName : 'div'\)/);
+  assert.match(copiedControl, /options\.inline && presentation\?\.className/);
+  assert.match(copiedControl, /host\.setAttribute\('title', presentation\.label\)/);
+  assert.match(copiedControl, /host\.addEventListener\('click', activate\)/);
   assert.match(source, /restoredThreadEntry} > \.\$\{this\.style\.restoredDeleteButton}[\s\S]*top: 50% !important[\s\S]*translateY\(-50%\)/);
   assert.match(source, /restoredThreadEntry} > \.\$\{this\.style\.restoredDeleteButton} button,[\s\S]*box-sizing: border-box !important[\s\S]*height: 24px[\s\S]*width: 24px/);
   assert.match(source, /restoredThreadBrowserCard} > \.\$\{this\.style\.restoredDeleteButton}[\s\S]*translate\(8px, -50%\)/);
@@ -197,7 +206,9 @@ test('native and cloned Trash actions remain scoped to indexed logger deletions'
   assert.match(source, /if \(e\.key === 'Shift'\) \{[\s\S]*setRestoredDeleteShiftActive\(true\)/);
   assert.match(source, /if \(e\.key === 'Shift'\) this\.setRestoredDeleteShiftActive\(!!e\.shiftKey\)/);
   assert.match(source, /shortcutBlurListener = \(\) => \{[\s\S]*setRestoredDeleteShiftActive\(false\)/);
-  assert.match(source, /wireNativeRestoredMessageDeleteControl[\s\S]*isIndexedSavedDeletedRecord\(record, messageId\)[\s\S]*nativeDeletePresent[\s\S]*createCopiedNativeDeleteControl\(record, \{ inline: true \}\)/);
+  assert.match(source, /wireNativeRestoredMessageDeleteControl[\s\S]*isIndexedSavedDeletedRecord\(record, messageId\)[\s\S]*nativeDeletePresent[\s\S]*existing\.parentElement !== actionRow[\s\S]*const replacement = this\.createCopiedNativeDeleteControl\(record, \{ inline: true \}\)[\s\S]*actionRow\.appendChild\(replacement\)[\s\S]*cleanupCopiedNativeDeleteControls\(existing\)[\s\S]*existing\.remove\(\)[\s\S]*getNativeMessageToolbarActionRow\(toolbar\)\.appendChild\(control\)/);
+  assert.match(source, /shouldAddPermissionIndependentContextDelete\(record, messageId, channelId, nativeDeletePresent = false\)[\s\S]*isIndexedSavedDeletedRecord\(record, messageId\)/);
+  assert.match(source, /id: 'mlv2-delete-saved-record'[\s\S]*danger: true[\s\S]*requestSavedDeletedRecordRemoval\(channelId, messageId, false\)/);
   assert.doesNotMatch(source, /restoredDeleteButton[\s\S]{0,1000}innerHTML\s*=\s*['"]<svg/);
   assert.match(source, /removeSavedDeletedRecordFromLog\(channelId, messageId[\s\S]*deleteMessageFromRecords\(id\)[\s\S]*ML2: true/);
 });
