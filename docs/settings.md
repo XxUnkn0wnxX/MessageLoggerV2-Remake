@@ -153,13 +153,14 @@ The notification whitelist and blacklist are managed from the same server, chann
 | Setting | Default | Behavior |
 | --- | --- | --- |
 | Enable Anti Nuke | On | Captures a bounded snapshot under **Purged** when a parent forum or text channel is deleted. This emergency path overrides whitelist, blacklist, mute, NSFW, bot, blocked-user, self-author, and local-delete rules. Turning it off suppresses the entire cascade. |
-| Thread and forum post cap | `10` | Limits structural thread/forum-post roots captured per deleted parent channel. Blank or `0` is unlimited. |
-| Total message cap | `10` | One shared allowance for replies across captured threads/forum posts plus ordinary parent-channel messages. Root payloads, including a distinct starter folded into a channel-thread root, do not consume this cap. Blank or `0` is unlimited. |
-| Total attachment cap | `10` | One total shared allowance for Discord file attachments across the deleted channel. A single message can consume the entire cap. Blank or `0` is unlimited. |
+| Thread and forum post cap | `15` | Limits structural thread/forum-post roots captured per deleted parent channel. Blank or `0` is unlimited. |
+| Total message cap | `45` | One shared allowance for replies across captured threads/forum posts plus ordinary parent-channel messages. Root payloads, including a distinct starter folded into a channel-thread root, do not consume this cap. Blank or `0` is unlimited. |
+| Total attachment cap | `15` | One total shared allowance for Discord file attachments across the deleted channel. A single message can consume the entire cap. Blank or `0` is unlimited. |
 
 All three caps apply to one parent-channel deletion event:
 
 - Thread/forum roots, then their replies, then ordinary parent-channel messages are captured newest-first.
+- Anti-Nuke channel-thread roots use the same metadata and starter-body schema as ordinary deleted threads; only their Purged category and Anti-Nuke markers differ.
 - Attachments count only after their message is admitted. Excluded messages never store attachments; roots remain even if their attachments exceed the budget.
 - Anti Nuke bypasses normal logging ignores and overrides; only its own toggle disables capture.
 - Blank or `0` is unlimited and can freeze Discord or use substantial disk space on large channels.

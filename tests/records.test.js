@@ -359,6 +359,117 @@ test('self-keyed forum starters do not fold or alter their message payload', () 
   assert.equal(root.message.content, 'forum body');
 });
 
+test('legacy Anti-Nuke channel-thread placeholders repair only a nearby initial starter', () => {
+  const rootId = '550';
+  const starterId = '551';
+  const replyId = '552';
+  const forumId = '560';
+  const lateRootId = '570';
+  const lateReplyId = '571';
+  const author = { id: 'author', username: 'Author', public_flags: 0 };
+  const antiNukeDeleteData = (overrides = {}) => ({
+    time: 3000,
+    anti_nuke: true,
+    anti_nuke_parent_id: 'parent',
+    forum_thread_message_delete: true,
+    ...overrides
+  });
+  const plugin = createPlugin({
+    cleanupMessageObject(message) {
+      return {
+        ...message,
+        attachments: Array.isArray(message.attachments) ? message.attachments : [],
+        embeds: Array.isArray(message.embeds) ? message.embeds : []
+      };
+    }
+  });
+  const data = {
+    messageRecord: {
+      [rootId]: {
+        message: { id: rootId, channel_id: rootId, content: '[starter message unavailable]', timestamp: 1000, author },
+        delete_data: antiNukeDeleteData({
+          forum_thread_delete: true,
+          forum_metadata: {
+            id: rootId,
+            name: 'Thread title',
+            ownerId: author.id,
+            isForumParent: false,
+            starterMessageId: rootId
+          }
+        })
+      },
+      [starterId]: {
+        message: { id: starterId, channel_id: rootId, content: 'Initial body', timestamp: 1500, author },
+        delete_data: antiNukeDeleteData({
+          forum_metadata: { id: rootId, isForumParent: false }
+        })
+      },
+      [replyId]: {
+        message: { id: replyId, channel_id: rootId, content: 'Reply B', timestamp: 2000, author },
+        delete_data: antiNukeDeleteData({
+          forum_metadata: { id: rootId, isForumParent: false }
+        })
+      },
+      [forumId]: {
+        message: { id: forumId, channel_id: forumId, content: 'Forum body', timestamp: 1000, author },
+        delete_data: antiNukeDeleteData({
+          forum_thread_delete: true,
+          forum_metadata: {
+            id: forumId,
+            name: 'Forum title',
+            ownerId: author.id,
+            isForumParent: true,
+            starterMessageId: forumId
+          }
+        })
+      },
+      [lateRootId]: {
+        message: { id: lateRootId, channel_id: lateRootId, content: '[starter message unavailable]', timestamp: 1000, author },
+        delete_data: antiNukeDeleteData({
+          forum_thread_delete: true,
+          forum_metadata: {
+            id: lateRootId,
+            name: 'Missing starter',
+            ownerId: author.id,
+            isForumParent: false,
+            starterMessageId: lateRootId
+          }
+        })
+      },
+      [lateReplyId]: {
+        message: { id: lateReplyId, channel_id: lateRootId, content: 'Much later reply', timestamp: 301001, author },
+        delete_data: antiNukeDeleteData({
+          forum_metadata: { id: lateRootId, isForumParent: false }
+        })
+      }
+    },
+    deletedMessageRecord: {},
+    editedMessageRecord: {},
+    purgedMessageRecord: {
+      [rootId]: [rootId, starterId, replyId],
+      [forumId]: [forumId],
+      [lateRootId]: [lateRootId, lateReplyId]
+    },
+    suppressedForumThreadIds: []
+  };
+
+  const normalized = plugin.normalizePersistedDataPayload(data);
+
+  assert.deepEqual(Object.keys(normalized.messageRecord).sort(), [forumId, lateReplyId, lateRootId, replyId, rootId].sort());
+  assert.equal(normalized.messageRecord[rootId].message.content, 'Initial body');
+  assert.equal(normalized.messageRecord[rootId].delete_data.forum_metadata.name, 'Thread title');
+  assert.equal(normalized.messageRecord[rootId].delete_data.forum_metadata.starterMessageId, starterId);
+  assert.equal(normalized.messageRecord[rootId].delete_data.forum_metadata.starterFoldedIntoRoot, true);
+  assert.equal(normalized.messageRecord[replyId].message.content, 'Reply B');
+  assert.deepEqual(normalized.purgedMessageRecord[rootId], [rootId, replyId]);
+  assert.equal(normalized.messageRecord[forumId].message.content, 'Forum body', 'forum post storage is unchanged');
+  assert.equal(normalized.messageRecord[forumId].delete_data.forum_metadata.starterMessageId, forumId);
+  assert.equal(normalized.messageRecord[lateRootId].message.content, '[starter message unavailable]');
+  assert.equal(normalized.messageRecord[lateRootId].delete_data.forum_metadata.starterMessageId, lateRootId);
+  assert.equal(normalized.messageRecord[lateReplyId].message.content, 'Much later reply');
+  assert.equal(JSON.stringify(plugin.normalizePersistedDataPayload(normalized)), JSON.stringify(normalized));
+});
+
 test('live thread capture folding rebuilds de-duplicated indexes without touching replies', () => {
   const rootId = '600';
   const starterId = '601';

@@ -178,7 +178,8 @@ Notification settings affect alerts only. Logging scope is controlled separately
 - **Automatically refresh new forum posts** uses Discord's native **New Post(s)** control so new cards appear without leaving and reopening the forum.
 - Fully deleted cards and thread entries need at least one live item as a layout anchor. Without one, they remain logged but unrendered.
 - **Anti Nuke** captures a deleted parent forum or text channel under **Purged** and bypasses normal scope rules.
-  - Thread/forum, message, and attachment caps default to `10` per deletion event.
+  - Thread/forum, message, and attachment caps default to `15`, `45`, and `15` per deletion event.
+  - Captured channel threads retain the same title metadata, initial body, author/media, and separate replies as ordinary deleted threads.
   - Capture is newest-first. Attachments count only after their message is admitted; roots bypass the message cap but their attachments still count.
   - Blank or `0` is unlimited and unsafe for large channels. Anti-Nuke records cannot Jump because their parent channel is gone.
 - Parent-channel “started a thread” system messages are left to Discord and are not logged.

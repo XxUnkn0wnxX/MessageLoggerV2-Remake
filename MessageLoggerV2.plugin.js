@@ -588,9 +588,9 @@ module.exports = class MessageLoggerV2 {
       messageCacheCap: 1000,
       savedMessagesCap: 1000,
       antiNukeEnabled: true,
-      antiNukeThreadCap: 10,
-      antiNukeMessageCap: 10,
-      antiNukeAttachmentCap: 10,
+      antiNukeThreadCap: 15,
+      antiNukeMessageCap: 45,
+      antiNukeAttachmentCap: 15,
       reverseOrder: false,
       onlyLogWhitelist: true,
       whitelist: [],
@@ -726,9 +726,11 @@ module.exports = class MessageLoggerV2 {
         : Number(legacyChannelDeleteCaptureCap);
       const migratedCap = Number.isFinite(parsedLegacyCap) && Number.isInteger(parsedLegacyCap) && parsedLegacyCap >= 0
         ? parsedLegacyCap
-        : 10;
-      if (!hadAntiNukeThreadCap) this.settings.antiNukeThreadCap = migratedCap;
-      if (!hadAntiNukeMessageCap) this.settings.antiNukeMessageCap = migratedCap;
+        : null;
+      // A valid legacy shared cap remains a user choice. Invalid legacy values leave the
+      // newly initialized per-category defaults intact instead of imposing an old fallback.
+      if (migratedCap !== null && !hadAntiNukeThreadCap) this.settings.antiNukeThreadCap = migratedCap;
+      if (migratedCap !== null && !hadAntiNukeMessageCap) this.settings.antiNukeMessageCap = migratedCap;
       delete this.settings.channelDeleteCaptureCap;
       settingsChanged = true;
     }
@@ -3751,6 +3753,85 @@ module.exports = class MessageLoggerV2 {
     if (!record.edit_history.length) record.edit_history = null;
     delete record.editHistory;
   }
+  repairAntiNukeChannelThreadStarterMetadata(data, onlyThreadIds = null) {
+    const records = data?.messageRecord;
+    if (!records || typeof records !== 'object' || Array.isArray(records)) return [];
+    const allowedThreadIds = onlyThreadIds
+      ? new Set(Array.from(onlyThreadIds, id => String(id)))
+      : null;
+    const repaired = [];
+    const messageTime = (message, fallbackId) => {
+      const numeric = Number(message?.timestamp);
+      if (Number.isFinite(numeric) && numeric > 0) return numeric;
+      const parsed = Date.parse(message?.timestamp);
+      if (Number.isFinite(parsed)) return parsed;
+      try {
+        return Number(BigInt(fallbackId) >> 22n) + DISCORD_EPOCH;
+      } catch (_) {
+        return NaN;
+      }
+    };
+
+    for (const [rootId, rootRecord] of Object.entries(records)) {
+      if (allowedThreadIds && !allowedThreadIds.has(rootId)) continue;
+      const rootMessage = rootRecord?.message;
+      const rootDeleteData = rootRecord?.delete_data;
+      const metadata = rootDeleteData?.forum_metadata;
+      const recordedStarterId = metadata?.starterMessageId && String(metadata.starterMessageId);
+      // This repair is intentionally limited to the known Anti-Nuke channel-thread fallback:
+      // forum posts are self-keyed by design and all ordinary saved records are left untouched.
+      if (!rootDeleteData?.anti_nuke
+        || !rootDeleteData.forum_thread_delete
+        || !rootDeleteData.anti_nuke_parent_id
+        || !rootMessage
+        || metadata?.isForumParent !== false
+        || (recordedStarterId && recordedStarterId !== rootId)
+        || rootMessage.content !== '[starter message unavailable]') continue;
+
+      const rootTime = messageTime(rootMessage, rootId);
+      const ownerId = metadata.ownerId || metadata.starterAuthor?.id || rootMessage.author?.id || null;
+      const candidates = Object.entries(records)
+        .filter(([messageId, record]) => {
+          if (messageId === rootId) return false;
+          const message = record?.message;
+          const deleteData = record?.delete_data;
+          const childMetadata = deleteData?.forum_metadata;
+          if (!message
+            || String(message.id) !== messageId
+            || String(message.channel_id) !== rootId
+            || !deleteData?.anti_nuke
+            || !deleteData.forum_thread_message_delete
+            || deleteData.forum_thread_delete
+            || String(deleteData.anti_nuke_parent_id || '') !== String(rootDeleteData.anti_nuke_parent_id)) return false;
+          if (childMetadata?.isForumParent === true
+            || (childMetadata?.id && String(childMetadata.id) !== rootId)) return false;
+          if (ownerId && String(message.author?.id || '') !== String(ownerId)) return false;
+          const candidateTime = messageTime(message, messageId);
+          // Discord creates a channel thread and its initial body together. Requiring the
+          // candidate to follow the root closely prevents a later cached reply from being
+          // mistaken for a missing starter when the actual starter payload was never cached.
+          return Number.isFinite(rootTime)
+            && Number.isFinite(candidateTime)
+            && candidateTime >= rootTime
+            && candidateTime - rootTime <= 5 * 60 * 1000;
+        })
+        .sort((left, right) => {
+          const timeDifference = messageTime(left[1].message, left[0]) - messageTime(right[1].message, right[0]);
+          if (timeDifference) return timeDifference;
+          try {
+            const leftId = BigInt(left[0]);
+            const rightId = BigInt(right[0]);
+            return leftId === rightId ? 0 : leftId < rightId ? -1 : 1;
+          } catch (_) {
+            return left[0].localeCompare(right[0], undefined, { numeric: true });
+          }
+        });
+      if (!candidates.length) continue;
+      metadata.starterMessageId = candidates[0][0];
+      repaired.push({ rootId, starterMessageId: candidates[0][0] });
+    }
+    return repaired;
+  }
   foldSeparateThreadStarterRecords(data, onlyThreadIds = null) {
     const records = data?.messageRecord;
     if (!records || typeof records !== 'object' || Array.isArray(records)) return [];
@@ -3930,6 +4011,9 @@ module.exports = class MessageLoggerV2 {
         data[key][channelId] = ids.map(id => canonicalMessageIds.get(id) || id);
       }
     }
+    // Repair the narrowly identifiable Anti-Nuke channel-thread fallback produced by older
+    // builds before applying the normal distinct-starter fold. Forum posts are excluded.
+    this.repairAntiNukeChannelThreadStarterMetadata(data);
     // Discord forum posts are naturally self-keyed, while some channel threads have a distinct
     // thread ID and starter-message ID. Canonical storage treats both as one logical root record:
     // the title stays in metadata and the starter payload becomes the root message. Existing
@@ -6155,6 +6239,7 @@ module.exports = class MessageLoggerV2 {
       editedMessageRecord: this.editedMessageRecord,
       purgedMessageRecord: this.purgedMessageRecord
     };
+    this.repairAntiNukeChannelThreadStarterMetadata(data, [threadId]);
     const [folded] = this.foldSeparateThreadStarterRecords(data, [threadId]);
     if (!folded) return false;
     const canonical = this.sanitizeDataPayload({
@@ -6428,9 +6513,9 @@ module.exports = class MessageLoggerV2 {
     const configuredThreadCap = Number(this.settings.antiNukeThreadCap);
     const configuredMessageCap = Number(this.settings.antiNukeMessageCap);
     const configuredAttachmentCap = Number(this.settings.antiNukeAttachmentCap);
-    const threadCap = Number.isInteger(configuredThreadCap) && configuredThreadCap >= 0 ? configuredThreadCap : 10;
-    const messageCap = Number.isInteger(configuredMessageCap) && configuredMessageCap >= 0 ? configuredMessageCap : 10;
-    const attachmentCap = Number.isInteger(configuredAttachmentCap) && configuredAttachmentCap >= 0 ? configuredAttachmentCap : 10;
+    const threadCap = Number.isInteger(configuredThreadCap) && configuredThreadCap >= 0 ? configuredThreadCap : 15;
+    const messageCap = Number.isInteger(configuredMessageCap) && configuredMessageCap >= 0 ? configuredMessageCap : 45;
+    const attachmentCap = Number.isInteger(configuredAttachmentCap) && configuredAttachmentCap >= 0 ? configuredAttachmentCap : 15;
     const parentMessages = this.getCachedMessagesForDeletedChannel(channel.id);
     const parentLocation = {
       guildId: channel.guild_id || guild?.id || null,
@@ -6580,11 +6665,26 @@ module.exports = class MessageLoggerV2 {
     this.forumThreadMetadataCache?.set(channel.id, metadata);
     return metadata;
   }
+  getDeletedChannelThreadStarterCandidate(channel, context, root, messages = []) {
+    const parentType = context?.channel?.type;
+    // Forum post IDs are their starter-message IDs, so preserve the working self-keyed path.
+    if (parentType === 15 || parentType === 16) return root || messages.at(-1) || null;
+    const cachedStarterId = this.forumThreadMetadataCache?.get(channel?.id)?.starterMessageId;
+    if (cachedStarterId && String(cachedStarterId) !== String(channel?.id)) {
+      // Keep known metadata only when the exact starter is still in the deleted-channel cache.
+      // Returning null preserves that known ID if its payload is no longer available.
+      return messages.find(message => String(message.id) === String(cachedStarterId)) || null;
+    }
+    // Anti-Nuke message collections are newest-first. For a regular channel thread the oldest
+    // eligible cached message is its distinct initial body; the structural root is synthetic.
+    return messages.at(-1) || root || null;
+  }
   queueThreadFromDeletedChannel(channel, context) {
     if (!channel?.id || !context) return false;
     const messages = this.getCachedMessagesForDeletedChannel(channel.id);
     const root = this.getForumThreadDeleteMessage(channel);
-    const metadata = this.getDeletedChannelThreadMetadata(channel, context, root || messages.at(-1) || null);
+    const starterMessage = this.getDeletedChannelThreadStarterCandidate(channel, context, root, messages);
+    const metadata = this.getDeletedChannelThreadMetadata(channel, context, starterMessage);
     context.pendingThreads.set(channel.id, { channel, messages, root, metadata });
     return true;
   }
@@ -6598,7 +6698,20 @@ module.exports = class MessageLoggerV2 {
     );
     if (!eligibleRoot && !eligibleMessages.length) return 0;
     if (!this.claimDeletedChannelThread(context, channel.id)) return 0;
-    const metadata = snapshot?.metadata || this.getDeletedChannelThreadMetadata(channel, context, root || messages.at(-1) || null);
+    let metadata = snapshot?.metadata || this.getDeletedChannelThreadMetadata(
+      channel,
+      context,
+      this.getDeletedChannelThreadStarterCandidate(channel, context, root, messages)
+    );
+    // Snapshots queued by an older hot-loaded build can still carry the synthetic root as the
+    // starter. Correct only regular channel threads before any message is saved or counted.
+    if (metadata.isForumParent === false
+      && (!metadata.starterMessageId || String(metadata.starterMessageId) === String(channel.id))) {
+      const starterCandidate = this.getDeletedChannelThreadStarterCandidate(channel, context, root, messages);
+      if (starterCandidate && String(starterCandidate.id) !== String(channel.id)) {
+        metadata = this.getDeletedChannelThreadMetadata(channel, context, starterCandidate);
+      }
+    }
     const location = {
       guildId: metadata.guildId || channel.guild_id || null,
       guildName: metadata.guildName || context.guild?.name || null,

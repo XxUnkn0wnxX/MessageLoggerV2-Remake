@@ -84,6 +84,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 
 - Channel deletion capture stores bounded snapshots under Purged.
 - Thread/forum-root, total-message, and attachment caps are separate and apply newest-first.
+- Channel-thread snapshots use the same folded starter/root schema as ordinary thread deletion; Anti-Nuke adds archival markers without changing the captured thread metadata or reply boundaries.
 - Root records bypass the total-message budget but their attachments still consume the attachment budget.
 - Anti-Nuke intentionally overrides normal logging scope and author ignores; only its own enable switch disables the cascade.
 - Parent channels no longer exist, so Anti-Nuke records do not offer impossible jump actions.

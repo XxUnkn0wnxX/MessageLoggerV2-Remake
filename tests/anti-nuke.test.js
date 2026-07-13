@@ -139,3 +139,154 @@ test('Anti-Nuke folds the initial thread starter into the root without consuming
   assert.equal(context.captured, 2, 'the logical root and one reply are counted once each');
   assert.equal(context.remainingMessages, 0);
 });
+
+test('Anti-Nuke channel threads capture the same root metadata and starter payload as normal thread deletes', () => {
+  const rootId = '500';
+  const starterId = '501';
+  const replyId = '502';
+  const author = { id: 'author', username: 'Author', discriminator: '0', public_flags: 0 };
+  const initialMetadata = {
+    id: rootId,
+    parentId: 'parent',
+    parentType: 0,
+    threadType: 11,
+    isForumParent: false,
+    guildId: 'guild',
+    guildName: 'Server',
+    parentName: 'general',
+    name: 'Thread title',
+    ownerId: author.id,
+    starterMessageId: rootId,
+    starterContent: '[starter message unavailable]'
+  };
+  const root = {
+    id: rootId,
+    channel_id: rootId,
+    guild_id: 'guild',
+    content: '[starter message unavailable]',
+    timestamp: 1000,
+    type: 0,
+    attachments: [],
+    embeds: [],
+    author
+  };
+  const starter = {
+    id: starterId,
+    channel_id: rootId,
+    guild_id: 'guild',
+    content: 'Initial body',
+    timestamp: 1001,
+    type: 0,
+    attachments: [{ id: 'attachment', filename: 'starter.png' }],
+    embeds: [],
+    author
+  };
+  const reply = {
+    id: replyId,
+    channel_id: rootId,
+    guild_id: 'guild',
+    content: 'Reply B',
+    timestamp: 1002,
+    type: 0,
+    attachments: [],
+    embeds: [],
+    author
+  };
+  const plugin = createPlugin({
+    settings: {
+      antiNukeEnabled: true,
+      antiNukeThreadCap: 1,
+      antiNukeMessageCap: 1,
+      antiNukeAttachmentCap: 5
+    },
+    messageRecord: {},
+    messageRecordIds: new Set(),
+    deletedMessageRecord: {},
+    editedMessageRecord: {},
+    purgedMessageRecord: {},
+    deletedMessageSet: new Map(),
+    editedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    suppressedForumThreadIds: new Set(),
+    sortedDeletedMessageIds: new Map(),
+    sortedPurgedMessageIds: new Map(),
+    noTintIds: new Set(),
+    editModifiers: {},
+    forumThreadMetadataCache: new Map([[rootId, structuredClone(initialMetadata)]]),
+    saveDeletedMessage(message, targetMap) {
+      this.messageRecord[message.id] = {
+        message: structuredClone(message),
+        delete_data: { time: 2000 },
+        edit_history: message.id === starterId ? [{ content: 'Initial body before edit', time: 900 }] : null,
+        logged_attachments: message.id === starterId ? ['cached-starter-media'] : []
+      };
+      (targetMap[message.channel_id] ||= []).push(message.id);
+      const targetSet = targetMap === this.deletedMessageRecord ? this.deletedMessageSet : this.purgedMessageSet;
+      if (!targetSet.has(message.channel_id)) targetSet.set(message.channel_id, new Set());
+      targetSet.get(message.channel_id).add(message.id);
+      this.messageRecordIds.add(message.id);
+    },
+    getDeletedChannelThreadMetadata(channel, context, starterMessage = null) {
+      const existing = this.forumThreadMetadataCache.get(channel.id) || {};
+      const metadata = {
+        ...existing,
+        id: channel.id,
+        parentId: context.channel.id,
+        parentType: context.channel.type,
+        threadType: channel.type,
+        isForumParent: false,
+        name: channel.name,
+        starterMessageId: starterMessage?.id || existing.starterMessageId || null,
+        starterContent: starterMessage?.content || existing.starterContent || null,
+        starterAuthor: starterMessage?.author || existing.starterAuthor || null,
+        starterTimestamp: starterMessage?.timestamp || existing.starterTimestamp || null
+      };
+      this.forumThreadMetadataCache.set(channel.id, metadata);
+      return metadata;
+    }
+  });
+  const context = plugin.createDeletedChannelCaptureContext(
+    { id: 'parent', guild_id: 'guild', name: 'general', type: 0 },
+    { id: 'guild', name: 'Server' }
+  );
+  const thread = { id: rootId, parent_id: 'parent', guild_id: 'guild', name: 'Thread title', type: 11 };
+
+  plugin.captureThreadFromDeletedChannel(thread, context, {
+    root,
+    // Anti-Nuke snapshots are newest-first; the starter is the oldest eligible message.
+    messages: [reply, starter],
+    metadata: structuredClone(initialMetadata)
+  });
+
+  const savedRoot = plugin.messageRecord[rootId];
+  assert.deepEqual(Object.keys(plugin.messageRecord).sort(), [rootId, replyId]);
+  assert.equal(savedRoot.message.content, 'Initial body');
+  assert.deepEqual(savedRoot.message.attachments, [{ id: 'attachment', filename: 'starter.png' }]);
+  assert.deepEqual(savedRoot.edit_history, [{ content: 'Initial body before edit', time: 900 }]);
+  assert.deepEqual(savedRoot.logged_attachments, ['cached-starter-media']);
+  assert.equal(savedRoot.delete_data.forum_metadata.name, 'Thread title');
+  assert.equal(savedRoot.delete_data.forum_metadata.starterMessageId, starterId);
+  assert.equal(savedRoot.delete_data.forum_metadata.starterContent, 'Initial body');
+  assert.equal(savedRoot.delete_data.forum_metadata.starterAuthor.id, author.id);
+  assert.equal(savedRoot.delete_data.forum_metadata.starterTimestamp, 1001);
+  assert.equal(savedRoot.delete_data.forum_metadata.starterFoldedIntoRoot, true);
+  assert.equal(savedRoot.delete_data.forum_thread_delete, true);
+  assert.equal(savedRoot.delete_data.forum_thread_message_delete, undefined);
+  assert.equal(savedRoot.delete_data.anti_nuke, true);
+  assert.equal(savedRoot.delete_data.anti_nuke_parent_id, 'parent');
+  assert.equal(plugin.messageRecord[replyId].message.content, 'Reply B');
+  assert.deepEqual(plugin.purgedMessageRecord, { [rootId]: [rootId, replyId] });
+  assert.equal(context.capturedMessages, 1, 'only the independent reply consumes the message cap');
+
+  const forumRoot = { id: 'forum', channel_id: 'forum' };
+  assert.equal(
+    plugin.getDeletedChannelThreadStarterCandidate(
+      { id: 'forum' },
+      { channel: { type: 15 } },
+      forumRoot,
+      [reply, starter]
+    ),
+    forumRoot,
+    'forum posts retain their existing self-keyed root selection'
+  );
+});
