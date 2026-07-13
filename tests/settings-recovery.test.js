@@ -16,6 +16,7 @@ const defaults = {
   savedMessagesCap: 1000,
   openLogsKeybind: ['Control', 'm'],
   openFilteredLogsKeybind: ['Control', 'n'],
+  openServerLogsKeybind: ['Control', 's'],
   toastToggles: {
     sent: false,
     edited: true
@@ -45,24 +46,29 @@ test('legacy configs gain shortcut defaults while valid custom and cleared bindi
   normalizeRecovered(plugin, legacy);
   assert.deepEqual(legacy.openLogsKeybind, ['Control', 'm']);
   assert.deepEqual(legacy.openFilteredLogsKeybind, ['Control', 'n']);
+  assert.deepEqual(legacy.openServerLogsKeybind, ['Control', 's']);
 
   const customized = {
     openLogsKeybind: ['Alt', 'L'],
     openFilteredLogsKeybind: [],
+    openServerLogsKeybind: ['Meta', 'G'],
     flags: 2
   };
   normalizeRecovered(plugin, customized);
   assert.deepEqual(customized.openLogsKeybind, ['Alt', 'l']);
   assert.deepEqual(customized.openFilteredLogsKeybind, []);
+  assert.deepEqual(customized.openServerLogsKeybind, ['Meta', 'g']);
 
   const invalid = {
     openLogsKeybind: 'Control+m',
     openFilteredLogsKeybind: ['Control', 123],
+    openServerLogsKeybind: 'Control+s',
     flags: 2
   };
   normalizeRecovered(plugin, invalid);
   assert.deepEqual(invalid.openLogsKeybind, ['Control', 'm']);
   assert.deepEqual(invalid.openFilteredLogsKeybind, ['Control', 'n']);
+  assert.deepEqual(invalid.openServerLogsKeybind, ['Control', 's']);
 });
 
 test('a valid legacy file initializes missing settings without corruption classification', t => {
@@ -91,6 +97,7 @@ test('a valid legacy file initializes missing settings without corruption classi
   assert.equal(settings.debugToasts, false);
   assert.deepEqual(settings.openLogsKeybind, ['Control', 'm']);
   assert.deepEqual(settings.openFilteredLogsKeybind, ['Control', 'n']);
+  assert.deepEqual(settings.openServerLogsKeybind, ['Control', 's']);
   assert.deepEqual(settings.forkSpecificSetting, { keep: true });
 });
 

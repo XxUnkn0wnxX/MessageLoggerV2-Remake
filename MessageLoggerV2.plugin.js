@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.1.1
+ * @version 2.8.1.2
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -19,9 +19,13 @@ const DEFAULT_AUTO_BACKUP_INTERVAL_SECONDS = 20;
 const MIN_AUTO_BACKUP_INTERVAL_SECONDS = 10;
 const MAX_AUTO_BACKUP_INTERVAL_SECONDS = 86400;
 // BetterDiscord's native keybind recorder persists KeyboardEvent.key values as an array.
-// Keep the legacy advertised shortcuts as defaults while allowing either binding to be
+// Keep the advertised shortcuts as defaults while allowing every binding to be
 // customized—or cleared to disable it—without introducing a fork-only settings component.
-const LOGGER_KEYBIND_SETTING_IDS = Object.freeze(['openLogsKeybind', 'openFilteredLogsKeybind']);
+const LOGGER_KEYBIND_SETTING_IDS = Object.freeze([
+  'openLogsKeybind',
+  'openFilteredLogsKeybind',
+  'openServerLogsKeybind'
+]);
 const LOGGER_KEYBIND_MODIFIERS = Object.freeze(['Control', 'Shift', 'Alt', 'Meta']);
 const { React, ReactDOM, Webpack, UI, Plugins, DOM, Patcher, Components, ContextMenu, Utils, Hooks, ReactUtils, Logger } = new BdApi('MessageLoggerV2');
 const { Data } = BdApi;
@@ -47,6 +51,7 @@ const DiscordModules = (() => {
     MessageStore: lazyGet('MessageStore', () => Webpack.Stores.MessageStore),
     ChannelStore: lazyGet('ChannelStore', () => Webpack.Stores.ChannelStore ?? Webpack.getByKeys('getChannel', 'getDMFromUserId')),
     SelectedChannelStore: lazyGet('SelectedChannelStore', () => Webpack.Stores.SelectedChannelStore),
+    SelectedGuildStore: lazyGet('SelectedGuildStore', () => Webpack.Stores.SelectedGuildStore),
     GuildStore: lazyGet('GuildStore', () => Webpack.Stores.GuildStore),
     GuildMemberStore: lazyGet('GuildMemberStore', () => Webpack.Stores.GuildMemberStore),
     RelationshipStore: lazyGet('RelationshipStore', () => Webpack.Stores.RelationshipStore ?? Webpack.getByKeys('isBlocked')),
@@ -405,66 +410,12 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Reliability',
-        type: 'fixed',
-        items: [
-          'Flushes pending log changes synchronously before plugin shutdown or hot reload.',
-          'Correctly expires stale edit-notification spam tracking regardless of media-cache settings.',
-          'Preserves disk-backed history when saving is re-enabled after a no-save reload by validating, merging, capping, and atomically replacing the completed payload.',
-          'Reports when saving is disabled or re-enabled, including whether in-memory logger changes stay memory-only, queue directly, or merge with saved history first.',
-          'Adds routed state feedback for high-impact logging, backup, media, Anti-Nuke, update, and destructive-cache settings without making ordinary toggles noisy.',
-          'Prevents BetterDiscord settings callbacks from running twice and replaces stale same-setting alerts when toggles change rapidly.',
-          'Makes native BetterDiscord setting alerts dismissible from the whole card and keeps their visible countdown moving while hovered.',
-          'Repairs common settings-config comma and bracket corruption while preserving recoverable custom values, and limits first-install help to genuinely new configs.',
-          'Cancels stale primary and backup writes when saving is disabled, and keeps saving disabled when recovery cannot complete safely.',
-          'Normalizes legacy and mixed-fork data into the current additive schema without duplicating records or discarding surviving enhanced metadata.',
-          'Reports valid-backup recovery separately while atomically rebuilding the main data file.',
-          'Adds a validated 10-to-86,400-second automatic-backup interval, with 20 seconds as the default.',
-          'Adds optional console and routed-toast diagnostics for the automatic-backup queue and write lifecycle.'
-        ]
-      },
-      {
-        title: 'Anti Nuke recovery',
+        title: 'Keyboard shortcuts',
         type: 'added',
         items: [
-          'Captures bounded snapshots of deleted parent channels under Purged, including forum posts, threads, replies, ordinary messages, and file attachments.',
-          'Adds separate thread/forum-post, total-message, and total-attachment caps with newest-first ordering and guaranteed root records.',
-          'Keeps deleted-channel paths stable, removes impossible jump actions, and makes Anti Nuke the only override for full channel-deletion cascades.'
-        ]
-      },
-      {
-        title: 'Forum posts and threads',
-        type: 'added',
-        items: [
-          'Restores fully deleted forum posts and channel threads from saved metadata when a live item is available as an anchor.',
-          'Adds thread-scoped log views, native context actions, jump routing, hidden-record cascades, and stable server/channel/thread paths.',
-          'Preserves replies and later-added attachments while respecting per-message self, bot, blocked-user, and local-delete rules.'
-        ]
-      },
-      {
-        title: 'Media and logs',
-        type: 'improved',
-        items: [
-          'Expands attachment, embed, sticker, and media-only logging with local-cache and CDN fallback controls.',
-          'Adds optional cached-file cleanup when records are permanently removed, including thread and forum cascades.',
-          'Adds a Hidden tab, live logger refreshes, channel-aware filters, configurable deleted tints, and improved theme-compatible rendering.'
-        ]
-      },
-      {
-        title: 'Compatibility and interface',
-        type: 'fixed',
-        items: [
-          'Restores the advertised logger shortcuts, adds native BetterDiscord capture controls, and makes each shortcut toggle its actual all-logs or selected-channel state.',
-          'Closes native media viewers first and stacked MessageLogger help and panel modals top-down before shortcut view switches, while leaving every other Discord panel untouched.',
-          'Lets Discord\'s native Trash action remove restored messages from the local log, adds the local-only fallback only when native Trash is absent, and shows matching Trash controls only while Shift is held; ordinary right-click Delete still confirms.',
-          'Keeps Discord\'s native Delete confirmation lifecycle intact after plugin hot reloads when Trash performs a local-only logger removal.',
-          'Resolves minified single-function Trash icon exports, keeps every logger-owned Trash glyph danger-red, adds a top-level local Delete when permissions hide Discord\'s item, and standardizes permanent logger actions as red Delete entries.',
-          'Prevents immediate Shift-click Trash actions from temporarily highlighting nearby logger or restored-mount text.',
-          'Uses Discord native forum refresh behavior and repairs deleted tint, jump, context-menu, purge, and restore edge cases.',
-          'Improves settings validation, accordion navigation, help screens, documentation, and legacy cache compatibility.',
-          'Restores the legacy aggressive message caching and new cache system controls as locked-on indicators and resets false config values at startup.',
-          'Moves source and automatic updates to the maintained XxUnkn0wnxX fork.',
-          'Prevents blank Discord pages during plugin reloads, removes duplicate synthetic thread starters, and adds a temporary deleted-file viewer.'
+          'Adds a configurable Ctrl + S selected-server shortcut that remains unavailable in DMs and group DMs while all-log and channel shortcuts continue to work there.',
+          'Makes all-log, selected-channel, and selected-server shortcuts toggle their actual filter state without changing the selected logger tab.',
+          'Closes native media viewers first and stacked MessageLogger help and panel modals top-down before shortcut view switches, while leaving every other Discord panel untouched.'
         ]
       }
     ];
@@ -633,6 +584,7 @@ module.exports = class MessageLoggerV2 {
       showOpenLogsButton: true,
       openLogsKeybind: ['Control', 'm'],
       openFilteredLogsKeybind: ['Control', 'n'],
+      openServerLogsKeybind: ['Control', 's'],
       showHiddenTab: false,
       messageCacheCap: 1000,
       savedMessagesCap: 1000,
@@ -2032,9 +1984,11 @@ module.exports = class MessageLoggerV2 {
       return { valid: false, message: 'Use Ctrl, Alt, Shift, or Command with the key (or use F1-F24 alone).' };
     }
     if (checkConflict && settingId && settings) {
-      const otherId = LOGGER_KEYBIND_SETTING_IDS.find(id => id !== settingId);
-      if (otherId && this.loggerKeybindsConflict(normalized, settings[otherId])) {
-        return { valid: false, message: 'This overlaps the other logger keybind. Record a distinct combination.' };
+      const conflictingId = LOGGER_KEYBIND_SETTING_IDS.find(id =>
+        id !== settingId && this.loggerKeybindsConflict(normalized, settings[id])
+      );
+      if (conflictingId) {
+        return { valid: false, message: 'This overlaps another logger keybind. Record a distinct combination.' };
       }
     }
     return { valid: true, value: normalized };
@@ -2042,12 +1996,17 @@ module.exports = class MessageLoggerV2 {
   ensureLoggerKeybindSettings(settings = this.settings, defaults = {}) {
     const hardcodedDefaults = {
       openLogsKeybind: ['Control', 'm'],
-      openFilteredLogsKeybind: ['Control', 'n']
+      openFilteredLogsKeybind: ['Control', 'n'],
+      openServerLogsKeybind: ['Control', 's']
     };
+    const fallbackBindings = Object.fromEntries(LOGGER_KEYBIND_SETTING_IDS.map(id => [
+      id,
+      (this.normalizeLoggerKeybind(defaults[id]) || hardcodedDefaults[id]).slice()
+    ]));
     const repairs = [];
     for (const id of LOGGER_KEYBIND_SETTING_IDS) {
       const configured = settings[id];
-      const fallback = this.normalizeLoggerKeybind(defaults[id]) || hardcodedDefaults[id].slice();
+      const fallback = fallbackBindings[id];
       if (configured === undefined) {
         settings[id] = fallback.slice();
         repairs.push({ id, reason: 'missing', savedValue: settings[id] });
@@ -2070,24 +2029,38 @@ module.exports = class MessageLoggerV2 {
       settings[id] = normalized;
       repairs.push({ id, reason: 'normalized', configuredValue: configured, savedValue: normalized });
     }
-    if (this.loggerKeybindsConflict(settings.openLogsKeybind, settings.openFilteredLogsKeybind)) {
-      const filteredFallback = this.normalizeLoggerKeybind(defaults.openFilteredLogsKeybind)
-        || hardcodedDefaults.openFilteredLogsKeybind.slice();
-      if (!this.loggerKeybindsConflict(settings.openLogsKeybind, filteredFallback)) {
-        const configuredValue = settings.openFilteredLogsKeybind;
-        settings.openFilteredLogsKeybind = filteredFallback.slice();
-        repairs.push({
-          id: 'openFilteredLogsKeybind',
-          reason: 'conflict',
-          configuredValue,
-          savedValue: settings.openFilteredLogsKeybind
-        });
-      } else {
-        for (const id of LOGGER_KEYBIND_SETTING_IDS) {
-          const configuredValue = settings[id];
-          settings[id] = (this.normalizeLoggerKeybind(defaults[id]) || hardcodedDefaults[id]).slice();
-          repairs.push({ id, reason: 'conflict', configuredValue, savedValue: settings[id] });
+    // Resolve cross-binding conflicts as a group. Prefer resetting only the later binding,
+    // then only the earlier binding, then the conflicting pair; fall back to all three safe
+    // defaults only when a retained custom value would overlap every smaller repair.
+    const findConflictPair = candidate => {
+      for (let firstIndex = 0; firstIndex < LOGGER_KEYBIND_SETTING_IDS.length; firstIndex++) {
+        for (let secondIndex = firstIndex + 1; secondIndex < LOGGER_KEYBIND_SETTING_IDS.length; secondIndex++) {
+          const firstId = LOGGER_KEYBIND_SETTING_IDS[firstIndex];
+          const secondId = LOGGER_KEYBIND_SETTING_IDS[secondIndex];
+          if (this.loggerKeybindsConflict(candidate[firstId], candidate[secondId])) return [firstId, secondId];
         }
+      }
+      return null;
+    };
+    const conflictPair = findConflictPair(settings);
+    if (conflictPair) {
+      const [firstId, secondId] = conflictPair;
+      const buildCandidate = replacements => Object.assign({}, settings, replacements);
+      const candidates = [
+        buildCandidate({ [secondId]: fallbackBindings[secondId].slice() }),
+        buildCandidate({ [firstId]: fallbackBindings[firstId].slice() }),
+        buildCandidate({
+          [firstId]: fallbackBindings[firstId].slice(),
+          [secondId]: fallbackBindings[secondId].slice()
+        }),
+        buildCandidate(Object.fromEntries(LOGGER_KEYBIND_SETTING_IDS.map(id => [id, fallbackBindings[id].slice()])))
+      ];
+      const resolved = candidates.find(candidate => !findConflictPair(candidate)) || candidates.at(-1);
+      for (const id of LOGGER_KEYBIND_SETTING_IDS) {
+        if (JSON.stringify(settings[id]) === JSON.stringify(resolved[id])) continue;
+        const configuredValue = settings[id];
+        settings[id] = resolved[id].slice();
+        repairs.push({ id, reason: 'conflict', configuredValue, savedValue: settings[id] });
       }
     }
     return repairs;
@@ -2109,14 +2082,15 @@ module.exports = class MessageLoggerV2 {
     if (!key) return false;
     this._pressedShortcutKeys.add(key);
     const openAll = this.loggerKeybindMatchesPressed(this.settings?.openLogsKeybind);
-    const openFiltered = !openAll && this.loggerKeybindMatchesPressed(this.settings?.openFilteredLogsKeybind);
-    if (!openAll && !openFiltered) return false;
+    const openChannel = !openAll && this.loggerKeybindMatchesPressed(this.settings?.openFilteredLogsKeybind);
+    const openServer = !openAll && !openChannel && this.loggerKeybindMatchesPressed(this.settings?.openServerLogsKeybind);
+    if (!openAll && !openChannel && !openServer) return false;
     // Consume only an exact configured match. Unrelated Discord and plugin keybinds continue
     // through the normal event path, including partial combinations while keys are held.
     event.preventDefault?.();
     event.stopPropagation?.();
     event.stopImmediatePropagation?.();
-    this.openLogsFromShortcut(openFiltered);
+    this.openLogsFromShortcut(openChannel ? 'channel' : openServer ? 'server' : 'all');
     return true;
   }
   handleLoggerShortcutKeyup(event) {
@@ -2230,10 +2204,10 @@ module.exports = class MessageLoggerV2 {
     this.menu.scrollPosition = 0;
     this.openWindow();
   }
-  openLogsFromShortcut(filterSelectedChannel = false) {
+  openLogsFromShortcut(scope = 'all') {
     if (!this.menu) return false;
     let desiredFilter = '';
-    if (filterSelectedChannel) {
+    if (scope === 'channel') {
       // Resolve the channel when the shortcut fires. `this.selectedChannel` is maintained by
       // UI observations and can briefly lag behind a fast navigation action.
       const selectedChannel = this.getSelectedTextChannel?.() || this.selectedChannel;
@@ -2243,6 +2217,17 @@ module.exports = class MessageLoggerV2 {
         return false;
       }
       desiredFilter = `channel:${selectedChannel.id}`;
+    } else if (scope === 'server') {
+      // Prefer Discord's selected-guild store so server Home and other non-channel surfaces
+      // still work. The active channel remains a compatibility fallback for host builds that
+      // do not expose that store.
+      const selectedGuildId = this.getSelectedGuildId?.();
+      if (!selectedGuildId) {
+        Logger.warn('Server logger shortcut was pressed without a selected server.');
+        this.showToast('Select a server before using the server logger shortcut.', { type: 'warning' });
+        return false;
+      }
+      desiredFilter = `server:${selectedGuildId}`;
     }
     const loggerModalOpen = this.ModalStack?.hasModalOpen
       ? this.ModalStack.hasModalOpen(this.style.menu)
@@ -3205,6 +3190,15 @@ module.exports = class MessageLoggerV2 {
             name: 'Toggle selected channel logs keybind',
             note: 'Defaults to Ctrl + N. Matching selected-channel logs close; another logger state closes and reopens for the currently selected channel. Any open native media viewer closes first; all other Discord panels remain untouched. Record a distinct safe combination; clear it to disable this shortcut.',
             id: 'openFilteredLogsKeybind',
+            type: 'keybind',
+            validator: 'loggerKeybind',
+            max: 4,
+            clearable: true
+          },
+          {
+            name: 'Toggle selected server logs keybind',
+            note: 'Defaults to Ctrl + S. Matching selected-server logs close; another logger state closes and reopens for the currently selected server. It is unavailable in DMs and group DMs. Any open native media viewer closes first; all other Discord panels remain untouched. Record a distinct safe combination; clear it to disable this shortcut.',
+            id: 'openServerLogsKeybind',
             type: 'keybind',
             validator: 'loggerKeybind',
             max: 4,
@@ -4965,6 +4959,18 @@ module.exports = class MessageLoggerV2 {
   }
   getSelectedTextChannel() {
     return this.ChannelStore.getChannel(DiscordModules.SelectedChannelStore?.getChannelId());
+  }
+  getSelectedGuildId() {
+    // A real selected channel is authoritative: DMs and group DMs deliberately have no guild_id,
+    // so return null even if Discord's selected-guild store briefly retains the previous server.
+    const selectedChannelId = DiscordModules.SelectedChannelStore?.getChannelId?.();
+    const selectedChannel = selectedChannelId ? this.ChannelStore?.getChannel?.(selectedChannelId) : null;
+    if (selectedChannelId) return selectedChannel?.guild_id || null;
+    // Discord's dedicated store still supports server Home and other guild surfaces where there
+    // is no ordinary selected text channel. Older hosts fall back to the last observed channel.
+    return DiscordModules.SelectedGuildStore?.getGuildId?.()
+      || this.selectedChannel?.guild_id
+      || null;
   }
   invalidateAllChannelCache() {
     for (let channelId in this.channelMessages) this.invalidateChannelCache(channelId);
@@ -11284,6 +11290,8 @@ module.exports = class MessageLoggerV2 {
                         Shortcut help:
                         "${this.formatLoggerKeybind(this.settings.openLogsKeybind)}" - Toggle all message logs.
                         "${this.formatLoggerKeybind(this.settings.openFilteredLogsKeybind)}" - Toggle message logs filtered to the currently selected channel.
+                        "${this.formatLoggerKeybind(this.settings.openServerLogsKeybind)}" - Toggle message logs filtered to the currently selected server.
+                        The server shortcut is unavailable in DMs and group DMs.
                         A matching logger view closes. A different view or stacked MessageLogger help page closes and reopens in the requested state.
                         An open Discord media viewer closes first, including one opened from a normal live message; other Discord panels remain open.\n\n</div>`.replaceAll('\n', '</br>')
             ),
@@ -11635,9 +11643,9 @@ module.exports = class MessageLoggerV2 {
       addElement('Open Logs', () => this.openWindow());
       if (guildId) {
         addElement(
-          `Open Log For Guild`,
+          `Open Log For Server`,
           () => {
-            this.menu.filter = `guild:${guildId}`;
+            this.menu.filter = `server:${guildId}`;
             this.openWindow();
           }
         );

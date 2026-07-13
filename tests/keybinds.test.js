@@ -5,7 +5,8 @@ const { createPlugin, resetHarness, toastEvents } = require('./helpers/plugin-ha
 
 const defaults = {
   openLogsKeybind: ['Control', 'm'],
-  openFilteredLogsKeybind: ['Control', 'n']
+  openFilteredLogsKeybind: ['Control', 'n'],
+  openServerLogsKeybind: ['Control', 's']
 };
 
 function keyboardEvent(key, overrides = {}) {
@@ -29,6 +30,7 @@ function createShortcutModalPlugin({
   openKeys = [],
   popoutCount = 0,
   selectedChannelId = 'live-channel',
+  selectedGuildId = 'live-guild',
   mediaViewerOpen = false
 } = {}) {
   const modalKeys = new Set(openKeys);
@@ -66,6 +68,9 @@ function createShortcutModalPlugin({
     },
     getSelectedTextChannel() {
       return selectedChannelId ? { id: selectedChannelId } : null;
+    },
+    getSelectedGuildId() {
+      return selectedGuildId;
     },
     openWindow() {
       opened++;
@@ -114,7 +119,8 @@ test('keybind normalization accepts native captures, aliases, order changes, and
 test('missing and invalid keybind config values default while valid custom and empty values survive', () => {
   const plugin = createPlugin();
   const settings = {
-    openFilteredLogsKeybind: ['Alt', 'K']
+    openFilteredLogsKeybind: ['Alt', 'K'],
+    openServerLogsKeybind: []
   };
 
   assert.deepEqual(plugin.ensureLoggerKeybindSettings(settings, defaults), [
@@ -128,36 +134,54 @@ test('missing and invalid keybind config values default while valid custom and e
   ]);
   assert.deepEqual(settings.openLogsKeybind, ['Control', 'm']);
   assert.deepEqual(settings.openFilteredLogsKeybind, ['Alt', 'k']);
+  assert.deepEqual(settings.openServerLogsKeybind, []);
 
   settings.openLogsKeybind = [];
   settings.openFilteredLogsKeybind = ['Control', 123];
+  settings.openServerLogsKeybind = ['Meta', 'G'];
   const repairs = plugin.ensureLoggerKeybindSettings(settings, defaults);
   assert.deepEqual(settings.openLogsKeybind, []);
   assert.deepEqual(settings.openFilteredLogsKeybind, ['Control', 'n']);
-  assert.equal(repairs.length, 1);
-  assert.equal(repairs[0].reason, 'invalid');
+  assert.deepEqual(settings.openServerLogsKeybind, ['Meta', 'g']);
+  assert.equal(repairs.length, 2);
+  assert.equal(repairs.some(repair => repair.reason === 'invalid'), true);
+  assert.equal(repairs.some(repair => repair.reason === 'normalized'), true);
 
   const conflicting = {
     openLogsKeybind: ['Control', 'm'],
-    openFilteredLogsKeybind: ['Control', 'Shift', 'm']
+    openFilteredLogsKeybind: ['Control', 'Shift', 'm'],
+    openServerLogsKeybind: ['Control', 's']
   };
   const conflictRepairs = plugin.ensureLoggerKeybindSettings(conflicting, defaults);
   assert.deepEqual(conflicting.openLogsKeybind, ['Control', 'm']);
   assert.deepEqual(conflicting.openFilteredLogsKeybind, ['Control', 'n']);
+  assert.deepEqual(conflicting.openServerLogsKeybind, ['Control', 's']);
   assert.equal(conflictRepairs.some(repair => repair.reason === 'conflict'), true);
+
+  const laterConflict = {
+    openLogsKeybind: ['Alt', 'L'],
+    openFilteredLogsKeybind: ['Control', 's'],
+    openServerLogsKeybind: ['Control', 'Shift', 's']
+  };
+  plugin.ensureLoggerKeybindSettings(laterConflict, defaults);
+  assert.deepEqual(laterConflict.openLogsKeybind, ['Alt', 'l']);
+  assert.deepEqual(laterConflict.openFilteredLogsKeybind, ['Control', 'n']);
+  assert.deepEqual(laterConflict.openServerLogsKeybind, ['Control', 'Shift', 's']);
 });
 
 test('runtime validation rejects identical and subset bindings without changing saved settings', () => {
   const plugin = createPlugin({
     settings: {
       openLogsKeybind: ['Control', 'm'],
-      openFilteredLogsKeybind: ['Control', 'n']
+      openFilteredLogsKeybind: ['Control', 'n'],
+      openServerLogsKeybind: ['Control', 's']
     }
   });
 
   assert.equal(plugin.validateLoggerKeybind(['Control', 'm'], 'openFilteredLogsKeybind').valid, false);
   assert.equal(plugin.validateLoggerKeybind(['Control', 'Shift', 'm'], 'openFilteredLogsKeybind').valid, false);
   assert.equal(plugin.validateLoggerKeybind(['Control', 'Shift', 'n'], 'openLogsKeybind').valid, false);
+  assert.equal(plugin.validateLoggerKeybind(['Control', 'Shift', 's'], 'openFilteredLogsKeybind').valid, false);
   assert.deepEqual(
     plugin.validateLoggerKeybind(['Alt', 'Shift', 'k'], 'openFilteredLogsKeybind'),
     { valid: true, value: ['Alt', 'Shift', 'k'] }
@@ -169,10 +193,11 @@ test('global shortcut matching is exact, order independent, repeat safe, and con
   const plugin = createPlugin({
     settings: {
       openLogsKeybind: ['Control', 'm'],
-      openFilteredLogsKeybind: ['Alt', 'Shift', 'k']
+      openFilteredLogsKeybind: ['Alt', 'Shift', 'k'],
+      openServerLogsKeybind: ['Control', 's']
     },
     _pressedShortcutKeys: new Set(),
-    openLogsFromShortcut(filtered) { actions.push(filtered); }
+    openLogsFromShortcut(scope) { actions.push(scope); }
   });
 
   const control = keyboardEvent('Control');
@@ -181,37 +206,43 @@ test('global shortcut matching is exact, order independent, repeat safe, and con
 
   const openAll = keyboardEvent('M');
   assert.equal(plugin.handleLoggerShortcutKeydown(openAll), true);
-  assert.deepEqual(actions, [false]);
+  assert.deepEqual(actions, ['all']);
   assert.deepEqual(openAll.calls, { preventDefault: 1, stopPropagation: 1, stopImmediatePropagation: 1 });
   assert.equal(plugin.handleLoggerShortcutKeydown(keyboardEvent('m', { repeat: true })), false);
-  assert.deepEqual(actions, [false]);
+  assert.deepEqual(actions, ['all']);
 
   plugin.handleLoggerShortcutKeyup(keyboardEvent('m'));
   plugin.handleLoggerShortcutKeyup(keyboardEvent('Control'));
   plugin.handleLoggerShortcutKeydown(keyboardEvent('Shift'));
   plugin.handleLoggerShortcutKeydown(keyboardEvent('Alt'));
   assert.equal(plugin.handleLoggerShortcutKeydown(keyboardEvent('K')), true);
-  assert.deepEqual(actions, [false, true]);
+  assert.deepEqual(actions, ['all', 'channel']);
+
+  plugin.handleLoggerShortcutKeyup(keyboardEvent('Alt'));
+  plugin._pressedShortcutKeys.clear();
+  plugin.handleLoggerShortcutKeydown(keyboardEvent('Control'));
+  assert.equal(plugin.handleLoggerShortcutKeydown(keyboardEvent('S')), true);
+  assert.deepEqual(actions, ['all', 'channel', 'server']);
 
   // A modifier release clears a whole potentially stale browser chord even if the browser
   // omitted the companion character keyup (a known Meta/OS shortcut behavior).
-  plugin.handleLoggerShortcutKeyup(keyboardEvent('Alt'));
+  plugin.handleLoggerShortcutKeyup(keyboardEvent('Control'));
   assert.equal(plugin._pressedShortcutKeys.size, 0);
 
   plugin.settings.openLogsKeybind = [];
   plugin.handleLoggerShortcutKeydown(keyboardEvent('Control'));
   assert.equal(plugin.handleLoggerShortcutKeydown(keyboardEvent('m')), false);
-  assert.deepEqual(actions, [false, true]);
+  assert.deepEqual(actions, ['all', 'channel', 'server']);
 
   plugin._pressedShortcutKeys.clear();
   plugin.settings.openLogsKeybind = ['m'];
   assert.equal(plugin.handleLoggerShortcutKeydown(keyboardEvent('m')), false);
-  assert.deepEqual(actions, [false, true]);
+  assert.deepEqual(actions, ['all', 'channel', 'server']);
 });
 
-test('shortcuts toggle matching manually opened all and selected-channel logger states closed', () => {
+test('shortcuts toggle matching manually opened all, channel, and server logger states closed', () => {
   const all = createShortcutModalPlugin({ openKeys: ['logger-modal'], filter: '' });
-  assert.equal(all.plugin.openLogsFromShortcut(false), true);
+  assert.equal(all.plugin.openLogsFromShortcut('all'), true);
   assert.equal(all.opened, 0);
   assert.equal(all.modalKeys.has('logger-modal'), false);
   assert.equal(all.plugin.menu.open, false);
@@ -221,30 +252,44 @@ test('shortcuts toggle matching manually opened all and selected-channel logger 
     openKeys: ['logger-modal'],
     filter: 'channel:live-channel'
   });
-  assert.equal(filtered.plugin.openLogsFromShortcut(true), true);
+  assert.equal(filtered.plugin.openLogsFromShortcut('channel'), true);
   assert.equal(filtered.opened, 0);
   assert.equal(filtered.modalKeys.has('logger-modal'), false);
   assert.equal(filtered.plugin.menu.open, false);
+
+  const server = createShortcutModalPlugin({
+    openKeys: ['logger-modal'],
+    filter: 'server:live-guild'
+  });
+  assert.equal(server.plugin.openLogsFromShortcut('server'), true);
+  assert.equal(server.opened, 0);
+  assert.equal(server.modalKeys.has('logger-modal'), false);
+  assert.equal(server.plugin.menu.open, false);
 });
 
-test('shortcuts close and reopen when switching all, selected-channel, or custom manual states', async () => {
+test('shortcuts close and reopen when switching all, channel, server, or custom manual states', async () => {
   const state = createShortcutModalPlugin({ openKeys: ['logger-modal'], filter: '' });
 
-  assert.equal(state.plugin.openLogsFromShortcut(true), true);
+  assert.equal(state.plugin.openLogsFromShortcut('channel'), true);
   await waitForShortcutTransition();
   assert.equal(state.opened, 1);
   assert.equal(state.plugin.menu.filter, 'channel:live-channel');
   assert.equal(state.modalKeys.has('logger-modal'), true);
 
-  assert.equal(state.plugin.openLogsFromShortcut(false), true);
+  assert.equal(state.plugin.openLogsFromShortcut('server'), true);
   await waitForShortcutTransition();
   assert.equal(state.opened, 2);
+  assert.equal(state.plugin.menu.filter, 'server:live-guild');
+
+  assert.equal(state.plugin.openLogsFromShortcut('all'), true);
+  await waitForShortcutTransition();
+  assert.equal(state.opened, 3);
   assert.equal(state.plugin.menu.filter, '');
 
   state.plugin.menu.filter = 'message:custom';
-  assert.equal(state.plugin.openLogsFromShortcut(true), true);
+  assert.equal(state.plugin.openLogsFromShortcut('channel'), true);
   await waitForShortcutTransition();
-  assert.equal(state.opened, 3);
+  assert.equal(state.opened, 4);
   assert.equal(state.plugin.menu.filter, 'channel:live-channel');
 });
 
@@ -258,7 +303,7 @@ test('stacked MessageLogger help pages close top-down before the matching logger
   // Reopening a stable named page must move it to the top of the owned stack.
   state.plugin.trackLoggerOwnedModalKey('filter-help');
 
-  assert.equal(state.plugin.openLogsFromShortcut(false), true);
+  assert.equal(state.plugin.openLogsFromShortcut('all'), true);
   await waitForShortcutTransition();
   assert.deepEqual(state.closeOrder, ['filter-help', 'logger-help', 'logger-modal']);
   assert.equal(state.opened, 1);
@@ -274,7 +319,7 @@ test('a matching logger with an owned popout closes the popout and reopens the l
     popoutCount: 1
   });
 
-  assert.equal(state.plugin.openLogsFromShortcut(false), true);
+  assert.equal(state.plugin.openLogsFromShortcut('all'), true);
   await waitForShortcutTransition();
   assert.equal(state.popoutCloses, 1);
   assert.equal(state.opened, 1);
@@ -284,7 +329,7 @@ test('a matching logger with an owned popout closes the popout and reopens the l
 test('any native Discord media viewer closes before the requested logger state opens', async () => {
   const normalDiscordMedia = createShortcutModalPlugin({ mediaViewerOpen: true });
 
-  assert.equal(normalDiscordMedia.plugin.openLogsFromShortcut(false), true);
+  assert.equal(normalDiscordMedia.plugin.openLogsFromShortcut('all'), true);
   await waitForShortcutTransition();
   assert.deepEqual(normalDiscordMedia.closeOrder, ['discord-media-viewer']);
   assert.equal(normalDiscordMedia.modalKeys.has('discord-media-viewer'), false);
@@ -297,7 +342,7 @@ test('any native Discord media viewer closes before the requested logger state o
     mediaViewerOpen: true
   });
 
-  assert.equal(loggerMedia.plugin.openLogsFromShortcut(false), true);
+  assert.equal(loggerMedia.plugin.openLogsFromShortcut('all'), true);
   await waitForShortcutTransition();
   assert.deepEqual(loggerMedia.closeOrder, ['discord-media-viewer', 'logger-modal']);
   assert.equal(loggerMedia.opened, 1, 'the matching logger reopens after its overlaid media viewer closes');
@@ -306,11 +351,11 @@ test('any native Discord media viewer closes before the requested logger state o
 
 test('rapid shortcut switches cancel stale queued logger reopens', async () => {
   const state = createShortcutModalPlugin({ openKeys: ['logger-modal'], filter: '' });
-  assert.equal(state.plugin.openLogsFromShortcut(true), true);
-  assert.equal(state.plugin.openLogsFromShortcut(false), true);
+  assert.equal(state.plugin.openLogsFromShortcut('channel'), true);
+  assert.equal(state.plugin.openLogsFromShortcut('server'), true);
   await waitForShortcutTransition();
   assert.equal(state.opened, 1);
-  assert.equal(state.plugin.menu.filter, '');
+  assert.equal(state.plugin.menu.filter, 'server:live-guild');
   assert.equal(state.modalKeys.has('logger-modal'), true);
 });
 
@@ -318,7 +363,7 @@ test('a stale menu flag after modal close reopens the requested actual state', a
   const state = createShortcutModalPlugin({ filter: 'channel:stale' });
   state.plugin.menu.open = true;
 
-  assert.equal(state.plugin.openLogsFromShortcut(false), true);
+  assert.equal(state.plugin.openLogsFromShortcut('all'), true);
   assert.equal(state.plugin.menu.open, false);
   assert.equal(state.plugin.menu.filter, '');
   assert.equal(state.plugin.menu.shownMessages, -1);
@@ -336,9 +381,39 @@ test('filtered shortcut fails visibly when no text channel is selected', () => {
   });
   const { plugin } = state;
 
-  assert.equal(plugin.openLogsFromShortcut(true), false);
+  assert.equal(plugin.openLogsFromShortcut('channel'), false);
   assert.equal(toastEvents.length, 1);
   assert.match(toastEvents[0][0], /Select a channel/);
   assert.equal(state.modalKeys.has('logger-modal'), true, 'failed navigation must leave the current logger untouched');
   assert.deepEqual(state.closeOrder, []);
+});
+
+test('server shortcut fails visibly outside a server and preserves the current logger', () => {
+  const state = createShortcutModalPlugin({
+    openKeys: ['logger-modal'],
+    filter: '',
+    selectedGuildId: null
+  });
+
+  assert.equal(state.plugin.openLogsFromShortcut('server'), false);
+  assert.equal(toastEvents.length, 1);
+  assert.match(toastEvents[0][0], /Select a server/);
+  assert.equal(state.modalKeys.has('logger-modal'), true);
+  assert.deepEqual(state.closeOrder, []);
+});
+
+test('all-log and channel shortcuts remain available in DMs and group DMs', async () => {
+  const dm = createShortcutModalPlugin({
+    selectedChannelId: 'dm-or-group-channel',
+    selectedGuildId: null
+  });
+
+  assert.equal(dm.plugin.openLogsFromShortcut('channel'), true);
+  await waitForShortcutTransition();
+  assert.equal(dm.plugin.menu.filter, 'channel:dm-or-group-channel');
+
+  assert.equal(dm.plugin.openLogsFromShortcut('all'), true);
+  await waitForShortcutTransition();
+  assert.equal(dm.plugin.menu.filter, '');
+  assert.equal(toastEvents.length, 0);
 });

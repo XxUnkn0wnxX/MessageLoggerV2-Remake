@@ -91,4 +91,4 @@ Status: Completed
 - [x] Keep shutdown flushes on the same safe write path.
 - [x] Add automated tests for normal, backup, shutdown, failure, and stale-cleanup paths.
 
-Implemented in `729da20` and completed with startup cleanup and official tests in `927b99e`.
+Implemented in [729da2024e8b7c5e18b582879bf9fd5b0ed80720](https://git.slowb.ro/XxUnkn0wnxX/MessageLoggerV2-Remake/commit/729da2024e8b7c5e18b582879bf9fd5b0ed80720) and completed with startup cleanup and official tests in [927b99e6949b2a8457c680428997fea4a5766188](https://git.slowb.ro/XxUnkn0wnxX/MessageLoggerV2-Remake/commit/927b99e6949b2a8457c680428997fea4a5766188).
