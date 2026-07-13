@@ -174,7 +174,9 @@ test('automatic backup interval is configurable and bounded in settings and conf
   assert.match(source, /const DEFAULT_AUTO_BACKUP_INTERVAL_SECONDS = 20;/);
   assert.match(source, /const MIN_AUTO_BACKUP_INTERVAL_SECONDS = 10;/);
   assert.match(source, /const MAX_AUTO_BACKUP_INTERVAL_SECONDS = 86400;/);
-  assert.match(source, /name: 'Auto backup interval \(seconds\)'[\s\S]*id: 'autoBackupIntervalSeconds'[\s\S]*min: MIN_AUTO_BACKUP_INTERVAL_SECONDS[\s\S]*max: MAX_AUTO_BACKUP_INTERVAL_SECONDS/);
+  assert.match(source, /name: 'Auto backup interval \(seconds\)'[\s\S]*id: 'autoBackupIntervalSeconds'[\s\S]*emptyValue: DEFAULT_AUTO_BACKUP_INTERVAL_SECONDS[\s\S]*min: MIN_AUTO_BACKUP_INTERVAL_SECONDS[\s\S]*max: MAX_AUTO_BACKUP_INTERVAL_SECONDS[\s\S]*inlineValidation: true/);
+  assert.match(source, /createInlineValidatedNumberInput\(config, onValid\)[\s\S]*aria-invalid[\s\S]*borderColor: 'var\(--status-danger\)'[\s\S]*boxShadow: '0 0 0 1px var\(--status-danger\)'/);
+  assert.match(source, /const nextValidation = plugin\.validateNumericSettingValue\(value, config\);[\s\S]*if \(nextValidation\.valid\) onValid\(nextValidation\.value\);/);
   assert.match(source, /Invalid auto-backup interval in config; reset to/);
   assert.match(source, /setTimeout\(\(\) => this\.saveBackup\(\), this\.getAutoBackupIntervalMilliseconds\(\)\)/);
 
@@ -186,6 +188,18 @@ test('automatic backup interval is configurable and bounded in settings and conf
   }
   assert.equal(plugin.normalizeAutoBackupIntervalSeconds(10), 10);
   assert.equal(plugin.normalizeAutoBackupIntervalSeconds(86400), 86400);
+  assert.deepEqual(plugin.validateNumericSettingValue('3', { min: 10, max: 86400 }), {
+    valid: false,
+    message: 'Value must be at least 10!'
+  });
+  assert.deepEqual(plugin.validateNumericSettingValue('300', { min: 10, max: 86400 }), {
+    valid: true,
+    value: 300
+  });
+  assert.deepEqual(plugin.validateNumericSettingValue('', { emptyValue: 20, min: 10, max: 86400 }), {
+    valid: true,
+    value: 20
+  });
 
   plugin.settings = {};
   assert.equal(plugin.ensureAutoBackupIntervalSetting(), true);

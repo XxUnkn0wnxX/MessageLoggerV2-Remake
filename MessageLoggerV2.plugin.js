@@ -1806,6 +1806,74 @@ module.exports = class MessageLoggerV2 {
     }
     return changed;
   }
+  validateNumericSettingValue(value, config = {}) {
+    const trimmed = String(value ?? '').trim();
+    if (trimmed === '' && config.emptyValue === undefined) {
+      return { valid: false, message: 'Value must be a whole number!' };
+    }
+    const parsed = trimmed === '' && config.emptyValue !== undefined
+      ? config.emptyValue
+      : Number(trimmed);
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+      return { valid: false, message: 'Value must be a whole number!' };
+    }
+    if (config.min !== undefined && parsed < config.min) {
+      return { valid: false, message: `Value must be at least ${config.min}!` };
+    }
+    if (config.max !== undefined && parsed > config.max) {
+      return { valid: false, message: `Value must be no more than ${config.max}!` };
+    }
+    return { valid: true, value: parsed };
+  }
+  handleNumericSettingInput(config, value, onValid) {
+    const validation = this.validateNumericSettingValue(value, config);
+    if (validation.valid) {
+      onValid(validation.value);
+      return true;
+    }
+    this.showToast(validation.message, { type: 'error' });
+    return false;
+  }
+  createInlineValidatedNumberInput(config, onValid) {
+    const plugin = this;
+    function InlineValidatedNumberInput() {
+      const [draft, setDraft] = React.useState(String(plugin.settings[config.id] ?? ''));
+      const validation = plugin.validateNumericSettingValue(draft, config);
+      const onChange = event => {
+        const value = event.currentTarget.value;
+        setDraft(value);
+        const nextValidation = plugin.validateNumericSettingValue(value, config);
+        if (nextValidation.valid) onValid(nextValidation.value);
+      };
+      return React.createElement(
+        'div',
+        { style: { display: 'flex', flexDirection: 'column', alignItems: 'stretch', minWidth: '250px' } },
+        React.createElement('input', {
+          className: 'bd-text-input',
+          type: 'text',
+          inputMode: 'numeric',
+          value: draft,
+          onChange,
+          'aria-invalid': !validation.valid,
+          'aria-describedby': validation.valid ? undefined : `${config.id}-validation-error`,
+          style: validation.valid ? undefined : {
+            borderColor: 'var(--status-danger)',
+            boxShadow: '0 0 0 1px var(--status-danger)'
+          }
+        }),
+        validation.valid ? null : React.createElement(
+          'div',
+          {
+            id: `${config.id}-validation-error`,
+            role: 'alert',
+            style: { color: 'var(--status-danger)', fontSize: '12px', marginTop: '4px' }
+          },
+          validation.message
+        )
+      );
+    }
+    return React.createElement(InlineValidatedNumberInput);
+  }
   normalizeAutoBackupIntervalSeconds(value) {
     const parsed = typeof value === 'number' ? value : Number(String(value ?? '').trim());
     return Number.isInteger(parsed)
@@ -2007,12 +2075,14 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Auto backup interval (seconds)',
-            note: 'Wait time before refreshing the backup after saved data changes. Accepts 10 to 86,400 seconds. Default: 20; example: 300 is 5 minutes.',
+            note: 'Wait time before refreshing the backup after saved data changes. Accepts 10 to 86,400 seconds. Blank resets to the 20-second default; example: 300 is 5 minutes.',
             id: 'autoBackupIntervalSeconds',
             type: 'textbox',
             validator: 'number',
+            emptyValue: DEFAULT_AUTO_BACKUP_INTERVAL_SECONDS,
             min: MIN_AUTO_BACKUP_INTERVAL_SECONDS,
             max: MAX_AUTO_BACKUP_INTERVAL_SECONDS,
+            inlineValidation: true,
             action: 'rescheduleBackup'
           },
           {
@@ -2324,27 +2394,13 @@ module.exports = class MessageLoggerV2 {
       }
       else if (config.validator === 'number') {
         setting.onChange = val => {
-          const trimmed = String(val ?? '').trim();
-          if (trimmed === '' && config.emptyValue === undefined) {
-            return this.showToast('Value must be a whole number!', { type: 'error' });
-          }
-          const parsed = trimmed === '' && config.emptyValue !== undefined
-            ? config.emptyValue
-            : Number(trimmed);
-          if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
-            return this.showToast('Value must be a whole number!', { type: 'error' });
-          }
-          if (config.min !== undefined && parsed < config.min) {
-            return this.showToast(`Value must be at least ${config.min}!`, { type: 'error' });
-          }
-          if (config.max !== undefined && parsed > config.max) {
-            return this.showToast(`Value must be no more than ${config.max}!`, { type: 'error' });
-          }
-          this.settings[config.id] = parsed;
-          if (config.action && actions[config.action]) {
-            actions[config.action](parsed);
-          }
-          this.saveSettings();
+          this.handleNumericSettingInput(config, val, parsed => {
+            this.settings[config.id] = parsed;
+            if (config.action && actions[config.action]) {
+              actions[config.action](parsed);
+            }
+            this.saveSettings();
+          });
         };
       }
       else if (config.validator === 'cachePath') {
@@ -2380,6 +2436,11 @@ module.exports = class MessageLoggerV2 {
           }
           this.saveSettings();
         };
+      }
+      if (config.inlineValidation && config.validator === 'number') {
+        const onValid = setting.onChange;
+        setting.type = 'custom';
+        setting.children = this.createInlineValidatedNumberInput(config, onValid);
       }
       return setting;
     };
