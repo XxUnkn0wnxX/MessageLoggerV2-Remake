@@ -204,12 +204,15 @@ test('Anti-Nuke channel threads capture the same root metadata and starter paylo
     deletedMessageRecord: {},
     editedMessageRecord: {},
     purgedMessageRecord: {},
+    nukedMessageRecord: {},
     deletedMessageSet: new Map(),
     editedMessageSet: new Map(),
     purgedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
     suppressedForumThreadIds: new Set(),
     sortedDeletedMessageIds: new Map(),
     sortedPurgedMessageIds: new Map(),
+    sortedNukedMessageIds: new Map(),
     noTintIds: new Set(),
     editModifiers: {},
     forumThreadMetadataCache: new Map([[rootId, structuredClone(initialMetadata)]]),
@@ -221,7 +224,11 @@ test('Anti-Nuke channel threads capture the same root metadata and starter paylo
         logged_attachments: message.id === starterId ? ['cached-starter-media'] : []
       };
       (targetMap[message.channel_id] ||= []).push(message.id);
-      const targetSet = targetMap === this.deletedMessageRecord ? this.deletedMessageSet : this.purgedMessageSet;
+      const targetSet = targetMap === this.deletedMessageRecord
+        ? this.deletedMessageSet
+        : targetMap === this.nukedMessageRecord
+          ? this.nukedMessageSet
+          : this.purgedMessageSet;
       if (!targetSet.has(message.channel_id)) targetSet.set(message.channel_id, new Set());
       targetSet.get(message.channel_id).add(message.id);
       this.messageRecordIds.add(message.id);
@@ -275,7 +282,8 @@ test('Anti-Nuke channel threads capture the same root metadata and starter paylo
   assert.equal(savedRoot.delete_data.anti_nuke, true);
   assert.equal(savedRoot.delete_data.anti_nuke_parent_id, 'parent');
   assert.equal(plugin.messageRecord[replyId].message.content, 'Reply B');
-  assert.deepEqual(plugin.purgedMessageRecord, { [rootId]: [rootId, replyId] });
+  assert.deepEqual(plugin.purgedMessageRecord, {});
+  assert.deepEqual(plugin.nukedMessageRecord, { [rootId]: [rootId, replyId] });
   assert.equal(context.capturedMessages, 1, 'only the independent reply consumes the message cap');
 
   const forumRoot = { id: 'forum', channel_id: 'forum' };

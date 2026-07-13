@@ -39,11 +39,12 @@ Default shortcuts, configurable under Misc settings:
 - **Deleted**: individually deleted messages and deleted forum/thread roots.
 - **Edited**: saved edit history.
 - **Purged**: messages captured from bulk deletes.
+- **Nuked**: deleted parent-channel snapshots captured by Anti Nuke. This tab is shown only while Anti Nuke is enabled; disabling it keeps existing records stored.
 - **Sent**: the bounded in-memory message cache used to reconstruct later deletions and edits. It clears on plugin or Discord reload.
 - **Ghost pings**: removed mentions that targeted the local user.
 - **Hidden**: hidden records from every category, when enabled in Display settings.
 
-Unhiding a record returns it to its original category.
+Unhiding a record returns it to its original category. If a Nuked record is unhidden while Anti Nuke is off, it stays stored but remains out of view until Anti Nuke is enabled again.
 
 ## 🔎 Filtering
 
@@ -177,11 +178,13 @@ Notification settings affect alerts only. Logging scope is controlled separately
   - Trash appears only while Shift is held and removes immediately. Direct right-click **Delete** still confirms first, including root-and-child removal; nested **Message Logger > Delete** is immediate.
 - **Automatically refresh new forum posts** uses Discord's native **New Post(s)** control so new cards appear without leaving and reopening the forum.
 - Fully deleted cards and thread entries need at least one live item as a layout anchor. Without one, they remain logged but unrendered.
-- **Anti Nuke** captures a deleted parent forum or text channel under **Purged** and bypasses normal scope rules.
+- **Anti Nuke** captures a deleted parent forum or text channel under **Nuked** and bypasses normal scope rules.
+  - **Show nuke detection toasts** reports only deleted channels that produced saved Anti-Nuke records, avoiding empty/uncached channel false positives. It uses the same destructive color as deleted and purged alerts; logging ignores and ordinary alert scope do not suppress it.
   - Thread/forum, message, and attachment caps default to `15`, `45`, and `15` per deletion event.
   - Captured channel threads retain the same title metadata, initial body, author/media, and separate replies as ordinary deleted threads.
   - Capture is newest-first. Attachments count only after their message is admitted; roots bypass the message cap but their attachments still count.
   - Blank or `0` is unlimited and unsafe for large channels. Anti-Nuke records cannot Jump because their parent channel is gone.
+  - Disabling Anti Nuke hides the Nuked tab but does not erase its records. Hidden Nuked records remain in Hidden when that tab is enabled.
 - Parent-channel “started a thread” system messages are left to Discord and are not logged.
 - Message-history caching and hierarchical media storage stay enabled internally so complete post/thread deletions do not lose unloaded messages or media paths.
 - Flat media-cache files from older versions or forks remain supported for rendering.
@@ -201,6 +204,7 @@ Disabling saving reports the memory-only state. Re-enabling without a reload que
 ### Legacy or mixed-fork data was detected
 
 - Legacy `deletedata` and `editHistory` fields are merged with surviving canonical and enhanced data, indexes are rebuilt, and the complete primary is atomically rewritten.
+- Anti-Nuke records saved by earlier builds under Purged are moved into the fork-specific Nuked index during the same rewrite.
 - Current MessageLoggerV2 forks can still read the core fields. Metadata an older fork removed cannot be recreated and remains blank.
 - Migration reports progress and success through the selected notification mode. On failure, the primary and backup remain available and the alert directs you to the console.
 - A missing or invalid primary is rebuilt from a valid normalized backup. The backup remains untouched; newer schemas fail closed instead of being downgraded.

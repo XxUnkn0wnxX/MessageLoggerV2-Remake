@@ -45,6 +45,7 @@ test('all fresh-install settings defaults remain stable', () => {
     messageCacheCap: 1000,
     savedMessagesCap: 1000,
     antiNukeEnabled: true,
+    antiNukeToasts: false,
     antiNukeThreadCap: 15,
     antiNukeMessageCap: 45,
     antiNukeAttachmentCap: 15,
@@ -186,7 +187,7 @@ test('native BetterDiscord keybind recorders drive capture-phase logger shortcut
 test('native and cloned Trash actions remain scoped to indexed logger deletions', () => {
   assert.match(source, /Patcher\.instead\(DiscordModules\.MessageActions, 'deleteMessage',[\s\S]*processNativeMessageDeleteAction\(args, original\)/);
   assert.match(source, /processNativeMessageDeleteAction\(args, original\)[\s\S]*isThreadCreatedSystemMessage\(message\)[\s\S]*handleNativeSavedRecordDelete\(channelId, messageId\)[\s\S]*Promise\.resolve\(\)[\s\S]*original\(\.\.\.args\)/);
-  assert.match(source, /isIndexedSavedDeletedRecord\(record, messageId\)[\s\S]*deletedMessageSet[\s\S]*purgedMessageSet[\s\S]*deletedMessageRecord[\s\S]*purgedMessageRecord/);
+  assert.match(source, /isIndexedSavedDeletedRecord\(record, messageId\)[\s\S]*deletedMessageSet[\s\S]*purgedMessageSet[\s\S]*nukedMessageSet[\s\S]*deletedMessageRecord[\s\S]*purgedMessageRecord[\s\S]*nukedMessageRecord/);
   assert.match(source, /inspectNativeDestructiveMessageCandidate\(candidate\)[\s\S]*memoizedProps[\s\S]*dangerous === true/);
   assert.match(source, /inspectNativeDeleteCandidate\(candidate\)[\s\S]*inspectNativeDestructiveMessageCandidate[\s\S]*2\.81h8\.36a3[\s\S]*!isTrashIcon/);
   assert.match(source, /MessageToolbarClasses: lazyGet[\s\S]*messageListItem[\s\S]*buttons/);
@@ -458,6 +459,22 @@ test('high-impact setting changes use routed theme-aware state feedback', () => 
   assert.match(source, /card\.addEventListener\('click', dismiss, true\)[\s\S]*card\.addEventListener\('contextmenu', dismiss, true\)/);
   assert.match(source, /\.bd-notification-progress[\s\S]*progress\?\.animate\?/);
   assert.match(source, /Notification mode changed to[\s\S]*Using BetterDiscord notifications[\s\S]*type: 'info'/);
+});
+
+test('Nuked uses a fork-specific persisted index and migrates old Anti-Nuke records out of Purged', () => {
+  assert.match(source, /isNukedRecord\(record\)[\s\S]*delete_data\?\.anti_nuke/);
+  assert.match(source, /migrateAntiNukeCategoryRecords\(data\)[\s\S]*\['deletedMessageRecord', 'purgedMessageRecord'\][\s\S]*data\.nukedMessageRecord = canonicalNuked/);
+  assert.match(source, /record\.delete_data\.anti_nuke \? data\.nukedMessageRecord : data\.deletedMessageRecord/);
+  assert.match(source, /saveDeletedChannelCaptureMessage\(root, this\.nukedMessageRecord/);
+  assert.match(source, /selectedTab == 'purged'[\s\S]*pushIdsIntoMessages\(this\.purgedMessageRecord\)/);
+  assert.match(source, /selectedTab == 'nuked'[\s\S]*this\.settings\.antiNukeEnabled[\s\S]*pushIdsIntoMessages\(this\.nukedMessageRecord\)/);
+  assert.match(source, /if \(this\.settings\.antiNukeEnabled\) tabs\.appendChild\(createTab\('Nuked', 'nuked'\)\)/);
+  assert.match(source, /isLoggerTabAvailable\(tab\)[\s\S]*tab === 'hidden'[\s\S]*showHiddenTab[\s\S]*tab === 'nuked'[\s\S]*antiNukeEnabled/);
+  assert.match(source, /nukedMessageRecord: \{\}/);
+  assert.match(source, /this\.nukedMessageSet = createSetMap\(this\.nukedMessageRecord\)/);
+  assert.match(source, /name: 'Show nuke detection toasts'[\s\S]*id: 'antiNukeToasts'[\s\S]*type: 'switch'/);
+  assert.match(source, /title: "Nuke Detected"[\s\S]*getMessage:[\s\S]*`Nuke Detected at \$\{name\}[\s\S]*type: "error"[\s\S]*tab: "nuked"/);
+  assert.match(source, /context\.captured > 0[\s\S]*context\.captureEnabled[\s\S]*this\.settings\.antiNukeEnabled[\s\S]*this\.settings\.antiNukeToasts[\s\S]*this\._notifyEvent\('nukeDetected'/);
 });
 
 test('no-save recovery remains guarded and ordered before backup persistence', () => {

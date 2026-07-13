@@ -3,7 +3,7 @@
  * @version 2.8.1.4
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
- * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
+ * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
  * @invite e66JbKte2P
  * @source https://git.slowb.ro/XxUnkn0wnxX/MessageLoggerV2-Remake/src/branch/main/MessageLoggerV2.plugin.js
  * @updateUrl https://git.slowb.ro/XxUnkn0wnxX/MessageLoggerV2-Remake/raw/branch/main/MessageLoggerV2.plugin.js
@@ -410,11 +410,12 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Logger jump shortcuts',
+        title: 'Nuked log separation',
         type: 'added',
         items: [
-          'Double-clicks jumpable saved messages in the logger window to their Discord location.',
-          'Warning-colored usernames identify records that still have a valid jump destination.'
+          'Anti-Nuke channel snapshots now use a dedicated Nuked tab instead of Purged.',
+          'Disabling Anti Nuke hides its tab without deleting visible or hidden Nuked records.',
+          'An optional nuke-detection toast reports captured channel nukes.'
         ]
       }
     ];
@@ -588,6 +589,7 @@ module.exports = class MessageLoggerV2 {
       messageCacheCap: 1000,
       savedMessagesCap: 1000,
       antiNukeEnabled: true,
+      antiNukeToasts: false,
       antiNukeThreadCap: 15,
       antiNukeMessageCap: 45,
       antiNukeAttachmentCap: 15,
@@ -988,9 +990,9 @@ module.exports = class MessageLoggerV2 {
       } else if (selectedData.source === 'empty') {
         if (selectedData.hadPersistedCandidate) {
           if (this.settings.autoBackup) {
-            UI.showToast(`[${this.getName()}] Data and backup files were corrupted. All deleted/edited/purged messages have been erased.`, { type: "error", timeout: 0 });
+            UI.showToast(`[${this.getName()}] Data and backup files were corrupted. All deleted/edited/purged/nuked messages have been erased.`, { type: "error", timeout: 0 });
           } else {
-            UI.showToast(`[${this.getName()}] Data was corrupted! Recommended to turn on auto backup in settings! All deleted/edited/purged messages have been erased.`, { type: "error", timeout: 0 });
+            UI.showToast(`[${this.getName()}] Data was corrupted! Recommended to turn on auto backup in settings! All deleted/edited/purged/nuked messages have been erased.`, { type: "error", timeout: 0 });
           }
         } else {
           Logger.log('No persisted logger primary or backup was found; starting with an empty payload.');
@@ -3265,10 +3267,16 @@ module.exports = class MessageLoggerV2 {
         settings: [
           {
             name: 'Enable Anti Nuke',
-            note: 'Save a bounded Purged snapshot when a forum or text channel is deleted. Overrides logging filters.',
+            note: 'Save a bounded Nuked snapshot when a forum or text channel is deleted. Disabling hides the Nuked tab but keeps existing records.',
             id: 'antiNukeEnabled',
             type: 'switch',
             action: 'reportAntiNuke'
+          },
+          {
+            name: 'Show nuke detection toasts',
+            note: 'With Anti Nuke enabled, alert only when records from a deleted channel were captured. Ignores normal logging/alert scope.',
+            id: 'antiNukeToasts',
+            type: 'switch'
           },
           {
             name: 'Thread and forum post cap',
@@ -3328,7 +3336,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Saved messages cap',
-            note: 'Per-category cap for deleted, edited, and purged records.',
+            note: 'Per-category cap for deleted, edited, purged, and nuked records.',
             id: 'savedMessagesCap',
             type: 'textbox',
             validator: 'number',
@@ -3600,6 +3608,9 @@ module.exports = class MessageLoggerV2 {
       deletedMessageRecord: {},
       editedMessageRecord: {},
       purgedMessageRecord: {},
+      // Anti-Nuke is fork-specific, so its category index is additive beside the legacy maps.
+      // The underlying message records remain readable by older loggers that ignore this key.
+      nukedMessageRecord: {},
       suppressedForumThreadIds: []
     };
   }
@@ -3636,7 +3647,7 @@ module.exports = class MessageLoggerV2 {
     // messageRecord is the source of truth and must exist. Only its derived category
     // indexes may be reconstructed when an older fork omitted them.
     if (!isPlainObject(prepared.messageRecord)) throw new TypeError('messageRecord is not an object map');
-    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord', 'nukedMessageRecord']) {
       if (prepared[key] === undefined || prepared[key] === null) prepared[key] = {};
       else if (!isPlainObject(prepared[key])) throw new TypeError(`${key} is not an object map`);
     }
@@ -3888,7 +3899,7 @@ module.exports = class MessageLoggerV2 {
 
       // Preserve every category the starter belonged to, but index the single logical record by
       // the stable thread ID. Sanitization later de-duplicates and restores the canonical channel.
-      for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+      for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord', 'nukedMessageRecord']) {
         for (const ids of Object.values(data[key] || {})) {
           if (!Array.isArray(ids)) continue;
           for (let index = 0; index < ids.length; index++) {
@@ -3900,11 +3911,50 @@ module.exports = class MessageLoggerV2 {
     }
     return folded;
   }
+  migrateAntiNukeCategoryRecords(data) {
+    // Older releases stored fork-specific Anti-Nuke captures in Purged. Treat the marker on
+    // delete_data as the durable source of truth and move those IDs into the dedicated Nuked
+    // index. Existing Nuked membership is also authoritative, which preserves records after a
+    // round trip through a logger that retained the additive index but did not know its marker.
+    const records = data?.messageRecord || {};
+    const nukedIds = new Set();
+    for (const ids of Object.values(data?.nukedMessageRecord || {})) {
+      if (!Array.isArray(ids)) continue;
+      ids.forEach(id => nukedIds.add(String(id)));
+    }
+    for (const [messageId, record] of Object.entries(records)) {
+      if (record?.delete_data?.anti_nuke) nukedIds.add(messageId);
+    }
+
+    // A deletion belongs to one visible deletion category. Edit history remains independent,
+    // so edited-and-nuked records keep their Edited membership while leaving Deleted/Purged.
+    for (const key of ['deletedMessageRecord', 'purgedMessageRecord']) {
+      for (const [channelId, ids] of Object.entries(data[key] || {})) {
+        if (!Array.isArray(ids)) continue;
+        data[key][channelId] = ids.filter(id => !nukedIds.has(String(id)));
+        if (!data[key][channelId].length) delete data[key][channelId];
+      }
+    }
+
+    const canonicalNuked = {};
+    for (const messageId of nukedIds) {
+      const record = records[messageId];
+      const channelId = record?.message?.channel_id;
+      if (!record || !channelId) continue;
+      if (!record.delete_data || typeof record.delete_data !== 'object' || Array.isArray(record.delete_data)) {
+        record.delete_data = {};
+      }
+      record.delete_data.anti_nuke = true;
+      (canonicalNuked[channelId] ||= []).push(messageId);
+    }
+    data.nukedMessageRecord = canonicalNuked;
+    return nukedIds.size;
+  }
   getDataPayloadValidationErrors(data, options = {}) {
     const isRecordMap = value => !!value && typeof value === 'object' && !Array.isArray(value);
     const errors = [];
     if (!isRecordMap(data)) return ['payload is not an object'];
-    for (const key of ['messageRecord', 'deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+    for (const key of ['messageRecord', 'deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord', 'nukedMessageRecord']) {
       if (!isRecordMap(data[key])) errors.push(`${key} is not an object map`);
     }
     if (data.suppressedForumThreadIds !== undefined && !Array.isArray(data.suppressedForumThreadIds)) {
@@ -3932,7 +3982,7 @@ module.exports = class MessageLoggerV2 {
         errors.push(`messageRecord.${messageId}.delete_data is not an object`);
       }
     }
-    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord', 'nukedMessageRecord']) {
       for (const [channelId, ids] of Object.entries(data[key])) {
         if (!Array.isArray(ids)) {
           errors.push(`${key}.${channelId} is not an array`);
@@ -4005,7 +4055,7 @@ module.exports = class MessageLoggerV2 {
     data.messageRecord = normalizedRecords;
     // Re-key every category reference before sanitization. Category membership is evidence
     // that cannot always be inferred later (for example a non-Anti-Nuke purged record).
-    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord', 'nukedMessageRecord']) {
       for (const [channelId, ids] of Object.entries(data[key])) {
         if (!Array.isArray(ids)) continue;
         data[key][channelId] = ids.map(id => canonicalMessageIds.get(id) || id);
@@ -4019,6 +4069,7 @@ module.exports = class MessageLoggerV2 {
     // the title stays in metadata and the starter payload becomes the root message. Existing
     // two-record files are folded during the same atomic canonical rewrite used for migrations.
     this.foldSeparateThreadStarterRecords(data);
+    this.migrateAntiNukeCategoryRecords(data);
     data = this.sanitizeDataPayload(data);
     // Rebuild missing indexes from canonical records. Existing category membership is
     // retained independently so edited-and-deleted or purged records are not collapsed.
@@ -4030,8 +4081,9 @@ module.exports = class MessageLoggerV2 {
       }
       if (record.delete_data
         && !isIndexed('deletedMessageRecord', messageId)
-        && !isIndexed('purgedMessageRecord', messageId)) {
-        const target = record.delete_data.anti_nuke ? data.purgedMessageRecord : data.deletedMessageRecord;
+        && !isIndexed('purgedMessageRecord', messageId)
+        && !isIndexed('nukedMessageRecord', messageId)) {
+        const target = record.delete_data.anti_nuke ? data.nukedMessageRecord : data.deletedMessageRecord;
         (target[channelId] ||= []).push(messageId);
       }
     }
@@ -4045,7 +4097,7 @@ module.exports = class MessageLoggerV2 {
   sanitizeDataPayload(data) {
     if (!this.isValidDataPayload(data)) throw new TypeError('Logger payload has an invalid structure');
     const validRecords = data.messageRecord;
-    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord', 'nukedMessageRecord']) {
       const canonicalMap = {};
       const seen = new Set();
       for (const ids of Object.values(data[key])) {
@@ -4071,6 +4123,7 @@ module.exports = class MessageLoggerV2 {
       'deletedMessageRecord',
       'editedMessageRecord',
       'purgedMessageRecord',
+      'nukedMessageRecord',
       'suppressedForumThreadIds'
     ]);
     return Object.fromEntries(
@@ -4089,13 +4142,16 @@ module.exports = class MessageLoggerV2 {
     this.deletedMessageRecord = data.deletedMessageRecord;
     this.editedMessageRecord = data.editedMessageRecord;
     this.purgedMessageRecord = data.purgedMessageRecord;
+    this.nukedMessageRecord = data.nukedMessageRecord;
     this.suppressedForumThreadIds = new Set(data.suppressedForumThreadIds);
     const createSetMap = map => new Map(Object.entries(map).map(([channelId, ids]) => [channelId, new Set(ids)]));
     this.deletedMessageSet = createSetMap(this.deletedMessageRecord);
     this.editedMessageSet = createSetMap(this.editedMessageRecord);
     this.purgedMessageSet = createSetMap(this.purgedMessageRecord);
+    this.nukedMessageSet = createSetMap(this.nukedMessageRecord);
     this.sortedDeletedMessageIds = new Map();
     this.sortedPurgedMessageIds = new Map();
+    this.sortedNukedMessageIds = new Map();
   }
   getRecordActivityTime(record) {
     const times = [
@@ -4172,8 +4228,12 @@ module.exports = class MessageLoggerV2 {
   mergeDataPayloads(persistedData, sessionData) {
     // Category maps are merged independently because one message may legitimately be both
     // edited and deleted. Each individual channel index is still de-duplicated and validated.
-    const persisted = this.sanitizeDataPayload(this.cloneDataValue(persistedData));
-    const session = this.sanitizeDataPayload(this.cloneDataValue(sessionData));
+    const persisted = this.sanitizeDataPayload(
+      this.prepareDataPayloadForNormalization(this.cloneDataValue(persistedData))
+    );
+    const session = this.sanitizeDataPayload(
+      this.prepareDataPayloadForNormalization(this.cloneDataValue(sessionData))
+    );
     // Opaque extensions are merged without interpreting their schema. Disk values win on
     // conflicts because the temporary no-save session does not own foreign persisted state.
     const mergedExtensions = this.mergePlainDataObjects(
@@ -4191,6 +4251,7 @@ module.exports = class MessageLoggerV2 {
       deletedMessageRecord: this.mergeCategoryIndexes(persisted.deletedMessageRecord, session.deletedMessageRecord, messageRecord),
       editedMessageRecord: this.mergeCategoryIndexes(persisted.editedMessageRecord, session.editedMessageRecord, messageRecord),
       purgedMessageRecord: this.mergeCategoryIndexes(persisted.purgedMessageRecord, session.purgedMessageRecord, messageRecord),
+      nukedMessageRecord: this.mergeCategoryIndexes(persisted.nukedMessageRecord, session.nukedMessageRecord, messageRecord),
       suppressedForumThreadIds: Array.from(new Set([
         ...persisted.suppressedForumThreadIds,
         ...session.suppressedForumThreadIds
@@ -4203,20 +4264,26 @@ module.exports = class MessageLoggerV2 {
       if (record.edit_history?.length && !isIndexed('editedMessageRecord')) {
         (merged.editedMessageRecord[channelId] ||= []).push(messageId);
       }
-      if (record.delete_data && !isIndexed('deletedMessageRecord') && !isIndexed('purgedMessageRecord')) {
-        const target = record.delete_data.anti_nuke ? merged.purgedMessageRecord : merged.deletedMessageRecord;
+      if (record.delete_data
+        && !isIndexed('deletedMessageRecord')
+        && !isIndexed('purgedMessageRecord')
+        && !isIndexed('nukedMessageRecord')) {
+        const target = record.delete_data.anti_nuke ? merged.nukedMessageRecord : merged.deletedMessageRecord;
         (target[channelId] ||= []).push(messageId);
       }
     }
+    this.migrateAntiNukeCategoryRecords(merged);
     return this.sanitizeDataPayload(merged);
   }
   applySavedMessagesCapToPayload(data, cap = this.settings.savedMessagesCap) {
     // Apply caps to the detached merged payload before any file is replaced. Removing a
     // forum/thread root also removes its children, matching normal runtime cap behavior.
-    data = this.sanitizeDataPayload(this.cloneDataValue(data));
+    data = this.sanitizeDataPayload(
+      this.prepareDataPayloadForNormalization(this.cloneDataValue(data))
+    );
     if (!Number.isInteger(cap) || cap < 0) return data;
     const idsToRemove = new Set();
-    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord', 'nukedMessageRecord']) {
       const uniqueIds = Array.from(new Set(Object.values(data[key]).flat()));
       uniqueIds.sort((a, b) => this.getRecordActivityTime(data.messageRecord[b]) - this.getRecordActivityTime(data.messageRecord[a]) || b.localeCompare(a));
       uniqueIds.slice(cap).forEach(id => idsToRemove.add(id));
@@ -4226,7 +4293,7 @@ module.exports = class MessageLoggerV2 {
       for (const [messageId, record] of Object.entries(data.messageRecord)) {
         if (record?.message?.channel_id === rootId) idsToRemove.add(messageId);
       }
-      for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+      for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord', 'nukedMessageRecord']) {
         for (const id of data[key][rootId] || []) idsToRemove.add(id);
       }
       if (/^\d+$/.test(rootId)) data.suppressedForumThreadIds.push(rootId);
@@ -4367,8 +4434,8 @@ module.exports = class MessageLoggerV2 {
       },
       antiNukeEnabled: {
         title: 'Message Logger Anti Nuke',
-        enabled: 'Anti Nuke enabled. Eligible deleted parent channels will be captured within the configured caps.',
-        disabled: 'Anti Nuke disabled. Deleted parent-channel snapshots will not be captured.'
+        enabled: 'Anti Nuke enabled. Eligible deleted parent channels will be captured within the configured caps and the Nuked tab is available.',
+        disabled: 'Anti Nuke disabled. New parent-channel snapshots will not be captured; existing Nuked records stay saved while their tab is hidden.'
       },
       autoUpdate: {
         title: 'Message Logger Automatic Updates',
@@ -4556,6 +4623,7 @@ module.exports = class MessageLoggerV2 {
         deleted: Object.values(this.deletedMessageRecord).flat().length,
         edited: Object.values(this.editedMessageRecord).flat().length,
         purged: Object.values(this.purgedMessageRecord).flat().length,
+        nuked: Object.values(this.nukedMessageRecord).flat().length,
         suppressedRoots: this.suppressedForumThreadIds.size
       });
       return true;
@@ -4870,6 +4938,16 @@ module.exports = class MessageLoggerV2 {
   getSavedMessage(id) {
     return this.messageRecord[id];
   }
+  isNukedRecord(record) {
+    // The marker survives even when another logger ignores or removes the additive Nuked index,
+    // allowing this fork to reconstruct the correct category on the next normalized load.
+    return !!record?.delete_data?.anti_nuke;
+  }
+  isLoggerTabAvailable(tab) {
+    if (tab === 'hidden') return !!this.settings.showHiddenTab;
+    if (tab === 'nuked') return !!this.settings.antiNukeEnabled;
+    return true;
+  }
   getMessageAuthorId(message) {
     const author = message?.author;
     const id = author?.id || message?.author_id || message?.authorId || (typeof author === 'string' ? author : null);
@@ -4948,7 +5026,8 @@ module.exports = class MessageLoggerV2 {
     if (channelId) {
       const ids = new Set([
         ...(this.deletedMessageRecord[channelId] || []),
-        ...(this.purgedMessageRecord[channelId] || [])
+        ...(this.purgedMessageRecord[channelId] || []),
+        ...(this.nukedMessageRecord[channelId] || [])
       ]);
       for (const id of ids) {
         const record = this.messageRecord[id];
@@ -5879,6 +5958,7 @@ module.exports = class MessageLoggerV2 {
       deletedMessageRecord: this.deletedMessageRecord,
       editedMessageRecord: this.editedMessageRecord,
       purgedMessageRecord: this.purgedMessageRecord,
+      nukedMessageRecord: this.nukedMessageRecord || {},
       suppressedForumThreadIds: Array.from(this.suppressedForumThreadIds || [])
     };
   }
@@ -5946,6 +6026,14 @@ module.exports = class MessageLoggerV2 {
         type: "error",
         tab: "purged"
       },
+      nukeDetected: {
+        title: "Nuke Detected",
+        // Custom toasts display only the content, while BetterDiscord cards display both fields.
+        // Starting the content with the event name keeps both routes immediately identifiable.
+        getMessage: (name, count) => `Nuke Detected at ${name}; ${count} saved record${count === 1 ? '' : 's'} captured`,
+        type: "error",
+        tab: "nuked"
+      },
       sent: {
         title: "Message Sent",
         getMessage: (name) => `Message sent in ${name}`,
@@ -5966,7 +6054,8 @@ module.exports = class MessageLoggerV2 {
     const message = config.getMessage(locationName, options.count, options.username);
     const timeout = config.timeout === undefined ? undefined : config.timeout;
     const actions = [];
-    if (config.tab) actions.push({ label: "View", onClick: () => this.openWindow(config.tab) });
+    const targetTab = options.tab || config.tab;
+    if (targetTab) actions.push({ label: "View", onClick: () => this.openWindow(targetTab) });
     const jumpRecord = messageId
       ? this.messageRecord[messageId]
         || { message: { id: messageId, channel_id: channel.id, guild_id: guild?.id }, delete_data: null }
@@ -6005,6 +6094,7 @@ module.exports = class MessageLoggerV2 {
     );
     if (this.deletedMessageSet.get(channelId)?.has(id)) return this.saveData();
     if (this.purgedMessageSet.get(channelId)?.has(id)) return this.saveData();
+    if (this.nukedMessageSet.get(channelId)?.has(id)) return this.saveData();
     if (this.settings?.deleteCachedFilesWithRecords) this.deleteCachedFilesForRecord(record);
     delete this.messageRecord[id];
     this.messageRecordIds.delete(id);
@@ -6233,11 +6323,15 @@ module.exports = class MessageLoggerV2 {
   }
   foldSavedThreadStarterIntoRoot(threadId) {
     if (!threadId) return false;
+    // Hot-swapping from a build that predates the Nuked index can leave the new runtime field
+    // absent until the next full load. Initialize it here before rebuilding all category sets.
+    this.nukedMessageRecord ||= {};
     const data = {
       messageRecord: this.messageRecord,
       deletedMessageRecord: this.deletedMessageRecord,
       editedMessageRecord: this.editedMessageRecord,
-      purgedMessageRecord: this.purgedMessageRecord
+      purgedMessageRecord: this.purgedMessageRecord,
+      nukedMessageRecord: this.nukedMessageRecord
     };
     this.repairAntiNukeChannelThreadStarterMetadata(data, [threadId]);
     const [folded] = this.foldSeparateThreadStarterRecords(data, [threadId]);
@@ -6250,6 +6344,7 @@ module.exports = class MessageLoggerV2 {
     this.deletedMessageRecord = canonical.deletedMessageRecord;
     this.editedMessageRecord = canonical.editedMessageRecord;
     this.purgedMessageRecord = canonical.purgedMessageRecord;
+    this.nukedMessageRecord = canonical.nukedMessageRecord;
     this.messageRecordIds?.delete(folded.starterMessageId);
     this.messageRecordIds?.add(folded.rootId);
     const createSetMap = map => new Map(
@@ -6258,8 +6353,10 @@ module.exports = class MessageLoggerV2 {
     this.deletedMessageSet = createSetMap(this.deletedMessageRecord);
     this.editedMessageSet = createSetMap(this.editedMessageRecord);
     this.purgedMessageSet = createSetMap(this.purgedMessageRecord);
+    this.nukedMessageSet = createSetMap(this.nukedMessageRecord);
     this.sortedDeletedMessageIds?.delete(threadId);
     this.sortedPurgedMessageIds?.delete(threadId);
+    this.sortedNukedMessageIds?.delete(threadId);
     this.noTintIds?.delete(folded.starterMessageId);
     if (this.editModifiers) delete this.editModifiers[folded.starterMessageId];
     return true;
@@ -6597,7 +6694,11 @@ module.exports = class MessageLoggerV2 {
     const consumesMessageSlot = !options.threadRoot && !options.threadStarterForRoot;
     if (consumesMessageSlot && !this.hasDeletedChannelMessageCaptureSlot(context)) return false;
     if (!this.shouldCaptureDeletedChannelMessage(message)) return false;
-    const targetSet = targetMap === this.deletedMessageRecord ? this.deletedMessageSet : this.purgedMessageSet;
+    const targetSet = targetMap === this.deletedMessageRecord
+      ? this.deletedMessageSet
+      : targetMap === this.nukedMessageRecord
+        ? this.nukedMessageSet
+        : this.purgedMessageSet;
     if (targetSet.get(message.channel_id)?.has(message.id)) return false;
     const attachments = this.claimDeletedChannelAttachments(context, message);
     const capturedMessage = attachments === message.attachments
@@ -6727,7 +6828,7 @@ module.exports = class MessageLoggerV2 {
     };
     const before = context.captured;
     if (eligibleRoot) {
-      this.saveDeletedChannelCaptureMessage(root, this.purgedMessageRecord, context, {
+      this.saveDeletedChannelCaptureMessage(root, this.nukedMessageRecord, context, {
         channel,
         location,
         threadMetadata: metadata,
@@ -6742,7 +6843,7 @@ module.exports = class MessageLoggerV2 {
       ? eligibleMessages.find(message => String(message.id) === distinctStarterMessageId)
       : null;
     if (starterMessage) {
-      this.saveDeletedChannelCaptureMessage(starterMessage, this.purgedMessageRecord, context, {
+      this.saveDeletedChannelCaptureMessage(starterMessage, this.nukedMessageRecord, context, {
         channel,
         location,
         threadMetadata: metadata,
@@ -6752,7 +6853,7 @@ module.exports = class MessageLoggerV2 {
     for (const message of eligibleMessages) {
       if (starterMessage && message === starterMessage) continue;
       if (!this.hasDeletedChannelMessageCaptureSlot(context)) break;
-      this.saveDeletedChannelCaptureMessage(message, this.purgedMessageRecord, context, {
+      this.saveDeletedChannelCaptureMessage(message, this.nukedMessageRecord, context, {
         channel,
         location,
         threadMetadata: metadata
@@ -6789,7 +6890,7 @@ module.exports = class MessageLoggerV2 {
     const before = context.captured;
     for (const message of context.parentMessages) {
       if (!this.hasDeletedChannelMessageCaptureSlot(context)) break;
-      this.saveDeletedChannelCaptureMessage(message, this.purgedMessageRecord, context, {
+      this.saveDeletedChannelCaptureMessage(message, this.nukedMessageRecord, context, {
         channel: context.channel,
         location: context.locations.get(message.id)
       });
@@ -6807,16 +6908,22 @@ module.exports = class MessageLoggerV2 {
     const result = callDefault(...args);
     this.captureQueuedThreadsFromDeletedChannel(context);
     this.captureMessagesFromDeletedChannel(context);
+    // Discord can dispatch channel deletions for empty, uncached, or otherwise irrelevant
+    // channels. Report a nuke only after at least one channel-scoped record was actually saved;
+    // the dedicated toggle still bypasses ordinary logging and notification scope.
+    if (context.captured > 0
+      && context.captureEnabled
+      && this.settings.antiNukeEnabled
+      && this.settings.antiNukeToasts) {
+      const locationName = guild?.name && channel.name
+        ? `${guild.name}, #${channel.name}`
+        : guild?.name || channel.name || 'unknown location';
+      this._notifyEvent('nukeDetected', channel, guild, undefined, {
+        count: context.captured,
+        locationName
+      });
+    }
     if (context.captured > 0) {
-      if (this._shouldShowToast(channel, guild, 'deleted', this.isLocalDeleteEvent(channel.id))) {
-        const locationName = guild?.name && channel.name
-          ? `${guild.name}, #${channel.name}`
-          : guild?.name || channel.name || 'unknown location';
-        this._notifyEvent('bulkDelete', channel, guild, undefined, {
-          count: context.captured,
-          locationName
-        });
-      }
       this.saveData();
       this.scheduleLoggerMenuRefresh();
       Logger.log(
@@ -7096,6 +7203,12 @@ module.exports = class MessageLoggerV2 {
                                     <div class="${this.style.textIndent}">
                                         Double-clicking a logged message jumps to its Discord location when available. A warning-orange username marks an available destination
                                     </div></br>
+                                </div>
+                                <strong>Logger tabs:</strong></br>
+                                <div class="${this.style.textIndent}">
+                                    Deleted contains individual deletes; Purged contains ordinary bulk deletes.</br>
+                                    Nuked contains Anti-Nuke channel snapshots and is shown only while Anti Nuke is enabled. Disabling it keeps the saved records.</br>
+                                    Hidden contains hidden records from every category when its Display setting is enabled. Unhiding a Nuked record while Anti Nuke is off keeps it stored but invisible until Anti Nuke is enabled again.</br>
                                 </div>
                                 <strong>Toasts:</strong></br>
                                 <div class="${this.style.textIndent}">
@@ -7496,9 +7609,17 @@ module.exports = class MessageLoggerV2 {
     }
     if (this.settings.cacheAllImages) this.cacheMessageImages(this.messageRecord[id].message);
     targetMessageRecord[channelId].push(id);
-    const sortedCache = targetMessageRecord === this.deletedMessageRecord ? this.sortedDeletedMessageIds : this.sortedPurgedMessageIds;
+    const sortedCache = targetMessageRecord === this.deletedMessageRecord
+      ? this.sortedDeletedMessageIds
+      : targetMessageRecord === this.nukedMessageRecord
+        ? this.sortedNukedMessageIds
+        : this.sortedPurgedMessageIds;
     sortedCache.delete(channelId);
-    const targetSet = targetMessageRecord === this.deletedMessageRecord ? this.deletedMessageSet : this.purgedMessageSet;
+    const targetSet = targetMessageRecord === this.deletedMessageRecord
+      ? this.deletedMessageSet
+      : targetMessageRecord === this.nukedMessageRecord
+        ? this.nukedMessageSet
+        : this.purgedMessageSet;
     this._addToChannelSet(targetSet, channelId, id);
   }
   createButton(label, callback) {
@@ -7763,7 +7884,7 @@ module.exports = class MessageLoggerV2 {
     for (const [messageId, record] of Object.entries(this.messageRecord || {})) {
       if (record?.message?.channel_id === threadId) ids.add(messageId);
     }
-    for (const map of [this.deletedMessageRecord, this.editedMessageRecord, this.purgedMessageRecord]) {
+    for (const map of [this.deletedMessageRecord, this.editedMessageRecord, this.purgedMessageRecord, this.nukedMessageRecord]) {
       if (!Array.isArray(map?.[threadId])) continue;
       map[threadId].forEach(messageId => ids.add(messageId));
     }
@@ -7795,6 +7916,7 @@ module.exports = class MessageLoggerV2 {
     }
     this.sortedDeletedMessageIds?.delete(threadId);
     this.sortedPurgedMessageIds?.delete(threadId);
+    this.sortedNukedMessageIds?.delete(threadId);
     this.forumThreadMetadataCache?.delete(threadId);
     if (this.deletedChatMessagesCount) delete this.deletedChatMessagesCount[threadId];
     return ids;
@@ -8450,14 +8572,14 @@ module.exports = class MessageLoggerV2 {
   }
   isIndexedSavedDeletedRecord(record, messageId) {
     // A message ID by itself is not a sufficient ownership signal: native forum cards also use
-    // Discord message/thread IDs. Require the canonical saved IDs and a deleted/purged index so
+    // Discord message/thread IDs. Require the canonical saved IDs and a deletion-category index so
     // normal messages and edit-only records can never enter the local removal path.
     const id = String(messageId ?? '');
     const channelId = String(record?.message?.channel_id ?? '');
     if (!id || !channelId || !record?.delete_data || String(record.message?.id ?? '') !== id) return false;
-    const indexedSets = [this.deletedMessageSet, this.purgedMessageSet];
+    const indexedSets = [this.deletedMessageSet, this.purgedMessageSet, this.nukedMessageSet];
     if (indexedSets.some(map => map?.get?.(channelId)?.has?.(id))) return true;
-    const indexedRecords = [this.deletedMessageRecord, this.purgedMessageRecord];
+    const indexedRecords = [this.deletedMessageRecord, this.purgedMessageRecord, this.nukedMessageRecord];
     return indexedRecords.some(map => Array.isArray(map?.[channelId]) && map[channelId].includes(id));
   }
   shouldAddPermissionIndependentContextDelete(record, messageId, channelId, nativeDeletePresent = false) {
@@ -8575,10 +8697,20 @@ module.exports = class MessageLoggerV2 {
   }
   deleteMessageFromRecords(id, options = {}) {
     const record = this.messageRecord[id];
-    const setMaps = [this.deletedMessageSet, this.editedMessageSet, this.purgedMessageSet];
+    // The live plugin may be hot-swapped from a pre-Nuked build. Make local removal safe during
+    // that short transition instead of assuming a full Discord restart initialized the index.
+    this.nukedMessageRecord ||= {};
+    this.nukedMessageSet ||= new Map();
+    const recordMaps = [
+      this.deletedMessageRecord,
+      this.editedMessageRecord,
+      this.purgedMessageRecord,
+      this.nukedMessageRecord
+    ];
+    const setMaps = [this.deletedMessageSet, this.editedMessageSet, this.purgedMessageSet, this.nukedMessageSet];
     if (!record) {
-      for (let i = 0; i < 3; i++) {
-        const map = [this.deletedMessageRecord, this.editedMessageRecord, this.purgedMessageRecord][i];
+      for (let i = 0; i < recordMaps.length; i++) {
+        const map = recordMaps[i];
         const setMap = setMaps[i];
         for (let channelId in map) {
           const index = map[channelId].indexOf(id);
@@ -8598,8 +8730,8 @@ module.exports = class MessageLoggerV2 {
       return this.deleteForumThreadFromRecords(id);
     }
     if (this.settings?.deleteCachedFilesWithRecords) this.deleteCachedFilesForRecord(record);
-    for (let i = 0; i < 3; i++) {
-      const map = [this.deletedMessageRecord, this.editedMessageRecord, this.purgedMessageRecord][i];
+    for (let i = 0; i < recordMaps.length; i++) {
+      const map = recordMaps[i];
       const setMap = setMaps[i];
       if (!map[channelId]) continue;
       const index = map[channelId].indexOf(id);
@@ -8684,10 +8816,14 @@ module.exports = class MessageLoggerV2 {
       handleInvalidEntries(this.deletedMessageRecord, this.deletedMessageSet);
       handleInvalidEntries(this.editedMessageRecord, this.editedMessageSet);
       handleInvalidEntries(this.purgedMessageRecord, this.purgedMessageSet);
+      handleInvalidEntries(this.nukedMessageRecord, this.nukedMessageSet);
       const deletedMessages = extractAllMessageIds(this.deletedMessageRecord);
       const editedMessages = extractAllMessageIds(this.editedMessageRecord);
       const purgedMessages = extractAllMessageIds(this.purgedMessageRecord);
-      for (let map of [deletedMessages, editedMessages, purgedMessages]) if (map.length > this.settings.savedMessagesCap) deleteMessages(map);
+      const nukedMessages = extractAllMessageIds(this.nukedMessageRecord);
+      for (let map of [deletedMessages, editedMessages, purgedMessages, nukedMessages]) {
+        if (map.length > this.settings.savedMessagesCap) deleteMessages(map);
+      }
       if (changed) this.saveData();
       for (let id in this.editHistoryAntiSpam) if (Date.now() - this.editHistoryAntiSpam[id].times[0] > 10 * 60 * 1000) delete this.editHistoryAntiSpam[id];
     } catch (e) {
@@ -9576,6 +9712,7 @@ module.exports = class MessageLoggerV2 {
       };
       addFromMap(this.deletedMessageRecord);
       addFromMap(this.purgedMessageRecord);
+      addFromMap(this.nukedMessageRecord);
       addFromMap(this.editedMessageRecord);
       for (const [messageId, saved] of Object.entries(this.messageRecord || {})) {
         if (saved?.message?.channel_id === threadId) addId(messageId);
@@ -10814,6 +10951,8 @@ module.exports = class MessageLoggerV2 {
                 ? this.getSavedThreadVisibilityLabel(record, true)
                 : this.menu.selectedTab === 'purged'
                   ? 'Hide Purged Message'
+                  : this.menu.selectedTab === 'nuked'
+                    ? 'Hide Nuked Message'
                   : this.menu.selectedTab === 'ghostpings'
                     ? 'Hide Ghost Ping'
                     : 'Hide Deleted Message';
@@ -11402,6 +11541,9 @@ module.exports = class MessageLoggerV2 {
     if (this.menu.selectedTab == 'edited') pushIdsIntoMessages(this.editedMessageRecord);
     if (this.menu.selectedTab == 'deleted') pushIdsIntoMessages(this.deletedMessageRecord);
     if (this.menu.selectedTab == 'purged') pushIdsIntoMessages(this.purgedMessageRecord);
+    if (this.menu.selectedTab == 'nuked' && this.settings.antiNukeEnabled) {
+      pushIdsIntoMessages(this.nukedMessageRecord);
+    }
     if (this.menu.selectedTab == 'hidden') {
       messages = Object.entries(this.messageRecord)
         .filter(([, record]) => isHiddenRecord(record))
@@ -11411,6 +11553,7 @@ module.exports = class MessageLoggerV2 {
       checkIsMentioned(this.deletedMessageRecord);
       checkIsMentioned(this.editedMessageRecord);
       checkIsMentioned(this.purgedMessageRecord);
+      checkIsMentioned(this.nukedMessageRecord);
     }
     const filters = this.menu.filter.split(',');
     for (const filterItem of filters) {
@@ -11512,12 +11655,21 @@ module.exports = class MessageLoggerV2 {
     }, 0);
   }
   openTab(tab) {
+    if (!this.isLoggerTabAvailable(tab)) {
+      if (tab === 'nuked') {
+        this.showToast('Enable Anti Nuke to view saved Nuked records.', { type: 'warning', timeout: 5000 });
+      }
+      return false;
+    }
     const tabBar = document.getElementById(this.style.menuTabBar);
     if (!tabBar) return this.showToast(`Error switching to tab ${tab}!`, { type: 'error', timeout: 3000 });
-    tabBar.querySelector(`.${this.style.tabSelected}`).classList.remove(this.style.tabSelected);
-    tabBar.querySelector('#' + tab).classList.add(this.style.tabSelected);
+    const nextTab = tabBar.querySelector('#' + tab);
+    if (!nextTab) return this.showToast(`Error switching to tab ${tab}!`, { type: 'error', timeout: 3000 });
+    tabBar.querySelector(`.${this.style.tabSelected}`)?.classList.remove(this.style.tabSelected);
+    nextTab.classList.add(this.style.tabSelected);
     this.menu.selectedTab = tab;
     setTimeout(() => this.refilterMessages(), 0);
+    return true;
   }
   createHeader() {
     if (!this.createHeader.classes || this.createHeader.classes.__errored) {
@@ -11548,6 +11700,7 @@ module.exports = class MessageLoggerV2 {
     tabs.appendChild(createTab('Deleted', 'deleted'));
     tabs.appendChild(createTab('Edited', 'edited'));
     tabs.appendChild(createTab('Purged', 'purged'));
+    if (this.settings.antiNukeEnabled) tabs.appendChild(createTab('Nuked', 'nuked'));
     tabs.appendChild(createTab('Ghost pings', 'ghostpings'));
     if (this.settings.showHiddenTab) tabs.appendChild(createTab('Hidden', 'hidden'));
     tabBar.style.marginRight = '20px';
@@ -11647,6 +11800,12 @@ module.exports = class MessageLoggerV2 {
     // A manual toolbar/context action supersedes a queued shortcut transition. The scheduled
     // callback clears its own handle before entering here, so it is not cancelled accidentally.
     if (this._loggerShortcutReopenTimeout) this.cancelPendingLoggerShortcutTransition();
+    if (type && !this.isLoggerTabAvailable(type)) {
+      if (type === 'nuked') {
+        this.showToast('Enable Anti Nuke to view saved Nuked records.', { type: 'warning', timeout: 5000 });
+      }
+      return;
+    }
     if (this.menu.open) {
       if (type) this.openTab(type);
       return;
@@ -11654,7 +11813,7 @@ module.exports = class MessageLoggerV2 {
     this.menu.open = true;
     if (type) this.menu.selectedTab = type;
     if (!this.menu.selectedTab) this.menu.selectedTab = 'deleted';
-    if (!this.settings.showHiddenTab && this.menu.selectedTab === 'hidden') this.menu.selectedTab = 'deleted';
+    if (!this.isLoggerTabAvailable(this.menu.selectedTab)) this.menu.selectedTab = 'deleted';
     const messagesDIV = this.parseHTML(`<div id="${this.style.menuMessages}"></div>`);
     const viewportHeight = document.getElementById('app-mount').getBoundingClientRect().height;
     messagesDIV.style.minHeight = viewportHeight * 0.514090909 + 'px';

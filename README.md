@@ -1,6 +1,6 @@
 # 📝 MessageLoggerV2 Remake
 
-A maintained BetterDiscord message logger for deleted, edited, purged, and ghost-pinged messages.
+A maintained BetterDiscord message logger for deleted, edited, purged, nuked, and ghost-pinged messages.
 
 This fork also restores logged forum posts and channel threads, preserves their metadata, and provides controls for hiding or permanently removing related records.
 
@@ -11,10 +11,10 @@ This fork also restores logged forum posts and channel threads, preserves their 
 
 ### 📜 Logging and restoration
 
-- Deleted, edited, purged, and ghost-ping history, plus a bounded memory-only **Sent** tab that clears on reload.
+- Deleted, edited, purged, Nuked, and ghost-ping history, plus a bounded memory-only **Sent** tab that clears on reload.
 - In-chat restoration of logged deleted and purged messages, saved edit history, configurable tints, and unseen-event counts.
 - Attachment-only messages, embeds, stickers, voice messages, and other file references remain manageable in logger views.
-- Search filters, scoped log views, context-menu actions, double-click-to-jump logger rows, and a Hidden tab.
+- Search filters, scoped log views, context-menu actions, double-click-to-jump logger rows, and cross-category Hidden records.
 - Captured toggle keybinds for all logs, the selected channel, and the selected server. Switching views closes any open native media viewer first.
 - One local-only permanent-delete flow across restored messages, logger rows, and forum/thread mounts.
   - Right-click **Delete** confirms removal.
@@ -25,7 +25,9 @@ This fork also restores logged forum posts and channel threads, preserves their 
 - Forum posts and channel threads retain parent-channel, location, author, reply, and later-added attachment metadata.
 - Fully deleted forum cards and thread entries can be restored when Discord provides at least one live item as a layout anchor.
 - Default-on native forum refresh shows new posts without leaving and reopening the channel.
-- Configurable **Anti Nuke** snapshots capture bounded forum posts, threads, messages, and attachments when a parent forum or text channel is deleted.
+- Configurable **Anti Nuke** snapshots capture bounded forum posts, threads, messages, and attachments in a dedicated **Nuked** tab when a parent forum or text channel is deleted.
+- An optional, default-off Anti-Nuke toast reports only channel deletions that captured records, using the destructive event color and selected notification mode regardless of ordinary logging or alert ignores.
+- Disabling Anti Nuke hides its tab without deleting existing records. Hidden Nuked records remain manageable from **Hidden** when that tab is enabled.
 - Required message-history caching and the hierarchical media-cache layout remain enabled for reliable forum/thread recovery; their legacy settings are visible but locked on.
 
 ### 🛡️ Scope, alerts, media, and reliability
@@ -72,7 +74,8 @@ The same help pages are available inside Discord from **MessageLoggerV2 Settings
 ### 💾 Data files
 
 - Standard message, deleted, edited, and purged records remain compatible with current MessageLoggerV2 forks.
-- Forum/thread, location, suppression, Anti-Nuke, and cache metadata are additive.
+- The fork-specific `nukedMessageRecord` index and Anti-Nuke marker are additive. Other forks can ignore them while retaining the core saved messages.
+- Older Anti-Nuke records previously indexed as Purged are moved into Nuked during atomic normalization.
 - Legacy or mixed-fork files are normalized and atomically rewritten without inventing missing enhanced metadata.
 - Missing primaries restore from valid backups; newer schemas fail closed instead of being downgraded.
 

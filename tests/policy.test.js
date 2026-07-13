@@ -103,3 +103,110 @@ test('BetterDiscord notifications queue in memory and clear without persistence'
   assert.deepEqual(plugin._nativeNotificationQueue, []);
   assert.equal(plugin._nativeNotificationQueueStopped, false);
 });
+
+test('Anti-Nuke alerts use the destructive theme and target Nuked while ordinary bulk deletes target Purged', () => {
+  let actions = [];
+  let openedTab = null;
+  let notification = null;
+  const plugin = createPlugin({
+    _showNotification(title, message, type, nextActions) {
+      notification = { title, message, type };
+      actions = nextActions;
+    },
+    openWindow(tab) {
+      openedTab = tab;
+    }
+  });
+  const channel = { id: 'channel', guild_id: 'guild' };
+  const guild = { id: 'guild' };
+
+  plugin._notifyEvent('nukeDetected', channel, guild, undefined, {
+    count: 3,
+    locationName: 'Server, #deleted-channel'
+  });
+  assert.deepEqual(notification, {
+    title: 'Nuke Detected',
+    message: 'Nuke Detected at Server, #deleted-channel; 3 saved records captured',
+    type: 'error'
+  });
+  assert.equal(actions[0].label, 'View');
+  actions[0].onClick();
+  assert.equal(openedTab, 'nuked');
+
+  plugin._notifyEvent('bulkDelete', channel, guild, undefined, {
+    count: 2,
+    locationName: 'Server, #general'
+  });
+  actions[0].onClick();
+  assert.equal(openedTab, 'purged');
+});
+
+test('Anti-Nuke detection toggle bypasses ordinary alert scope and requires both feature toggles', () => {
+  const notifications = [];
+  let capturedCount = 2;
+  const guild = { id: 'guild', name: 'Server' };
+  const channel = { id: 'channel', guild_id: guild.id, name: 'general', type: 0 };
+  const createContext = () => ({
+    channel,
+    guild,
+    captured: capturedCount,
+    capturedThreads: 1,
+    capturedMessages: 1,
+    capturedAttachments: 0,
+    captureEnabled: true,
+    threadCap: 15,
+    messageCap: 45,
+    attachmentCap: 15,
+    cleanupTimer: null
+  });
+  const plugin = createPlugin({
+    settings: {
+      antiNukeEnabled: true,
+      antiNukeToasts: false,
+      toastToggles: { deleted: false, disableToastsForLocal: false },
+      toastTogglesDMs: { deleted: false },
+      ignoreSelf: true,
+      ignoreLocalDeletes: true,
+      alwaysNotifChannel: false,
+      alwaysNotifGuild: false,
+      notifOnlyWhitelist: true,
+      notificationBlacklist: [channel.id, guild.id],
+      notificationWhitelist: []
+    },
+    selectedChannel: channel,
+    tools: { getServer: () => guild },
+    _destructiveChannelDeleteContexts: new Map(),
+    createDeletedChannelCaptureContext: createContext,
+    captureQueuedThreadsFromDeletedChannel() {},
+    captureMessagesFromDeletedChannel() {},
+    isLocalDeleteEvent: () => false,
+    _notifyEvent(...args) { notifications.push(args); },
+    saveData() {},
+    scheduleLoggerMenuRefresh() {}
+  });
+
+  assert.equal(plugin.handleDeletedGuildChannel({ channel }, () => 'handled', []), 'handled');
+  assert.equal(notifications.length, 0, 'capture remains silent while the dedicated toggle is off');
+
+  plugin.settings.antiNukeToasts = true;
+  plugin.handleDeletedGuildChannel({ channel }, () => 'handled', []);
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0][0], 'nukeDetected');
+  assert.deepEqual(notifications[0][4], {
+    count: 2,
+    locationName: 'Server, #general'
+  });
+  assert.equal(
+    plugin._shouldShowToast(channel, guild, 'deleted', true),
+    false,
+    'the equivalent ordinary deleted-message alert remains suppressed'
+  );
+
+  capturedCount = 0;
+  plugin.handleDeletedGuildChannel({ channel }, () => 'handled', []);
+  assert.equal(notifications.length, 1, 'empty or uncached channel deletions do not create false-positive alerts');
+
+  plugin.settings.antiNukeEnabled = false;
+  plugin.handleDeletedGuildChannel({ channel }, () => 'handled', []);
+  assert.equal(notifications.length, 1, 'the toast toggle cannot alert while Anti Nuke is disabled');
+});

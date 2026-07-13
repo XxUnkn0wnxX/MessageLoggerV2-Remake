@@ -34,9 +34,11 @@ function createRecordPlugin() {
     deletedMessageRecord: { [state.rootId]: [state.rootId, state.childId] },
     editedMessageRecord: { [state.rootId]: [state.childId] },
     purgedMessageRecord: {},
+    nukedMessageRecord: {},
     deletedMessageSet: new Map([[state.rootId, new Set([state.rootId, state.childId])]]),
     editedMessageSet: new Map([[state.rootId, new Set([state.childId])]]),
     purgedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
     suppressedForumThreadIds: new Set(),
     settings: { deleteCachedFilesWithRecords: false },
     dispatcher: { dispatch: event => dispatches.push(event) },
@@ -179,6 +181,7 @@ test('suppressed root IDs accept only Discord-style numeric IDs and persist in p
     deletedMessageRecord: {},
     editedMessageRecord: {},
     purgedMessageRecord: {},
+    nukedMessageRecord: {},
     suppressedForumThreadIds: new Set()
   });
 
@@ -461,12 +464,137 @@ test('legacy Anti-Nuke channel-thread placeholders repair only a nearby initial 
   assert.equal(normalized.messageRecord[rootId].delete_data.forum_metadata.starterMessageId, starterId);
   assert.equal(normalized.messageRecord[rootId].delete_data.forum_metadata.starterFoldedIntoRoot, true);
   assert.equal(normalized.messageRecord[replyId].message.content, 'Reply B');
-  assert.deepEqual(normalized.purgedMessageRecord[rootId], [rootId, replyId]);
+  assert.equal(normalized.purgedMessageRecord[rootId], undefined);
+  assert.deepEqual(normalized.nukedMessageRecord[rootId], [rootId, replyId]);
   assert.equal(normalized.messageRecord[forumId].message.content, 'Forum body', 'forum post storage is unchanged');
   assert.equal(normalized.messageRecord[forumId].delete_data.forum_metadata.starterMessageId, forumId);
   assert.equal(normalized.messageRecord[lateRootId].message.content, '[starter message unavailable]');
   assert.equal(normalized.messageRecord[lateRootId].delete_data.forum_metadata.starterMessageId, lateRootId);
   assert.equal(normalized.messageRecord[lateReplyId].message.content, 'Much later reply');
+  assert.equal(JSON.stringify(plugin.normalizePersistedDataPayload(normalized)), JSON.stringify(normalized));
+});
+
+test('Nuked tab separation preserves hidden Anti-Nuke records while its feature is disabled', () => {
+  const saved = (id, { antiNuke = false, hidden = false, time = Number(id) } = {}) => ({
+    message: {
+      id,
+      channel_id: 'channel',
+      content: `message ${id}`,
+      timestamp: Number(id),
+      author: { id: 'author', username: 'Author' }
+    },
+    delete_data: {
+      time,
+      ...(antiNuke ? { anti_nuke: true, anti_nuke_parent_id: 'parent' } : {}),
+      ...(hidden ? { hidden: true } : {})
+    }
+  });
+  const normalPurgedId = '600';
+  const visibleNukedId = '601';
+  const hiddenNukedId = '602';
+  const hiddenPurgedId = '603';
+  const plugin = createPlugin({
+    settings: {
+      antiNukeEnabled: true,
+      showHiddenTab: true,
+      reverseOrder: false
+    },
+    menu: { selectedTab: 'purged', filter: '' },
+    messageRecord: {
+      [normalPurgedId]: saved(normalPurgedId, { time: 100 }),
+      [visibleNukedId]: saved(visibleNukedId, { antiNuke: true, time: 200 }),
+      [hiddenNukedId]: saved(hiddenNukedId, { antiNuke: true, hidden: true, time: 300 }),
+      [hiddenPurgedId]: saved(hiddenPurgedId, { hidden: true, time: 400 })
+    },
+    purgedMessageRecord: {
+      channel: [normalPurgedId, hiddenPurgedId]
+    },
+    nukedMessageRecord: {
+      channel: [visibleNukedId, hiddenNukedId]
+    },
+    dispatcher: { dispatch() {} },
+    _invalidateAndRecache() {},
+    saveData() {},
+    scheduleLoggerMenuRefresh() {},
+    refreshForumThreadLogModal() {},
+    showToast() {}
+  });
+
+  assert.deepEqual(plugin.getFilteredMessages(), [normalPurgedId], 'Purged contains only ordinary bulk deletes');
+  plugin.menu.selectedTab = 'nuked';
+  assert.deepEqual(plugin.getFilteredMessages(), [visibleNukedId], 'Nuked contains only visible Anti-Nuke records');
+  plugin.menu.selectedTab = 'hidden';
+  assert.deepEqual(
+    plugin.getFilteredMessages(),
+    [hiddenPurgedId, hiddenNukedId],
+    'Hidden contains hidden records from both categories'
+  );
+
+  plugin.settings.antiNukeEnabled = false;
+  assert.equal(plugin.isLoggerTabAvailable('nuked'), false);
+  assert.equal(plugin.isLoggerTabAvailable('hidden'), true);
+  assert.deepEqual(
+    plugin.getFilteredMessages(),
+    [hiddenPurgedId, hiddenNukedId],
+    'disabling Anti-Nuke does not remove its records from Hidden'
+  );
+
+  assert.equal(plugin.unhideSavedDeletedRecord(plugin.messageRecord[hiddenNukedId]), true);
+  assert.deepEqual(plugin.getFilteredMessages(), [hiddenPurgedId], 'unhidden Nuked records leave Hidden immediately');
+  plugin.menu.selectedTab = 'nuked';
+  assert.deepEqual(plugin.getFilteredMessages(), [], 'the unavailable Nuked view stays empty while disabled');
+  assert.deepEqual(
+    plugin.nukedMessageRecord.channel,
+    [visibleNukedId, hiddenNukedId],
+    'tab visibility never changes the persisted fork-specific Nuked index'
+  );
+
+  plugin.settings.antiNukeEnabled = true;
+  assert.equal(plugin.isLoggerTabAvailable('nuked'), true);
+  assert.deepEqual(
+    plugin.getFilteredMessages(),
+    [hiddenNukedId, visibleNukedId],
+    're-enabling Anti-Nuke reveals both previously visible and newly unhidden Nuked records'
+  );
+});
+
+test('normalization migrates Anti-Nuke records out of Purged into the fork-specific Nuked index', () => {
+  const antiNukeId = '610';
+  const ordinaryPurgedId = '611';
+  const plugin = createPlugin({
+    cleanupMessageObject(message) {
+      return {
+        ...message,
+        attachments: Array.isArray(message.attachments) ? message.attachments : [],
+        embeds: Array.isArray(message.embeds) ? message.embeds : []
+      };
+    }
+  });
+  const payload = {
+    messageRecord: {
+      [antiNukeId]: {
+        message: { id: antiNukeId, channel_id: 'deleted-channel', content: 'nuked', timestamp: 610 },
+        delete_data: { time: 100, anti_nuke: true, anti_nuke_parent_id: 'deleted-channel' }
+      },
+      [ordinaryPurgedId]: {
+        message: { id: ordinaryPurgedId, channel_id: 'live-channel', content: 'purged', timestamp: 611 },
+        delete_data: { time: 200 }
+      }
+    },
+    deletedMessageRecord: {},
+    editedMessageRecord: { 'deleted-channel': [antiNukeId] },
+    purgedMessageRecord: {
+      'deleted-channel': [antiNukeId],
+      'live-channel': [ordinaryPurgedId]
+    }
+  };
+
+  const normalized = plugin.normalizePersistedDataPayload(payload);
+
+  assert.deepEqual(normalized.purgedMessageRecord, { 'live-channel': [ordinaryPurgedId] });
+  assert.deepEqual(normalized.nukedMessageRecord, { 'deleted-channel': [antiNukeId] });
+  assert.deepEqual(normalized.editedMessageRecord, { 'deleted-channel': [antiNukeId] });
+  assert.equal(normalized.messageRecord[antiNukeId].delete_data.anti_nuke, true);
   assert.equal(JSON.stringify(plugin.normalizePersistedDataPayload(normalized)), JSON.stringify(normalized));
 });
 

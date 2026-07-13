@@ -110,7 +110,8 @@ BetterDiscord stores the plugin's data beside the installed plugin:
 ### Compatibility
 
 - Legacy and other-fork data is normalized into the current complete schema and atomically rewritten.
-- Core message and index fields remain readable by current MessageLoggerV2 forks; this fork adds forum/thread, saved-location, suppression, Anti-Nuke, and cache metadata.
+- Core message and legacy index fields remain readable by current MessageLoggerV2 forks. The additive `nukedMessageRecord` index is fork-specific; its core messages remain available to forks that ignore the extra key.
+- Earlier Anti-Nuke records indexed as Purged are moved into Nuked during whole-file normalization.
 - Surviving metadata and unknown top-level fork keys are retained. Metadata removed by another fork remains blank.
 - A newer data or backup schema is never downgraded: the logger fails closed until it is updated.
 
@@ -152,7 +153,8 @@ The notification whitelist and blacklist are managed from the same server, chann
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Enable Anti Nuke | On | Captures a bounded snapshot under **Purged** when a parent forum or text channel is deleted. This emergency path overrides whitelist, blacklist, mute, NSFW, bot, blocked-user, self-author, and local-delete rules. Turning it off suppresses the entire cascade. |
+| Enable Anti Nuke | On | Captures a bounded snapshot under **Nuked** when a parent forum or text channel is deleted. Turning it off stops new captures and hides the Nuked tab without deleting existing records. |
+| Show nuke detection toasts | Off | Reports only deleted channels that captured Anti-Nuke records, avoiding empty/uncached false positives. Uses the destructive deleted/purged event color and selected native/custom mode; ordinary logging and alert scope do not suppress it. |
 | Thread and forum post cap | `15` | Limits structural thread/forum-post roots captured per deleted parent channel. Blank or `0` is unlimited. |
 | Total message cap | `45` | One shared allowance for replies across captured threads/forum posts plus ordinary parent-channel messages. Root payloads, including a distinct starter folded into a channel-thread root, do not consume this cap. Blank or `0` is unlimited. |
 | Total attachment cap | `15` | One total shared allowance for Discord file attachments across the deleted channel. A single message can consume the entire cap. Blank or `0` is unlimited. |
@@ -160,9 +162,10 @@ The notification whitelist and blacklist are managed from the same server, chann
 All three caps apply to one parent-channel deletion event:
 
 - Thread/forum roots, then their replies, then ordinary parent-channel messages are captured newest-first.
-- Anti-Nuke channel-thread roots use the same metadata and starter-body schema as ordinary deleted threads; only their Purged category and Anti-Nuke markers differ.
+- Anti-Nuke channel-thread roots use the same metadata and starter-body schema as ordinary deleted threads; their dedicated Nuked category and marker keep them separate from ordinary bulk deletes.
 - Attachments count only after their message is admitted. Excluded messages never store attachments; roots remain even if their attachments exceed the budget.
 - Anti Nuke bypasses normal logging ignores and overrides; only its own toggle disables capture.
+- Hidden Nuked records remain in **Hidden** while Anti Nuke is off. Unhiding one keeps it stored and makes it visible again when Anti Nuke is re-enabled.
 - Blank or `0` is unlimited and can freeze Discord or use substantial disk space on large channels.
 
 Anti-Nuke records are archival because their parent channel no longer exists, so they cannot **Jump to Message**. The same rule applies whenever neither the message channel nor a saved thread/forum parent remains.
@@ -172,7 +175,7 @@ Anti-Nuke records are archival because their parent channel no longer exists, so
 | Setting | Default | Behavior |
 | --- | --- | --- |
 | Cached messages cap | `1000` | Maximum sent messages retained in the working cache. |
-| Saved messages cap | `1000` | Separate maximum for deleted, edited, and purged records. |
+| Saved messages cap | `1000` | Separate maximum for deleted, edited, purged, and nuked records. |
 | Menu message render cap | `50` | Number rendered before **Load More** appears. |
 
 Caps are enforced periodically. Increasing a cap does not restore records that were already removed.

@@ -41,6 +41,7 @@ function payload(records = {}, indexes = {}, suppressedForumThreadIds = []) {
     deletedMessageRecord: indexes.deleted || {},
     editedMessageRecord: indexes.edited || {},
     purgedMessageRecord: indexes.purged || {},
+    nukedMessageRecord: indexes.nuked || {},
     suppressedForumThreadIds
   };
 }
@@ -133,7 +134,7 @@ test('legacy fork payloads without forum metadata or suppression migrate before 
     purgedMessageRecord: {}
   };
 
-  assert.equal(plugin.isValidDataPayload(legacy, { strict: true }), true);
+  assert.equal(plugin.canNormalizePersistedDataPayload(legacy), true);
   const normalized = plugin.normalizePersistedDataPayload(legacy);
   const merged = plugin.mergeDataPayloads(normalized, payload({
     '200': record('200', 'thread', {
@@ -197,6 +198,7 @@ test('mixed legacy and enhanced fields normalize without discarding surviving me
   assert.deepEqual(normalized.deletedMessageRecord, { 'channel-a': ['100'] });
   assert.deepEqual(normalized.editedMessageRecord, { 'channel-a': ['100'] });
   assert.deepEqual(normalized.purgedMessageRecord, {});
+  assert.deepEqual(normalized.nukedMessageRecord, {});
   assert.deepEqual(normalized.suppressedForumThreadIds, []);
 });
 
@@ -247,6 +249,7 @@ test('data rewritten by a legacy fork can round-trip back into the enhanced sche
   assert.deepEqual(normalized.deletedMessageRecord, { 'channel-a': ['100'] });
   assert.deepEqual(normalized.editedMessageRecord, { 'channel-a': ['100'] });
   assert.deepEqual(normalized.purgedMessageRecord, {});
+  assert.deepEqual(normalized.nukedMessageRecord, {});
   assert.deepEqual(normalized.suppressedForumThreadIds, []);
   assert.equal(normalizedRecord.deletedata, undefined);
   assert.equal(normalizedRecord.editHistory, undefined);
@@ -399,7 +402,7 @@ test('canonical output retains the core payload shape used by current logger for
   plugin.installDataPayload(normalized);
   const output = plugin._getDataPayload();
 
-  for (const key of ['messageRecord', 'deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+  for (const key of ['messageRecord', 'deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord', 'nukedMessageRecord']) {
     assert.equal(typeof output[key], 'object');
     assert.equal(Array.isArray(output[key]), false);
   }
@@ -448,12 +451,19 @@ test('newer fork schemas fail closed and foreign top-level extensions survive ca
 
 test('startup selection restores missing primary data from backup but blocks newer schemas', () => {
   const plugin = createNormalizationPlugin();
-  const backup = payload({ '100': record('100', 'channel') });
+  const backup = payload({
+    '100': record('100', 'deleted-channel', {
+      delete_data: { time: 100, anti_nuke: true, anti_nuke_parent_id: 'deleted-channel' }
+    })
+  }, { purged: { 'deleted-channel': ['100'] } });
 
   const selected = plugin.selectStartupDataPayload(null, backup);
   assert.equal(selected.source, 'backup');
   assert.equal(selected.primaryWasPresent, false);
   assert.deepEqual(Object.keys(selected.data.messageRecord), ['100']);
+  const normalizedBackup = plugin.normalizePersistedDataPayload(selected.data);
+  assert.deepEqual(normalizedBackup.purgedMessageRecord, {});
+  assert.deepEqual(normalizedBackup.nukedMessageRecord, { 'deleted-channel': ['100'] });
 
   assert.throws(
     () => plugin.selectStartupDataPayload(
@@ -579,7 +589,7 @@ test('forum root cap removal also removes its children and preserves suppression
   assert.deepEqual(capped.suppressedForumThreadIds, ['100']);
 });
 
-test('forum root cap removal cascades across deleted, edited, and purged indexes', () => {
+test('forum root cap removal cascades across deleted, edited, purged, and nuked indexes', () => {
   const plugin = createMergePlugin();
   const data = payload({
     '100': record('100', '100', { delete_data: { time: 100, forum_thread_delete: true } }),
@@ -589,7 +599,8 @@ test('forum root cap removal cascades across deleted, edited, and purged indexes
   }, {
     deleted: { '100': ['100'], channel: ['300'] },
     edited: { '100': ['101'] },
-    purged: { '100': ['102'] }
+    purged: {},
+    nuked: { '100': ['102'] }
   });
 
   const capped = plugin.applySavedMessagesCapToPayload(data, 1);
@@ -598,6 +609,7 @@ test('forum root cap removal cascades across deleted, edited, and purged indexes
   assert.deepEqual(capped.deletedMessageRecord, { channel: ['300'] });
   assert.deepEqual(capped.editedMessageRecord, {});
   assert.deepEqual(capped.purgedMessageRecord, {});
+  assert.deepEqual(capped.nukedMessageRecord, {});
 });
 
 test('re-enabling after a no-save startup atomically preserves disk and session history', async t => {

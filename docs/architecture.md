@@ -33,8 +33,8 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 ## 🗃️ Record Model and Indexes
 
 - `messageRecord` is the source of truth keyed by Discord message ID.
-- `deletedMessageRecord`, `editedMessageRecord`, and `purgedMessageRecord` are channel-to-ID indexes. A record may legitimately appear in more than one category, but each category/channel list must remain de-duplicated.
-- `deletedMessageSet`, `editedMessageSet`, and `purgedMessageSet` mirror those indexes for fast membership checks.
+- `deletedMessageRecord`, `editedMessageRecord`, `purgedMessageRecord`, and fork-specific `nukedMessageRecord` are channel-to-ID indexes. A record may also retain independent Edited membership, but each deletion belongs to only Deleted, Purged, or Nuked.
+- Matching `*MessageSet` maps mirror those indexes for fast membership checks.
 - `suppressedForumThreadIds` prevents intentionally hidden or removed restored roots from reappearing.
 - `_getDataPayload`, `installDataPayload`, and `sanitizeDataPayload` define the persisted/runtime boundary and rebuild derived sets and sorted caches.
 
@@ -53,6 +53,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
   - Legacy `deletedata` and `editHistory` values merge into `delete_data` and `edit_history`; missing enhanced values receive safe empty defaults.
 - `prepareDataPayloadForNormalization` fills only reconstructable derived collections and refuses to invent a missing core `messageRecord`.
   - `normalizePersistedDataPayload` normalizes records, re-keys mismatched IDs, de-duplicates edit/cache identities, rebuilds canonical channel indexes, and performs final validation.
+  - `migrateAntiNukeCategoryRecords` removes marked Anti-Nuke IDs from Deleted/Purged and rebuilds the additive Nuked index. The marker can reconstruct the index after a round trip through another fork.
 - A detected legacy/mixed payload is installed only after normalization succeeds, then `rewriteCanonicalDataPayload` atomically replaces the entire primary file. The old backup is deliberately retained until a later normal backup, and progress/failure uses the configured notification router.
 - `selectStartupDataPayload` distinguishes a missing primary from a fresh empty payload and restores a valid backup even when automatic backup writing is disabled.
   - Backup restoration is separate from legacy migration so console and routed messages describe rebuilding the primary accurately.
@@ -82,11 +83,12 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 
 ## 🛡️ Anti-Nuke Recovery
 
-- Channel deletion capture stores bounded snapshots under Purged.
+- Channel deletion capture stores bounded snapshots under the fork-specific Nuked index; Purged remains reserved for ordinary bulk deletes.
 - Thread/forum-root, total-message, and attachment caps are separate and apply newest-first.
 - Channel-thread snapshots use the same folded starter/root schema as ordinary thread deletion; Anti-Nuke adds archival markers without changing the captured thread metadata or reply boundaries.
 - Root records bypass the total-message budget but their attachments still consume the attachment budget.
 - Anti-Nuke intentionally overrides normal logging scope and author ignores; only its own enable switch disables the cascade.
+- The Nuked tab is conditional on that switch. Disabling it hides the view only; records and Hidden-tab state remain persisted.
 - Parent channels no longer exist, so Anti-Nuke records do not offer impossible jump actions.
 
 ## 🖼️ Media Lifecycle
