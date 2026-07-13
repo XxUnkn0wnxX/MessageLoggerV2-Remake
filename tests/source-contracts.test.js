@@ -314,14 +314,21 @@ test('first-install help matches the current logging-scope onboarding', () => {
   assert.match(source, /Open the <strong>Message Logger<\/strong> submenu/);
   assert.match(source, /Only log whitelist<\/strong> under <strong>Ignores and overrides/);
   assert.match(source, /Always log selected channel<\/strong> and <strong>Always log DMs/);
-  assert.match(source, /Default shortcuts: <strong>Ctrl\+M<\/strong> toggles all logs/);
-  assert.match(source, /<strong>Ctrl\+N<\/strong> toggles the selected channel/);
-  assert.match(source, /<strong>Ctrl\+S<\/strong> toggles the selected server/);
-  assert.match(source, /server shortcut is unavailable in DMs/);
   assert.match(source, /Cache media locally<\/strong> and <strong>Disable saving data/);
   assert.match(source, /<div class="\$\{this\.style\.textIndent\} \$\{this\.style\.startupHelpTitle\}">/);
   assert.doesNotMatch(source, /startupHelpIntro|ml2-startup-help-intro/);
   assert.doesNotMatch(source, /font-size: 40px/);
+});
+
+test('shared logger help lists every current default shortcut', () => {
+  const startupBlock = source.match(/const firstTimeIntroduction = initial([\s\S]*?): '';/);
+  assert.ok(startupBlock, 'startup help block was not found');
+  assert.doesNotMatch(startupBlock[1], /Ctrl\+[MNS]/);
+  assert.match(source, /\$\{regularHelpIntroduction\}[\s\S]*?<strong>Keyboard shortcuts:<\/strong>/);
+  assert.match(source, /<strong>Ctrl\+M<\/strong>: Toggle all logs/);
+  assert.match(source, /<strong>Ctrl\+N<\/strong>: Toggle logs for the selected channel/);
+  assert.match(source, /<strong>Ctrl\+S<\/strong>: Toggle logs for the selected server; unavailable in DMs/);
+  assert.match(source, /Change or clear these shortcuts under Misc settings/);
 });
 
 test('the complete first-setup block uses Discord native warning color', () => {

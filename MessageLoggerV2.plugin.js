@@ -6782,7 +6782,6 @@ module.exports = class MessageLoggerV2 {
            3. Add that location to the whitelist.</br></br>
            To log all eligible unmuted servers and channels, disable <strong>Only log whitelist</strong> under <strong>Ignores and overrides</strong>.</br>
            <strong>Always log selected channel</strong> and <strong>Always log DMs</strong> are enabled by default and can override the normal whitelist, blacklist, mute, and NSFW scope rules for their targets.</br>
-           Default shortcuts: <strong>Ctrl+M</strong> toggles all logs, <strong>Ctrl+N</strong> toggles the selected channel, and <strong>Ctrl+S</strong> toggles the selected server. Change them under Misc settings; the server shortcut is unavailable in DMs.</br>
            Logged message content and any enabled media cache remain local to this device. Review <strong>Cache media locally</strong> and <strong>Disable saving data</strong> under Misc settings if needed.
          </div></br>`
       : '';
@@ -6878,6 +6877,13 @@ module.exports = class MessageLoggerV2 {
                                     <div class="${this.style.textIndent}">
                                         Opens filtered menu that only shows messages from selected channel</br>
                                     </div></br>
+                                </div>
+                                <strong>Keyboard shortcuts:</strong></br>
+                                <div class="${this.style.textIndent}">
+                                    <strong>Ctrl+M</strong>: Toggle all logs.</br>
+                                    <strong>Ctrl+N</strong>: Toggle logs for the selected channel.</br>
+                                    <strong>Ctrl+S</strong>: Toggle logs for the selected server; unavailable in DMs.</br>
+                                    Change or clear these shortcuts under Misc settings.
                                 </div>
                                 <strong>Whitelist/blacklist, ignores and overrides:</strong></br>
                                 <div class="${this.style.textIndent}">
