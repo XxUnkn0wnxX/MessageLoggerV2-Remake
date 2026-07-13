@@ -11423,6 +11423,23 @@ module.exports = class MessageLoggerV2 {
     };
     setTimeout(loadMessages, 100);
   }
+  isExtendedDestructiveDeleteMenuItem(item) {
+    const props = item?.props || {};
+    const label = typeof props.label === 'string'
+      ? props.label.trim()
+      : typeof props.children === 'string'
+        ? props.children.trim()
+        : '';
+    // Keep plain "Delete" on its existing message-specific path. This fallback is for
+    // named Discord actions, such as Delete Thread, Delete Category, or Bulk Delete Posts.
+    if (!/\bDelete\b/i.test(label) || /^Delete$/i.test(label)) return false;
+    const className = typeof props.className === 'string' ? props.className : '';
+    const nativeDangerClass = DiscordModules.ColorClasses?.colorDanger;
+    return props.danger === true
+      || props.color === 'danger'
+      || (nativeDangerClass && className.split(/\s+/).includes(nativeDangerClass))
+      || /(?:^|\s)colorDanger(?:_[\w-]+)?(?:\s|$)/.test(className);
+  }
   patchContextMenus() {
     const getNestedProp = (obj, path) => path.split('.').reduce((o, p) => o?.[p], obj);
     const menuIdMatches = (actual, expected) =>
@@ -11488,6 +11505,16 @@ module.exports = class MessageLoggerV2 {
       // user, DM, channel, and server menus. Insert before its real top-level wrapper group.
       const copyGroupIndex = menu.findIndex(group => menuNodeContains(group, isVisibleCopyIdItem));
       return insertLoggerGroupAt(menu, copyGroupIndex, loggerSubmenu);
+    };
+    const insertLoggerSubmenuAfterExtendedDelete = (menu, loggerSubmenu) => {
+      // Discord changes both IDs and wording between Delete Thread, Forum, Category, Channel,
+      // and Post. The visible label plus native destructive styling is the stable fallback.
+      const deleteGroupIndex = menu.findIndex(group => menuNodeContains(
+        group,
+        item => this.isExtendedDestructiveDeleteMenuItem(item)
+      ));
+      if (deleteGroupIndex < 0) return false;
+      return insertLoggerGroupAt(menu, deleteGroupIndex + 1, loggerSubmenu);
     };
     const addSavedRecordItems = (newItems, addElement, record, messageId, channelId, options = {}) => {
       if (!record) return;
@@ -11654,6 +11681,7 @@ module.exports = class MessageLoggerV2 {
         items: newItems
       };
       if (insertLoggerSubmenuBeforeCopyId(menu, loggerSubmenu)) return;
+      if (insertLoggerSubmenuAfterExtendedDelete(menu, loggerSubmenu)) return;
       const actionGroup = nativeDeleteGroup
         || findMenuGroupByChildId(ret, 'mlv2-delete-saved-record')
         || findMenuGroupByChildId(ret, 'report');
@@ -11708,6 +11736,7 @@ module.exports = class MessageLoggerV2 {
         ? ['server-lockdown', 'report-raid', 'report-guild', 'report', 'delete-guild', 'leave-guild']
         : [];
       if (guildId && insertLoggerSubmenuBeforeCopyId(menu, loggerSubmenu)) return;
+      if (insertLoggerSubmenuAfterExtendedDelete(menu, loggerSubmenu)) return;
       if (insertLoggerSubmenuAfterAnchor(menu, loggerSubmenu, anchorIds)) return;
       menu.push(ContextMenu.buildMenuChildren([{
         type: 'group',
@@ -11747,6 +11776,7 @@ module.exports = class MessageLoggerV2 {
           items: newItems
         };
         if (insertLoggerSubmenuBeforeCopyId(menu, loggerSubmenu)) return;
+        if (insertLoggerSubmenuAfterExtendedDelete(menu, loggerSubmenu)) return;
         const isCurrentUser = props.user?.id === DiscordModules.UserStore?.getCurrentUser?.()?.id;
         if (!isCurrentUser && insertLoggerSubmenuAfterAnchor(
           menu,
@@ -11788,6 +11818,7 @@ module.exports = class MessageLoggerV2 {
             items: newItems
           };
           if (insertLoggerSubmenuBeforeCopyId(menu, loggerSubmenu)) return;
+          if (insertLoggerSubmenuAfterExtendedDelete(menu, loggerSubmenu)) return;
           if (insertLoggerSubmenuAfterAnchor(
             menu,
             loggerSubmenu,

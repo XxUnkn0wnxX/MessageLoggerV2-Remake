@@ -236,6 +236,17 @@ test('logger submenus prefer visible Copy ID rows and retain action fallbacks', 
   assert.match(source, /menuIdMatches\(id, 'copy-id'\) \|\| id\.startsWith\('devmode-copy-id-'\)/);
   assert.match(source, /\^Copy \(\?:Message\|User\|Channel\|Server\|Guild\) ID\$/);
   assert.match(source, /const copyGroupIndex = menu\.findIndex\(group => menuNodeContains\(group, isVisibleCopyIdItem\)\)/);
+  const plugin = createPlugin();
+  assert.equal(plugin.isExtendedDestructiveDeleteMenuItem({ props: { label: 'Delete', danger: true } }), false);
+  assert.equal(plugin.isExtendedDestructiveDeleteMenuItem({ props: { label: 'Delete Thread', danger: true } }), true);
+  assert.equal(plugin.isExtendedDestructiveDeleteMenuItem({ props: { children: 'Delete Forum', color: 'danger' } }), true);
+  assert.equal(plugin.isExtendedDestructiveDeleteMenuItem({ props: { label: 'Bulk Delete Posts', className: 'colorDanger_test' } }), true);
+  assert.equal(plugin.isExtendedDestructiveDeleteMenuItem({ props: { label: 'Delete Channel' } }), false);
+  assert.match(source, /const insertLoggerSubmenuAfterExtendedDelete = \(menu, loggerSubmenu\) =>[\s\S]*menuNodeContains\([\s\S]*isExtendedDestructiveDeleteMenuItem\(item\)[\s\S]*if \(deleteGroupIndex < 0\) return false;[\s\S]*deleteGroupIndex \+ 1/);
+  assert.equal(
+    (source.match(/if \(insertLoggerSubmenuAfterExtendedDelete\(menu, loggerSubmenu\)\) return;/g) || []).length,
+    4
+  );
   assert.equal(
     (source.match(/if \(insertLoggerSubmenuBeforeCopyId\(menu, loggerSubmenu\)\) return;/g) || []).length,
     3
