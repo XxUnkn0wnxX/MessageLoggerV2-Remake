@@ -388,6 +388,8 @@ module.exports = class MessageLoggerV2 {
           'Flushes pending log changes synchronously before plugin shutdown or hot reload.',
           'Correctly expires stale edit-notification spam tracking regardless of media-cache settings.',
           'Preserves disk-backed history when saving is re-enabled after a no-save reload by validating, merging, capping, and atomically replacing the completed payload.',
+          'Reports when saving is disabled or re-enabled, including whether in-memory logger changes stay memory-only, queue directly, or merge with saved history first.',
+          'Adds routed state feedback for high-impact logging, backup, media, Anti-Nuke, update, and destructive-cache settings without making ordinary toggles noisy.',
           'Cancels stale primary and backup writes when saving is disabled, and keeps saving disabled when recovery cannot complete safely.',
           'Normalizes legacy and mixed-fork data into the current additive schema without duplicating records or discarding surviving enhanced metadata.',
           'Reports valid-backup recovery separately while atomically rebuilding the main data file.',
@@ -1922,6 +1924,28 @@ module.exports = class MessageLoggerV2 {
     if (this.saveBackupTimeout) clearTimeout(this.saveBackupTimeout);
     this.saveBackupTimeout = 0;
     this.autoBackupSaveInterupts = 0;
+    if (enabled && this.settings.dontSaveData) {
+      this.reportSettingState(
+        'Message Logger Automatic Backup',
+        'Automatic backups enabled, but data saving is disabled; backup writes will resume after data saving is re-enabled.',
+        'Automatic backups enabled, but they will remain paused until data saving is re-enabled.',
+        'info'
+      );
+    } else if (enabled) {
+      this.reportSettingState(
+        'Message Logger Automatic Backup',
+        'Automatic backups enabled; creating a backup now and scheduling future backups after saved logger changes.',
+        'Automatic backups enabled. Creating a backup now; future backups follow saved logger changes.',
+        'info'
+      );
+    } else {
+      this.reportSettingState(
+        'Message Logger Automatic Backup',
+        `Automatic backups disabled.${hadPendingBackup ? ' The pending automatic backup was cancelled.' : ''}`,
+        `Automatic backups disabled.${hadPendingBackup ? ' The pending backup was cancelled.' : ''}`,
+        'neutral'
+      );
+    }
     if (!enabled && hadPendingBackup) {
       this.reportDebugEvent('Pending automatic backup cancelled because Auto backup was disabled.');
     }
@@ -1980,7 +2004,12 @@ module.exports = class MessageLoggerV2 {
           },
           { name: 'Ignore blocked users', id: 'ignoreBlockedUsers', type: 'switch' },
           { name: 'Ignore NSFW channels', id: 'ignoreNSFW', type: 'switch' },
-          { name: 'Only log whitelist', id: 'onlyLogWhitelist', type: 'switch' },
+          {
+            name: 'Only log whitelist',
+            id: 'onlyLogWhitelist',
+            type: 'switch',
+            action: 'reportLoggingScope'
+          },
           {
             name: 'Always log selected channel, regardless of whitelist/blacklist',
             note: 'A selected thread also applies this override to its parent channel.',
@@ -2125,7 +2154,8 @@ module.exports = class MessageLoggerV2 {
             name: 'Cache media locally',
             note: 'Master switch for caching attachments, embed images, and stickers.',
             id: 'cacheAllImages',
-            type: 'switch'
+            type: 'switch',
+            action: 'reportMediaCaching'
           },
           {
             name: 'Aggresive message caching (makes sure we have the data of any deleted or edited messages)',
@@ -2248,7 +2278,8 @@ module.exports = class MessageLoggerV2 {
             name: 'Enable Anti Nuke',
             note: 'Captures a bounded snapshot under Purged when a parent forum or text channel is deleted. This emergency path overrides all normal logging ignores and location rules.',
             id: 'antiNukeEnabled',
-            type: 'switch'
+            type: 'switch',
+            action: 'reportAntiNuke'
           },
           {
             name: 'Thread and forum post cap',
@@ -2361,7 +2392,8 @@ module.exports = class MessageLoggerV2 {
             name: 'Delete cached files with log records',
             note: 'Permanently removes related cached media when a log record is removed. This cannot be undone.',
             id: 'deleteCachedFilesWithRecords',
-            type: 'switch'
+            type: 'switch',
+            action: 'reportCachedFileDeletion'
           }
         ]
       },
@@ -2403,7 +2435,10 @@ module.exports = class MessageLoggerV2 {
         this.invalidateAllChannelCache();
         if (this.selectedChannel) this.cacheChannelMessages(this.selectedChannel.id);
       },
-      refreshAttachmentRendering: () => this.refreshAttachmentRendering(),
+      refreshAttachmentRendering: (val) => {
+        this.refreshAttachmentRendering();
+        this.reportMajorSettingChange('onlyRenderCachedAttachments', val);
+      },
       refreshDeletedStyle: () => {
         this.updateCSS();
         this._tintSweep?.();
@@ -2413,6 +2448,10 @@ module.exports = class MessageLoggerV2 {
       notificationModeChange: (val) => this.handleNotificationModeChange(val),
       handleDataSave: (val) => this.handleDataSaveSetting(val),
       handleBackup: (val) => this.handleAutoBackupSetting(val),
+      reportLoggingScope: (val) => this.reportMajorSettingChange('onlyLogWhitelist', val),
+      reportMediaCaching: (val) => this.reportMajorSettingChange('cacheAllImages', val),
+      reportAntiNuke: (val) => this.reportMajorSettingChange('antiNukeEnabled', val),
+      reportCachedFileDeletion: (val) => this.reportMajorSettingChange('deleteCachedFilesWithRecords', val),
       rescheduleBackup: () => this.handleAutoBackupIntervalChange(),
       toggleLogsButton: (val) => {
         if (val) return this.addOpenLogsButton();
@@ -2434,6 +2473,7 @@ module.exports = class MessageLoggerV2 {
         } else {
           clearInterval(this._autoUpdateInterval);
         }
+        this.reportMajorSettingChange('autoUpdate', val);
       }
     };
     const createSettingFromConfig = (config) => {
@@ -3118,6 +3158,86 @@ module.exports = class MessageLoggerV2 {
       0
     );
   }
+  reportSettingState(title, consoleMessage, notificationMessage, type = 'info', timeout = 5000) {
+    // High-impact settings use one routing point so console detail and the user's selected
+    // BetterDiscord-notification/custom-toast mode cannot drift apart.
+    Logger.log(consoleMessage);
+    this._showNotification(title, notificationMessage, type, [], timeout);
+  }
+  reportDataSavingResume(requiresRecoveryMerge) {
+    // Re-enabling saving has two intentionally different paths. Avoid calling session data
+    // "ephemeral" because Discord reserves that term for messages the logger excludes.
+    const consoleMessage = requiresRecoveryMerge
+      ? 'Data saving re-enabled after a no-save reload; merging persisted history with in-memory logger changes before saving.'
+      : 'Data saving re-enabled without a reload; queued current in-memory logger changes for safe persistence.';
+    const notificationMessage = requiresRecoveryMerge
+      ? 'Data saving re-enabled. Merging saved history with in-memory logger changes before saving.'
+      : 'Data saving re-enabled. In-memory logger changes are queued to save.';
+    this.reportSettingState(
+      requiresRecoveryMerge ? 'Message Logger Data Recovery' : 'Message Logger Data Saving',
+      consoleMessage,
+      notificationMessage,
+      'info',
+      5000
+    );
+  }
+  reportDataSavingDisabled() {
+    // The detailed console entry records the cancelled write state, while the shorter
+    // neutral alert tells the user what will happen to new logger changes until saving returns.
+    this.reportSettingState(
+      'Message Logger Data Saving',
+      'Data saving disabled; new logger changes will remain in memory and will not be written to disk. Pending primary and backup writes were cancelled.',
+      'Data saving disabled. New logger changes will stay in memory and will not be written to disk.',
+      'neutral',
+      5000
+    );
+  }
+  reportMajorSettingChange(settingId, enabled) {
+    // These are deliberately limited to settings with broad, persistent, destructive, or
+    // privacy-relevant effects. Ordinary display/filter toggles remain silent.
+    const feedback = {
+      onlyLogWhitelist: {
+        title: 'Message Logger Logging Scope',
+        enabled: 'Whitelist-only logging enabled. Messages outside the logging whitelist will not be saved unless an override applies.',
+        disabled: 'Whitelist-only logging disabled. Messages outside the whitelist may now be saved unless another ignore or blacklist rule blocks them.'
+      },
+      cacheAllImages: {
+        title: 'Message Logger Media Cache',
+        enabled: 'Local media caching enabled. New eligible attachments, embeds, and stickers may be downloaded.',
+        disabled: 'Local media caching disabled. New media will not be downloaded; existing cached files are kept.'
+      },
+      antiNukeEnabled: {
+        title: 'Message Logger Anti Nuke',
+        enabled: 'Anti Nuke enabled. Eligible deleted parent channels will be captured within the configured caps.',
+        disabled: 'Anti Nuke disabled. Deleted parent-channel snapshots will not be captured.'
+      },
+      autoUpdate: {
+        title: 'Message Logger Automatic Updates',
+        enabled: 'Automatic updates enabled. MessageLoggerV2 will periodically check for updates.',
+        disabled: 'Automatic updates disabled. MessageLoggerV2 will not check for updates automatically.'
+      },
+      onlyRenderCachedAttachments: {
+        title: 'Message Logger Attachment Rendering',
+        enabled: 'Local-only attachment rendering enabled. Uncached remote attachments will use filename placeholders.',
+        disabled: "Local-only attachment rendering disabled. Uncached attachments may render from Discord's CDN."
+      },
+      deleteCachedFilesWithRecords: {
+        title: 'Message Logger Cached-File Deletion',
+        enabled: 'Cached-file deletion enabled. Removing a log record may permanently delete its related local media; no files are deleted until records are removed.',
+        disabled: 'Cached-file deletion disabled. Removing log records will leave cached media files in place.'
+      }
+    };
+    const state = feedback[settingId];
+    if (!state) return;
+    const message = enabled ? state.enabled : state.disabled;
+    this.reportSettingState(
+      state.title,
+      `High-impact setting changed (${settingId}=${enabled}): ${message}`,
+      message,
+      enabled ? 'info' : 'neutral',
+      settingId === 'deleteCachedFilesWithRecords' && enabled ? 8000 : 5000
+    );
+  }
   async rewriteCanonicalDataPayload() {
     // This is deliberately a primary-only migration write. Keeping the previous backup
     // untouched gives users one additional recovery point until the next normal backup.
@@ -3295,13 +3415,14 @@ module.exports = class MessageLoggerV2 {
     if (disabled) {
       const hadPendingBackup = !!this.saveBackupTimeout;
       this.cancelPendingDataWrites();
-      Logger.log('Data saving disabled; pending primary and backup writes were cancelled.');
+      this.reportDataSavingDisabled();
       if (hadPendingBackup) {
         this.reportDebugEvent('Pending automatic backup cancelled because data saving was disabled.');
       }
       return;
     }
     if (!this._needsNoSaveDataMerge) {
+      this.reportDataSavingResume(false);
       this.saveData();
       if (this.settings.autoBackup) this.saveBackup();
       return;
@@ -3309,6 +3430,7 @@ module.exports = class MessageLoggerV2 {
     this.settings.dontSaveData = true;
     this.saveSettings();
     if (!this._noSaveMergePromise) {
+      this.reportDataSavingResume(true);
       this._noSaveMergePromise = this.mergeNoSaveSessionIntoPersistedData()
         .finally(() => { this._noSaveMergePromise = null; });
     }
@@ -3934,18 +4056,21 @@ module.exports = class MessageLoggerV2 {
     }
     const toast = document.createElement('div');
     toast.className = 'mlv2-toast';
+    // Use Discord theme variables instead of fixed colors so custom toasts retain contrast
+    // in light, dark, and themed clients. Neutral is the grey disabled-state presentation.
     const typeConfig = {
-      'success': { bg: '#43b581', icon: '\u2713' },
-      'info': { bg: '#4a90e2', icon: '\u2139' },
-      'warning': { bg: '#faa61a', icon: '\u26A0' },
-      'error': { bg: '#f04747', icon: '\u2715' },
-      'danger': { bg: '#f04747', icon: '\u2715' },
-      '': { bg: '#7289da', icon: '' }
+      'success': { bg: 'var(--status-positive, #43b581)', fg: 'var(--white-500, #fff)', icon: '\u2713' },
+      'info': { bg: 'var(--brand-500, #5865f2)', fg: 'var(--white-500, #fff)', icon: '\u2139' },
+      'warning': { bg: 'var(--status-warning, #faa61a)', fg: 'var(--black-500, #000)', icon: '\u26A0' },
+      'error': { bg: 'var(--status-danger, #f04747)', fg: 'var(--white-500, #fff)', icon: '\u2715' },
+      'danger': { bg: 'var(--status-danger, #f04747)', fg: 'var(--white-500, #fff)', icon: '\u2715' },
+      'neutral': { bg: 'var(--background-tertiary, #4f545c)', fg: 'var(--text-default, #fff)', icon: '\u25CF' },
+      '': { bg: 'var(--brand-500, #5865f2)', fg: 'var(--white-500, #fff)', icon: '' }
     };
     const config = typeConfig[type] || typeConfig[''];
     toast.style.cssText = `
       background-color: ${config.bg};
-      color: white;
+      color: ${config.fg};
       padding: 14px 18px;
       margin-top: 10px;
       border-radius: 5px;
@@ -4092,13 +4217,24 @@ module.exports = class MessageLoggerV2 {
   }
   _showNotification(title, content, type, actions, timeout = 4500) {
     if (this.settings.useNotificationsInstead) {
-      this._enqueueNativeNotification({
+      const notification = {
         title,
         content,
-        type,
+        // BetterDiscord's native card is already theme-dependent grey. Keep its supported
+        // info type for compatibility, but replace the blue info icon with a neutral,
+        // theme-colored icon when the plugin requests a grey disabled state.
+        type: type === 'neutral' ? 'info' : type,
         duration: timeout === 0 ? Infinity : timeout,
         actions
-      });
+      };
+      if (type === 'neutral') {
+        notification.icon = () => React.createElement(
+          'span',
+          { style: { color: 'var(--interactive-normal)', fontSize: '16px', lineHeight: 1 } },
+          '\u25CF'
+        );
+      }
+      this._enqueueNativeNotification(notification);
     } else {
       this.showToast(content, {
         type,
@@ -4197,6 +4333,7 @@ module.exports = class MessageLoggerV2 {
     } else {
       this._clearNativeNotificationQueue(false);
     }
+    Logger.log(`Notification mode changed to ${useNotifications ? 'BetterDiscord notifications' : 'custom toasts'}.`);
     this.showNotificationTest(useNotifications);
   }
   showNotificationTest(useNotifications = this.settings.useNotificationsInstead) {
@@ -4204,16 +4341,16 @@ module.exports = class MessageLoggerV2 {
     if (this.lastNotificationTest?.mode === useNotifications
       && now - this.lastNotificationTest.time < 500) return;
     this.lastNotificationTest = { mode: useNotifications, time: now };
-    const message = useNotifications ? 'Using BdApi notifications' : 'Using custom toasts';
+    const message = useNotifications ? 'Using BetterDiscord notifications' : 'Using custom toasts';
     if (useNotifications) {
       this._enqueueNativeNotification({
         title: 'Notification Test',
         content: message,
-        type: 'success',
+        type: 'info',
         duration: 5000
       });
     } else {
-      this.showToast(message, { type: 'success', timeout: 5000 });
+      this.showToast(message, { type: 'info', timeout: 5000 });
     }
   }
   _getChangedAttachments(oldAttachments, newAttachments, messageId, channelId, guildId) {

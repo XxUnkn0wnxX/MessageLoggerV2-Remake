@@ -220,6 +220,22 @@ test('backup diagnostics remain opt-in under their own warning-colored Debug cat
   assert.match(source, /if \(this\.settings\?\.debugToasts\)[\s\S]*this\._showNotification\('Message Logger Debug', message, 'warning'/);
 });
 
+test('high-impact setting changes use routed theme-aware state feedback', () => {
+  for (const [settingName, action] of [
+    ['Only log whitelist', 'reportLoggingScope'],
+    ['Cache media locally', 'reportMediaCaching'],
+    ['Enable Anti Nuke', 'reportAntiNuke'],
+    ['Delete cached files with log records', 'reportCachedFileDeletion']
+  ]) {
+    assert.match(source, new RegExp(`name: ['"]${settingName}['"][\\s\\S]*?action: '${action}'`));
+  }
+  assert.match(source, /reportMajorSettingChange\(settingId, enabled\)[\s\S]*onlyLogWhitelist[\s\S]*cacheAllImages[\s\S]*antiNukeEnabled[\s\S]*autoUpdate[\s\S]*onlyRenderCachedAttachments[\s\S]*deleteCachedFilesWithRecords/);
+  assert.match(source, /enabled \? 'info' : 'neutral'/);
+  assert.match(source, /'neutral': \{ bg: 'var\(--background-tertiary, #4f545c\)', fg: 'var\(--text-default, #fff\)'/);
+  assert.match(source, /type: type === 'neutral' \? 'info' : type[\s\S]*var\(--interactive-normal\)/);
+  assert.match(source, /Notification mode changed to[\s\S]*Using BetterDiscord notifications[\s\S]*type: 'info'/);
+});
+
 test('no-save recovery remains guarded and ordered before backup persistence', () => {
   assert.match(source, /this\._needsNoSaveDataMerge = !!this\.settings\.dontSaveData/);
   assert.match(source, /loadPersistedDataForNoSaveMerge\(\)/);
@@ -228,6 +244,8 @@ test('no-save recovery remains guarded and ordered before backup persistence', (
   assert.match(source, /Data Recovery Error/);
   assert.match(source, /View the console log for more details/);
   assert.match(source, /this\.cancelPendingDataWrites\?\.\(\)/);
+  assert.match(source, /reportDataSavingResume\(requiresRecoveryMerge\)[\s\S]*this\.reportSettingState\([\s\S]*Message Logger Data Recovery[\s\S]*Message Logger Data Saving/);
+  assert.match(source, /reportDataSavingDisabled\(\)[\s\S]*new logger changes will remain in memory[\s\S]*will not be written to disk[\s\S]*'neutral'/);
   const recovery = source.slice(source.indexOf('async mergeNoSaveSessionIntoPersistedData()'), source.indexOf('handleDataSaveSetting(disabled)'));
   assert.ok(recovery.indexOf("this.getName() + 'Data'") < recovery.indexOf("this.getName() + 'DataBackup'"));
 });

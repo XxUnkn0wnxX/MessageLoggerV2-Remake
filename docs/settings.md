@@ -90,7 +90,7 @@ The two locked legacy cache settings remain present in `MessageLoggerV2.config.j
 
 At startup, the plugin fills every missing setting from the current defaults and repairs invalid types, nested toast options, numeric bounds, lists, colors, and the automatic-backup interval before saving the canonical config. Valid custom values are retained, including paths, colors, caps, lists, and backup intervals within range. Unknown top-level and nested keys are also retained for compatibility with other forks; only a completely malformed settings container is replaced with the full default object.
 
-When saving is disabled, queued primary and backup writes are cancelled. Re-enabling it without reloading keeps the current in-memory behavior. Re-enabling it after a no-save reload performs a one-time disk/session merge, removes duplicate indexes, preserves hidden and forum/thread state, applies the configured saved-message cap, writes the primary atomically, and updates the backup only after the primary succeeds. If the primary is missing or invalid, an available valid backup is used; if recovery cannot validate a source or complete the primary write, neither file is replaced and saving remains disabled.
+When saving is disabled, a neutral state message explains that new logger changes will remain in memory and will not be written to disk; queued primary and backup writes are cancelled. Re-enabling it without reloading reports that the current in-memory logger changes are queued for saving. Re-enabling it after a no-save reload reports that saved history is being merged with in-memory logger changes, then performs the one-time merge, removes duplicate indexes, preserves hidden and forum/thread state, applies the configured saved-message cap, writes the primary atomically, and updates the backup only after the primary succeeds. All state messages use the selected BetterDiscord-notification or custom-toast mode and include a detailed console message. If the primary is missing or invalid, an available valid backup is used; if recovery cannot validate a source or complete the primary write, neither file is replaced and saving remains disabled.
 
 When a data file was written by a legacy or different MessageLoggerV2 fork, the plugin normalizes the complete payload to its current schema and atomically rewrites the primary file. The standard message record and deleted/edited/purged indexes remain compatible with current logger forks; this fork's forum/thread, saved-location, suppression, Anti-Nuke, and cache fields are additive. Surviving legacy and enhanced fields are merged, while metadata already removed by another fork is left blank. Unknown top-level metadata owned by another fork is retained, including during no-save recovery. Migration progress, success, and errors use the selected BetterDiscord-notification or custom-toast mode; detailed errors are also written to the console.
 
@@ -170,6 +170,20 @@ The Debug category title and both setting labels use Discord's native warning co
 | Show debug messages as toasts | Off | Sends the same backup events through the selected BetterDiscord-notification or custom-toast mode. Every debug alert uses the native warning color, and this control is independent of console debug logging. |
 
 Debug output currently covers only the automatic-backup lifecycle. It does not change backup timing, persistence, or normal error reporting.
+
+## 📣 High-Impact Setting Feedback
+
+The plugin reports only settings with broad logging, persistence, media, update, or destructive effects; ordinary display and filter toggles remain quiet.
+
+- **Only log whitelist**
+- **Auto backup data**
+- **Cache media locally**
+- **Enable Anti Nuke**
+- **Automatic updates**
+- **Only render locally cached attachments**
+- **Delete cached files with log records**
+
+Each change writes an explicit `enabled` or `disabled` message to the console and follows the selected BetterDiscord-notification or custom-toast mode. Enabled states use Discord's info/brand color. Disabled states use a theme-neutral grey custom toast; BetterDiscord's native route keeps its theme-colored card and substitutes a neutral icon because the native API has no grey notification type. Debug alerts remain warning-colored, and errors remain red.
 
 ## 🖱️ Settings Actions
 

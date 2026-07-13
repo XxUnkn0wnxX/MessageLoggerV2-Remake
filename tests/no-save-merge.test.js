@@ -1008,6 +1008,7 @@ test('the public setting handler completes the guarded reload merge', async t =>
   const pluginDir = temporaryDirectory(t);
   const filePath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
   fs.writeFileSync(filePath, JSON.stringify({ data: payload() }));
+  const notifications = [];
   const plugin = createMergePlugin({
     pluginDir,
     nodeModules: { fs, path },
@@ -1015,6 +1016,7 @@ test('the public setting handler completes the guarded reload merge', async t =>
     messageRecordIds: new Set(['200']),
     suppressedForumThreadIds: new Set(),
     normalizePersistedDataPayload(data) { return this.sanitizeDataPayload(data); },
+    _showNotification(...args) { notifications.push(args); },
     _needsNoSaveDataMerge: true,
     _dataWriteEpoch: 0
   });
@@ -1026,6 +1028,11 @@ test('the public setting handler completes the guarded reload merge', async t =>
   assert.equal(plugin.settings.dontSaveData, false);
   assert.equal(plugin._needsNoSaveDataMerge, false);
   assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(filePath, 'utf8')).data.messageRecord), ['200']);
+  assert.ok(loggerEvents.some(event => event[0] === 'log'
+    && String(event[1]).includes('merging persisted history with in-memory logger changes')));
+  assert.equal(notifications[0][0], 'Message Logger Data Recovery');
+  assert.match(notifications[0][1], /merging saved history with in-memory logger changes/i);
+  assert.equal(notifications[0][2], 'info');
 });
 
 test('stale in-flight writes are cancelled before atomic rename', async t => {
@@ -1058,17 +1065,31 @@ test('stale in-flight writes are cancelled before atomic rename', async t => {
 test('no-reload disable and re-enable keeps the existing save behavior', () => {
   let primarySaves = 0;
   let backupSaves = 0;
+  const notifications = [];
   const plugin = createMergePlugin({
     settings: { dontSaveData: false, autoBackup: true },
     _needsNoSaveDataMerge: false,
     saveData() { primarySaves++; },
-    saveBackup() { backupSaves++; }
+    saveBackup() { backupSaves++; },
+    _showNotification(...args) { notifications.push(args); }
   });
+
+  plugin.handleDataSaveSetting(true);
+  assert.ok(loggerEvents.some(event => event[0] === 'log'
+    && String(event[1]).includes('new logger changes will remain in memory')));
+  assert.equal(notifications[0][0], 'Message Logger Data Saving');
+  assert.match(notifications[0][1], /will stay in memory.*will not be written to disk/i);
+  assert.equal(notifications[0][2], 'neutral');
 
   plugin.handleDataSaveSetting(false);
 
   assert.equal(primarySaves, 1);
   assert.equal(backupSaves, 1);
+  assert.ok(loggerEvents.some(event => event[0] === 'log'
+    && String(event[1]).includes('queued current in-memory logger changes')));
+  assert.equal(notifications[1][0], 'Message Logger Data Saving');
+  assert.match(notifications[1][1], /in-memory logger changes are queued to save/i);
+  assert.equal(notifications[1][2], 'info');
 });
 
 test('merge failures log details and use the configured notification router', () => {

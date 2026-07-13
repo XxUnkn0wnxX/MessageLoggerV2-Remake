@@ -174,6 +174,109 @@ test('debug warning alerts honor the selected native-notification or custom-toas
   assert.equal(customToasts[0][1].type, 'warning');
 });
 
+test('neutral state alerts use a theme-colored native card or custom grey toast', () => {
+  const nativeNotifications = [];
+  const customToasts = [];
+  const plugin = createPlugin({
+    settings: { useNotificationsInstead: true },
+    _enqueueNativeNotification(notification) { nativeNotifications.push(notification); },
+    showToast(content, options) { customToasts.push([content, options]); }
+  });
+
+  plugin._showNotification('State', 'Disabled state', 'neutral', [], 5000);
+  assert.equal(nativeNotifications[0].type, 'info');
+  assert.equal(typeof nativeNotifications[0].icon, 'function');
+  assert.equal(customToasts.length, 0);
+
+  plugin.settings.useNotificationsInstead = false;
+  plugin._showNotification('State', 'Disabled state', 'neutral', [], 5000);
+  assert.equal(customToasts[0][0], 'Disabled state');
+  assert.equal(customToasts[0][1].type, 'neutral');
+});
+
+test('high-impact setting feedback uses info for enabled and neutral for disabled', () => {
+  const notifications = [];
+  const plugin = createPlugin({
+    _showNotification(...args) { notifications.push(args); }
+  });
+  const settingIds = [
+    'onlyLogWhitelist',
+    'cacheAllImages',
+    'antiNukeEnabled',
+    'autoUpdate',
+    'onlyRenderCachedAttachments',
+    'deleteCachedFilesWithRecords'
+  ];
+
+  for (const settingId of settingIds) {
+    plugin.reportMajorSettingChange(settingId, true);
+    plugin.reportMajorSettingChange(settingId, false);
+  }
+
+  assert.deepEqual(notifications.map(event => event[2]), settingIds.flatMap(() => ['info', 'neutral']));
+  assert.ok(notifications.every(event => /enabled|disabled/i.test(event[1])));
+  assert.equal(loggerEvents.filter(event => event[0] === 'log'
+    && String(event[1]).includes('High-impact setting changed')).length, settingIds.length * 2);
+});
+
+test('automatic backup state feedback covers enabled, disabled, and saving-paused paths', () => {
+  const notifications = [];
+  let backupSaves = 0;
+  const plugin = createPlugin({
+    settings: { dontSaveData: false, debugLogging: false, debugToasts: false },
+    saveBackup() { backupSaves++; },
+    _showNotification(...args) { notifications.push(args); }
+  });
+
+  plugin.handleAutoBackupSetting(true);
+  assert.equal(backupSaves, 1);
+  assert.equal(notifications.at(-1)[2], 'info');
+  assert.match(notifications.at(-1)[1], /enabled.*creating a backup now/i);
+
+  plugin.saveBackupTimeout = setTimeout(() => {}, 60_000);
+  plugin.handleAutoBackupSetting(false);
+  assert.equal(notifications.at(-1)[2], 'neutral');
+  assert.match(notifications.at(-1)[1], /disabled.*pending backup was cancelled/i);
+
+  plugin.settings.dontSaveData = true;
+  plugin.handleAutoBackupSetting(true);
+  assert.equal(backupSaves, 1);
+  assert.equal(notifications.at(-1)[2], 'info');
+  assert.match(notifications.at(-1)[1], /enabled.*paused until data saving is re-enabled/i);
+});
+
+test('notification mode changes log and preview the selected route as info', () => {
+  const previews = [];
+  const plugin = createPlugin({
+    _nativeNotificationQueueStopped: true,
+    _clearNativeNotificationQueue() {},
+    showNotificationTest(mode) { previews.push(mode); }
+  });
+
+  plugin.handleNotificationModeChange(true);
+  plugin.handleNotificationModeChange(false);
+
+  assert.deepEqual(previews, [true, false]);
+  assert.ok(loggerEvents.some(event => event[1] === 'Notification mode changed to BetterDiscord notifications.'));
+  assert.ok(loggerEvents.some(event => event[1] === 'Notification mode changed to custom toasts.'));
+
+  const nativeNotifications = [];
+  const customToasts = [];
+  const previewPlugin = createPlugin({
+    _enqueueNativeNotification(notification) { nativeNotifications.push(notification); },
+    showToast(content, options) { customToasts.push([content, options]); }
+  });
+
+  previewPlugin.showNotificationTest(true);
+  previewPlugin.lastNotificationTest = null;
+  previewPlugin.showNotificationTest(false);
+
+  assert.equal(nativeNotifications[0].type, 'info');
+  assert.match(nativeNotifications[0].content, /BetterDiscord notifications/);
+  assert.equal(customToasts[0][1].type, 'info');
+  assert.match(customToasts[0][0], /custom toasts/);
+});
+
 test('backup debug lifecycle reports the queue delay, write start, and completion', () => {
   const notifications = [];
   const plugin = createPlugin({

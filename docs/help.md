@@ -153,6 +153,8 @@ Notification settings affect alerts only. Logging scope is controlled separately
 
 When **Disable saving data** was active at startup, the plugin leaves existing disk history untouched and starts a temporary in-memory session. Turning saving back on validates the disk history, merges it with eligible session records, applies saved-message caps, and atomically replaces the primary file before updating the backup. Duplicate category entries are removed while deleted, edited, purged, hidden, forum/thread, and suppressed-root state is preserved.
 
+Disabling saving reports that new logger changes will remain in memory and will not be written to disk. Re-enabling saving without a reload reports that those in-memory logger changes are queued to save. Re-enabling it after a no-save reload instead reports that saved history and in-memory logger changes are being merged. All messages follow your selected BetterDiscord-notification or custom-toast mode and also write details to the console.
+
 If validation or the primary write fails, saving remains disabled and the existing primary and backup files remain untouched. The plugin reports a short error through your selected BetterDiscord-notification or custom-toast mode and writes detailed paths, stage information, and the underlying error to the console.
 
 ### Legacy or mixed-fork data was detected
@@ -164,6 +166,10 @@ You will receive a migration-in-progress alert followed by success through your 
 If the primary file is missing or invalid, the same normalization is applied to a valid backup before the plugin atomically recreates the primary. Your selected notification mode reports that the valid backup was loaded and the main data file is being rebuilt, then reports recovery-specific success or failure. The console includes the recovery reason and detailed write errors. The original backup remains untouched during this recovery. Files marked with a schema newer than the installed plugin are not replaced from an older backup; the plugin fails closed so updating it cannot destroy newer data.
 
 The separate **Debug** settings group can report automatic-backup queue delays, reschedules, cancellations, starts, verification retries, and completions. Console logging and routed debug toasts are independent and both default off; enabling them does not change the backup schedule or normal error alerts.
+
+### High-impact setting feedback
+
+Changing **Only log whitelist**, **Auto backup data**, **Cache media locally**, **Enable Anti Nuke**, **Automatic updates**, **Only render locally cached attachments**, or **Delete cached files with log records** writes the new state to the console and reports it through your selected notification mode. Enabled states use the info color; disabled states use Discord's theme-neutral presentation. If the native notification API cannot request a grey type, the plugin keeps its theme-colored native card and uses a neutral icon. Debug alerts remain warning-colored, and actual errors remain red.
 
 ### Nothing is logged
 

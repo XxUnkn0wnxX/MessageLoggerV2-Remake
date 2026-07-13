@@ -13,6 +13,7 @@ This document maps the major responsibilities inside the distributed `MessageLog
 
 - `getSettingsPanel`, `createSetting`, and `createGroup` build the accordion settings interface.
 - The standalone warning-colored Debug group keeps console and routed-toast diagnostics independently opt-in. `reportDebugEvent` is the shared router and currently accepts only automatic-backup lifecycle events.
+- `reportSettingState` keeps console detail and routed alerts aligned. `reportMajorSettingChange` deliberately covers only broad logging, persistence, media, update, and destructive settings; enabled states route as info and disabled states route through the theme-neutral presentation.
 - Logging scope combines whitelist, blacklist, muted server/channel, NSFW, selected-channel, and DM rules.
 - Author and local-action gates are intentionally separate: bot, blocked-user, self-author, local-edit, and local-delete rules must remain per message.
 - Guild and DM notification lists affect alerts rather than record eligibility.
@@ -91,6 +92,7 @@ This document maps the major responsibilities inside the distributed `MessageLog
 ## 🔔 Notifications
 
 - `_showNotification` is the single routing point between BetterDiscord native notifications and the plugin's custom toasts.
+- Custom toast colors use Discord CSS variables. The plugin-owned `neutral` state becomes a theme-grey custom toast or a supported native `info` notification with a neutral icon, because BetterDiscord exposes no grey notification type.
 - Native notifications use a memory-only FIFO queue with hover-aware yielding; queue state is never persisted.
 - Guild and DM event settings, local-user rules, active-location overrides, and notification lists are evaluated separately from logging eligibility.
 

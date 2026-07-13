@@ -62,9 +62,10 @@ npm run test:runtime-contracts
 | AT-24 | Cached-file deletion | Removing a record deletes only its related local media files and preserves unrelated files. |
 | AT-25 | No-save merge | Disk and session payloads merge deterministically with de-duplicated deleted, edited, and purged indexes. |
 | AT-26 | No-save failure safety | Empty sessions, corrupt sources, failed renames, and stale in-flight writes cannot erase or replace existing history. |
-| AT-27 | No-save state | No-reload toggles retain existing behavior; reload recovery preserves hidden, forum/thread, suppression, cap, and backup ordering contracts. |
+| AT-27 | No-save state | Disabling reports the memory-only state, no-reload re-enabling reports queued in-memory changes, and reload recovery reports its merge path while preserving hidden, forum/thread, suppression, cap, and backup ordering contracts. |
 | AT-28 | Cross-fork normalization | Legacy aliases, mixed enhanced fields, missing derived maps, scoped de-duplication, canonical defaults on newly captured records, idempotent output across changing Discord channel-store availability, canonical output shape, whole-file atomic migration, routed migration and backup-rebuild status, missing-primary backup restoration, opaque fork extensions, newer-schema fail-closed behavior, and legacy round trips remain covered. |
 | AT-29 | Backup diagnostics | Console and routed-toast debug controls remain independent and off by default; backup events use the warning type and follow the selected native-notification or custom-toast route. |
+| AT-30 | High-impact setting feedback | Logging scope, automatic backup, media caching, Anti-Nuke, automatic update, local-only rendering, and cached-file deletion actions log explicit states and follow the selected route; enabled uses info, disabled uses a theme-neutral presentation, debug remains warning, and errors remain red. |
 
 ## 💬 Live Discord Matrix
 
@@ -86,6 +87,7 @@ The following behavior depends on Discord's current Webpack exports, Flux events
 | RT-12 | Persistence recovery | In a disposable BetterDiscord profile, verify primary corruption loads a valid automatic backup, reports that the main file is being rebuilt, and retains the backup. Never corrupt the active profile for this check. |
 | RT-13 | No-save recovery | In a disposable profile, save known records, restart with saving disabled, create temporary deleted/edited/purged/forum records, then re-enable saving and confirm both generations survive another reload. |
 | RT-14 | Backup diagnostics | Open the warning-colored **Debug** group and verify both toggles default off. Enable console-only, toast-only, then both; schedule a backup and confirm queue, reschedule, cancellation, start, retry, and completion events use only the selected destinations. |
+| RT-15 | High-impact setting feedback | In both BetterDiscord-notification and custom-toast modes, toggle each high-impact setting listed in AT-30. Confirm the console and alert say `enabled` or `disabled`, enabled is info blue, disabled is theme-neutral grey or a neutral native icon/card, and the setting's existing behavior still applies. |
 
 ## 🔍 Audit Policy
 
