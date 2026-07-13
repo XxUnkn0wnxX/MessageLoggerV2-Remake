@@ -10,6 +10,8 @@ MessageLoggerV2 starts in whitelist-only mode.
 
 To log all eligible unmuted servers instead, disable **Only log whitelist** under **Ignores and overrides**. The selected channel and DMs also have enabled-by-default logging overrides; see the [settings reference](settings.md#logging-scope).
 
+Logged message content and any enabled media cache remain local to this device. Review **Cache media locally** and **Disable saving data** under Misc settings if needed.
+
 ## 📂 Opening Logs
 
 - Click the **Open Logs** button beside channel search to open all logs.

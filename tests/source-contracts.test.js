@@ -182,6 +182,32 @@ test('first-install help has one full-width dismiss-only action', () => {
   assert.doesNotMatch(initialBranch[1], /cancelText: 'Back'|returnToLoggerWindow/);
 });
 
+test('first-install help matches the current logging-scope onboarding', () => {
+  assert.match(source, /<strong class="\$\{this\.style\.startupHelpTitle\}">First setup:<\/strong>/);
+  assert.match(source, /Welcome to MessageLoggerV2/);
+  assert.match(source, /New installations start in <strong>whitelist-only mode<\/strong>/);
+  assert.match(source, /Right-click a server, channel, DM, or thread/);
+  assert.match(source, /Open the <strong>Message Logger<\/strong> submenu/);
+  assert.match(source, /Only log whitelist<\/strong> under <strong>Ignores and overrides/);
+  assert.match(source, /Always log selected channel<\/strong> and <strong>Always log DMs/);
+  assert.match(source, /Cache media locally<\/strong> and <strong>Disable saving data/);
+  assert.match(source, /<div class="\$\{this\.style\.textIndent\}">/);
+  assert.doesNotMatch(source, /startupHelpIntro|ml2-startup-help-intro/);
+  assert.doesNotMatch(source, /font-size: 40px/);
+});
+
+test('the first-setup heading uses Discord native warning color', () => {
+  assert.match(source, /\.\$\{this\.style\.startupHelpTitle\} \{\s*color: var\(--text-warning, var\(--status-warning\)\);/);
+});
+
+test('top-level help headings always start on a separate spaced line', () => {
+  assert.match(source, /\.\$\{this\.style\.helpContent\} > strong \{\s*display: block;\s*margin-top: 18px;/);
+  assert.match(source, /\.\$\{this\.style\.helpContent\} > strong \+ br \{\s*display: none;/);
+  assert.match(source, /<strong>Menu:<\/strong><\/br>\s*<div class="\$\{this\.style\.textIndent\}">/);
+  assert.doesNotMatch(source, /<strong>Menu:<\/strong><\/br><\/br>/);
+  assert.match(source, /<strong>Toasts:<\/strong><\/br>[\s\S]*?<strong>Notifications:<\/strong><\/br>/);
+});
+
 test('atomic persistence and startup cleanup remain wired into the plugin', () => {
   assert.match(source, /this\.cleanUpStaleDataTempFiles\(\)/);
   assert.match(source, /fs\.renameSync\(tempPath, filePath\)/);

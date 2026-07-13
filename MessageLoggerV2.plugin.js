@@ -1273,6 +1273,7 @@ module.exports = class MessageLoggerV2 {
     this.style.tabSelected = this.obfuscatedClass('ml2-tab-selected');
     this.style.textIndent = this.obfuscatedClass('ml2-help-text-indent');
     this.style.helpContent = this.obfuscatedClass('ml2-help-content');
+    this.style.startupHelpTitle = this.obfuscatedClass('ml2-startup-help-title');
     this.style.filterHelpModal = this.obfuscatedClass('ml2-filter-help-modal');
     this.style.settingsHelpModal = this.obfuscatedClass('ml2-settings-help-modal');
     this.style.startupHelpModal = this.obfuscatedClass('ml2-startup-help-modal');
@@ -1477,6 +1478,16 @@ module.exports = class MessageLoggerV2 {
                       overflow-y: auto;
                       padding-right: 12px;
                       scrollbar-gutter: stable;
+                    }
+                    .${this.style.helpContent} > strong {
+                      display: block;
+                      margin-top: 18px;
+                    }
+                    .${this.style.helpContent} > strong + br {
+                      display: none;
+                    }
+                    .${this.style.startupHelpTitle} {
+                      color: var(--text-warning, var(--status-warning));
                     }
                     .${this.style.filterHelpModal} footer > div,
                     .${this.style.filterHelpModal} footer [data-direction="horizontal"],
@@ -6190,6 +6201,20 @@ module.exports = class MessageLoggerV2 {
   }
   showLoggerHelpModal(initial = false, returnTarget = 'logger') {
     const fromSettings = returnTarget === 'settings';
+    // Keep first-install onboarding aligned with docs/help.md#first-setup while reusing the
+    // same heading-and-indent layout as the ordinary help modal shown directly below it.
+    const firstTimeIntroduction = initial
+      ? `<strong class="${this.style.startupHelpTitle}">First setup:</strong></br>
+         <div class="${this.style.textIndent}">
+           Welcome to MessageLoggerV2. New installations start in <strong>whitelist-only mode</strong>; unlisted locations are ignored unless an enabled override applies.</br></br>
+           1. Right-click a server, channel, DM, or thread.</br>
+           2. Open the <strong>Message Logger</strong> submenu.</br>
+           3. Add that location to the whitelist.</br></br>
+           To log all eligible unmuted servers and channels, disable <strong>Only log whitelist</strong> under <strong>Ignores and overrides</strong>.</br>
+           <strong>Always log selected channel</strong> and <strong>Always log DMs</strong> are enabled by default and can override the normal whitelist, blacklist, mute, and NSFW scope rules for their targets.</br>
+           Logged message content and any enabled media cache remain local to this device. Review <strong>Cache media locally</strong> and <strong>Disable saving data</strong> under Misc settings if needed.
+         </div></br>`
+      : '';
     this.createModal({
       ...(initial
         ? {
@@ -6219,9 +6244,9 @@ module.exports = class MessageLoggerV2 {
         this.tools.createWrappedElement([
           this.parseHTML(
             `<div class="${this.multiClasses.defaultColor} ${this.style.helpContent}">
-                               ${initial ? '</br><span style="font-size: 40px;">As you are a <strong>first time user</strong>, you must know in order to have a server be logged, you must <strong>RIGHT CLICK</strong> a server or channel and add it to the whitelist.</br>Alternatively if this behavior is unwanted, you can always log all unmuted servers and channels by disabling <strong>Only log whitelist</strong> in logger settings under <strong>IGNORES AND OVERRIDES</strong>.</span></br></br>' : ''}
+                               ${firstTimeIntroduction}
                                Hello! This is the ${this.getName()} help modal! You may at any time open this in plugin settings by clicking the help button, or in the menu by pressing the question mark button and then then Logger help button.</br>
-                               <strong>Menu:</strong></br></br>
+                               <strong>Menu:</strong></br>
                                 <div class="${this.style.textIndent}">
                                     DELETE + LEFT-CLICK:</br>
                                     <div class="${this.style.textIndent}">
