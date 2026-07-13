@@ -251,6 +251,22 @@ test('restored forum and thread previews use native parsed markup', () => {
   assert.doesNotMatch(restoredPreviews, /subtext\.textContent = `\$\{record\.message\.author/);
 });
 
+test('surviving forum and thread cards tint only their deleted preview body', () => {
+  const previewTint = source.slice(
+    source.indexOf('const addForumTextTint ='),
+    source.indexOf('const addTintClass =')
+  );
+  assert.match(previewTint, /message-content-\$\{messageId\}/);
+  assert.match(previewTint, /messageFocusBlock_[\s\S]*messageContent_/);
+  assert.doesNotMatch(previewTint, /postTitleText_|data-text-variant|querySelector\([^\n]*h3/);
+  assert.match(previewTint, /tintNativeThreadBrowserPreviewContent[\s\S]*\^message-content-\(\\d\+\)\$/);
+  assert.match(previewTint, /closest\?\.\('div\[role="button"\]'\)[\s\S]*h2 \[class\*="threadName_"\]/);
+  assert.match(previewTint, /input\[placeholder="Search for Thread Name"\]/);
+  assert.match(previewTint, /clearTintClasses\(card\);[\s\S]*shouldTintPreview[\s\S]*clearForumTextTint\(card\);[\s\S]*target !== content[\s\S]*addForumTextTint\(card, messageId\)/);
+  assert.match(source, /scheduleTintForMessage[\s\S]*tintNativeThreadBrowserPreviewByMessageId\(messageId\)/);
+  assert.match(source, /createRestoredThreadBrowserCard[\s\S]*card\.classList\.add\(this\.style\.deleted\)/);
+});
+
 test('logger jump-availability tint stays scoped to the logger window', () => {
   assert.match(source, /style\.jumpAvailableAuthor = this\.obfuscatedClass\('ml2-jump-available-author'\)/);
   assert.match(source, /#app-mount \.\$\{this\.style\.menuRoot\} \.\$\{this\.style\.jumpAvailableAuthor\}[\s\S]*color: var\(--text-warning, var\(--status-warning\)\) !important/);

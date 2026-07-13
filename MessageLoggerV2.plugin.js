@@ -9404,19 +9404,62 @@ module.exports = class MessageLoggerV2 {
       });
       return changed;
     };
-    const addForumTextTint = (card, threadId) => {
-      if (!card || card.nodeType !== 1 || this.noTintIds.has(threadId)) return false;
-      const targets = [
-        card.querySelector('[class*="postTitleText_"], [class*="title_"][data-text-variant*="heading"], h3'),
-        card.querySelector('[class*="messageFocusBlock_"] [class*="messageContent_"], [class*="message_"] [class*="messageContent_"], [class*="messageContent_"]')
-      ].filter(Boolean);
-      let changed = false;
-      for (const target of targets) {
-        if (target.classList.contains(this.style.deletedForumText)) continue;
-        target.classList.add(this.style.deletedForumText);
-        changed = true;
+    const addForumTextTint = (card, messageId) => {
+      if (!card || card.nodeType !== 1 || this.noTintIds.has(messageId)) return false;
+      // A surviving forum post or channel thread is not itself deleted. Tint only the
+      // exact saved preview body; its native title and card background must stay intact.
+      const target = card.querySelector(`[id="message-content-${messageId}"]`)
+        || card.querySelector('[class*="messageFocusBlock_"] [class*="messageContent_"], [class*="message_"] [class*="messageContent_"], [class*="messageContent_"]');
+      if (!target) return false;
+      if (!target.classList.contains(this.style.deletedForumText)) target.classList.add(this.style.deletedForumText);
+      return true;
+    };
+    const tintNativeThreadBrowserPreviewContent = (content) => {
+      const messageId = content?.id?.match?.(/^message-content-(\d+)$/)?.[1];
+      if (!messageId) return false;
+      const card = content.closest?.('div[role="button"]');
+      const browser = card?.closest?.('[role="dialog"]');
+      if (!card
+        || card.hasAttribute?.('data-ml2-restored-thread-browser-card')
+        || !card.querySelector?.('h2 [class*="threadName_"]')
+        || !browser?.querySelector?.('input[placeholder="Search for Thread Name"]')) return false;
+      const record = this.messageRecord?.[messageId];
+      const channelId = record?.message?.channel_id;
+      // Native thread-browser cards can outlive their deleted preview message. Clear any
+      // logger-owned full-card tint first, then keep only the exact preview tint when that
+      // message is still indexed and visible under the current logger settings.
+      clearTintClasses(card);
+      const shouldTintPreview = !!channelId
+        && shouldTintMessage(channelId, messageId)
+        && !this.noTintIds.has(messageId);
+      if (!shouldTintPreview) {
+        clearForumTextTint(card);
+        return true;
       }
-      return changed || targets.length > 0;
+      // Remove any title tint left by an older hot-loaded build without removing and
+      // re-adding the current preview class, which would retrigger the class observer.
+      card.querySelectorAll?.(`.${this.style.deletedForumText}`).forEach(target => {
+        if (target !== content) target.classList.remove(this.style.deletedForumText);
+      });
+      addForumTextTint(card, messageId);
+      return true;
+    };
+    const tintNativeThreadBrowserPreviewByMessageId = (messageId) => {
+      if (!/^\d+$/.test(messageId || '')) return false;
+      let found = false;
+      document.querySelectorAll(`[id="message-content-${messageId}"]`).forEach(content => {
+        found = tintNativeThreadBrowserPreviewContent(content) || found;
+      });
+      return found;
+    };
+    const tintNativeThreadBrowserPreviews = (root = document) => {
+      if (!root?.querySelectorAll) return false;
+      const contents = [];
+      if (root.matches?.('[id^="message-content-"]')) contents.push(root);
+      contents.push(...root.querySelectorAll('[id^="message-content-"]'));
+      let found = false;
+      for (const content of contents) found = tintNativeThreadBrowserPreviewContent(content) || found;
+      return found;
     };
     const addTintClass = (target) => {
       if (!target || target.nodeType !== 1 || this.noTintIds.has(target.id?.split?.('-').slice(3).join('-'))) return false;
@@ -10375,8 +10418,9 @@ module.exports = class MessageLoggerV2 {
       setTimeout(() => {
         requestAnimationFrame(() => {
           const appliedMessageTint = tintMessageById(channelId, messageId);
+          const appliedThreadBrowserTint = tintNativeThreadBrowserPreviewByMessageId(messageId);
           const appliedForumCardTint = !requiresForumCardTint || tintForumCardByThreadId(channelId);
-          if (appliedMessageTint && appliedForumCardTint) return;
+          if ((appliedMessageTint || appliedThreadBrowserTint) && appliedForumCardTint) return;
           scheduleTintForMessage(channelId, messageId, attempt + 1);
         });
       }, delays[attempt]);
@@ -10385,6 +10429,9 @@ module.exports = class MessageLoggerV2 {
       this.captureNativeDeleteButtonPresentation(document);
       wireNativeRestoredMessageDeleteControls(document);
       clickNativeForumNewPostsButton(document);
+      // This scan also removes preview-only tint when its record or visibility setting no
+      // longer qualifies, without changing Discord's native thread title/background.
+      tintNativeThreadBrowserPreviews(document);
       if (!this.settings.showDeletedMessages && !this.settings.showPurgedMessages) return;
       removeSuppressedForumCards();
       document.querySelectorAll('[id^="chat-messages-"]').forEach(tintMessageNode);
@@ -10405,6 +10452,7 @@ module.exports = class MessageLoggerV2 {
           }
           const targetMessageNode = getMessageNodeFromAnyNode(m.target);
           if (targetMessageNode) tintMessageNode(targetMessageNode);
+          tintNativeThreadBrowserPreviews(m.target);
           this.captureNativeDeleteButtonPresentation(m.target);
           wireNativeRestoredMessageDeleteControls(m.target);
           const targetThreadId = getForumThreadIdFromAnyNode(m.target);
@@ -10418,13 +10466,15 @@ module.exports = class MessageLoggerV2 {
             if (removedSuppressed && !node.isConnected) continue;
             const messageNode = getMessageNodeFromAnyNode(node);
             if (messageNode) tintMessageNode(messageNode);
+            tintNativeThreadBrowserPreviews(node);
             const threadId = getForumThreadIdFromAnyNode(node);
             if (threadId && !removedSuppressed) tintForumCardByThreadId(threadId);
             if (!node.querySelectorAll) continue;
-            const found = node.querySelectorAll('[id^="chat-messages-"], [data-list-item-id^="chat-messages___chat-messages-"], [data-item-id], [data-ml2-restored-forum-card]');
+            const found = node.querySelectorAll('[id^="chat-messages-"], [data-list-item-id^="chat-messages___chat-messages-"], [id^="message-content-"], [data-item-id], [data-ml2-restored-forum-card]');
             if (found.length) found.forEach(foundNode => {
               const resolvedMessageNode = getMessageNodeFromAnyNode(foundNode);
               if (resolvedMessageNode) tintMessageNode(resolvedMessageNode);
+              tintNativeThreadBrowserPreviews(foundNode);
               const foundThreadId = getForumThreadIdFromAnyNode(foundNode);
               if (foundThreadId && !removeSuppressedForumCards(foundNode)) tintForumCardByThreadId(foundThreadId);
             });
@@ -10435,6 +10485,7 @@ module.exports = class MessageLoggerV2 {
           if (t.nodeType !== 1) continue;
           const messageNode = getMessageNodeFromAnyNode(t);
           if (messageNode) tintMessageNode(messageNode);
+          tintNativeThreadBrowserPreviews(t);
           const threadId = getForumThreadIdFromAnyNode(t);
           if (threadId) tintForumCardByThreadId(threadId);
         }
