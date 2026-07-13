@@ -60,6 +60,9 @@ const DiscordModules = (() => {
     ColorClasses: lazyGet('ColorClasses', () => Webpack.getByKeys('colorDanger', 'colorPremium')),
     ButtonClasses: lazyGet('ButtonClasses', () => Webpack.getByKeys('button', 'colorBrand', 'lookFilled')),
     MessageWrapperClasses: lazyGet('MessageWrapperClasses', () => Webpack.getByKeys('message', 'cozyMessage') || Webpack.getByKeys('message', 'groupStart')),
+    MessageToolbarClasses: lazyGet('MessageToolbarClasses', () => Webpack.getByKeys('messageListItem', 'buttons')),
+    TrashIcon: lazyGet('TrashIcon', () => Webpack.getBySource('2.81h8.36a3', { searchExports: true })),
+    TrashIconFallback: lazyGet('TrashIconFallback', () => Webpack.getBySource(/M5\.06 7a1 1 0 0 0-1 1\.06l\.76 12\.13/, { searchExports: true })),
     ContainerClasses: lazyGet('ContainerClasses', () => Webpack.getByKeys('containerCozyBounded')),
     ChatContentClasses: lazyGet('ChatContentClasses', () => Webpack.getByKeys('chatContent')),
     MarkupClasses: lazyGet('MarkupClasses', () => Webpack.getByKeys('markup')),
@@ -448,6 +451,7 @@ module.exports = class MessageLoggerV2 {
         type: 'fixed',
         items: [
           'Restores the advertised logger shortcuts and adds native BetterDiscord capture controls for custom or disabled bindings.',
+          'Lets Discord\'s native Trash action remove restored messages from the local log, adds a permission-independent local-only fallback, and gives restored forum/thread clones the same confirm-or-Shift-click Delete flow.',
           'Uses Discord native forum refresh behavior and repairs deleted tint, jump, context-menu, purge, and restore edge cases.',
           'Improves settings validation, accordion navigation, help screens, documentation, and legacy cache compatibility.',
           'Restores the legacy aggressive message caching and new cache system controls as locked-on indicators and resets false config values at startup.',
@@ -1325,6 +1329,9 @@ module.exports = class MessageLoggerV2 {
     this.style.restoredThreadEntry = this.obfuscatedClass('MLv2-restored-thread-entry');
     this.style.restoredThreadBrowserCard = this.obfuscatedClass('MLv2-restored-thread-browser-card');
     this.style.restoredThreadBrowserSection = this.obfuscatedClass('MLv2-restored-thread-browser-section');
+    this.style.restoredDeleteHost = this.obfuscatedClass('MLv2-restored-delete-host');
+    this.style.restoredDeleteButton = this.obfuscatedClass('MLv2-restored-delete-button');
+    this.style.restoredInlineDeleteButton = this.obfuscatedClass('MLv2-restored-inline-delete-button');
     this.style.deletedForumModal = this.obfuscatedClass('MLv2-deleted-forum-modal');
     this.style.deletedForumRoot = this.obfuscatedClass('MLv2-deleted-forum-root');
     this.style.deletedForumHeader = this.obfuscatedClass('MLv2-deleted-forum-header');
@@ -1369,6 +1376,7 @@ module.exports = class MessageLoggerV2 {
                     }
                     html #app-mount .${this.style.restoredForumCard} {
                       cursor: pointer !important;
+                      position: relative !important;
                     }
                     html #app-mount .${this.style.restoredForumItem} {
                       display: block !important;
@@ -1412,6 +1420,42 @@ module.exports = class MessageLoggerV2 {
                     html #app-mount .${this.style.restoredThreadEntry}.${this.style.deleted} [class*="name_"],
                     html #app-mount .${this.style.restoredThreadBrowserCard}.${this.style.deleted} [class*="threadName_"] {
                       color: ${this.settings.deletedMessageColor || "#f04747"} !important;
+                    }
+                    html #app-mount .${this.style.restoredThreadEntry},
+                    html #app-mount .${this.style.restoredThreadBrowserCard},
+                    html #app-mount .${this.style.restoredDeleteHost} {
+                      position: relative !important;
+                    }
+                    html #app-mount .${this.style.restoredDeleteButton} {
+                      opacity: 0 !important;
+                      pointer-events: none !important;
+                      position: absolute !important;
+                      right: 8px !important;
+                      top: 8px !important;
+                      transition: opacity 120ms ease !important;
+                      z-index: 3 !important;
+                    }
+                    html #app-mount .${this.style.restoredForumCard}:hover > .${this.style.restoredDeleteButton},
+                    html #app-mount .${this.style.restoredThreadEntry}:hover > .${this.style.restoredDeleteButton},
+                    html #app-mount .${this.style.restoredThreadBrowserCard}:hover > .${this.style.restoredDeleteButton},
+                    html #app-mount .${this.style.restoredDeleteHost}:hover > .${this.style.restoredDeleteButton},
+                    html #app-mount .${this.style.restoredDeleteButton}:focus-within {
+                      opacity: 1 !important;
+                      pointer-events: auto !important;
+                    }
+                    html #app-mount .${this.style.restoredDeleteButton}[data-ml2-pending-delete-control="true"] {
+                      display: none !important;
+                    }
+                    html #app-mount .${this.style.restoredDeleteButton}.${this.style.restoredInlineDeleteButton} {
+                      display: flex !important;
+                      opacity: 1 !important;
+                      pointer-events: auto !important;
+                      position: static !important;
+                      transition: none !important;
+                      z-index: auto !important;
+                    }
+                    html #app-mount .${this.style.restoredDeleteButton}.${this.style.restoredInlineDeleteButton}[data-ml2-pending-delete-control="true"] {
+                      display: none !important;
                     }
                     .${this.style.deletedForumModal} {
                       max-height: 85vh;
@@ -1679,6 +1723,12 @@ module.exports = class MessageLoggerV2 {
     this.keydownListener = e => {
       if (e.repeat) return;
       if (e.keyCode === 46) this.menu.deleteKeyDown = true;
+      if (e.key === 'Shift') {
+        // Discord lazily reveals destructive message actions while Shift is held. Wait through
+        // two paint frames so the mounted native button can be copied without guessing at its
+        // current hashed classes, localized label, or icon markup.
+        requestAnimationFrame(() => requestAnimationFrame(() => this.captureNativeDeleteButtonPresentation?.(document)));
+      }
     };
     document.addEventListener('keydown', this.keydownListener);
     this.keyupListener = e => {
@@ -1702,16 +1752,7 @@ module.exports = class MessageLoggerV2 {
     this.addOpenLogsButton();
     this.unpatches.push(
       Patcher.instead(DiscordModules.MessageActions, 'deleteMessage', (_, args, original) => {
-        const channelId = args[0];
-        const messageId = args[1];
-        const message = this.getCachedMessage(messageId, channelId);
-        if (this.isThreadCreatedSystemMessage(message)) {
-          this.rememberLocalDeleteId(messageId);
-          return original(...args);
-        }
-        if (this.messageRecord[messageId]?.delete_data) return;
-        this.rememberLocalDeleteId(messageId);
-        return original(...args);
+        return this.processNativeMessageDeleteAction(args, original);
       }),
       this.patchLocalDeleteTracker(DiscordModules.HttpModule, 'delete'),
       this.patchLocalDeleteTracker(DiscordModules.HttpModule, 'del'),
@@ -6661,6 +6702,11 @@ module.exports = class MessageLoggerV2 {
                                 </div>
                                 <strong>Chat:</strong></br>
                                 <div class="${this.style.textIndent}">
+                                    TRASH:</br>
+                                    <div class="${this.style.textIndent}">
+                                        Trash removes a restored deleted message from the local log after normal confirmation; Shift-click removes it immediately</br>
+                                        If Discord hides Trash because you lack delete permission, the logger adds a matching local-only action. Logger rows, forum cards, and thread entries provide the same confirm-or-Shift-click behavior</br>
+                                    </div></br>
                                     RIGHT-CLICK:</br>
                                     <div class="${this.style.textIndent}">
                                         Right-clicking an edit (darkened text) allows you to delete that edit, or hide edits</br>
@@ -7486,6 +7532,415 @@ module.exports = class MessageLoggerV2 {
     }
     return deleted;
   }
+  getNativeDeleteIconComponent() {
+    const icon = DiscordModules.TrashIcon || DiscordModules.TrashIconFallback;
+    if (typeof icon === 'function') return icon;
+    if (typeof icon?.default === 'function') return icon.default;
+    return null;
+  }
+  getNativeDeleteLabel() {
+    return this._nativeDeleteButtonPresentation?.label || 'Delete';
+  }
+  getNativeDeleteToolbarClass() {
+    if (this._nativeDeleteToolbarClass) return this._nativeDeleteToolbarClass;
+    if (Date.now() < (this._nativeDeleteToolbarRetryAt || 0)) return '';
+    const value = DiscordModules.MessageToolbarClasses?.buttons;
+    const toolbarClass = String(value || '').split(/\s+/g).find(Boolean) || '';
+    if (toolbarClass) this._nativeDeleteToolbarClass = toolbarClass;
+    else this._nativeDeleteToolbarRetryAt = Date.now() + 5000;
+    return toolbarClass;
+  }
+  getNativeMessageToolbarNodes(root = document) {
+    const toolbarClass = this.getNativeDeleteToolbarClass();
+    if (!toolbarClass || !root) return [];
+    const toolbars = [];
+    if (root.classList?.contains?.(toolbarClass)) toolbars.push(root);
+    if (root.getElementsByClassName) toolbars.push(...root.getElementsByClassName(toolbarClass));
+    return toolbars;
+  }
+  inspectNativeDestructiveMessageCandidate(candidate) {
+    if (!candidate?.querySelector?.('svg')) return null;
+    if (candidate.closest?.('[data-ml2-native-delete-host], [data-ml2-restored-forum-card], [data-ml2-restored-thread-entry], [data-ml2-restored-thread-browser-card]')) return null;
+    let fiber = ReactUtils.getInternalInstance?.(candidate);
+    let dangerous = false;
+    let label = candidate.getAttribute?.('aria-label') || '';
+    // Discord marks its native destructive toolbar action with dangerous=true. Walking only a
+    // short ancestry keeps discovery language-independent without retaining the live fiber or
+    // its real server-delete callback.
+    for (let depth = 0; fiber && depth < 24; depth++, fiber = fiber.return) {
+      const props = fiber.memoizedProps;
+      if (props?.dangerous === true) dangerous = true;
+      if (!label) {
+        const possibleLabel = props?.['aria-label'] || props?.text || props?.label;
+        if (typeof possibleLabel === 'string') label = possibleLabel;
+      }
+    }
+    if (!dangerous) return null;
+    return { label: label || 'Delete' };
+  }
+  inspectNativeDeleteCandidate(candidate) {
+    const destructive = this.inspectNativeDestructiveMessageCandidate(candidate);
+    if (!destructive) return null;
+    // The path fragment is from Discord's own current TrashIcon. Require it in addition to the
+    // destructive marker before copying a presentation exactly. Presence checks use the broader
+    // destructive marker so a Discord icon update cannot create a duplicate logger fallback.
+    const isTrashIcon = Array.from(candidate.querySelectorAll?.('path[d]') || [])
+      .some(path => String(path.getAttribute('d') || '').includes('2.81h8.36a3'));
+    if (!isTrashIcon) return null;
+    return {
+      tagName: String(candidate.tagName || 'button').toLowerCase(),
+      className: candidate.getAttribute?.('class') || '',
+      role: candidate.getAttribute?.('role') || '',
+      tabIndex: candidate.getAttribute?.('tabindex'),
+      label: destructive.label,
+      innerHTML: candidate.innerHTML || '',
+      useNativeTrashIcon: false
+    };
+  }
+  wireNativeRestoredMessageDeleteControl(toolbar, channelId, messageId) {
+    if (!toolbar || !channelId || !messageId) return false;
+    const record = this.messageRecord?.[messageId];
+    const existing = toolbar.querySelector?.('[data-ml2-inline-delete-control="true"]');
+    const ownsRestoredRecord = record?.delete_data
+      && !record.delete_data.hidden
+      && String(record.message?.channel_id ?? '') === String(channelId)
+      && this.isIndexedSavedDeletedRecord(record, messageId);
+    if (!ownsRestoredRecord) {
+      if (existing) {
+        this.cleanupCopiedNativeDeleteControls(existing);
+        existing.remove();
+      }
+      return false;
+    }
+    const nativeDeletePresent = Array.from(toolbar.querySelectorAll?.('button, [role="button"]') || [])
+      .some(candidate => !!this.inspectNativeDestructiveMessageCandidate(candidate));
+    if (nativeDeletePresent) {
+      // Prefer Discord's own toolbar action whenever it exists. The logger-owned copy is only
+      // the permission-independent fallback for restored records Discord will not let the
+      // current account delete from the server.
+      if (existing) {
+        this.cleanupCopiedNativeDeleteControls(existing);
+        existing.remove();
+      }
+      return true;
+    }
+    if (existing) return true;
+    const control = this.createCopiedNativeDeleteControl(record, { inline: true });
+    if (!control) return false;
+    toolbar.appendChild(control);
+    return true;
+  }
+  captureNativeDeleteButtonPresentation(root = document) {
+    for (const toolbar of this.getNativeMessageToolbarNodes(root)) {
+      const candidates = Array.from(toolbar.querySelectorAll?.('button, [role="button"]') || []);
+      const matches = candidates
+        .map(candidate => this.inspectNativeDeleteCandidate(candidate))
+        .filter(Boolean);
+      // Ambiguous destructive actions are deliberately ignored; guessing could snapshot the
+      // wrong Discord action and make a logger clone misleading.
+      let presentation = matches.length === 1 ? matches[0] : null;
+      if (!presentation && matches.length === 0 && !this._nativeDeleteButtonPresentation && this.getNativeDeleteIconComponent()) {
+        // A user may have no permission to delete any visible message. In that case, copy the
+        // neutral structure/classes from another native toolbar action and render Discord's own
+        // TrashIcon component inside it. If a real native Delete action appears later, the exact
+        // localized presentation above replaces this permission-independent fallback.
+        const reference = candidates.find(candidate => (
+          candidate.querySelector?.('svg')
+          && !candidate.closest?.('[data-ml2-native-delete-host]')
+        ));
+        const svg = reference?.querySelector?.('svg');
+        if (reference && svg) {
+          presentation = {
+            tagName: String(reference.tagName || 'button').toLowerCase(),
+            className: reference.getAttribute?.('class') || '',
+            role: reference.getAttribute?.('role') || '',
+            tabIndex: reference.getAttribute?.('tabindex'),
+            label: 'Delete',
+            innerHTML: '',
+            useNativeTrashIcon: true,
+            iconClassName: svg.getAttribute?.('class') || '',
+            iconWidth: svg.getAttribute?.('width') || undefined,
+            iconHeight: svg.getAttribute?.('height') || undefined,
+            iconViewBox: svg.getAttribute?.('viewBox') || undefined
+          };
+        }
+      }
+      if (!presentation) continue;
+      const signature = JSON.stringify(presentation);
+      if (signature === this._nativeDeleteButtonPresentationSignature) return true;
+      this._nativeDeleteButtonPresentation = presentation;
+      this._nativeDeleteButtonPresentationSignature = signature;
+      this._nativeDeleteTemplateWarningShown = false;
+      Logger.log(presentation.useNativeTrashIcon
+        ? 'Prepared a Discord-native Delete button fallback for restored logger items without message-delete permission.'
+        : `Captured Discord's native ${presentation.label} button presentation for restored logger items.`);
+      this.refreshCopiedNativeDeleteControls();
+      return true;
+    }
+    if (!this._nativeDeleteButtonPresentation && !this._nativeDeleteTemplateWarningShown) {
+      this._nativeDeleteTemplateWarningShown = true;
+      Logger.log('Waiting for Discord to mount a native message toolbar before showing Delete controls on restored logger items. Hover a normal message to expose its toolbar.');
+    }
+    return !!this._nativeDeleteButtonPresentation;
+  }
+  sanitizeNativeDeleteMarkup(markup) {
+    const template = document.createElement('template');
+    template.innerHTML = String(markup || '');
+    const idMap = new Map();
+    this._nativeDeleteMarkupId = (Number(this._nativeDeleteMarkupId) || 0) + 1;
+    const prefix = `ml2-native-delete-${this._nativeDeleteMarkupId}-`;
+    template.content.querySelectorAll('[id]').forEach((node, index) => {
+      const oldId = node.id;
+      const newId = `${prefix}${index}`;
+      idMap.set(oldId, newId);
+      node.id = newId;
+    });
+    if (idMap.size) {
+      template.content.querySelectorAll('*').forEach(node => {
+        for (const attribute of Array.from(node.attributes || [])) {
+          let value = attribute.value;
+          for (const [oldId, newId] of idMap) {
+            value = value.replaceAll(`url(#${oldId})`, `url(#${newId})`);
+            if (value === `#${oldId}`) value = `#${newId}`;
+          }
+          if (value !== attribute.value) node.setAttribute(attribute.name, value);
+        }
+      });
+    }
+    template.content.querySelectorAll('*').forEach(node => {
+      for (const attribute of ['aria-describedby', 'aria-controls', 'aria-expanded', 'aria-pressed']) {
+        node.removeAttribute(attribute);
+      }
+      for (const attribute of Array.from(node.attributes || [])) {
+        if (attribute.name.toLowerCase().startsWith('on')) node.removeAttribute(attribute.name);
+      }
+    });
+    return template.innerHTML;
+  }
+  handleCopiedNativeDeleteActivation(event, channelId, messageId) {
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+    event.nativeEvent?.stopImmediatePropagation?.();
+    return this.requestSavedDeletedRecordRemoval(channelId, messageId, !!event.shiftKey);
+  }
+  createCopiedNativeDeleteControl(record, options = {}) {
+    const message = record?.message;
+    if (!message?.id || !message?.channel_id || !record?.delete_data) return null;
+    const host = document.createElement('div');
+    host.className = this.joinClassNames(
+      this.style.restoredDeleteButton,
+      options.inline && this.style.restoredInlineDeleteButton
+    );
+    host.setAttribute('data-ml2-native-delete-host', 'true');
+    host.setAttribute('data-ml2-remove-from-log', message.id);
+    host.setAttribute('data-ml2-message-id', message.id);
+    host.setAttribute('data-ml2-channel-id', message.channel_id);
+    if (options.inline) host.setAttribute('data-ml2-inline-delete-control', 'true');
+    const presentation = this._nativeDeleteButtonPresentation;
+    if (!presentation || typeof ReactDOM.createRoot !== 'function') {
+      host.setAttribute('data-ml2-pending-delete-control', 'true');
+      return host;
+    }
+    const innerHTML = presentation.useNativeTrashIcon
+      ? ''
+      : this.sanitizeNativeDeleteMarkup(presentation.innerHTML);
+    const renderAction = tooltipProps => {
+      const tagName = presentation.tagName === 'button' ? 'button' : presentation.tagName || 'div';
+      const activate = event => this.handleCopiedNativeDeleteActivation(event, message.channel_id, message.id);
+      const actionProps = {
+        ...tooltipProps,
+        className: this.joinClassNames(presentation.className, tooltipProps?.className),
+        'aria-label': presentation.label,
+        'data-ml2-remove-from-log': message.id,
+        onClick: activate
+      };
+      if (presentation.useNativeTrashIcon) {
+        const TrashIcon = this.getNativeDeleteIconComponent();
+        if (TrashIcon) {
+          actionProps.children = React.createElement(TrashIcon, {
+            'aria-hidden': true,
+            className: presentation.iconClassName,
+            width: presentation.iconWidth,
+            height: presentation.iconHeight,
+            viewBox: presentation.iconViewBox
+          });
+        }
+      } else {
+        actionProps.dangerouslySetInnerHTML = { __html: innerHTML };
+      }
+      if (presentation.role) actionProps.role = presentation.role;
+      // Native toolbar buttons may use tabIndex=-1 under Discord's roving-focus manager. These
+      // logger controls live outside that manager, so normalize them to a reachable tab stop.
+      actionProps.tabIndex = 0;
+      if (tagName === 'button') actionProps.type = 'button';
+      else if (presentation.role === 'button') {
+        actionProps.onKeyDown = event => {
+          if (event.key === 'Enter' || event.key === ' ') activate(event);
+        };
+      }
+      return React.createElement(tagName, actionProps);
+    };
+    let root = null;
+    try {
+      root = ReactDOM.createRoot(host);
+      const child = Components.Tooltip
+        ? React.createElement(Components.Tooltip, { text: presentation.label, position: 'top' }, renderAction)
+        : renderAction({});
+      root.render(child);
+      (this._copiedDeleteControlRoots ||= new Map()).set(host, root);
+    } catch (error) {
+      try { root?.unmount?.(); } catch {}
+      host.replaceChildren();
+      host.setAttribute('data-ml2-pending-delete-control', 'true');
+      Logger.warn('Could not mount Discord-native Delete control on a restored logger item:', error);
+    }
+    return host;
+  }
+  cleanupCopiedNativeDeleteControls(rootNode = null, force = false) {
+    for (const [host, root] of this._copiedDeleteControlRoots || []) {
+      const belongsToRoot = rootNode && (rootNode === host || rootNode.contains?.(host));
+      if (!force) {
+        if (rootNode && !belongsToRoot) continue;
+        if (!rootNode && host.isConnected) continue;
+      }
+      try { root.unmount(); } catch (error) {
+        Logger.warn('Could not unmount a restored logger Delete control:', error);
+      }
+      this._copiedDeleteControlRoots.delete(host);
+    }
+  }
+  refreshCopiedNativeDeleteControls() {
+    if (typeof document === 'undefined') return;
+    const hosts = Array.from(document.querySelectorAll('[data-ml2-native-delete-host="true"]'));
+    for (const host of hosts) {
+      const record = this.messageRecord?.[host.getAttribute('data-ml2-message-id')];
+      if (!record?.delete_data) {
+        this.cleanupCopiedNativeDeleteControls(host);
+        host.remove();
+        continue;
+      }
+      const replacement = this.createCopiedNativeDeleteControl(record, {
+        inline: host.getAttribute('data-ml2-inline-delete-control') === 'true'
+      });
+      if (!replacement) continue;
+      this.cleanupCopiedNativeDeleteControls(host);
+      host.replaceWith(replacement);
+    }
+  }
+  isIndexedSavedDeletedRecord(record, messageId) {
+    // A message ID by itself is not a sufficient ownership signal: native forum cards also use
+    // Discord message/thread IDs. Require the canonical saved IDs and a deleted/purged index so
+    // normal messages and edit-only records can never enter the local removal path.
+    const id = String(messageId ?? '');
+    const channelId = String(record?.message?.channel_id ?? '');
+    if (!id || !channelId || !record?.delete_data || String(record.message?.id ?? '') !== id) return false;
+    const indexedSets = [this.deletedMessageSet, this.purgedMessageSet];
+    if (indexedSets.some(map => map?.get?.(channelId)?.has?.(id))) return true;
+    const indexedRecords = [this.deletedMessageRecord, this.purgedMessageRecord];
+    return indexedRecords.some(map => Array.isArray(map?.[channelId]) && map[channelId].includes(id));
+  }
+  processNativeMessageDeleteAction(args, original) {
+    const channelId = args?.[0];
+    const messageId = args?.[1];
+    const message = this.getCachedMessage(messageId, channelId);
+    if (this.isThreadCreatedSystemMessage(message)) {
+      this.rememberLocalDeleteId(messageId);
+      return original(...args);
+    }
+    // Discord has already handled its normal confirmation before this action runs, while
+    // Shift-click reaches it directly. Consume only an exact indexed logger deletion and
+    // translate it into the same local cleanup as Remove From Log. Every live message keeps
+    // Discord's original network-delete path below.
+    if (this.handleNativeSavedRecordDelete(channelId, messageId)) return;
+    this.rememberLocalDeleteId(messageId);
+    return original(...args);
+  }
+  removeSavedDeletedRecordFromLog(channelId, messageId, options = {}) {
+    const requestedChannelId = String(channelId ?? '');
+    const id = String(messageId ?? '');
+    const record = this.messageRecord?.[id];
+    const savedChannelId = String(record?.message?.channel_id ?? '');
+    if (!record?.delete_data
+      || String(record.message?.id ?? '') !== id
+      || savedChannelId !== requestedChannelId
+      || !this.isIndexedSavedDeletedRecord(record, id)) return false;
+
+    // Snapshot every UI decision before deleteMessageFromRecords removes the canonical record.
+    // Root removal deliberately uses its existing cascade so children, indexes, cached-media
+    // cleanup, suppression, and modal state stay consistent with Remove From Log.
+    const removesThreadRoot = !!record.delete_data.forum_thread_delete;
+    const wasMounted = !record.delete_data.hidden;
+    const shouldRefreshChannelCache = !removesThreadRoot
+      && wasMounted
+      && !!this.channelMessages?.[savedChannelId];
+    if (shouldRefreshChannelCache) this.invalidateChannelCache(savedChannelId);
+    if (removesThreadRoot) this.suppressForumThreadId(id);
+
+    this.deleteMessageFromRecords(id);
+    this.noTintIds?.delete?.(id);
+    if (this.editModifiers) delete this.editModifiers[id];
+    if (removesThreadRoot) this.removeForumCardFromDom(id);
+    if (shouldRefreshChannelCache) this.cacheChannelMessages(savedChannelId);
+
+    // ML2 marks the synthetic UI cleanup so the dispatch interceptor never logs it as a new
+    // remote deletion. Custom logger windows and forum/thread clones are refreshed separately.
+    this.dispatcher?.dispatch?.({
+      type: 'MESSAGE_DELETE',
+      id,
+      channelId: savedChannelId,
+      ML2: true
+    });
+    this.scheduleLoggerMenuRefresh?.();
+    this.refreshForumThreadLogModal?.(savedChannelId);
+    if (removesThreadRoot) {
+      this._scheduleForumCardRestore?.();
+      this._scheduleThreadRestore?.();
+    }
+    this.saveData();
+    Logger.log(`Removed saved deleted record ${id} from the local log via ${options.source || 'logger action'}.`);
+    return true;
+  }
+  handleNativeSavedRecordDelete(channelId, messageId) {
+    const id = String(messageId ?? '');
+    const record = this.messageRecord?.[id];
+    if (!record?.delete_data || !this.isIndexedSavedDeletedRecord(record, id)) return false;
+    if (!this.removeSavedDeletedRecordFromLog(channelId, id, { source: 'Discord Trash' })) {
+      // A known synthetic deletion must never fall through to Discord's HTTP delete endpoint if
+      // its saved channel/index metadata is inconsistent. Preserve it for diagnosis instead.
+      Logger.warn(`Blocked Discord Trash for saved logger record ${id}: stored channel or deletion index did not match.`);
+    }
+    return true;
+  }
+  requestSavedDeletedRecordRemoval(channelId, messageId, immediate = false) {
+    const id = String(messageId ?? '');
+    const record = this.messageRecord?.[id];
+    if (!record?.delete_data || !this.isIndexedSavedDeletedRecord(record, id)) return false;
+    if (String(record.message?.channel_id ?? '') !== String(channelId ?? '')) {
+      Logger.warn(`Refused local Delete for saved logger record ${id}: requested channel did not match its stored channel.`);
+      return false;
+    }
+    if (immediate) {
+      return this.removeSavedDeletedRecordFromLog(channelId, id, { source: 'Shift-click Trash' });
+    }
+    const rootType = record.delete_data.forum_thread_delete
+      ? this.getSavedThreadRootTypeLabel(record)
+      : 'Message';
+    const mediaNotice = this.settings?.deleteCachedFilesWithRecords
+      ? ' Related locally cached media will also be deleted.'
+      : '';
+    UI.showConfirmationModal(
+      `Delete ${rootType}?`,
+      `This permanently deletes the saved ${rootType.toLowerCase()} from this local logger only.${mediaNotice}`,
+      {
+        confirmText: 'Delete',
+        cancelText: 'Cancel',
+        danger: true,
+        onConfirm: () => this.removeSavedDeletedRecordFromLog(channelId, id, { source: 'restored-item Trash' })
+      }
+    );
+    return true;
+  }
   deleteMessageFromRecords(id, options = {}) {
     const record = this.messageRecord[id];
     const setMaps = [this.deletedMessageSet, this.editedMessageSet, this.purgedMessageSet];
@@ -8217,6 +8672,30 @@ module.exports = class MessageLoggerV2 {
       if (!listItemId?.startsWith('chat-messages___chat-messages-')) return null;
       return document.getElementById(listItemId.slice('chat-messages___'.length));
     };
+    const getMessageIdentityFromNode = (node) => {
+      const messageNode = getMessageNodeFromAnyNode(node);
+      if (!messageNode?.id?.startsWith('chat-messages-')) return null;
+      const parts = messageNode.id.split('-');
+      if (parts.length < 4) return null;
+      return {
+        channelId: parts[2],
+        messageId: parts.slice(3).join('-')
+      };
+    };
+    const wireNativeRestoredMessageDeleteControl = (toolbar) => {
+      const identity = getMessageIdentityFromNode(toolbar);
+      if (!identity) return false;
+      return this.wireNativeRestoredMessageDeleteControl(
+        toolbar,
+        identity.channelId,
+        identity.messageId
+      );
+    };
+    const wireNativeRestoredMessageDeleteControls = (root = document) => {
+      for (const toolbar of this.getNativeMessageToolbarNodes(root)) {
+        wireNativeRestoredMessageDeleteControl(toolbar);
+      }
+    };
     const getForumThreadIdFromAnyNode = (node) => {
       if (!node || node.nodeType !== 1) return null;
       const cardNode = node.matches?.('[data-item-id], [data-ml2-restored-forum-card]')
@@ -8658,10 +9137,15 @@ module.exports = class MessageLoggerV2 {
       menuItems.push(
         {
           type: 'item',
-          label: this.getSavedThreadRemovalLabel(record),
+          label: record.delete_data ? this.getNativeDeleteLabel() : this.getSavedThreadRemovalLabel(record),
+          icon: record.delete_data ? this.getNativeDeleteIconComponent() || undefined : undefined,
           danger: true,
           action: () => {
             ContextMenu.close();
+            if (record.delete_data) {
+              this.requestSavedDeletedRecordRemoval(message.channel_id, threadId, false);
+              return;
+            }
             this.suppressForumThreadId(threadId);
             this.deleteMessageFromRecords(threadId);
             this.saveData();
@@ -8685,17 +9169,25 @@ module.exports = class MessageLoggerV2 {
       );
       ContextMenu.open(event, this.buildMenu([{ type: 'group', items: menuItems }]));
     };
+    const isRestoredDeleteControlEvent = event => !!event?.target?.closest?.('[data-ml2-remove-from-log]');
     const wireRestoredForumCard = (card, record) => {
       const blockNativeNavigation = (event) => {
-        if (event.button !== undefined && event.button !== 0) return;
+        if (isRestoredDeleteControlEvent(event)) return false;
+        if (event.button !== undefined && event.button !== 0) return false;
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation?.();
+        return true;
       };
       const open = (event) => {
-        blockNativeNavigation(event);
+        if (!blockNativeNavigation(event)) return;
         openRestoredForumPost(record);
       };
+      // Raw forum/sidebar/browser clones have no Discord React toolbar of their own. Mount a
+      // Discord-matched presentation whose sole callback is the logger's local removal helper,
+      // so no live Discord delete action can leak into a clone.
+      const deleteControl = this.createCopiedNativeDeleteControl(record);
+      if (deleteControl) card.appendChild(deleteControl);
       for (const eventName of ['pointerdown', 'mousedown', 'mouseup', 'auxclick']) {
         card.addEventListener(eventName, blockNativeNavigation, true);
       }
@@ -8708,6 +9200,7 @@ module.exports = class MessageLoggerV2 {
         openRestoredForumContextMenu(event, record);
       }, true);
       card.addEventListener('keydown', (event) => {
+        if (isRestoredDeleteControlEvent(event)) return;
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
         event.stopPropagation();
@@ -9097,6 +9590,8 @@ module.exports = class MessageLoggerV2 {
       }, delays[attempt]);
     };
     const sweepDom = () => {
+      this.captureNativeDeleteButtonPresentation(document);
+      wireNativeRestoredMessageDeleteControls(document);
       clickNativeForumNewPostsButton(document);
       if (!this.settings.showDeletedMessages && !this.settings.showPurgedMessages) return;
       removeSuppressedForumCards();
@@ -9113,12 +9608,19 @@ module.exports = class MessageLoggerV2 {
     const tintObserver = new MutationObserver((mutations) => {
       for (const m of mutations) {
         if (m.type === 'childList') {
+          for (const node of m.removedNodes) {
+            if (node.nodeType === 1) this.cleanupCopiedNativeDeleteControls(node);
+          }
           const targetMessageNode = getMessageNodeFromAnyNode(m.target);
           if (targetMessageNode) tintMessageNode(targetMessageNode);
+          this.captureNativeDeleteButtonPresentation(m.target);
+          wireNativeRestoredMessageDeleteControls(m.target);
           const targetThreadId = getForumThreadIdFromAnyNode(m.target);
           if (targetThreadId && !removeSuppressedForumCards(m.target)) tintForumCardByThreadId(targetThreadId);
           for (const node of m.addedNodes) {
             if (node.nodeType !== 1) continue;
+            this.captureNativeDeleteButtonPresentation(node);
+            wireNativeRestoredMessageDeleteControls(node);
             clickNativeForumNewPostsButton(node);
             const removedSuppressed = removeSuppressedForumCards(node);
             if (removedSuppressed && !node.isConnected) continue;
@@ -9162,6 +9664,10 @@ module.exports = class MessageLoggerV2 {
     sweepDom();
     this.unpatches.push(() => {
       try { tintObserver.disconnect(); } catch {}
+      this.cleanupCopiedNativeDeleteControls(null, true);
+      this._nativeDeleteButtonPresentation = null;
+      this._nativeDeleteButtonPresentationSignature = '';
+      this._nativeDeleteTemplateWarningShown = false;
       this._tintSweep = null;
       this._tintMessageById = null;
       this._scheduleTintForMessage = null;
@@ -9702,9 +10208,15 @@ module.exports = class MessageLoggerV2 {
           menuItems.push(
             {
               type: 'item',
-              label: this.getSavedThreadRemovalLabel(record),
+              label: record.delete_data ? this.getNativeDeleteLabel() : this.getSavedThreadRemovalLabel(record),
+              icon: record.delete_data ? this.getNativeDeleteIconComponent() || undefined : undefined,
+              danger: !!record.delete_data,
               action: () => {
                 ContextMenu.close();
+                if (record.delete_data) {
+                  this.requestSavedDeletedRecordRemoval(record.message.channel_id, messageId, false);
+                  return;
+                }
                 let invalidatedChannelCache = false;
                 const removesForumCard = record.delete_data?.forum_thread_delete;
                 if ((record.edit_history && !record.edits_hidden) || (record.delete_data && !record.delete_data.hidden)) {
@@ -9800,6 +10312,13 @@ module.exports = class MessageLoggerV2 {
       this.scheduleLoggerMenuRefresh();
       this.saveData();
     });
+    if (record?.delete_data) {
+      // Logger windows and deleted-thread modals render their own DOM rows, so they receive the
+      // same presentation-only native Delete control as restored forum/thread clones.
+      element.classList.add(this.style.restoredDeleteHost);
+      const deleteControl = this.createCopiedNativeDeleteControl(record);
+      if (deleteControl) element.appendChild(deleteControl);
+    }
     return element;
   }
   populateParent(parent, messages) {
@@ -10594,20 +11113,6 @@ module.exports = class MessageLoggerV2 {
       }
       return null;
     };
-    const removeForumCardFromDom = (threadId) => {
-      if (!threadId || typeof document === 'undefined') return;
-      const selectors = [
-        `[data-ml2-restored-forum-thread="${threadId}"]`,
-        `[data-ml2-restored-forum-card="${threadId}"]`,
-        `[data-item-id="${threadId}"]`
-      ];
-      for (const selector of selectors) {
-        document.querySelectorAll(selector).forEach(node => {
-          const target = node.matches?.('li') ? node : node.closest?.('li') || node;
-          target?.remove?.();
-        });
-      }
-    };
     const addSavedRecordItems = (newItems, addElement, record, messageId, channelId, options = {}) => {
       if (!record) return;
       try {
@@ -10696,29 +11201,22 @@ module.exports = class MessageLoggerV2 {
           }
         }
         addElement(
-          this.getSavedThreadRemovalLabel(record),
+          record.delete_data ? this.getNativeDeleteLabel() : this.getSavedThreadRemovalLabel(record),
           () => {
-            if (record.delete_data?.forum_thread_delete) this.suppressForumThreadId(messageId);
+            if (record.delete_data) {
+              this.requestSavedDeletedRecordRemoval(channelId, messageId, false);
+              return;
+            }
             this.deleteMessageFromRecords(messageId);
             this.saveData();
-            if (record.delete_data?.forum_thread_delete) removeForumCardFromDom(messageId);
             this.refreshLoggerMenu?.();
-            if (record.delete_data) {
-              this.dispatcher.dispatch({
-                type: 'MESSAGE_DELETE',
-                id: messageId,
-                channelId: channelId,
-                ML2: true
-              });
-              if (record.delete_data?.forum_thread_delete) {
-                this._scheduleForumCardRestore?.();
-                this._scheduleThreadRestore?.();
-              }
-            } else {
-              this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
-            }
+            this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
           },
-          { className: DiscordModules.ColorClasses?.colorDanger }
+          {
+            className: DiscordModules.ColorClasses?.colorDanger,
+            danger: !!record.delete_data,
+            icon: record.delete_data ? this.getNativeDeleteIconComponent() || undefined : undefined
+          }
         );
       } catch (err) {
         Logger.error('Error in record handling:', err);

@@ -4,6 +4,8 @@ const dataStore = new Map();
 const loggerEvents = [];
 const notificationEvents = [];
 const toastEvents = [];
+const confirmationEvents = [];
+const ReactDOM = {};
 
 const Data = {
   load(name, key) {
@@ -25,6 +27,7 @@ const Logger = {
 
 const UI = {
   showToast(...args) { toastEvents.push(args); },
+  showConfirmationModal(...args) { confirmationEvents.push(args); },
   showNotification(options) {
     notificationEvents.push(options);
     return { close() {} };
@@ -39,7 +42,7 @@ class MockBdApi {
           return { type, props: { ...props, children } };
         }
       },
-      ReactDOM: {},
+      ReactDOM,
       Webpack: { Filters: {} },
       UI,
       Plugins: {},
@@ -73,13 +76,17 @@ function resetHarness() {
   loggerEvents.length = 0;
   notificationEvents.length = 0;
   toastEvents.length = 0;
+  confirmationEvents.length = 0;
+  for (const key of Object.keys(ReactDOM)) delete ReactDOM[key];
 }
 
 module.exports = {
   Data,
   Logger,
+  ReactDOM,
   UI,
   createPlugin,
+  confirmationEvents,
   dataStore,
   loggerEvents,
   notificationEvents,

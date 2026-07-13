@@ -166,6 +166,29 @@ test('native BetterDiscord keybind recorders drive capture-phase logger shortcut
   assert.match(source, /this\.ensureLoggerKeybindSettings\(this\.settings, defaultSettings\)/);
 });
 
+test('native and cloned Trash actions remain scoped to indexed logger deletions', () => {
+  assert.match(source, /Patcher\.instead\(DiscordModules\.MessageActions, 'deleteMessage',[\s\S]*processNativeMessageDeleteAction\(args, original\)/);
+  assert.match(source, /processNativeMessageDeleteAction\(args, original\)[\s\S]*isThreadCreatedSystemMessage\(message\)[\s\S]*handleNativeSavedRecordDelete\(channelId, messageId\)[\s\S]*original\(\.\.\.args\)/);
+  assert.match(source, /isIndexedSavedDeletedRecord\(record, messageId\)[\s\S]*deletedMessageSet[\s\S]*purgedMessageSet[\s\S]*deletedMessageRecord[\s\S]*purgedMessageRecord/);
+  assert.match(source, /inspectNativeDestructiveMessageCandidate\(candidate\)[\s\S]*memoizedProps[\s\S]*dangerous === true/);
+  assert.match(source, /inspectNativeDeleteCandidate\(candidate\)[\s\S]*inspectNativeDestructiveMessageCandidate[\s\S]*2\.81h8\.36a3[\s\S]*!isTrashIcon/);
+  assert.match(source, /MessageToolbarClasses: lazyGet[\s\S]*messageListItem[\s\S]*buttons/);
+  assert.match(source, /getNativeDeleteToolbarClass\(\)[\s\S]*DiscordModules\.MessageToolbarClasses/);
+  assert.match(source, /captureNativeDeleteButtonPresentation\(root = document\)[\s\S]*inspectNativeDeleteCandidate/);
+  const copiedControl = source.slice(
+    source.indexOf('createCopiedNativeDeleteControl(record, options = {})'),
+    source.indexOf('cleanupCopiedNativeDeleteControls(rootNode')
+  );
+  assert.match(copiedControl, /Components\.Tooltip/);
+  assert.match(copiedControl, /data-ml2-remove-from-log/);
+  assert.match(copiedControl, /handleCopiedNativeDeleteActivation\(event, message\.channel_id, message\.id\)/);
+  assert.match(source, /handleCopiedNativeDeleteActivation\(event, channelId, messageId\)[\s\S]*stopPropagation[\s\S]*requestSavedDeletedRecordRemoval\(channelId, messageId, !!event\.shiftKey\)/);
+  assert.match(source, /TrashIcon: lazyGet[\s\S]*getNativeDeleteIconComponent\(\)/);
+  assert.match(source, /wireNativeRestoredMessageDeleteControl[\s\S]*isIndexedSavedDeletedRecord\(record, messageId\)[\s\S]*nativeDeletePresent[\s\S]*createCopiedNativeDeleteControl\(record, \{ inline: true \}\)/);
+  assert.doesNotMatch(source, /restoredDeleteButton[\s\S]{0,1000}innerHTML\s*=\s*['"]<svg/);
+  assert.match(source, /removeSavedDeletedRecordFromLog\(channelId, messageId[\s\S]*deleteMessageFromRecords\(id\)[\s\S]*ML2: true/);
+});
+
 test('required legacy cache toggles stay visible, locked, and forced on', () => {
   assert.match(source, /if \(this\.ensureRequiredLegacySettings\(\)\) settingsChanged = true;/);
   assert.match(source, /name: 'Aggresive message caching \(makes sure we have the data of any deleted or edited messages\)'[\s\S]*?id: 'aggresiveMessageCaching'[\s\S]*?disabled: true/);

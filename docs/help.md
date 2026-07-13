@@ -83,6 +83,8 @@ Right-click saved messages in the logger or channel view to access applicable ac
 
 **Hide** preserves the record and moves it to the Hidden tab. **Remove From Log** permanently deletes the stored record.
 
+On a restored deleted message in chat, Trash performs **Remove From Log**. If Discord omits Trash because you did not post the message and lack moderation permissions, the logger adds a matching local-only Delete action to that restored row. A normal click confirms; Shift-click removes the local record immediately. Normal live Discord messages are not intercepted, and the fallback never grants or invokes a server delete.
+
 ### Media-only records
 
 - Attachment-only messages retain the same hide, remove, and context-menu actions as text messages.
@@ -144,6 +146,7 @@ Notification settings affect alerts only. Logging scope is controlled separately
 - Child messages can be hidden, unhidden, or removed individually while the root remains.
 - Jumping from a child record opens the exact message when its live thread still exists. Fully deleted threads fall back to the restored parent card or thread entry. Jump is unavailable when both the thread and its parent channel are gone.
 - A restored forum card opens a logger view limited to that thread.
+- Fully restored forum cards, sidebar thread entries, thread-browser cards, and logger rows have a logger-owned Delete button because those entries are DOM clones rather than Discord message components. The plugin reuses Discord's observed Delete action when available, or combines another current native toolbar button with Discord's own Trash icon when permissions hide Delete. Normal click confirms; Shift-click removes the record immediately, including saved children when deleting a root.
 - **Automatically refresh new forum posts** uses Discord's native **New Post(s)** control so new cards appear without leaving and reopening the forum.
 - Fully deleted forum cards and thread entries use an anchor system: Discord must have at least one live forum post or thread entry whose current layout can be cloned. If the list is empty, deleted items remain logged but are not rendered until a live item exists.
 - **Anti Nuke** captures a deleted parent forum or text channel under **Purged**, overriding all normal logging ignores and location rules unless Anti Nuke itself is disabled. Thread/forum-post, total-message, and total-attachment caps default to `10` and are shared across one deletion event. Capture runs newest-first; attachments are considered only after their owning message is admitted, while root messages bypass the total-message cap but their files still consume the attachment cap. Blank or `0` is unlimited and unsafe for large channels. Anti Nuke records do not offer Jump because their parent channel is gone.
