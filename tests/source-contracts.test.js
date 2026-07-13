@@ -191,13 +191,18 @@ test('first-install help matches the current logging-scope onboarding', () => {
   assert.match(source, /Only log whitelist<\/strong> under <strong>Ignores and overrides/);
   assert.match(source, /Always log selected channel<\/strong> and <strong>Always log DMs/);
   assert.match(source, /Cache media locally<\/strong> and <strong>Disable saving data/);
-  assert.match(source, /<div class="\$\{this\.style\.textIndent\}">/);
+  assert.match(source, /<div class="\$\{this\.style\.textIndent\} \$\{this\.style\.startupHelpTitle\}">/);
   assert.doesNotMatch(source, /startupHelpIntro|ml2-startup-help-intro/);
   assert.doesNotMatch(source, /font-size: 40px/);
 });
 
-test('the first-setup heading uses Discord native warning color', () => {
+test('the complete first-setup block uses Discord native warning color', () => {
   assert.match(source, /\.\$\{this\.style\.startupHelpTitle\} \{\s*color: var\(--text-warning, var\(--status-warning\)\);/);
+});
+
+test('first-install help omits the regular help-modal greeting', () => {
+  assert.match(source, /const regularHelpIntroduction = initial\s*\? ''\s*:\s*`Hello! This is the \$\{this\.getName\(\)\} help modal!/);
+  assert.match(source, /\$\{firstTimeIntroduction\}\s*\$\{regularHelpIntroduction\}\s*<strong>Menu:<\/strong>/);
 });
 
 test('top-level help headings always start on a separate spaced line', () => {

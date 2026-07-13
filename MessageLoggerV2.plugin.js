@@ -6205,7 +6205,7 @@ module.exports = class MessageLoggerV2 {
     // same heading-and-indent layout as the ordinary help modal shown directly below it.
     const firstTimeIntroduction = initial
       ? `<strong class="${this.style.startupHelpTitle}">First setup:</strong></br>
-         <div class="${this.style.textIndent}">
+         <div class="${this.style.textIndent} ${this.style.startupHelpTitle}">
            Welcome to MessageLoggerV2. New installations start in <strong>whitelist-only mode</strong>; unlisted locations are ignored unless an enabled override applies.</br></br>
            1. Right-click a server, channel, DM, or thread.</br>
            2. Open the <strong>Message Logger</strong> submenu.</br>
@@ -6215,6 +6215,11 @@ module.exports = class MessageLoggerV2 {
            Logged message content and any enabled media cache remain local to this device. Review <strong>Cache media locally</strong> and <strong>Disable saving data</strong> under Misc settings if needed.
          </div></br>`
       : '';
+    // The generic help greeting is useful when the modal is opened manually, but it adds
+    // noise to first-install onboarding because the dedicated setup introduction replaces it.
+    const regularHelpIntroduction = initial
+      ? ''
+      : `Hello! This is the ${this.getName()} help modal! You may at any time open this in plugin settings by clicking the help button, or in the menu by pressing the question mark button and then then Logger help button.</br>`;
     this.createModal({
       ...(initial
         ? {
@@ -6245,7 +6250,7 @@ module.exports = class MessageLoggerV2 {
           this.parseHTML(
             `<div class="${this.multiClasses.defaultColor} ${this.style.helpContent}">
                                ${firstTimeIntroduction}
-                               Hello! This is the ${this.getName()} help modal! You may at any time open this in plugin settings by clicking the help button, or in the menu by pressing the question mark button and then then Logger help button.</br>
+                               ${regularHelpIntroduction}
                                <strong>Menu:</strong></br>
                                 <div class="${this.style.textIndent}">
                                     DELETE + LEFT-CLICK:</br>
