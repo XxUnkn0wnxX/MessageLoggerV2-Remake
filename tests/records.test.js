@@ -251,7 +251,7 @@ test('native MessageActions wrapper calls Discord only for non-logger deletions'
   assert.equal(run({ id: 'thread-system', indexed: 'deleted', record: saved('thread-system'), threadCreated: true }).originalCalls, 1);
 });
 
-test('clone Trash confirms normally and Shift-click removes immediately', () => {
+test('local Delete confirms without Shift and Shift activation removes immediately', () => {
   const normal = createNativeDeletePlugin();
   const stopped = { default: 0, immediate: 0, nativeImmediate: 0, propagation: 0 };
   assert.equal(normal.plugin.handleCopiedNativeDeleteActivation({
@@ -287,6 +287,31 @@ test('clone Trash confirms normally and Shift-click removes immediately', () => 
   assert.equal(mismatched.plugin.requestSavedDeletedRecordRemoval('wrong-channel', mismatched.messageId, false), false);
   assert.equal(confirmationEvents.length, 0);
   assert.ok(mismatched.plugin.messageRecord[mismatched.messageId]);
+});
+
+test('logger-owned Trash visibility follows the Shift root marker', () => {
+  const toggles = [];
+  const previousDocument = global.document;
+  global.document = {
+    documentElement: {
+      classList: {
+        toggle(name, active) { toggles.push([name, active]); }
+      }
+    }
+  };
+  const plugin = createPlugin({ style: { shiftDeleteActive: 'shift-delete-active' } });
+  try {
+    assert.equal(plugin.setRestoredDeleteShiftActive(true), true);
+    assert.equal(plugin._restoredDeleteShiftHeld, true);
+    assert.equal(plugin.setRestoredDeleteShiftActive(false), false);
+    assert.equal(plugin._restoredDeleteShiftHeld, false);
+  } finally {
+    global.document = previousDocument;
+  }
+  assert.deepEqual(toggles, [
+    ['shift-delete-active', true],
+    ['shift-delete-active', false]
+  ]);
 });
 
 test('Trash removal of a restored forum or thread root cascades through its children', () => {
@@ -407,6 +432,25 @@ test('permission-independent Delete presentation uses a native toolbar shape and
   assert.equal(plugin._nativeDeleteButtonPresentation.iconClassName, 'native-icon');
   assert.equal(plugin._nativeDeleteButtonPresentation.label, 'Delete');
   assert.equal(refreshes, 1);
+});
+
+test('native toolbar discovery includes the closest toolbar for nested action mutations', () => {
+  const toolbarClass = 'buttons_hash';
+  const toolbar = {
+    nodeType: 1,
+    parentElement: null,
+    classList: { contains: value => value === toolbarClass },
+    getElementsByClassName: () => []
+  };
+  const nestedActionWrapper = {
+    nodeType: 1,
+    parentElement: toolbar,
+    classList: { contains: () => false },
+    getElementsByClassName: () => [toolbar]
+  };
+  const plugin = createPlugin({ _nativeDeleteToolbarClass: toolbarClass });
+
+  assert.deepEqual(plugin.getNativeMessageToolbarNodes(nestedActionWrapper), [toolbar]);
 });
 
 test('permission-independent toolbar fallback is owned only by exact indexed logger records', () => {

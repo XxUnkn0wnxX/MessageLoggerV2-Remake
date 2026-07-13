@@ -314,6 +314,7 @@ module.exports = class MessageLoggerV2 {
       if (this.keyupListener) {
         document.removeEventListener('keyup', this.keyupListener);
       }
+      this.setRestoredDeleteShiftActive?.(false);
       if (this.shortcutKeydownListener) {
         document.removeEventListener('keydown', this.shortcutKeydownListener, true);
       }
@@ -451,7 +452,7 @@ module.exports = class MessageLoggerV2 {
         type: 'fixed',
         items: [
           'Restores the advertised logger shortcuts and adds native BetterDiscord capture controls for custom or disabled bindings.',
-          'Lets Discord\'s native Trash action remove restored messages from the local log, adds a permission-independent local-only fallback, and gives restored forum/thread clones the same confirm-or-Shift-click Delete flow.',
+          'Lets Discord\'s native Trash action remove restored messages from the local log, adds a permission-independent local-only fallback, and shows matching Trash controls only while Shift is held; ordinary right-click Delete still confirms.',
           'Uses Discord native forum refresh behavior and repairs deleted tint, jump, context-menu, purge, and restore edge cases.',
           'Improves settings validation, accordion navigation, help screens, documentation, and legacy cache compatibility.',
           'Restores the legacy aggressive message caching and new cache system controls as locked-on indicators and resets false config values at startup.',
@@ -1332,6 +1333,7 @@ module.exports = class MessageLoggerV2 {
     this.style.restoredDeleteHost = this.obfuscatedClass('MLv2-restored-delete-host');
     this.style.restoredDeleteButton = this.obfuscatedClass('MLv2-restored-delete-button');
     this.style.restoredInlineDeleteButton = this.obfuscatedClass('MLv2-restored-inline-delete-button');
+    this.style.shiftDeleteActive = this.obfuscatedClass('MLv2-shift-delete-active');
     this.style.deletedForumModal = this.obfuscatedClass('MLv2-deleted-forum-modal');
     this.style.deletedForumRoot = this.obfuscatedClass('MLv2-deleted-forum-root');
     this.style.deletedForumHeader = this.obfuscatedClass('MLv2-deleted-forum-header');
@@ -1435,11 +1437,35 @@ module.exports = class MessageLoggerV2 {
                       transition: opacity 120ms ease !important;
                       z-index: 3 !important;
                     }
-                    html #app-mount .${this.style.restoredForumCard}:hover > .${this.style.restoredDeleteButton},
-                    html #app-mount .${this.style.restoredThreadEntry}:hover > .${this.style.restoredDeleteButton},
-                    html #app-mount .${this.style.restoredThreadBrowserCard}:hover > .${this.style.restoredDeleteButton},
-                    html #app-mount .${this.style.restoredDeleteHost}:hover > .${this.style.restoredDeleteButton},
-                    html #app-mount .${this.style.restoredDeleteButton}:focus-within {
+                    html #app-mount .${this.style.restoredThreadEntry} > .${this.style.restoredDeleteButton} {
+                      top: 50% !important;
+                      transform: translateY(-50%) !important;
+                    }
+                    /* Sidebar thread rows are only 34px tall. Keep their copied native Delete
+                       affordance compact and centered instead of inheriting the 28px card size. */
+                    html #app-mount .${this.style.restoredThreadEntry} > .${this.style.restoredDeleteButton} button,
+                    html #app-mount .${this.style.restoredThreadEntry} > .${this.style.restoredDeleteButton} [role="button"] {
+                      box-sizing: border-box !important;
+                      height: 24px !important;
+                      width: 24px !important;
+                    }
+                    html #app-mount .${this.style.restoredThreadBrowserCard} > .${this.style.restoredDeleteButton} {
+                      top: 50% !important;
+                      transform: translate(8px, -50%) !important;
+                    }
+                    html #app-mount .${this.style.restoredThreadEntry} > .${this.style.restoredDeleteButton} svg {
+                      height: 16px !important;
+                      width: 16px !important;
+                    }
+                    html #app-mount .${this.style.restoredThreadBrowserCard} > .${this.style.restoredDeleteButton} svg {
+                      height: 20px !important;
+                      width: 20px !important;
+                    }
+                    html.${this.style.shiftDeleteActive} #app-mount .${this.style.restoredForumCard}:hover > .${this.style.restoredDeleteButton},
+                    html.${this.style.shiftDeleteActive} #app-mount .${this.style.restoredThreadEntry}:hover > .${this.style.restoredDeleteButton},
+                    html.${this.style.shiftDeleteActive} #app-mount .${this.style.restoredThreadBrowserCard}:hover > .${this.style.restoredDeleteButton},
+                    html.${this.style.shiftDeleteActive} #app-mount .${this.style.restoredDeleteHost}:hover > .${this.style.restoredDeleteButton},
+                    html.${this.style.shiftDeleteActive} #app-mount .${this.style.restoredDeleteButton}:focus-within {
                       opacity: 1 !important;
                       pointer-events: auto !important;
                     }
@@ -1447,12 +1473,17 @@ module.exports = class MessageLoggerV2 {
                       display: none !important;
                     }
                     html #app-mount .${this.style.restoredDeleteButton}.${this.style.restoredInlineDeleteButton} {
-                      display: flex !important;
-                      opacity: 1 !important;
-                      pointer-events: auto !important;
+                      display: none !important;
+                      opacity: 0 !important;
+                      pointer-events: none !important;
                       position: static !important;
                       transition: none !important;
                       z-index: auto !important;
+                    }
+                    html.${this.style.shiftDeleteActive} #app-mount .${this.style.restoredDeleteButton}.${this.style.restoredInlineDeleteButton} {
+                      display: flex !important;
+                      opacity: 1 !important;
+                      pointer-events: auto !important;
                     }
                     html #app-mount .${this.style.restoredDeleteButton}.${this.style.restoredInlineDeleteButton}[data-ml2-pending-delete-control="true"] {
                       display: none !important;
@@ -1720,10 +1751,12 @@ module.exports = class MessageLoggerV2 {
       return channels[keys[Math.trunc(keys.length * Math.random())]];
     })();
     this.menu.deleteKeyDown = false;
+    this.setRestoredDeleteShiftActive(false);
     this.keydownListener = e => {
       if (e.repeat) return;
       if (e.keyCode === 46) this.menu.deleteKeyDown = true;
       if (e.key === 'Shift') {
+        this.setRestoredDeleteShiftActive(true);
         // Discord lazily reveals destructive message actions while Shift is held. Wait through
         // two paint frames so the mounted native button can be copied without guessing at its
         // current hashed classes, localized label, or icon markup.
@@ -1734,6 +1767,7 @@ module.exports = class MessageLoggerV2 {
     this.keyupListener = e => {
       if (e.repeat) return;
       if (e.keyCode === 46) this.menu.deleteKeyDown = false;
+      if (e.key === 'Shift') this.setRestoredDeleteShiftActive(!!e.shiftKey);
     };
     document.addEventListener('keyup', this.keyupListener);
     // BetterDiscord's native recorder listens during window capture, which precedes document
@@ -1743,7 +1777,10 @@ module.exports = class MessageLoggerV2 {
     this._pressedShortcutKeys = new Set();
     this.shortcutKeydownListener = event => this.handleLoggerShortcutKeydown(event);
     this.shortcutKeyupListener = event => this.handleLoggerShortcutKeyup(event);
-    this.shortcutBlurListener = () => this._pressedShortcutKeys.clear();
+    this.shortcutBlurListener = () => {
+      this._pressedShortcutKeys.clear();
+      this.setRestoredDeleteShiftActive(false);
+    };
     document.addEventListener('keydown', this.shortcutKeydownListener, true);
     document.addEventListener('keyup', this.shortcutKeyupListener, true);
     window.addEventListener('blur', this.shortcutBlurListener);
@@ -6704,8 +6741,8 @@ module.exports = class MessageLoggerV2 {
                                 <div class="${this.style.textIndent}">
                                     TRASH:</br>
                                     <div class="${this.style.textIndent}">
-                                        Trash removes a restored deleted message from the local log after normal confirmation; Shift-click removes it immediately</br>
-                                        If Discord hides Trash because you lack delete permission, the logger adds a matching local-only action. Logger rows, forum cards, and thread entries provide the same confirm-or-Shift-click behavior</br>
+                                        Right-click a restored item and choose Delete for the confirmed removal path</br>
+                                        Hold Shift while hovering to expose Trash; Shift-click removes the local record immediately. If Discord hides Trash because you lack delete permission, the logger adds a matching local-only Shift action</br>
                                     </div></br>
                                     RIGHT-CLICK:</br>
                                     <div class="${this.style.textIndent}">
@@ -7538,6 +7575,15 @@ module.exports = class MessageLoggerV2 {
     if (typeof icon?.default === 'function') return icon.default;
     return null;
   }
+  setRestoredDeleteShiftActive(active) {
+    const enabled = !!active;
+    this._restoredDeleteShiftHeld = enabled;
+    if (typeof document === 'undefined' || !this.style?.shiftDeleteActive) return enabled;
+    // One root marker gates every logger-owned Trash affordance, including raw forum/thread
+    // clones and permission-independent controls inserted into Discord message toolbars.
+    document.documentElement?.classList?.toggle(this.style.shiftDeleteActive, enabled);
+    return enabled;
+  }
   getNativeDeleteLabel() {
     return this._nativeDeleteButtonPresentation?.label || 'Delete';
   }
@@ -7553,10 +7599,22 @@ module.exports = class MessageLoggerV2 {
   getNativeMessageToolbarNodes(root = document) {
     const toolbarClass = this.getNativeDeleteToolbarClass();
     if (!toolbarClass || !root) return [];
-    const toolbars = [];
-    if (root.classList?.contains?.(toolbarClass)) toolbars.push(root);
-    if (root.getElementsByClassName) toolbars.push(...root.getElementsByClassName(toolbarClass));
-    return toolbars;
+    const toolbars = new Set();
+    // Discord can add or remove Shift-only actions below the toolbar root. Mutation records then
+    // point at a nested wrapper, so include its closest toolbar as well as roots/descendants. This
+    // lets a newly mounted native Trash immediately displace the permission-independent fallback.
+    let ancestor = root.nodeType === 1 ? root : root.parentElement;
+    while (ancestor) {
+      if (ancestor.classList?.contains?.(toolbarClass)) {
+        toolbars.add(ancestor);
+        break;
+      }
+      ancestor = ancestor.parentElement;
+    }
+    if (root.getElementsByClassName) {
+      for (const toolbar of root.getElementsByClassName(toolbarClass)) toolbars.add(toolbar);
+    }
+    return Array.from(toolbars);
   }
   inspectNativeDestructiveMessageCandidate(candidate) {
     if (!candidate?.querySelector?.('svg')) return null;
