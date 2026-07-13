@@ -53,10 +53,12 @@ test.beforeEach(resetHarness);
 
 test('logger viewer double-click jumps only valid non-interactive saved messages', () => {
   let doubleClick;
+  let mouseDown;
   const interactive = {};
   const element = {
     addEventListener(type, handler) {
       if (type === 'dblclick') doubleClick = handler;
+      if (type === 'mousedown') mouseDown = handler;
     },
     contains(node) { return node === interactive; }
   };
@@ -68,6 +70,7 @@ test('logger viewer double-click jumps only valid non-interactive saved messages
 
   assert.equal(plugin.wireLoggerViewerDoubleClick(element, record), true);
   assert.equal(typeof doubleClick, 'function');
+  assert.equal(typeof mouseDown, 'function');
 
   let prevented = 0;
   let stopped = 0;
@@ -76,23 +79,51 @@ test('logger viewer double-click jumps only valid non-interactive saved messages
     preventDefault() { prevented++; },
     stopPropagation() { stopped++; }
   };
+  mouseDown({ ...plainEvent, detail: 1 });
+  assert.equal(prevented, 0, 'an ordinary click must retain its native behavior');
+  mouseDown({ ...plainEvent, detail: 2 });
+  assert.equal(prevented, 1, 'the second row press must not begin browser selection');
   doubleClick(plainEvent);
   assert.deepEqual(jumps, [record]);
-  assert.equal(prevented, 1);
+  assert.equal(prevented, 2);
   assert.equal(stopped, 1);
 
   record.valid = false;
+  mouseDown({ ...plainEvent, detail: 2 });
   doubleClick(plainEvent);
   assert.equal(jumps.length, 1);
-  assert.equal(prevented, 1);
+  assert.equal(prevented, 2);
 
   record.valid = true;
-  doubleClick({ target: { closest: () => interactive } });
+  const directMediaEvent = {
+    detail: 2,
+    target: { closest: selector => selector.includes('img') ? interactive : null },
+    preventDefault() { prevented++; }
+  };
+  mouseDown(directMediaEvent);
+  doubleClick(directMediaEvent);
   assert.equal(jumps.length, 1);
+  assert.equal(prevented, 2, 'direct media must retain its viewer action');
+
+  const attachmentBlankEvent = {
+    detail: 2,
+    target: {
+      closest: selector => selector.includes('data-ml2-attachment-message-id') ? interactive : null
+    },
+    preventDefault() { prevented++; },
+    stopPropagation() { stopped++; }
+  };
+  mouseDown(attachmentBlankEvent);
+  doubleClick(attachmentBlankEvent);
+  assert.deepEqual(jumps, [record, record], 'blank space beside media remains part of the row');
+  assert.equal(prevented, 4);
+  assert.equal(stopped, 2);
 
   plugin.menu.deleteKeyDown = true;
+  mouseDown({ ...plainEvent, detail: 2 });
   doubleClick(plainEvent);
-  assert.equal(jumps.length, 1);
+  assert.equal(jumps.length, 2);
+  assert.equal(prevented, 4);
   assert.equal(plugin.wireLoggerViewerDoubleClick(element, null), false);
 });
 

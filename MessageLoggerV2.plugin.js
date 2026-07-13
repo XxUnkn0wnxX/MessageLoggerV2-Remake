@@ -5924,14 +5924,25 @@ module.exports = class MessageLoggerV2 {
   }
   wireLoggerViewerDoubleClick(element, record) {
     if (!element?.addEventListener || !record) return false;
-    element.addEventListener('dblclick', event => {
-      // Delete-key clicks and controls with their own actions keep priority over row navigation.
+    const shouldJumpFromEvent = event => {
+      // Delete-key clicks and actual controls keep priority over row navigation. Do not treat
+      // an attachment's whole layout wrapper as interactive: blank space beside its media is
+      // still part of the saved row, while the image/link/video itself keeps Discord's action.
       if (this.menu?.deleteKeyDown || !this.canJumpToSavedRecord(record)) return;
       const target = event?.target;
       const interactive = target?.closest?.(
-        'a, button, img, video, audio, input, textarea, select, [contenteditable="true"], [role="button"], [data-ml2-native-delete-host="true"], [data-ml2-attachment-message-id]'
+        'a, button, img, picture, video, audio, input, textarea, select, [contenteditable="true"], [role="button"], [data-ml2-native-delete-host="true"]'
       );
-      if (interactive && (!element.contains || element.contains(interactive))) return;
+      return !(interactive && (!element.contains || element.contains(interactive)));
+    };
+    // Browser selection begins on the second mousedown, before dblclick fires. Cancel only
+    // that press for a valid row jump so ordinary clicks and media-viewer activation are intact.
+    element.addEventListener('mousedown', event => {
+      if ((event?.detail ?? 0) < 2 || !shouldJumpFromEvent(event)) return;
+      event.preventDefault?.();
+    });
+    element.addEventListener('dblclick', event => {
+      if (!shouldJumpFromEvent(event)) return;
       event.preventDefault?.();
       event.stopPropagation?.();
       this.jumpToSavedRecord(record);

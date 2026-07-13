@@ -77,7 +77,7 @@ Right-click a timestamp for group-level actions.
 
 ### Message actions
 
-Double-click a saved message row to jump to its Discord location when one remains available. A warning-orange username in the logger window marks a valid destination; the normal username color means no jump target remains. Links, avatars, media, and Delete controls retain their own actions. Deleted-channel Anti-Nuke records and other records without a live message channel or saved forum/thread parent do nothing.
+Double-click a saved message row to jump to its Discord location when one remains available. This includes blank row space beside an attachment, without selecting the row. A warning-orange username in the logger window marks a valid destination; the normal username color means no jump target remains. Links, avatars, the attachment or media itself, and Delete controls retain their own actions, so clicking an image still opens Discord's media viewer. Deleted-channel Anti-Nuke records and other records without a live message channel or saved forum/thread parent do nothing.
 
 Right-click saved messages in the logger or channel view to access applicable actions:
 
