@@ -570,6 +570,12 @@ test('permission-independent inline Delete is the direct native toolbar action',
   assert.equal(root.rendered.props.className, 'native-trash-icon');
   assert.equal(plugin._copiedDeleteControlRoots.get(host), root);
 
+  let selectionPreventions = 0;
+  listeners.get('mousedown')({ shiftKey: false, preventDefault() { selectionPreventions++; } });
+  assert.equal(selectionPreventions, 0, 'ordinary presses must retain native focus behavior');
+  listeners.get('mousedown')({ shiftKey: true, preventDefault() { selectionPreventions++; } });
+  assert.equal(selectionPreventions, 1, 'Shift-press must not begin browser text selection');
+
   const clickEvent = { shiftKey: true };
   listeners.get('click')(clickEvent);
   assert.deepEqual(activations.at(-1), {
@@ -782,6 +788,7 @@ test('failed native Delete control render unmounts its partial React root', () =
   const attributes = new Map();
   const host = {
     setAttribute(name, value) { attributes.set(name, String(value)); },
+    addEventListener() {},
     replaceChildren() {}
   };
   const plugin = createPlugin({

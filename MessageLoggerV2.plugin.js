@@ -455,6 +455,7 @@ module.exports = class MessageLoggerV2 {
           'Lets Discord\'s native Trash action remove restored messages from the local log, adds the local-only fallback only when native Trash is absent, and shows matching Trash controls only while Shift is held; ordinary right-click Delete still confirms.',
           'Keeps Discord\'s native Delete confirmation lifecycle intact after plugin hot reloads when Trash performs a local-only logger removal.',
           'Resolves minified single-function Trash icon exports, keeps every logger-owned Trash glyph danger-red, adds a top-level local Delete when permissions hide Discord\'s item, and standardizes permanent logger actions as red Delete entries.',
+          'Prevents immediate Shift-click Trash actions from temporarily highlighting nearby logger or restored-mount text.',
           'Uses Discord native forum refresh behavior and repairs deleted tint, jump, context-menu, purge, and restore edge cases.',
           'Improves settings validation, accordion navigation, help screens, documentation, and legacy cache compatibility.',
           'Restores the legacy aggressive message caching and new cache system controls as locked-on indicators and resets false config values at startup.',
@@ -6758,13 +6759,14 @@ module.exports = class MessageLoggerV2 {
                                 <div class="${this.style.textIndent}">
                                     TRASH:</br>
                                     <div class="${this.style.textIndent}">
-                                        Right-click a restored item and choose Delete for the confirmed removal path</br>
-                                        Hold Shift while hovering to expose Trash; Shift-click removes the local record immediately. If Discord hides Trash because you lack delete permission, the logger adds a matching local-only Shift action</br>
+                                        The same local-only flow applies to restored chat messages, logger-window rows, and restored forum/thread mounts</br>
+                                        Right-click an item and choose Delete for the confirmed removal path</br>
+                                        Hold Shift while hovering to expose Trash; Shift-click removes the local record immediately without selecting text. If Discord hides Trash because you lack delete permission, the logger adds a matching local-only Shift action</br>
                                     </div></br>
                                     RIGHT-CLICK:</br>
                                     <div class="${this.style.textIndent}">
                                         Right-clicking an edit (darkened text) allows you to delete that edit, or hide edits</br>
-                                        Right-clicking on a edited or deleted message gives you the option to hide the deleted message or hide or unhide edits, remove the edited or deleted message from log and remove deleted tint which makes the message look like it isn't deleted.
+                                        Right-clicking an edited or deleted message lets you hide the deletion, hide or unhide edits, permanently Delete the saved logger record, or remove its deleted tint.
                                     </div></br>
                                 </div>
                             </div>`
@@ -7860,6 +7862,12 @@ module.exports = class MessageLoggerV2 {
     host.setAttribute('data-ml2-message-id', message.id);
     host.setAttribute('data-ml2-channel-id', message.channel_id);
     if (options.inline) host.setAttribute('data-ml2-inline-delete-control', 'true');
+    // Shift-click bypasses the confirmation modal, but browsers begin extending a text
+    // selection on mousedown before the later click handler can cancel it. Prevent only that
+    // Shift-modified default action so ordinary clicks retain their normal focus behavior.
+    host.addEventListener('mousedown', event => {
+      if (event.shiftKey) event.preventDefault();
+    });
     if (!presentation) {
       host.setAttribute('data-ml2-pending-delete-control', 'true');
       return host;
