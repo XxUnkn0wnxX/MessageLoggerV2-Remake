@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.1.2
+ * @version 2.8.1.3
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -410,12 +410,11 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Keyboard shortcuts',
-        type: 'added',
+        title: 'Context menu reshuffling',
+        type: 'fixed',
         items: [
-          'Adds a configurable Ctrl + S selected-server shortcut that remains unavailable in DMs and group DMs while all-log and channel shortcuts continue to work there.',
-          'Makes all-log, selected-channel, and selected-server shortcuts toggle their actual filter state without changing the selected logger tab.',
-          'Closes native media viewers first and stacked MessageLogger help and panel modals top-down before shortcut view switches, while leaving every other Discord panel untouched.'
+          'Places MessageLogger directly above visible Copy ID actions across message, user, channel, DM, and server menus.',
+          'Keeps destructive-action and final-group fallbacks stable when Discord omits Copy ID actions.'
         ]
       }
     ];
@@ -2936,19 +2935,19 @@ module.exports = class MessageLoggerV2 {
           { name: 'Ignore bots', id: 'ignoreBots', type: 'switch' },
           {
             name: 'Ignore messages posted by you',
-            note: 'Applied per author, including messages inside forum posts and threads.',
+            note: 'Also applies inside forum posts and threads.',
             id: 'ignoreSelf',
             type: 'switch'
           },
           {
             name: 'Ignore message edits from you',
-            note: 'Skips edit history but keeps the current message ready for later deletions.',
+            note: 'Skips your edit history but keeps messages ready for later deletions.',
             id: 'ignoreLocalEdits',
             type: 'switch'
           },
           {
             name: 'Ignore message deletes from you',
-            note: 'Skips deletions initiated by this Discord client.',
+            note: 'Skips deletions from this Discord client.',
             id: 'ignoreLocalDeletes',
             type: 'switch'
           },
@@ -2962,14 +2961,14 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Always log selected channel, regardless of whitelist/blacklist',
-            note: 'A selected thread also applies this override to its parent channel.',
+            note: 'Selected threads also cover their parent channel.',
             id: 'alwaysLogSelected',
             type: 'switch'
           },
           { name: 'Always log DMs, regardless of whitelist/blacklist', id: 'alwaysLogDM', type: 'switch' },
           {
             name: 'Always log ghost pings, regardless of whitelist/blacklist',
-            note: 'Watches ignored locations, but only saves a message if it becomes a ghost ping.',
+            note: 'Watches ignored locations only for ghost pings.',
             id: 'alwaysLogGhostPings',
             type: 'switch'
           }
@@ -3015,7 +3014,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Use background instead of text tint for deleted messages',
-            note: 'Uses the configured deleted-message color as a background tint.',
+            note: 'Uses the deleted-message color as a background.',
             id: 'useAlternativeDeletedStyle',
             type: 'switch',
             action: 'forceUpdateMessage'
@@ -3037,7 +3036,7 @@ module.exports = class MessageLoggerV2 {
           { name: 'Show amount of new edited messages when entering a channel', id: 'showEditedCount', type: 'switch' },
           {
             name: 'Show Hidden tab in logger',
-            note: 'Hidden records remain stored when this tab is disabled.',
+            note: 'Disabling this tab does not delete hidden records.',
             id: 'showHiddenTab',
             type: 'switch'
           },
@@ -3053,7 +3052,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Use BdApi basic notifications instead of custom toasts',
-            note: 'Uses BetterDiscord notifications for logger alerts and message counts. Switching this off dismisses the active notification and clears queued notifications.',
+            note: 'Use BetterDiscord notifications instead of custom toasts. Switching modes clears active and queued alerts.',
             id: 'useNotificationsInstead',
             type: 'switch',
             action: 'notificationModeChange'
@@ -3068,21 +3067,21 @@ module.exports = class MessageLoggerV2 {
         settings: [
           {
             name: 'Disable saving data',
-            note: 'Keeps new logs in memory and disables automatic backups. Existing disk history stays untouched; after a reload, re-enabling saving safely merges that history with eligible records from the current session.',
+            note: 'Keeps new logs memory-only and pauses backups. Re-enabling after reload safely merges them with saved history.',
             id: 'dontSaveData',
             type: 'switch',
             action: 'handleDataSave'
           },
           {
             name: "Auto backup data (won't fully prevent losing data, just prevent total data loss)",
-            note: 'Keeps a fallback copy of saved logger data.',
+            note: 'Keep a fallback copy of saved logger data.',
             id: 'autoBackup',
             type: 'switch',
             action: 'handleBackup'
           },
           {
             name: 'Auto backup interval (seconds)',
-            note: 'Wait time before refreshing the backup after saved data changes. Accepts 10 to 86,400 seconds. Blank resets to the 20-second default; example: 300 is 5 minutes.',
+            note: 'Backup delay in seconds (10–86,400). Blank resets to 20; 300 is 5 minutes.',
             id: 'autoBackupIntervalSeconds',
             type: 'textbox',
             validator: 'number',
@@ -3094,7 +3093,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Deleted messages color',
-            note: 'Enter a hex color. Leave blank to use the built-in red.',
+            note: 'Hex color; blank uses the built-in red.',
             id: 'deletedMessageColor',
             type: 'textbox',
             validator: 'hexColor',
@@ -3102,14 +3101,14 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Cache media locally',
-            note: 'Master switch for caching attachments, embed images, and stickers.',
+            note: 'Cache attachments, embed images, and stickers.',
             id: 'cacheAllImages',
             type: 'switch',
             action: 'reportMediaCaching'
           },
           {
             name: 'Aggresive message caching (makes sure we have the data of any deleted or edited messages)',
-            note: 'Legacy setting: this must remain enabled on this fork for reliable forum and thread restoration.',
+            note: 'Legacy control locked on for reliable forum and thread restoration.',
             id: 'aggresiveMessageCaching',
             type: 'switch',
             disabled: true,
@@ -3120,7 +3119,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Use new cached images system',
-            note: 'Organizes cached media by server and channel. Legacy setting: this must remain enabled on this fork for reliable forum and thread media restoration.',
+            note: 'Legacy control locked on for organized forum and thread media storage.',
             id: 'newCacheAllImages',
             type: 'switch',
             disabled: true,
@@ -3131,40 +3130,40 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: "Always show notifications for selected channel",
-            note: 'Allows enabled alerts while viewing the active channel, thread, or parent forum.',
+            note: 'Allow alerts while viewing the active channel, thread, or parent forum.',
             id: 'alwaysNotifChannel',
             type: 'switch'
           },
           {
             name: "Always show notifications for selected guild",
-            note: 'Treats the currently open server as an override for notification location lists.',
+            note: 'Allow alerts for the currently open server.',
             id: 'alwaysNotifGuild',
             type: 'switch'
           },
           { name: "Add user id to saved media filename", id: 'addUserIdToSavedMediaFilename', type: 'switch' },
           {
             name: "Show notifications to whitelisted only",
-            note: 'Restricts alerts without changing what gets logged.',
+            note: 'Restrict alerts without changing what is logged.',
             id: 'notifOnlyWhitelist',
             type: 'switch'
           },
           {
             name: 'Media cache path (optional)',
-            note: 'Uses this existing folder instead of MLV2_IMAGE_CACHE.',
+            note: 'Use an existing folder instead of MLV2_IMAGE_CACHE.',
             id: 'newCacheAllImagesPath',
             type: 'textbox',
             validator: 'cachePath'
           },
           {
             name: "Cache all attachment types",
-            note: 'Also caches videos, audio, and other non-image files.',
+            note: 'Also cache videos, audio, and other files.',
             id: 'newSaveAllFileTypes',
             type: 'switch',
             customValue: true
           },
           {
             name: 'Max cache file size (MB, 0 = no limit)',
-            note: 'Skips oversized attachment files. Blank or 0 disables the limit.',
+            note: 'Skip larger attachments. Blank or 0 disables the limit.',
             id: 'maxCacheFileSize',
             type: 'textbox',
             validator: 'number',
@@ -3179,7 +3178,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Toggle all logs keybind',
-            note: 'Defaults to Ctrl + M. Matching all logs close; another logger state closes and reopens as all logs. Any open native media viewer closes first, including one opened from a normal Discord message. Record modifiers plus one key (or F1-F24 alone); unsafe or overlapping captures are rejected. Clear it to disable this shortcut.',
+            note: 'Ctrl + M. Toggle all logs. Clear to disable.',
             id: 'openLogsKeybind',
             type: 'keybind',
             validator: 'loggerKeybind',
@@ -3188,7 +3187,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Toggle selected channel logs keybind',
-            note: 'Defaults to Ctrl + N. Matching selected-channel logs close; another logger state closes and reopens for the currently selected channel. Any open native media viewer closes first; all other Discord panels remain untouched. Record a distinct safe combination; clear it to disable this shortcut.',
+            note: 'Ctrl + N. Toggle selected channel, DM, or group DM logs. Clear to disable.',
             id: 'openFilteredLogsKeybind',
             type: 'keybind',
             validator: 'loggerKeybind',
@@ -3197,7 +3196,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Toggle selected server logs keybind',
-            note: 'Defaults to Ctrl + S. Matching selected-server logs close; another logger state closes and reopens for the currently selected server. It is unavailable in DMs and group DMs. Any open native media viewer closes first; all other Discord panels remain untouched. Record a distinct safe combination; clear it to disable this shortcut.',
+            note: 'Ctrl + S. Toggle selected server logs. Unavailable in DMs/group DMs. Clear to disable.',
             id: 'openServerLogsKeybind',
             type: 'keybind',
             validator: 'loggerKeybind',
@@ -3206,7 +3205,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Automatically refresh new forum posts',
-            note: "Uses Discord's native New Post control so cards appear without leaving the forum.",
+            note: "Use Discord's New Post control to refresh forum cards.",
             id: 'autoRefreshForumPosts',
             type: 'switch',
             action: 'refreshNativeForumPosts'
@@ -3226,7 +3225,7 @@ module.exports = class MessageLoggerV2 {
           { name: 'Ghost pings', id: 'ghostPings', type: 'switch', parent: 'toastToggles' },
           {
             name: 'Disable toasts for local user (yourself)',
-            note: 'Suppresses alerts for actions initiated by this client. Remote deletions of your messages still alert unless messages posted by you are ignored.',
+            note: 'Suppress local-client actions. Remote deletions of your messages can still alert.',
             id: 'disableToastsForLocal',
             type: 'switch',
             parent: 'toastToggles'
@@ -3253,7 +3252,7 @@ module.exports = class MessageLoggerV2 {
         settings: [
           {
             name: 'Enable Anti Nuke',
-            note: 'Captures a bounded snapshot under Purged when a parent forum or text channel is deleted. This emergency path overrides all normal logging ignores and location rules.',
+            note: 'Save a bounded Purged snapshot when a forum or text channel is deleted. Overrides logging filters.',
             id: 'antiNukeEnabled',
             type: 'switch',
             action: 'reportAntiNuke'
@@ -3263,7 +3262,7 @@ module.exports = class MessageLoggerV2 {
             note: React.createElement(
               'span',
               { style: { color: 'var(--status-warning)' } },
-              'Limits how many thread or forum-post roots are captured per deleted parent channel. Blank or 0 is unlimited and may freeze or crash Discord.'
+              'Roots captured per deleted channel. Blank or 0 is unlimited and may freeze Discord.'
             ),
             id: 'antiNukeThreadCap',
             type: 'textbox',
@@ -3276,7 +3275,7 @@ module.exports = class MessageLoggerV2 {
             note: React.createElement(
               'span',
               { style: { color: 'var(--status-warning)' } },
-              'One total shared allowance for child replies across all captured threads or forum posts plus ordinary messages in the deleted parent channel. Root messages do not consume this cap, so the total record count can be higher. Blank or 0 is unlimited and may freeze or crash Discord.'
+              'Shared cap for replies and ordinary messages; roots are excluded. Blank or 0 is unlimited and may freeze Discord.'
             ),
             id: 'antiNukeMessageCap',
             type: 'textbox',
@@ -3289,7 +3288,7 @@ module.exports = class MessageLoggerV2 {
             note: React.createElement(
               'span',
               { style: { color: 'var(--status-warning)' } },
-              'One total shared allowance for Discord file attachments across the deleted channel, captured newest-first. A single message can consume the whole allowance. Blank or 0 is unlimited and may use substantial disk space.'
+              'Shared newest-first attachment cap. Blank or 0 is unlimited and may use substantial disk space.'
             ),
             id: 'antiNukeAttachmentCap',
             type: 'textbox',
@@ -3307,7 +3306,7 @@ module.exports = class MessageLoggerV2 {
         settings: [
           {
             name: 'Cached messages cap',
-            note: 'Max number of sent messages logger should keep track of',
+            note: 'Sent-message cache size.',
             id: 'messageCacheCap',
             type: 'textbox',
             validator: 'number',
@@ -3316,7 +3315,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Saved messages cap',
-            note: 'Applied separately to deleted, edited, and purged records.',
+            note: 'Per-category cap for deleted, edited, and purged records.',
             id: 'savedMessagesCap',
             type: 'textbox',
             validator: 'number',
@@ -3325,7 +3324,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Menu message render cap',
-            note: 'How many messages will show before the LOAD MORE button will show',
+            note: 'Messages shown before Load More.',
             id: 'renderCap',
             type: 'textbox',
             validator: 'number',
@@ -3341,33 +3340,33 @@ module.exports = class MessageLoggerV2 {
         settings: [
           {
             name: 'Obfuscate CSS classes',
-            note: 'Enable this if some plugin, library or theme is blocking you from using the plugin',
+            note: 'Helps when another plugin, library, or theme blocks MessageLogger.',
             id: 'obfuscateCSSClasses',
             type: 'switch'
           },
           {
             name: 'Automatic updates',
-            note: "Do NOT disable unless you really don't want automatic updates",
+            note: 'Automatically install plugin updates.',
             id: 'autoUpdate',
             type: 'switch',
             action: 'toggleAutoUpdate'
           },
           {
             name: 'Contextmenu submenu name',
-            note: "Instead of saying Message Logger, make it say something else, so it's screenshot friendly",
+            note: 'Custom label for the Message Logger submenu.',
             id: 'contextmenuSubmenuName',
             type: 'textbox'
           },
           {
             name: 'Only render locally cached attachments',
-            note: 'Prevents uncached attachment URLs from rendering through Discord CDN in deleted messages and logger views.',
+            note: 'Hide uncached attachments instead of loading them from Discord.',
             id: 'onlyRenderCachedAttachments',
             type: 'switch',
             action: 'refreshAttachmentRendering'
           },
           {
             name: 'Delete cached files with log records',
-            note: 'Permanently removes related cached media when a log record is removed. This cannot be undone.',
+            note: 'Also delete cached media with log records. This cannot be undone.',
             id: 'deleteCachedFilesWithRecords',
             type: 'switch',
             action: 'reportCachedFileDeletion'
@@ -3390,7 +3389,7 @@ module.exports = class MessageLoggerV2 {
               { style: { color: 'var(--text-warning, var(--status-warning))' } },
               'Enable debug logging'
             ),
-            note: 'Writes automatic-backup queue, reschedule, cancellation, start, retry, and completion events to the console. Other debug areas may be added later.',
+            note: 'Log automatic-backup scheduling and writes to the console.',
             id: 'debugLogging',
             type: 'switch'
           },
@@ -3400,7 +3399,7 @@ module.exports = class MessageLoggerV2 {
               { style: { color: 'var(--text-warning, var(--status-warning))' } },
               'Show debug messages as toasts'
             ),
-            note: 'Shows the same automatic-backup debug events through the selected BetterDiscord notification or custom-toast mode. This can be enabled independently from console logging.',
+            note: 'Show backup diagnostics through the selected alert mode.',
             id: 'debugToasts',
             type: 'switch'
           }
@@ -11428,7 +11427,7 @@ module.exports = class MessageLoggerV2 {
     const getNestedProp = (obj, path) => path.split('.').reduce((o, p) => o?.[p], obj);
     const menuIdMatches = (actual, expected) =>
       typeof actual === 'string' && (actual === expected || actual === `message-${expected}`);
-    const findMenuGroupByChildId = (node, id) => {
+    const findMenuGroupByChild = (node, predicate) => {
       const children = Array.isArray(node)
         ? node
         : Array.isArray(node?.props?.children)
@@ -11436,12 +11435,59 @@ module.exports = class MessageLoggerV2 {
           : node?.props?.children
             ? [node.props.children]
             : [];
-      if (children.some(child => menuIdMatches(child?.props?.id, id))) return children;
+      if (children.some(predicate)) return children;
       for (const child of children) {
-        const found = findMenuGroupByChildId(child, id);
+        const found = findMenuGroupByChild(child, predicate);
         if (found) return found;
       }
       return null;
+    };
+    const findMenuGroupByChildId = (node, id) => findMenuGroupByChild(
+      node,
+      child => menuIdMatches(child?.props?.id, id)
+    );
+    const menuNodeContains = (node, predicate, seen = new Set()) => {
+      if (node == null || typeof node === 'boolean') return false;
+      if (Array.isArray(node)) return node.some(child => menuNodeContains(child, predicate, seen));
+      if (typeof node !== 'object' || seen.has(node)) return false;
+      seen.add(node);
+      if (predicate(node)) return true;
+      return menuNodeContains(node.props?.children, predicate, seen);
+    };
+    const insertLoggerGroupAt = (menu, index, loggerSubmenu) => {
+      if (!Array.isArray(menu) || index < 0 || index > menu.length) return false;
+      // Insert a complete top-level group. Discord frequently wraps a single menu action in
+      // a non-array child; mutating a temporary one-item array would not update the real tree.
+      menu.splice(index, 0, ContextMenu.buildMenuChildren([{
+        type: 'group',
+        items: [loggerSubmenu]
+      }]));
+      return true;
+    };
+    const insertLoggerSubmenuAfterAnchor = (menu, loggerSubmenu, anchorIds) => {
+      // Discord exposes different destructive/action IDs for DMs, servers, and folders.
+      // Insert after the complete native group so wrapped and multi-item actions stay intact.
+      for (const anchorId of anchorIds) {
+        const anchorIndex = menu.findIndex(group => menuNodeContains(
+          group,
+          item => menuIdMatches(item?.props?.id, anchorId)
+        ));
+        if (anchorIndex < 0) continue;
+        return insertLoggerGroupAt(menu, anchorIndex + 1, loggerSubmenu);
+      }
+      return false;
+    };
+    const isVisibleCopyIdItem = (item) => {
+      const id = item?.props?.id;
+      const label = item?.props?.label;
+      return (typeof id === 'string' && (menuIdMatches(id, 'copy-id') || id.startsWith('devmode-copy-id-')))
+        || (typeof label === 'string' && /^Copy (?:Message|User|Channel|Server|Guild) ID$/i.test(label));
+    };
+    const insertLoggerSubmenuBeforeCopyId = (menu, loggerSubmenu) => {
+      // Copy-ID actions are the most stable visible footer boundary across Discord's message,
+      // user, DM, channel, and server menus. Insert before its real top-level wrapper group.
+      const copyGroupIndex = menu.findIndex(group => menuNodeContains(group, isVisibleCopyIdItem));
+      return insertLoggerGroupAt(menu, copyGroupIndex, loggerSubmenu);
     };
     const addSavedRecordItems = (newItems, addElement, record, messageId, channelId, options = {}) => {
       if (!record) return;
@@ -11607,6 +11653,7 @@ module.exports = class MessageLoggerV2 {
         label: this.settings.contextmenuSubmenuName?.trim() || 'Message Logger',
         items: newItems
       };
+      if (insertLoggerSubmenuBeforeCopyId(menu, loggerSubmenu)) return;
       const actionGroup = nativeDeleteGroup
         || findMenuGroupByChildId(ret, 'mlv2-delete-saved-record')
         || findMenuGroupByChildId(ret, 'report');
@@ -11651,13 +11698,20 @@ module.exports = class MessageLoggerV2 {
         );
         handleWhiteBlackList(newItems, guildId);
       }
+      const loggerSubmenu = {
+        id: 'mlv2-guild-logger',
+        type: 'submenu',
+        label: this.settings.contextmenuSubmenuName?.trim() || 'Message Logger',
+        items: newItems
+      };
+      const anchorIds = guildId
+        ? ['server-lockdown', 'report-raid', 'report-guild', 'report', 'delete-guild', 'leave-guild']
+        : [];
+      if (guildId && insertLoggerSubmenuBeforeCopyId(menu, loggerSubmenu)) return;
+      if (insertLoggerSubmenuAfterAnchor(menu, loggerSubmenu, anchorIds)) return;
       menu.push(ContextMenu.buildMenuChildren([{
         type: 'group',
-        items: [{
-          type: 'submenu',
-          label: this.settings.contextmenuSubmenuName?.trim() || 'Message Logger',
-          items: newItems
-        }]
+        items: [loggerSubmenu]
       }]));
     }),
       ContextMenu.patch('user-context', (ret, props) => {
@@ -11686,13 +11740,22 @@ module.exports = class MessageLoggerV2 {
           );
           handleWhiteBlackList(newItems, props.channel.id);
         }
+        const loggerSubmenu = {
+          id: 'mlv2-user-logger',
+          type: 'submenu',
+          label: this.settings.contextmenuSubmenuName?.trim() || 'Message Logger',
+          items: newItems
+        };
+        if (insertLoggerSubmenuBeforeCopyId(menu, loggerSubmenu)) return;
+        const isCurrentUser = props.user?.id === DiscordModules.UserStore?.getCurrentUser?.()?.id;
+        if (!isCurrentUser && insertLoggerSubmenuAfterAnchor(
+          menu,
+          loggerSubmenu,
+          ['block', 'report-user', 'report', 'close-dm', 'remove-friend']
+        )) return;
         menu.push(ContextMenu.buildMenuChildren([{
           type: 'group',
-          items: [{
-            type: 'submenu',
-            label: this.settings.contextmenuSubmenuName?.trim() || 'Message Logger',
-            items: newItems
-          }]
+          items: [loggerSubmenu]
         }]));
       }),
       ...['channel-context', 'gdm-context', 'thread-context'].map(contextName =>
@@ -11718,13 +11781,21 @@ module.exports = class MessageLoggerV2 {
             addSavedRecordItems(newItems, addElement, this.messageRecord[channelId], channelId, channelId);
           }
           handleWhiteBlackList(newItems, channelId);
+          const loggerSubmenu = {
+            id: `mlv2-${contextName}-logger`,
+            type: 'submenu',
+            label: this.settings.contextmenuSubmenuName?.trim() || 'Message Logger',
+            items: newItems
+          };
+          if (insertLoggerSubmenuBeforeCopyId(menu, loggerSubmenu)) return;
+          if (insertLoggerSubmenuAfterAnchor(
+            menu,
+            loggerSubmenu,
+            ['delete', 'report', 'close-dm', 'leave-thread']
+          )) return;
           menu.push(ContextMenu.buildMenuChildren([{
             type: 'group',
-            items: [{
-              type: 'submenu',
-              label: this.settings.contextmenuSubmenuName?.trim() || 'Message Logger',
-              items: newItems
-            }]
+            items: [loggerSubmenu]
           }]));
         })
       ),

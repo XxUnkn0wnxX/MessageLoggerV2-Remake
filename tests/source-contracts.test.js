@@ -230,10 +230,30 @@ test('native and cloned Trash actions remain scoped to indexed logger deletions'
   assert.match(source, /removeSavedDeletedRecordFromLog\(channelId, messageId[\s\S]*deleteMessageFromRecords\(id\)[\s\S]*ML2: true/);
 });
 
+test('logger submenus prefer visible Copy ID rows and retain action fallbacks', () => {
+  assert.match(source, /const insertLoggerGroupAt = \(menu, index, loggerSubmenu\) =>[\s\S]*type: 'group'[\s\S]*items: \[loggerSubmenu\]/);
+  assert.match(source, /const insertLoggerSubmenuBeforeCopyId = \(menu, loggerSubmenu\) =>/);
+  assert.match(source, /menuIdMatches\(id, 'copy-id'\) \|\| id\.startsWith\('devmode-copy-id-'\)/);
+  assert.match(source, /\^Copy \(\?:Message\|User\|Channel\|Server\|Guild\) ID\$/);
+  assert.match(source, /const copyGroupIndex = menu\.findIndex\(group => menuNodeContains\(group, isVisibleCopyIdItem\)\)/);
+  assert.equal(
+    (source.match(/if \(insertLoggerSubmenuBeforeCopyId\(menu, loggerSubmenu\)\) return;/g) || []).length,
+    3
+  );
+  assert.match(source, /if \(guildId && insertLoggerSubmenuBeforeCopyId\(menu, loggerSubmenu\)\) return/);
+  assert.match(source, /const insertLoggerSubmenuAfterAnchor = \(menu, loggerSubmenu, anchorIds\) =>/);
+  assert.match(source, /return insertLoggerGroupAt\(menu, anchorIndex \+ 1, loggerSubmenu\)/);
+  assert.match(source, /const anchorIds = guildId[\s\S]*'server-lockdown'[\s\S]*'leave-guild'[\s\S]*: \[\]/);
+  assert.match(source, /const isCurrentUser = props\.user\?\.id === DiscordModules\.UserStore\?\.getCurrentUser\?\.\(\)\?\.id/);
+  assert.match(source, /if \(!isCurrentUser && insertLoggerSubmenuAfterAnchor\([\s\S]*\['block', 'report-user', 'report', 'close-dm', 'remove-friend'\]/);
+  assert.match(source, /if \(insertLoggerSubmenuAfterAnchor\(menu, loggerSubmenu, anchorIds\)\) return/);
+  assert.match(source, /id: 'mlv2-message-logger'[\s\S]*if \(insertLoggerSubmenuBeforeCopyId\(menu, loggerSubmenu\)\) return;[\s\S]*const actionGroup = nativeDeleteGroup/);
+});
+
 test('required legacy cache toggles stay visible, locked, and forced on', () => {
   assert.match(source, /if \(this\.ensureRequiredLegacySettings\(\)\) settingsChanged = true;/);
   assert.match(source, /name: 'Aggresive message caching \(makes sure we have the data of any deleted or edited messages\)'[\s\S]*?id: 'aggresiveMessageCaching'[\s\S]*?disabled: true/);
-  assert.match(source, /name: 'Use new cached images system'[\s\S]*?Organizes cached media by server and channel\.[\s\S]*?id: 'newCacheAllImages'[\s\S]*?disabled: true/);
+  assert.match(source, /name: 'Use new cached images system'[\s\S]*?Legacy control locked on for organized forum and thread media storage\.[\s\S]*?id: 'newCacheAllImages'[\s\S]*?disabled: true/);
 
   const plugin = createPlugin({
     settings: {
