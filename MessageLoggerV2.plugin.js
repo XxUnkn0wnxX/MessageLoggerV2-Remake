@@ -393,6 +393,7 @@ module.exports = class MessageLoggerV2 {
           'Adds routed state feedback for high-impact logging, backup, media, Anti-Nuke, update, and destructive-cache settings without making ordinary toggles noisy.',
           'Prevents BetterDiscord settings callbacks from running twice and replaces stale same-setting alerts when toggles change rapidly.',
           'Makes native BetterDiscord setting alerts dismissible from the whole card and keeps their visible countdown moving while hovered.',
+          'Repairs common settings-config comma and bracket corruption while preserving recoverable custom values, and limits first-install help to genuinely new configs.',
           'Cancels stale primary and backup writes when saving is disabled, and keeps saving disabled when recovery cannot complete safely.',
           'Normalizes legacy and mixed-fork data into the current additive schema without duplicating records or discarding surviving enhanced metadata.',
           'Reports valid-backup recovery separately while atomically rebuilding the main data file.',
@@ -666,7 +667,13 @@ module.exports = class MessageLoggerV2 {
     const Flags = {
       STARTUP_HELP: 1 << 1
     };
-    const loadedSettings = Data.load(this.getName(), 'settings');
+    // BetterDiscord deliberately converts an unreadable plugin config into an empty in-memory
+    // object. If we used Data.load() first, one stray comma or bracket would therefore look
+    // exactly like a fresh install and the next save would overwrite every valid user setting.
+    // Read and conservatively repair the settings file before consulting BetterDiscord's cache.
+    const startupSettingsConfig = this.loadSettingsConfigForStartup(defaultSettings);
+    this._isFreshSettingsInstall = !startupSettingsConfig.existed;
+    const loadedSettings = startupSettingsConfig.settings ?? Data.load(this.getName(), 'settings');
     const loadedSettingsAreUsable = !!loadedSettings
       && typeof loadedSettings === 'object'
       && !Array.isArray(loadedSettings)
@@ -674,9 +681,28 @@ module.exports = class MessageLoggerV2 {
     this.settings = loadedSettingsAreUsable ? loadedSettings : structuredClone(defaultSettings);
     // A first install is persisted just like a repaired config. Only existing malformed
     // containers receive the corruption alert; a missing file is the normal fresh state.
-    let settingsChanged = !loadedSettingsAreUsable;
-    if (loadedSettings !== null && loadedSettings !== undefined && !loadedSettingsAreUsable) {
+    let settingsChanged = !loadedSettingsAreUsable || startupSettingsConfig.repaired;
+    if (startupSettingsConfig.repaired) {
+      Logger.warn('Settings config corruption was repaired before startup.', {
+        configPath: startupSettingsConfig.configPath,
+        recoveryBackupPath: startupSettingsConfig.backupPath,
+        recoveredKeys: startupSettingsConfig.recoveredKeys,
+        parserRepairs: startupSettingsConfig.issueCount,
+        strictParseError: startupSettingsConfig.strictParseError
+      });
+      UI.showToast(
+        `[${this.getName()}] Settings config corruption detected and repaired. Valid settings were preserved; invalid or missing settings will use defaults. View the console log for details.`,
+        { type: 'warning', timeout: 10000 }
+      );
+    } else if (loadedSettings !== null && loadedSettings !== undefined && !loadedSettingsAreUsable) {
       UI.showToast(`[${this.getName()}] Settings file corrupted! All settings restored to default.`, { type: "error", timeout: 0 });
+    }
+    // Existing users must not receive the first-install help merely because an old/corrupt
+    // config omitted the flags field. A genuinely missing config still follows the normal
+    // fresh-install path and shows the help once.
+    if (startupSettingsConfig.existed && !Number.isInteger(loadedSettings?.flags)) {
+      this.settings.flags |= Flags.STARTUP_HELP;
+      settingsChanged = true;
     }
     const hadAutoBackupInterval = Object.prototype.hasOwnProperty.call(this.settings, 'autoBackupIntervalSeconds');
     const configuredAutoBackupInterval = this.settings.autoBackupIntervalSeconds;
@@ -1249,6 +1275,7 @@ module.exports = class MessageLoggerV2 {
     this.style.helpContent = this.obfuscatedClass('ml2-help-content');
     this.style.filterHelpModal = this.obfuscatedClass('ml2-filter-help-modal');
     this.style.settingsHelpModal = this.obfuscatedClass('ml2-settings-help-modal');
+    this.style.startupHelpModal = this.obfuscatedClass('ml2-startup-help-modal');
     this.style.cachedFilesModal = this.obfuscatedClass('ml2-cached-files-modal');
     this.style.menu = this.obfuscatedClass('ML2-MENU');
     this.loggerHelpModalKey = `${this.style.menu}-logger-help`;
@@ -1456,7 +1483,10 @@ module.exports = class MessageLoggerV2 {
                     .${this.style.filterHelpModal} footer [data-mana-component="button"],
                     .${this.style.settingsHelpModal} footer > div,
                     .${this.style.settingsHelpModal} footer [data-direction="horizontal"],
-                    .${this.style.settingsHelpModal} footer [data-mana-component="button"] {
+                    .${this.style.settingsHelpModal} footer [data-mana-component="button"],
+                    .${this.style.startupHelpModal} footer > div,
+                    .${this.style.startupHelpModal} footer [data-direction="horizontal"],
+                    .${this.style.startupHelpModal} footer [data-mana-component="button"] {
                       width: 100%;
                     }
                     .${this.style.cachedFilesModal} {
@@ -1665,7 +1695,7 @@ module.exports = class MessageLoggerV2 {
       this.forceUpdateUI();
     }, 100);
     Logger.log('initialize() about to return...');
-    if (!(this.settings.flags & Flags.STARTUP_HELP)) {
+    if (this._isFreshSettingsInstall && !(this.settings.flags & Flags.STARTUP_HELP)) {
       this.settings.flags |= Flags.STARTUP_HELP;
       this.showLoggerHelpModal(true);
       this.saveSettings();
@@ -1781,6 +1811,404 @@ module.exports = class MessageLoggerV2 {
       changed = true;
     }
     return changed;
+  }
+  tokenizeRecoverableSettingsJson(text) {
+    // BetterDiscord configs are ordinary JSON, but hand edits commonly leave one missing or
+    // extra comma/bracket. Tokenizing first lets recovery ignore damaged separators without
+    // changing commas or braces that legitimately appear inside a quoted setting value.
+    const tokens = [];
+    const issues = [];
+    const source = String(text ?? '');
+    const punctuation = new Set(['{', '}', '[', ']', ':', ',']);
+    let index = 0;
+    while (index < source.length) {
+      const char = source[index];
+      if (/\s/.test(char)) {
+        index++;
+        continue;
+      }
+      // Comments are not valid JSON, but accepting them during recovery is safer than losing
+      // otherwise valid settings copied from JSON5-style configuration examples.
+      if (char === '/' && source[index + 1] === '/') {
+        const start = index;
+        index += 2;
+        while (index < source.length && source[index] !== '\n' && source[index] !== '\r') index++;
+        issues.push({ type: 'line-comment', position: start });
+        continue;
+      }
+      if (char === '/' && source[index + 1] === '*') {
+        const start = index;
+        const end = source.indexOf('*/', index + 2);
+        index = end === -1 ? source.length : end + 2;
+        issues.push({ type: end === -1 ? 'unclosed-comment' : 'block-comment', position: start });
+        continue;
+      }
+      if (punctuation.has(char)) {
+        tokens.push({ type: char, value: char, position: index });
+        index++;
+        continue;
+      }
+      if (char === '"') {
+        const start = index;
+        let escaped = false;
+        let closed = false;
+        index++;
+        while (index < source.length) {
+          const current = source[index];
+          if (!escaped && current === '"') {
+            index++;
+            closed = true;
+            break;
+          }
+          // A literal newline cannot belong to a JSON string. Stop there so a damaged string
+          // does not consume every valid setting that follows it on later lines.
+          if (!escaped && (current === '\n' || current === '\r')) break;
+          if (!escaped && current === '\\') escaped = true;
+          else escaped = false;
+          index++;
+        }
+        const rawString = source.slice(start, index);
+        if (!closed) {
+          issues.push({ type: 'unclosed-string', position: start });
+          continue;
+        }
+        try {
+          tokens.push({ type: 'string', value: JSON.parse(rawString), position: start });
+        } catch {
+          issues.push({ type: 'invalid-string', position: start });
+        }
+        continue;
+      }
+      const numberMatch = source.slice(index).match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+      if (numberMatch) {
+        tokens.push({ type: 'number', value: Number(numberMatch[0]), position: index });
+        index += numberMatch[0].length;
+        continue;
+      }
+      const identifierMatch = source.slice(index).match(/^[A-Za-z_$][A-Za-z0-9_$-]*/);
+      if (identifierMatch) {
+        const identifier = identifierMatch[0];
+        if (identifier === 'true' || identifier === 'false' || identifier === 'null') {
+          tokens.push({
+            type: 'literal',
+            value: identifier === 'true' ? true : identifier === 'false' ? false : null,
+            position: index
+          });
+        } else {
+          // Bare identifiers are accepted only as damaged property names, never as values.
+          tokens.push({ type: 'identifier', value: identifier, position: index });
+          issues.push({ type: 'unquoted-key-candidate', position: index });
+        }
+        index += identifier.length;
+        continue;
+      }
+      issues.push({ type: 'unexpected-character', position: index, value: char });
+      index++;
+    }
+    return { tokens, issues };
+  }
+  parseRecoverableSettingsJson(text) {
+    // This tolerant recursive-descent parser is intentionally settings-focused. It accepts
+    // missing/extra commas and incomplete/mismatched containers, records every valid property,
+    // and skips only the value that cannot be decoded. Normal settings validation later applies
+    // defaults to those skipped values while retaining everything that was parsed successfully.
+    const tokenized = this.tokenizeRecoverableSettingsJson(text);
+    const { tokens, issues } = tokenized;
+    const propertyEntries = [];
+    let index = 0;
+    const isKey = token => token?.type === 'string' || token?.type === 'identifier';
+    const safeSet = (target, key, value) => {
+      Object.defineProperty(target, key, {
+        value,
+        enumerable: true,
+        configurable: true,
+        writable: true
+      });
+    };
+    const recoverObjectMember = () => {
+      let depth = 0;
+      while (index < tokens.length) {
+        const token = tokens[index];
+        if (depth === 0 && token.type === ',') {
+          index++;
+          return;
+        }
+        if (depth === 0 && (token.type === '}' || token.type === ']')) return;
+        if (depth === 0 && isKey(token) && tokens[index + 1]?.type === ':') return;
+        if (token.type === '{' || token.type === '[') depth++;
+        else if ((token.type === '}' || token.type === ']') && depth > 0) depth--;
+        index++;
+      }
+    };
+    let parseValue;
+    const parseObject = (path, consumeOpening = true) => {
+      const object = Object.create(null);
+      if (consumeOpening && tokens[index]?.type === '{') index++;
+      while (index < tokens.length) {
+        while (tokens[index]?.type === ',') {
+          issues.push({ type: 'extra-comma', position: tokens[index].position });
+          index++;
+        }
+        const token = tokens[index];
+        if (!token) break;
+        if (token.type === '}') {
+          index++;
+          return object;
+        }
+        if (token.type === ']') {
+          issues.push({ type: 'mismatched-object-close', position: token.position });
+          index++;
+          return object;
+        }
+        if (!isKey(token)) {
+          issues.push({ type: 'invalid-object-member', position: token.position });
+          index++;
+          continue;
+        }
+        const key = String(token.value);
+        const quotedKey = token.type === 'string';
+        index++;
+        if (tokens[index]?.type === ':') index++;
+        else {
+          // Without a colon there is no safe way to know whether this token was intended as a
+          // property name or stray text. Leave the next token untouched so a following valid
+          // quoted key can still be recovered independently.
+          issues.push({ type: 'missing-colon', position: tokens[index]?.position ?? token.position });
+          continue;
+        }
+        const parsed = parseValue(path.concat(key));
+        if (parsed.ok) {
+          safeSet(object, key, parsed.value);
+          propertyEntries.push({ key, value: parsed.value, path: path.slice(), quotedKey });
+        } else {
+          issues.push({ type: 'invalid-property-value', position: tokens[index]?.position ?? token.position, key });
+          recoverObjectMember();
+        }
+        if (tokens[index]?.type === ',') index++;
+        // A following property token is enough to prove a missing comma. Do not consume it.
+        else if (isKey(tokens[index]) && tokens[index + 1]?.type === ':') {
+          issues.push({ type: 'missing-comma', position: tokens[index].position });
+        }
+      }
+      issues.push({ type: 'missing-object-close', position: String(text ?? '').length });
+      return object;
+    };
+    const parseArray = path => {
+      const array = [];
+      index++;
+      while (index < tokens.length) {
+        while (tokens[index]?.type === ',') {
+          issues.push({ type: 'extra-comma', position: tokens[index].position });
+          index++;
+        }
+        const token = tokens[index];
+        if (!token) break;
+        if (token.type === ']') {
+          index++;
+          return array;
+        }
+        if (token.type === '}') {
+          issues.push({ type: 'mismatched-array-close', position: token.position });
+          index++;
+          return array;
+        }
+        const parsed = parseValue(path.concat(String(array.length)));
+        if (parsed.ok) array.push(parsed.value);
+        else {
+          issues.push({ type: 'invalid-array-value', position: token.position });
+          index++;
+        }
+        if (tokens[index]?.type === ',') index++;
+        else if (tokens[index] && tokens[index].type !== ']') {
+          issues.push({ type: 'missing-comma', position: tokens[index].position });
+        }
+      }
+      issues.push({ type: 'missing-array-close', position: String(text ?? '').length });
+      return array;
+    };
+    parseValue = path => {
+      const token = tokens[index];
+      if (!token) return { ok: false };
+      if (token.type === '{') return { ok: true, value: parseObject(path) };
+      if (token.type === '[') return { ok: true, value: parseArray(path) };
+      if (token.type === 'string' || token.type === 'number' || token.type === 'literal') {
+        index++;
+        return { ok: true, value: token.value };
+      }
+      return { ok: false };
+    };
+    let value;
+    if (tokens[index]?.type === '{' || tokens[index]?.type === '[') {
+      value = parseValue([]).value;
+    } else {
+      // Missing outer braces are recoverable when the document still consists of key/value
+      // members such as `"settings": { ... }`.
+      issues.push({ type: 'missing-root-open', position: tokens[index]?.position ?? 0 });
+      value = parseObject([], false);
+    }
+    // Extra/misplaced closing braces can end the first parse early. Continue scanning the
+    // remainder so later valid settings still appear in propertyEntries and can be salvaged.
+    while (index < tokens.length) {
+      while (tokens[index] && [',', '}', ']'].includes(tokens[index].type)) {
+        issues.push({ type: 'extra-root-separator', position: tokens[index].position });
+        index++;
+      }
+      if (index >= tokens.length) break;
+      if (tokens[index].type === '{') parseValue([]);
+      else if (isKey(tokens[index])) parseObject([], false);
+      else index++;
+    }
+    return { value, propertyEntries, issues };
+  }
+  recoverSettingsConfigText(text, defaults) {
+    // Strict JSON is always preferred. Tolerant recovery runs only after strict parsing or the
+    // settings container fails, preventing the repair path from changing an already valid file.
+    let strictParseError = null;
+    try {
+      const parsed = JSON.parse(String(text ?? ''));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        && parsed.settings && typeof parsed.settings === 'object' && !Array.isArray(parsed.settings)) {
+        return {
+          repaired: false,
+          envelope: parsed,
+          settings: parsed.settings,
+          recoveredKeys: Object.keys(parsed.settings),
+          issues: [],
+          strictParseError: null
+        };
+      }
+      strictParseError = new Error('The config root or settings container is not an object');
+    } catch (error) {
+      strictParseError = error;
+    }
+    const recovered = this.parseRecoverableSettingsJson(text);
+    const isObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
+    const envelope = isObject(recovered.value) ? recovered.value : Object.create(null);
+    const hadRecoveredSettingsContainer = isObject(envelope.settings);
+    let settings = hadRecoveredSettingsContainer
+      ? JSON.parse(JSON.stringify(envelope.settings))
+      : Object.create(null);
+    const entriesForKey = new Map();
+    for (const entry of recovered.propertyEntries) {
+      if (!entriesForKey.has(entry.key)) entriesForKey.set(entry.key, []);
+      entriesForKey.get(entry.key).push(entry);
+    }
+    // When even the outer `settings` wrapper is lost, quoted root members are still strong
+    // evidence of real settings. Preserve those—including unknown fork-specific entries—before
+    // applying this build's defaults. Unquoted recovery tokens are never trusted here.
+    if (!hadRecoveredSettingsContainer) {
+      for (const entry of recovered.propertyEntries) {
+        if (!entry.quotedKey || entry.path.length || entry.key === 'settings') continue;
+        Object.defineProperty(settings, entry.key, {
+          value: entry.value,
+          enumerable: true,
+          configurable: true,
+          writable: true
+        });
+      }
+    }
+    // A misplaced bracket can push later setting members outside the recovered `settings`
+    // object. Known keys are therefore salvaged from any parsed level, preferring occurrences
+    // that were still underneath the settings path.
+    for (const key of Object.keys(defaults)) {
+      if (Object.prototype.hasOwnProperty.call(settings, key)) continue;
+      const candidates = entriesForKey.get(key) || [];
+      const scoped = candidates.filter(entry => entry.path.includes('settings'));
+      const selected = scoped.at(-1) || candidates.at(-1);
+      if (!selected) continue;
+      Object.defineProperty(settings, key, {
+        value: selected.value,
+        enumerable: true,
+        configurable: true,
+        writable: true
+      });
+    }
+    if (!isObject(settings)) settings = Object.create(null);
+    Object.defineProperty(envelope, 'settings', {
+      value: settings,
+      enumerable: true,
+      configurable: true,
+      writable: true
+    });
+    return {
+      repaired: true,
+      envelope,
+      settings,
+      recoveredKeys: Object.keys(settings),
+      issues: recovered.issues,
+      strictParseError: strictParseError?.message || String(strictParseError)
+    };
+  }
+  writeSettingsTextAtomic(filePath, text, fsModule = require('fs'), pathModule = require('path')) {
+    // Config repair uses the same fundamental safety rule as logger-data persistence: finish a
+    // same-directory temporary file, then atomically rename it over the destination.
+    const tempPath = pathModule.join(
+      pathModule.dirname(filePath),
+      `.${pathModule.basename(filePath)}.mlv2-settings-repair-${process.pid}-${Date.now()}.tmp`
+    );
+    try {
+      fsModule.writeFileSync(tempPath, text, 'utf8');
+      fsModule.renameSync(tempPath, filePath);
+    } finally {
+      try {
+        if (fsModule.existsSync(tempPath)) fsModule.unlinkSync(tempPath);
+      } catch {}
+    }
+  }
+  loadSettingsConfigForStartup(defaults, modules = {}) {
+    const fsModule = modules.fs || require('fs');
+    const pathModule = modules.path || require('path');
+    const configPath = pathModule.join(this.pluginDir, `${this.getName()}.config.json`);
+    if (!fsModule.existsSync(configPath)) {
+      return {
+        existed: false,
+        repaired: false,
+        settings: null,
+        configPath,
+        backupPath: null,
+        recoveredKeys: [],
+        issueCount: 0,
+        strictParseError: null
+      };
+    }
+    const originalText = fsModule.readFileSync(configPath, 'utf8');
+    const result = this.recoverSettingsConfigText(originalText, defaults);
+    if (!result.repaired) {
+      return {
+        existed: true,
+        repaired: false,
+        settings: result.settings,
+        configPath,
+        backupPath: null,
+        recoveredKeys: result.recoveredKeys,
+        issueCount: 0,
+        strictParseError: null
+      };
+    }
+    // Keep the exact corrupt bytes as a recovery point. If tolerant parsing missed a custom
+    // fork field, a future developer or user can still inspect the untouched source text.
+    const backupPath = pathModule.join(this.pluginDir, `${this.getName()}.config.corrupt-backup.json`);
+    this.writeSettingsTextAtomic(backupPath, originalText, fsModule, pathModule);
+    this.writeSettingsTextAtomic(configPath, JSON.stringify(result.envelope, null, 4), fsModule, pathModule);
+    // Both the local BetterDiscord fork and mainstream development expose guarded recaching.
+    // It is used only after an actual repair so Data.save cannot later resurrect an empty or
+    // stale host cache over the repaired on-disk settings.
+    try {
+      const recacheResult = Data.recache?.(this.getName());
+      recacheResult?.catch?.(error => Logger.error('Failed to recache repaired settings config.', error));
+    } catch (error) {
+      Logger.warn('BetterDiscord settings recache was unavailable after config repair.', error);
+    }
+    return {
+      existed: true,
+      repaired: true,
+      settings: result.settings,
+      configPath,
+      backupPath,
+      recoveredKeys: result.recoveredKeys,
+      issueCount: result.issues.length,
+      strictParseError: result.strictParseError
+    };
   }
   normalizeSettingsAgainstDefaults(settings, defaults) {
     // This is the common compatibility boundary for fresh installs, older forks, and
@@ -5763,7 +6191,16 @@ module.exports = class MessageLoggerV2 {
   showLoggerHelpModal(initial = false, returnTarget = 'logger') {
     const fromSettings = returnTarget === 'settings';
     this.createModal({
-      ...(fromSettings
+      ...(initial
+        ? {
+          // First-install help is informational, not part of the logger's Back/OK modal
+          // chain. Its one full-width action closes only this modal and never opens logs.
+          confirmText: 'OK',
+          onConfirm: () => this.ModalStack.closeModal(this.loggerHelpModalKey),
+          ml2Data: true,
+          className: this.style.startupHelpModal
+        }
+        : fromSettings
         ? {
           cancelText: 'Back',
           onCancel: () => this.ModalStack.closeModal(this.loggerHelpModalKey),

@@ -165,6 +165,23 @@ test('required legacy cache toggles stay visible, locked, and forced on', () => 
   assert.equal(plugin.settings.newCacheAllImages, true);
 });
 
+test('settings startup repairs existing configs without classifying them as first installs', () => {
+  assert.match(source, /loadSettingsConfigForStartup\(defaultSettings\)/);
+  assert.match(source, /this\._isFreshSettingsInstall = !startupSettingsConfig\.existed/);
+  assert.match(source, /if \(this\._isFreshSettingsInstall && !\(this\.settings\.flags & Flags\.STARTUP_HELP\)\)/);
+  assert.match(source, /\$\{this\.getName\(\)\}\.config\.corrupt-backup\.json/);
+  assert.match(source, /writeSettingsTextAtomic\(configPath, JSON\.stringify\(result\.envelope, null, 4\)/);
+  assert.match(source, /Data\.recache\?\.\(this\.getName\(\)\)/);
+});
+
+test('first-install help has one full-width dismiss-only action', () => {
+  assert.match(source, /initial[\s\S]*?confirmText: 'OK'[\s\S]*?closeModal\(this\.loggerHelpModalKey\)[\s\S]*?ml2Data: true[\s\S]*?className: this\.style\.startupHelpModal/);
+  assert.match(source, /\.\$\{this\.style\.startupHelpModal\} footer \[data-mana-component="button"\][\s\S]*?width: 100%/);
+  const initialBranch = source.match(/\.\.\.\(initial([\s\S]*?): fromSettings/);
+  assert.ok(initialBranch, 'startup help branch was not found');
+  assert.doesNotMatch(initialBranch[1], /cancelText: 'Back'|returnToLoggerWindow/);
+});
+
 test('atomic persistence and startup cleanup remain wired into the plugin', () => {
   assert.match(source, /this\.cleanUpStaleDataTempFiles\(\)/);
   assert.match(source, /fs\.renameSync\(tempPath, filePath\)/);

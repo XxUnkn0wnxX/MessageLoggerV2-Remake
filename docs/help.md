@@ -167,6 +167,8 @@ If the primary file is missing or invalid, the same normalization is applied to 
 
 The separate **Debug** settings group can report automatic-backup queue delays, reschedules, cancellations, starts, verification retries, and completions. Console logging and routed debug toasts are independent and both default off; enabling them does not change the backup schedule or normal error alerts.
 
+If `MessageLoggerV2.config.json` contains common hand-editing damage, such as extra or missing commas or unbalanced braces/brackets, startup salvages every valid setting it can decode and defaults only missing or invalid owned keys. The exact damaged text is kept in `MessageLoggerV2.config.corrupt-backup.json` before the repaired config is atomically rewritten. An existing repaired config is never treated as a first install.
+
 ### High-impact setting feedback
 
 Changing **Only log whitelist**, **Auto backup data**, **Cache media locally**, **Enable Anti Nuke**, **Automatic updates**, **Only render locally cached attachments**, or **Delete cached files with log records** writes the new state once to the console and reports it once through your selected notification mode. Enabled states use the info color; disabled states use Discord's theme-neutral presentation. If the native notification API cannot request a grey type, the plugin keeps its theme-colored native card and uses a neutral icon. Rapid changes replace the previous alert for that setting, setting alerts do not pause while hovered, and left- or right-clicking either a native card or custom setting toast dismisses it immediately. Debug alerts remain warning-colored, and actual errors remain red.

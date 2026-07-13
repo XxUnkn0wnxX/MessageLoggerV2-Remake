@@ -7,7 +7,7 @@ This document maps the major responsibilities inside the distributed `MessageLog
 - `start`, `initialize`, and `stop` own plugin startup, module readiness, timers, patches, synchronous shutdown persistence, and cleanup.
 - `DiscordModules` lazily resolves Discord Webpack exports. Missing-module fixes must follow the runtime trace workflow in `AGENTS.md`; do not hide lookup warnings without proving the live export path.
 - `getChanges`, `checkNewUpdate`, and `performUpdate` provide the in-plugin changelog and maintained-fork updater.
-- Startup settings normalization preserves old installations, migrates legacy caps, and forces the two locked cache compatibility settings on.
+- Startup settings normalization preserves old installations, migrates legacy caps, and forces the two locked cache compatibility settings on. `loadSettingsConfigForStartup`, `parseRecoverableSettingsJson`, and `recoverSettingsConfigText` run before BetterDiscord can mistake invalid JSON for an empty first-install cache; they repair common comma/bracket damage, salvage valid individual settings, atomically rewrite the config, and retain the exact corrupt source as a recovery backup.
 
 ## ⚙️ Settings and Scope Policy
 
