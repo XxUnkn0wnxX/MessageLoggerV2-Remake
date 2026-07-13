@@ -24,6 +24,8 @@ test('all fresh-install settings defaults remain stable', () => {
     obfuscateCSSClasses: true,
     autoBackup: false,
     autoBackupIntervalSeconds: 20,
+    debugLogging: false,
+    debugToasts: false,
     dontSaveData: false,
     displayUpdateNotes: true,
     ignoreMutedGuilds: true,
@@ -178,7 +180,7 @@ test('automatic backup interval is configurable and bounded in settings and conf
   assert.match(source, /createInlineValidatedNumberInput\(config, onValid\)[\s\S]*aria-invalid[\s\S]*borderColor: 'var\(--status-danger\)'[\s\S]*boxShadow: '0 0 0 1px var\(--status-danger\)'/);
   assert.match(source, /const nextValidation = plugin\.validateNumericSettingValue\(value, config\);[\s\S]*if \(nextValidation\.valid\) onValid\(nextValidation\.value\);/);
   assert.match(source, /Invalid auto-backup interval in config; reset to/);
-  assert.match(source, /setTimeout\(\(\) => this\.saveBackup\(\), this\.getAutoBackupIntervalMilliseconds\(\)\)/);
+  assert.match(source, /this\.queueAutoBackup\(this\.getAutoBackupIntervalMilliseconds\(\), 'rescheduled after the interval changed'\)/);
 
   const plugin = createPlugin({ settings: { autoBackupIntervalSeconds: 300 } });
   assert.equal(plugin.normalizeAutoBackupIntervalSeconds(300), 300);
@@ -208,6 +210,14 @@ test('automatic backup interval is configurable and bounded in settings and conf
   plugin.settings.autoBackupIntervalSeconds = 9;
   assert.equal(plugin.ensureAutoBackupIntervalSetting(), true);
   assert.equal(plugin.settings.autoBackupIntervalSeconds, 20);
+});
+
+test('backup diagnostics remain opt-in under their own warning-colored Debug category', () => {
+  assert.match(source, /name: 'Debug'[\s\S]*id: 'ml2-settings-debug'[\s\S]*collapsible: true[\s\S]*shown: false/);
+  assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Enable debug logging[\s\S]*id: 'debugLogging'[\s\S]*type: 'switch'/);
+  assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Show debug messages as toasts[\s\S]*id: 'debugToasts'[\s\S]*type: 'switch'/);
+  assert.match(source, /if \(this\.settings\?\.debugLogging\) Logger\.log\(`\[Debug\] \$\{message\}`\)/);
+  assert.match(source, /if \(this\.settings\?\.debugToasts\)[\s\S]*this\._showNotification\('Message Logger Debug'/);
 });
 
 test('no-save recovery remains guarded and ordered before backup persistence', () => {

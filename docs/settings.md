@@ -160,6 +160,17 @@ Message-history caching and hierarchical media storage are core behavior and no 
 | Only render locally cached attachments | Off | Prevents uncached attachments from rendering through Discord CDN. The saved record shows a filename placeholder instead. Toggling this reevaluates open logger and channel views immediately. |
 | Delete cached files with log records | Off | Permanently deletes related cached attachments, embeds, and stickers whenever their final log record is removed, including purges and thread/forum cascades. |
 
+## 🐞 Debug
+
+Both Debug setting labels use Discord's native warning color so the opt-in controls remain visible in light and dark themes.
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| Enable debug logging | Off | Writes automatic-backup queue delay, reschedule, cancellation, write start, verification retry, and completion events to the console. |
+| Show debug messages as toasts | Off | Sends the same backup events through the selected BetterDiscord-notification or custom-toast mode. This is independent of console debug logging. |
+
+Debug output currently covers only the automatic-backup lifecycle. It does not change backup timing, persistence, or normal error reporting.
+
 ## 🖱️ Settings Actions
 
 - **Stats**: shows saved and cached message counts.

@@ -113,6 +113,72 @@ test('backup saves use an independent atomic destination', async t => {
   );
 });
 
+test('backup debug console and routed-toast controls are independent and disabled by default', () => {
+  const notifications = [];
+  const plugin = createPlugin({
+    settings: { debugLogging: false, debugToasts: false },
+    _showNotification(...args) { notifications.push(args); }
+  });
+
+  plugin.reportDebugEvent('disabled event');
+  assert.equal(loggerEvents.length, 0);
+  assert.equal(notifications.length, 0);
+
+  plugin.settings.debugLogging = true;
+  plugin.reportDebugEvent('console-only event');
+  assert.deepEqual(loggerEvents.at(-1), ['log', '[Debug] console-only event']);
+  assert.equal(notifications.length, 0);
+
+  plugin.settings.debugLogging = false;
+  plugin.settings.debugToasts = true;
+  plugin.reportDebugEvent('toast-only event', 'warning', 2500);
+  assert.equal(loggerEvents.length, 1);
+  assert.deepEqual(notifications.at(-1), [
+    'Message Logger Debug',
+    'toast-only event',
+    'warning',
+    [],
+    2500
+  ]);
+
+  plugin.settings.debugLogging = true;
+  plugin.reportDebugEvent('combined event', 'success');
+  assert.deepEqual(loggerEvents.at(-1), ['log', '[Debug] combined event']);
+  assert.equal(notifications.at(-1)[1], 'combined event');
+});
+
+test('backup debug lifecycle reports the queue delay, write start, and completion', () => {
+  const notifications = [];
+  const plugin = createPlugin({
+    settings: { debugLogging: true, debugToasts: true, dontSaveData: false },
+    __started: true,
+    _dataWriteEpoch: 0,
+    _getDataPayload() { return { messageRecord: {} }; },
+    _showNotification(...args) { notifications.push(args); },
+    efficientlySaveData(name, key, data, callback) {
+      Data.save(name, key, data);
+      callback(null, false);
+    }
+  });
+
+  const timer = plugin.queueAutoBackup(300_000);
+  clearTimeout(timer);
+  plugin.saveBackupTimeout = 0;
+  plugin.saveBackup();
+
+  assert.ok(loggerEvents.some(event => event[1] === '[Debug] Automatic backup queued. Starting in 300 seconds.'));
+  assert.ok(loggerEvents.some(event => event[1] === '[Debug] Automatic backup started.'));
+  assert.ok(loggerEvents.some(event => event[1] === '[Debug] Automatic backup completed successfully.'));
+  assert.deepEqual(
+    notifications.map(event => event[1]),
+    [
+      'Automatic backup queued. Starting in 300 seconds.',
+      'Automatic backup started.',
+      'Automatic backup completed successfully.'
+    ]
+  );
+});
+
 test('canonical migration atomically rewrites only the primary and reports success', async t => {
   const pluginDir = temporaryDirectory(t);
   const primaryPath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');

@@ -12,6 +12,7 @@ This document maps the major responsibilities inside the distributed `MessageLog
 ## ⚙️ Settings and Scope Policy
 
 - `getSettingsPanel`, `createSetting`, and `createGroup` build the accordion settings interface.
+- The standalone warning-colored Debug group keeps console and routed-toast diagnostics independently opt-in. `reportDebugEvent` is the shared router and currently accepts only automatic-backup lifecycle events.
 - Logging scope combines whitelist, blacklist, muted server/channel, NSFW, selected-channel, and DM rules.
 - Author and local-action gates are intentionally separate: bot, blocked-user, self-author, local-edit, and local-delete rules must remain per message.
 - Guild and DM notification lists affect alerts rather than record eligibility.
@@ -26,7 +27,7 @@ This document maps the major responsibilities inside the distributed `MessageLog
 
 ## 💾 Persistence and No-Save Recovery
 
-- `saveData` batches ordinary writes; `handleDataSaving` creates the current payload and schedules optional backups using the validated 10-to-86,400-second interval (20 seconds by default).
+- `saveData` batches ordinary writes; `handleDataSaving` creates the current payload and schedules optional backups using the validated 10-to-86,400-second interval (20 seconds by default). `queueAutoBackup` owns timer creation and reports its delay through the optional debug router.
 - `efficientlySaveData` writes complete JSON to a same-directory temporary file and atomically renames it over the destination. Its commit predicate prevents stale in-flight writes from renaming after saving is disabled.
 - `cleanUpStaleDataTempFiles` removes only old logger-owned temp files.
 - When the plugin starts with `dontSaveData`, disk history is intentionally skipped and the session starts empty. `_needsNoSaveDataMerge` distinguishes this from toggling saving without a reload.

@@ -391,7 +391,8 @@ module.exports = class MessageLoggerV2 {
           'Cancels stale primary and backup writes when saving is disabled, and keeps saving disabled when recovery cannot complete safely.',
           'Normalizes legacy and mixed-fork data into the current additive schema without duplicating records or discarding surviving enhanced metadata.',
           'Reports valid-backup recovery separately while atomically rebuilding the main data file.',
-          'Adds a validated 10-to-86,400-second automatic-backup interval, with 20 seconds as the default.'
+          'Adds a validated 10-to-86,400-second automatic-backup interval, with 20 seconds as the default.',
+          'Adds optional console and routed-toast diagnostics for the automatic-backup queue and write lifecycle.'
         ]
       },
       {
@@ -581,6 +582,8 @@ module.exports = class MessageLoggerV2 {
       obfuscateCSSClasses: true,
       autoBackup: false,
       autoBackupIntervalSeconds: 20,
+      debugLogging: false,
+      debugToasts: false,
       dontSaveData: false,
       displayUpdateNotes: true,
       ignoreMutedGuilds: true,
@@ -1891,12 +1894,35 @@ module.exports = class MessageLoggerV2 {
   getAutoBackupIntervalMilliseconds() {
     return this.normalizeAutoBackupIntervalSeconds(this.settings?.autoBackupIntervalSeconds) * 1000;
   }
+  formatBackupDebugDelay(delayMs) {
+    if (delayMs < 1000) return `${delayMs} millisecond${delayMs === 1 ? '' : 's'}`;
+    const seconds = delayMs / 1000;
+    return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  }
+  reportDebugEvent(message, type = 'info', timeout = 4000) {
+    // Debug output is intentionally opt-in and currently limited to automatic-backup
+    // lifecycle events. The two settings are independent so developers can use either the
+    // console, the selected notification/toast route, or both without affecting errors.
+    if (this.settings?.debugLogging) Logger.log(`[Debug] ${message}`);
+    if (this.settings?.debugToasts) {
+      this._showNotification('Message Logger Debug', message, type, [], timeout);
+    }
+  }
+  queueAutoBackup(delayMs, reason = 'queued') {
+    this.saveBackupTimeout = setTimeout(() => this.saveBackup(), delayMs);
+    this.reportDebugEvent(`Automatic backup ${reason}. Starting in ${this.formatBackupDebugDelay(delayMs)}.`);
+    return this.saveBackupTimeout;
+  }
   handleAutoBackupSetting(enabled) {
     // Disabling automatic backups must also cancel a backup already waiting on the debounce
     // timer. Enabling retains the legacy behavior of creating a fresh backup immediately.
+    const hadPendingBackup = !!this.saveBackupTimeout;
     if (this.saveBackupTimeout) clearTimeout(this.saveBackupTimeout);
     this.saveBackupTimeout = 0;
     this.autoBackupSaveInterupts = 0;
+    if (!enabled && hadPendingBackup) {
+      this.reportDebugEvent('Pending automatic backup cancelled because Auto backup was disabled.', 'warning');
+    }
     if (enabled && !this.settings.dontSaveData) this.saveBackup();
   }
   handleAutoBackupIntervalChange() {
@@ -1907,7 +1933,7 @@ module.exports = class MessageLoggerV2 {
     this.saveBackupTimeout = 0;
     this.autoBackupSaveInterupts = 0;
     if (this.settings.autoBackup && !this.settings.dontSaveData) {
-      this.saveBackupTimeout = setTimeout(() => this.saveBackup(), this.getAutoBackupIntervalMilliseconds());
+      this.queueAutoBackup(this.getAutoBackupIntervalMilliseconds(), 'rescheduled after the interval changed');
     }
   }
   createGroup(group) {
@@ -2333,6 +2359,34 @@ module.exports = class MessageLoggerV2 {
             name: 'Delete cached files with log records',
             note: 'Permanently removes related cached media when a log record is removed. This cannot be undone.',
             id: 'deleteCachedFilesWithRecords',
+            type: 'switch'
+          }
+        ]
+      },
+      {
+        name: 'Debug',
+        id: 'ml2-settings-debug',
+        collapsible: true,
+        shown: false,
+        settings: [
+          {
+            name: React.createElement(
+              'span',
+              { style: { color: 'var(--text-warning, var(--status-warning))' } },
+              'Enable debug logging'
+            ),
+            note: 'Writes automatic-backup queue, reschedule, cancellation, start, retry, and completion events to the console. Other debug areas may be added later.',
+            id: 'debugLogging',
+            type: 'switch'
+          },
+          {
+            name: React.createElement(
+              'span',
+              { style: { color: 'var(--text-warning, var(--status-warning))' } },
+              'Show debug messages as toasts'
+            ),
+            note: 'Shows the same automatic-backup debug events through the selected BetterDiscord notification or custom-toast mode. This can be enabled independently from console logging.',
+            id: 'debugToasts',
             type: 'switch'
           }
         ]
@@ -3233,8 +3287,12 @@ module.exports = class MessageLoggerV2 {
   }
   handleDataSaveSetting(disabled) {
     if (disabled) {
+      const hadPendingBackup = !!this.saveBackupTimeout;
       this.cancelPendingDataWrites();
       Logger.log('Data saving disabled; pending primary and backup writes were cancelled.');
+      if (hadPendingBackup) {
+        this.reportDebugEvent('Pending automatic backup cancelled because data saving was disabled.', 'warning');
+      }
       return;
     }
     if (!this._needsNoSaveDataMerge) {
@@ -3304,10 +3362,14 @@ module.exports = class MessageLoggerV2 {
         Logger.error('There has been an error saving the data file', err);
       }
       if (!cancelled && scheduleBackup && this.settings.autoBackup) {
-        if (this.saveBackupTimeout) this.autoBackupSaveInterupts++;
+        const hadPendingBackup = !!this.saveBackupTimeout;
+        if (hadPendingBackup) this.autoBackupSaveInterupts++;
         if (this.autoBackupSaveInterupts < 4) {
           if (this.saveBackupTimeout) clearTimeout(this.saveBackupTimeout);
-          this.saveBackupTimeout = setTimeout(() => this.saveBackup(), this.getAutoBackupIntervalMilliseconds());
+          this.queueAutoBackup(
+            this.getAutoBackupIntervalMilliseconds(),
+            hadPendingBackup ? 'rescheduled after another data save' : 'queued'
+          );
         }
       }
       this.requestedDataSave = 0;
@@ -3410,8 +3472,10 @@ module.exports = class MessageLoggerV2 {
   saveBackup() {
     if (this.settings.dontSaveData && !this._noSaveMergeInProgress) {
       this.saveBackupTimeout = 0;
+      this.reportDebugEvent('Automatic backup skipped because data saving is disabled.', 'warning');
       return;
     }
+    this.reportDebugEvent('Automatic backup started.');
     const writeEpoch = this._dataWriteEpoch || 0;
     const callback = (err, cancelled = false) => {
       if (err) {
@@ -3420,8 +3484,17 @@ module.exports = class MessageLoggerV2 {
       }
       this.saveBackupTimeout = 0;
       this.autoBackupSaveInterupts = 0;
-      if (!cancelled && !this.settings.dontSaveData && !Data.load(this.getName() + 'DataBackup', 'data')?.messageRecord) {
-        this.saveBackupTimeout = setTimeout(() => this.saveBackup(), 300);
+      // Verify only a successful active write. Cancelled or failed writes must not touch the
+      // cached backup value or accidentally enter the short verification-retry path.
+      const backupWasLoaded = !err && !cancelled && !this.settings.dontSaveData
+        ? !!Data.load(this.getName() + 'DataBackup', 'data')?.messageRecord
+        : false;
+      if (!err && !cancelled && !this.settings.dontSaveData && !backupWasLoaded) {
+        this.queueAutoBackup(300, 'verification retry queued');
+      } else if (cancelled) {
+        this.reportDebugEvent('Automatic backup write was cancelled before commit.', 'warning');
+      } else if (!err) {
+        this.reportDebugEvent('Automatic backup completed successfully.', 'success');
       }
     };
     this.efficientlySaveData(

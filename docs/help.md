@@ -163,6 +163,8 @@ You will receive a migration-in-progress alert followed by success through your 
 
 If the primary file is missing or invalid, the same normalization is applied to a valid backup before the plugin atomically recreates the primary. Your selected notification mode reports that the valid backup was loaded and the main data file is being rebuilt, then reports recovery-specific success or failure. The console includes the recovery reason and detailed write errors. The original backup remains untouched during this recovery. Files marked with a schema newer than the installed plugin are not replaced from an older backup; the plugin fails closed so updating it cannot destroy newer data.
 
+The separate **Debug** settings group can report automatic-backup queue delays, reschedules, cancellations, starts, verification retries, and completions. Console logging and routed debug toasts are independent and both default off; enabling them does not change the backup schedule or normal error alerts.
+
 ### Nothing is logged
 
 1. Check **Only log whitelist**.
