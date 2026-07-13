@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.2.12
+ * @version 2.8.0.2.13
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -10,6 +10,9 @@
  */
 const REPO_MAIN_URL = "https://git.slowb.ro/XxUnkn0wnxX/MessageLoggerV2-Remake/raw/branch/main/";
 const DISCORD_EPOCH = 14200704e5;
+// Persisted data is canonicalized to this additive schema. Older forks can ignore the
+// marker and enhanced fields while this fork can detect files rewritten without them.
+const DATA_SCHEMA_VERSION = 1;
 const { React, ReactDOM, Webpack, UI, Plugins, DOM, Patcher, Components, ContextMenu, Utils, Hooks, ReactUtils, Logger } = new BdApi('MessageLoggerV2');
 const { Data } = BdApi;
 const { Filters } = Webpack;
@@ -276,6 +279,10 @@ module.exports = class MessageLoggerV2 {
     if (!this.__started) return;
     this.__started = false;
     try {
+      // Invalidate queued and in-flight persistence before any other teardown. This keeps an
+      // async no-save recovery from renaming files or re-enabling saving after plugin unload.
+      this.cancelPendingDataWrites?.();
+      this._noSaveMergeInProgress = false;
       clearInterval(this.dataManagerInterval);
       clearInterval(this._autoUpdateInterval);
       clearTimeout(this.updateTimeout);
@@ -374,7 +381,10 @@ module.exports = class MessageLoggerV2 {
         type: 'fixed',
         items: [
           'Flushes pending log changes synchronously before plugin shutdown or hot reload.',
-          'Correctly expires stale edit-notification spam tracking regardless of media-cache settings.'
+          'Correctly expires stale edit-notification spam tracking regardless of media-cache settings.',
+          'Preserves disk-backed history when saving is re-enabled after a no-save reload by validating, merging, capping, and atomically replacing the completed payload.',
+          'Cancels stale primary and backup writes when saving is disabled, and keeps saving disabled when recovery cannot complete safely.',
+          'Normalizes legacy and mixed-fork data into the current additive schema without duplicating records or discarding surviving enhanced metadata.'
         ]
       },
       {
@@ -911,98 +921,70 @@ module.exports = class MessageLoggerV2 {
     this.nodeModules.electron.clipboard = {};
     this.nodeModules.electron.clipboard.write = DiscordNative.clipboard.copy;
     this.nodeModules.electron.clipboard.writeText = DiscordNative.clipboard.copy;
-    const defaultConstruct = () => {
-      return {
-        messageRecord: {},
-        deletedMessageRecord: {},
-        editedMessageRecord: {},
-        purgedMessageRecord: {},
-        suppressedForumThreadIds: []
-      };
-    };
+    const defaultConstruct = () => this.createDefaultDataPayload();
+    this._dataWriteEpoch = 0;
+    this._noSaveMergeInProgress = false;
+    this._noSaveMergeDirty = false;
+    // Only instances that skipped disk loading at startup need a later disk/session merge.
+    // Toggling saving off and back on without a reload must keep the existing in-memory behavior.
+    this._needsNoSaveDataMerge = !!this.settings.dontSaveData;
     let data;
+    let dataLoadedFromBackup = false;
     if (this.settings.dontSaveData) {
       data = defaultConstruct();
     } else {
-      data = (Data.load(this.getName() + 'Data', 'data') || defaultConstruct());
-      const isBad = map => !(map?.messageRecord && map.editedMessageRecord && map.deletedMessageRecord && map.purgedMessageRecord && typeof map.messageRecord == 'object' && typeof map.editedMessageRecord == 'object' && typeof map.deletedMessageRecord == 'object' && typeof map.purgedMessageRecord == 'object');
-      if (isBad(data)) {
-        if (this.settings.autoBackup) {
-          data = (Data.load(this.getName() + 'DataBackup', 'data') || defaultConstruct());
-          if (isBad(data)) {
+      const selectedData = this.selectStartupDataPayload(
+        Data.load(this.getName() + 'Data', 'data'),
+        Data.load(this.getName() + 'DataBackup', 'data')
+      );
+      data = selectedData.data;
+      if (selectedData.source === 'backup') {
+        dataLoadedFromBackup = true;
+        const reason = selectedData.primaryWasPresent ? 'could not be validated' : 'was missing';
+        Logger.warn(`Primary logger data ${reason}; restoring from the valid backup.`);
+        UI.showToast(`[${this.getName()}] Data ${reason}, loaded backup!`, { type: "warning", timeout: 5000 });
+      } else if (selectedData.source === 'empty') {
+        if (selectedData.hadPersistedCandidate) {
+          if (this.settings.autoBackup) {
             UI.showToast(`[${this.getName()}] Data and backup files were corrupted. All deleted/edited/purged messages have been erased.`, { type: "error", timeout: 0 });
-            data = defaultConstruct();
           } else {
-            UI.showToast(`[${this.getName()}] Data was corrupted, loaded backup!`, { type: "warning", timeout: 5000 });
+            UI.showToast(`[${this.getName()}] Data was corrupted! Recommended to turn on auto backup in settings! All deleted/edited/purged messages have been erased.`, { type: "error", timeout: 0 });
           }
         } else {
-          UI.showToast(`[${this.getName()}] Data was corrupted! Recommended to turn on auto backup in settings! All deleted/edited/purged messages have been erased.`, { type: "error", timeout: 0 });
-          data = defaultConstruct();
+          Logger.log('No persisted logger primary or backup was found; starting with an empty payload.');
         }
       }
     }
     this.messageStore = DiscordModules.MessageStore;
     this.ChannelStore = DiscordModules.ChannelStore;
     if (!this.settings.dontSaveData) {
-      const records = data.messageRecord;
-      for (let a in records) {
-        const record = records[a];
-        if (record.deletedata) {
-          if (record.deletedata.deletetime) {
-            record.delete_data = {};
-            record.delete_data.time = record.deletedata.deletetime;
-          }
-          delete record.deletedata;
-        } else if (record.delete_data?.rel_ids !== undefined) delete record.delete_data.rel_ids;
-        if (record.editHistory) {
-          record.edit_history = [];
-          for (let b in record.editHistory) {
-            record.edit_history.push({ content: record.editHistory[b].content, time: record.editHistory[b].editedAt });
-          }
-          delete record.editHistory;
+      let loadedPayloadSnapshot = JSON.stringify(data);
+      try {
+        data = this.normalizePersistedDataPayload(data);
+      } catch (primaryNormalizationError) {
+        // Structural checks are intentionally cheap. If deeper record normalization fails,
+        // make one safe attempt to use the backup before aborting startup with files intact.
+        if (dataLoadedFromBackup) throw primaryNormalizationError;
+        const backupData = Data.load(this.getName() + 'DataBackup', 'data');
+        if (!this.canNormalizePersistedDataPayload(backupData)) throw primaryNormalizationError;
+        try {
+          loadedPayloadSnapshot = JSON.stringify(backupData);
+          data = this.normalizePersistedDataPayload(backupData);
+          dataLoadedFromBackup = true;
+          Logger.warn('Primary logger data failed canonical normalization; loaded the valid backup instead.', primaryNormalizationError);
+          UI.showToast(`[${this.getName()}] Data could not be normalized, loaded backup!`, { type: "warning", timeout: 5000 });
+        } catch (backupNormalizationError) {
+          const error = new Error('Primary and backup logger data both failed canonical normalization');
+          error.cause = { primaryNormalizationError, backupNormalizationError };
+          throw error;
         }
-        record.message = this.cleanupMessageObject(record.message);
-        record.message.embeds.map(x => {
-          if (x.image !== undefined) {
-            const hasUrl = x.image.url !== undefined;
-            const hasProxyUrl = x.image.proxy_url !== undefined;
-            if (!hasUrl && !hasProxyUrl) {
-              delete x.image;
-            }
-            else if (!hasUrl && hasProxyUrl) {
-              x.image.url = x.image.proxy_url;
-            }
-            else if (hasUrl && !hasProxyUrl) {
-              x.image.proxy_url = x.image.url;
-            }
-          }
-          return x;
-        });
       }
+      this._dataNeedsCanonicalRewrite = dataLoadedFromBackup || loadedPayloadSnapshot !== JSON.stringify(data);
     }
     this.cachedMessageRecord = [];
     this.cachedMessageIds = new Set();
     this.cachedMessagesMap = new Map();
-    this.messageRecord = data.messageRecord;
-    this.messageRecordIds = new Set(Object.keys(this.messageRecord));
-    this.deletedMessageRecord = data.deletedMessageRecord;
-    this.editedMessageRecord = data.editedMessageRecord;
-    this.purgedMessageRecord = data.purgedMessageRecord;
-    this.suppressedForumThreadIds = new Set(Array.isArray(data.suppressedForumThreadIds) ? data.suppressedForumThreadIds.filter(id => typeof id === 'string' && /^\d+$/.test(id)) : []);
-    this.deletedMessageSet = new Map();
-    this.editedMessageSet = new Map();
-    this.purgedMessageSet = new Map();
-    for (const [channelId, ids] of Object.entries(this.deletedMessageRecord)) {
-      this.deletedMessageSet.set(channelId, new Set(ids));
-    }
-    for (const [channelId, ids] of Object.entries(this.editedMessageRecord)) {
-      this.editedMessageSet.set(channelId, new Set(ids));
-    }
-    for (const [channelId, ids] of Object.entries(this.purgedMessageRecord)) {
-      this.purgedMessageSet.set(channelId, new Set(ids));
-    }
-    this.sortedDeletedMessageIds = new Map();
-    this.sortedPurgedMessageIds = new Map();
+    this.installDataPayload(data);
     this._messageUpdateRegistry = new Map();
     this._globalUpdateCallbackMessage = null;
     this._globalUpdateCallbackContent = null;
@@ -1665,6 +1647,20 @@ module.exports = class MessageLoggerV2 {
       this.showLoggerHelpModal(true);
       this.saveSettings();
     }
+    // A legacy/mixed file is rewritten only after initialization succeeds. Normal saving
+    // uses the same atomic temp-file replacement as every other write.
+    if (this._dataNeedsCanonicalRewrite && !this.settings.dontSaveData) {
+      Logger.log(`Persisted logger data was normalized to schema ${DATA_SCHEMA_VERSION}; scheduling an atomic rewrite.`);
+      this._showNotification(
+        'Message Logger Data Migration',
+        'Legacy or mixed-fork logger data detected. Migration to the current schema is in progress.',
+        'info',
+        [],
+        5000
+      );
+      this._canonicalRewritePromise = this.rewriteCanonicalDataPayload()
+        .finally(() => { this._canonicalRewritePromise = null; });
+    }
   }
   observer({ addedNodes }) {
     let isChat = false;
@@ -1899,7 +1895,8 @@ module.exports = class MessageLoggerV2 {
         shown: false,
         settings: [
           {
-            name: 'Disable saving data. Logged messages are erased after reload/restart. Disables auto backup.',
+            name: 'Disable saving data',
+            note: 'Keeps new logs in memory and disables automatic backups. Existing disk history stays untouched; after a reload, re-enabling saving safely merges that history with eligible records from the current session.',
             id: 'dontSaveData',
             type: 'switch',
             action: 'handleDataSave'
@@ -2177,10 +2174,7 @@ module.exports = class MessageLoggerV2 {
       forceUpdateContent: () => this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' }),
       forceUpdateMessage: () => this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE' }),
       notificationModeChange: (val) => this.handleNotificationModeChange(val),
-      handleDataSave: (val) => {
-        if (!val) this.saveData();
-        if (!val && this.settings.autoBackup) this.saveBackup();
-      },
+      handleDataSave: (val) => this.handleDataSaveSetting(val),
       handleBackup: (val) => {
         if (val && !this.settings.dontSaveData) this.saveBackup();
       },
@@ -2330,6 +2324,738 @@ module.exports = class MessageLoggerV2 {
   saveSettings() {
     Data.save(this.getName(), 'settings', this.settings);
   }
+  // No-save recovery payload helpers. These keep validation, normalization, and runtime
+  // index rebuilding in one place so startup loading and later recovery cannot drift apart.
+  createDefaultDataPayload() {
+    return {
+      mlv2RemakeSchemaVersion: DATA_SCHEMA_VERSION,
+      messageRecord: {},
+      deletedMessageRecord: {},
+      editedMessageRecord: {},
+      purgedMessageRecord: {},
+      suppressedForumThreadIds: []
+    };
+  }
+  cloneDataValue(value) {
+    if (value === undefined) return undefined;
+    return JSON.parse(JSON.stringify(value));
+  }
+  mergePlainDataObjects(base, overlay) {
+    const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
+    if (!isPlainObject(base)) return this.cloneDataValue(overlay);
+    if (!isPlainObject(overlay)) return this.cloneDataValue(base);
+    const merged = this.cloneDataValue(base);
+    for (const [key, value] of Object.entries(overlay)) {
+      merged[key] = isPlainObject(value) && isPlainObject(merged[key])
+        ? this.mergePlainDataObjects(merged[key], value)
+        : this.cloneDataValue(value);
+    }
+    return merged;
+  }
+  prepareDataPayloadForNormalization(data) {
+    // Missing collections are normal for older forks. Wrong collection types are not
+    // silently erased because doing so could turn recoverable corruption into data loss.
+    const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
+    if (!isPlainObject(data)) throw new TypeError('Persisted logger payload is not an object');
+    const prepared = this.cloneDataValue(data);
+    const savedSchemaVersion = prepared.mlv2RemakeSchemaVersion;
+    if (savedSchemaVersion !== undefined
+      && (!Number.isInteger(savedSchemaVersion) || savedSchemaVersion < 1)) {
+      throw new TypeError('mlv2RemakeSchemaVersion is invalid');
+    }
+    if (savedSchemaVersion > DATA_SCHEMA_VERSION) {
+      throw new TypeError(`Logger data schema ${savedSchemaVersion} is newer than supported schema ${DATA_SCHEMA_VERSION}`);
+    }
+    // messageRecord is the source of truth and must exist. Only its derived category
+    // indexes may be reconstructed when an older fork omitted them.
+    if (!isPlainObject(prepared.messageRecord)) throw new TypeError('messageRecord is not an object map');
+    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+      if (prepared[key] === undefined || prepared[key] === null) prepared[key] = {};
+      else if (!isPlainObject(prepared[key])) throw new TypeError(`${key} is not an object map`);
+    }
+    if (prepared.suppressedForumThreadIds === undefined || prepared.suppressedForumThreadIds === null) {
+      prepared.suppressedForumThreadIds = [];
+    } else if (!Array.isArray(prepared.suppressedForumThreadIds)) {
+      throw new TypeError('suppressedForumThreadIds is not an array');
+    }
+    prepared.mlv2RemakeSchemaVersion = DATA_SCHEMA_VERSION;
+    return prepared;
+  }
+  canNormalizePersistedDataPayload(data) {
+    try {
+      return this.isValidDataPayload(this.prepareDataPayloadForNormalization(data));
+    } catch {
+      return false;
+    }
+  }
+  getUnsupportedDataSchemaVersion(data) {
+    const version = data?.mlv2RemakeSchemaVersion;
+    return Number.isInteger(version) && version > DATA_SCHEMA_VERSION ? version : null;
+  }
+  selectStartupDataPayload(primaryData, backupData) {
+    // A newer schema is not corruption. Falling back to an older backup would overwrite a
+    // file this build does not understand, so startup must stop before persistence begins.
+    const newerVersion = this.getUnsupportedDataSchemaVersion(primaryData);
+    if (newerVersion !== null) {
+      const error = new Error(`Logger data schema ${newerVersion} is newer than supported schema ${DATA_SCHEMA_VERSION}`);
+      error.code = 'MLV2_NEWER_DATA_SCHEMA';
+      throw error;
+    }
+    if (primaryData && this.canNormalizePersistedDataPayload(primaryData)) {
+      return { data: primaryData, source: 'primary', primaryWasPresent: true, hadPersistedCandidate: true };
+    }
+    const newerBackupVersion = this.getUnsupportedDataSchemaVersion(backupData);
+    if (newerBackupVersion !== null) {
+      const error = new Error(`Logger backup schema ${newerBackupVersion} is newer than supported schema ${DATA_SCHEMA_VERSION}`);
+      error.code = 'MLV2_NEWER_DATA_SCHEMA';
+      throw error;
+    }
+    if (backupData && this.canNormalizePersistedDataPayload(backupData)) {
+      return {
+        data: backupData,
+        source: 'backup',
+        primaryWasPresent: !!primaryData,
+        hadPersistedCandidate: true
+      };
+    }
+    return {
+      data: this.createDefaultDataPayload(),
+      source: 'empty',
+      primaryWasPresent: !!primaryData,
+      hadPersistedCandidate: !!(primaryData || backupData)
+    };
+  }
+  normalizeLegacyDeleteData(record) {
+    const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
+    const canonical = record.delete_data === undefined || record.delete_data === null
+      ? {}
+      : record.delete_data;
+    if (!isPlainObject(canonical)) throw new TypeError('delete_data is not an object');
+    let legacy = {};
+    if (record.deletedata !== undefined && record.deletedata !== null) {
+      if (!isPlainObject(record.deletedata)) throw new TypeError('deletedata is not an object');
+      legacy = this.cloneDataValue(record.deletedata);
+      if (legacy.deletetime !== undefined && legacy.time === undefined) legacy.time = legacy.deletetime;
+      delete legacy.deletetime;
+    }
+    const merged = this.mergePlainDataObjects(legacy, canonical);
+    const legacyTime = Number(legacy.time);
+    const canonicalTime = Number(canonical.time);
+    if (Number.isFinite(legacyTime) && (!Number.isFinite(canonicalTime) || legacyTime > canonicalTime)) {
+      merged.time = legacy.time;
+    }
+    if (legacy.hidden || canonical.hidden) merged.hidden = true;
+    delete merged.rel_ids;
+    delete record.deletedata;
+    record.delete_data = Object.keys(merged).length ? merged : null;
+  }
+  normalizeLegacyEditHistory(record) {
+    const canonical = record.edit_history === undefined || record.edit_history === null
+      ? []
+      : record.edit_history;
+    if (!Array.isArray(canonical)) throw new TypeError('edit_history is not an array');
+    let legacy = [];
+    if (record.editHistory !== undefined && record.editHistory !== null) {
+      const values = Array.isArray(record.editHistory)
+        ? record.editHistory
+        : typeof record.editHistory === 'object'
+          ? Object.values(record.editHistory)
+          : null;
+      if (!values) throw new TypeError('editHistory is not an object or array');
+      if (values.some(edit => !edit || typeof edit !== 'object' || Array.isArray(edit))) {
+        throw new TypeError('editHistory contains an invalid edit entry');
+      }
+      legacy = values
+        .map(edit => ({ ...edit, time: edit.time ?? edit.editedAt }))
+        .map(edit => {
+          delete edit.editedAt;
+          return edit;
+        });
+    }
+    const edits = new Map();
+    for (const edit of [...legacy, ...canonical]) {
+      if (!edit || typeof edit !== 'object' || Array.isArray(edit)) {
+        throw new TypeError('edit_history contains an invalid edit entry');
+      }
+      edits.set(JSON.stringify([edit.time ?? null, edit.content ?? null]), this.cloneDataValue(edit));
+    }
+    record.edit_history = Array.from(edits.values()).sort((a, b) => {
+      const time = value => Number(value?.time) || Date.parse(value?.time) || 0;
+      return time(a) - time(b) || String(a?.content || '').localeCompare(String(b?.content || ''));
+    });
+    if (!record.edit_history.length) record.edit_history = null;
+    delete record.editHistory;
+  }
+  getDataPayloadValidationErrors(data, options = {}) {
+    const isRecordMap = value => !!value && typeof value === 'object' && !Array.isArray(value);
+    const errors = [];
+    if (!isRecordMap(data)) return ['payload is not an object'];
+    for (const key of ['messageRecord', 'deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+      if (!isRecordMap(data[key])) errors.push(`${key} is not an object map`);
+    }
+    if (data.suppressedForumThreadIds !== undefined && !Array.isArray(data.suppressedForumThreadIds)) {
+      errors.push('suppressedForumThreadIds is not an array');
+    }
+    if (!options.strict || errors.length) return errors;
+    for (const [messageId, record] of Object.entries(data.messageRecord)) {
+      if (!record || typeof record !== 'object' || Array.isArray(record)) {
+        errors.push(`messageRecord.${messageId} is not an object`);
+        continue;
+      }
+      if (!record.message || typeof record.message !== 'object' || Array.isArray(record.message)) {
+        errors.push(`messageRecord.${messageId}.message is not an object`);
+        continue;
+      }
+      if (String(record.message.id || '') !== messageId) errors.push(`messageRecord.${messageId} has a mismatched message id`);
+      if (typeof record.message.channel_id !== 'string' || !record.message.channel_id) {
+        errors.push(`messageRecord.${messageId} has no channel id`);
+      }
+      if (record.edit_history !== null && record.edit_history !== undefined && !Array.isArray(record.edit_history)) {
+        errors.push(`messageRecord.${messageId}.edit_history is not an array`);
+      }
+      if (record.delete_data !== null && record.delete_data !== undefined
+        && (typeof record.delete_data !== 'object' || Array.isArray(record.delete_data))) {
+        errors.push(`messageRecord.${messageId}.delete_data is not an object`);
+      }
+    }
+    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+      for (const [channelId, ids] of Object.entries(data[key])) {
+        if (!Array.isArray(ids)) {
+          errors.push(`${key}.${channelId} is not an array`);
+          continue;
+        }
+        for (const id of ids) {
+          if (typeof id !== 'string') errors.push(`${key}.${channelId} contains a non-string id`);
+          else if (!Object.prototype.hasOwnProperty.call(data.messageRecord, id)) errors.push(`${key}.${channelId} references missing record ${id}`);
+          else {
+            const canonicalChannelId = data.messageRecord[id]?.message?.channel_id;
+            if (canonicalChannelId !== channelId) errors.push(`${key}.${channelId} places ${id} outside canonical channel ${canonicalChannelId}`);
+          }
+        }
+      }
+    }
+    for (const id of data.suppressedForumThreadIds || []) {
+      if (typeof id !== 'string' || !/^\d+$/.test(id)) errors.push(`suppressedForumThreadIds contains invalid id ${String(id)}`);
+    }
+    return errors;
+  }
+  isValidDataPayload(data, options = {}) {
+    return this.getDataPayloadValidationErrors(data, options).length === 0;
+  }
+  normalizePersistedDataPayload(data) {
+    data = this.prepareDataPayloadForNormalization(data);
+    const records = data.messageRecord;
+    const normalizedRecords = {};
+    const canonicalMessageIds = new Map();
+    for (const [messageId, record] of Object.entries(records)) {
+      if (!record || typeof record !== 'object' || !record.message || typeof record.message !== 'object') {
+        throw new TypeError(`messageRecord.${messageId} is not a valid message record`);
+      }
+      // Unexpected per-record failures invalidate the candidate file instead of silently
+      // dropping otherwise recoverable history and atomically rewriting that loss.
+      this.normalizeLegacyDeleteData(record);
+      this.normalizeLegacyEditHistory(record);
+      record.message = this.cleanupMessageObject(record.message);
+      const canonicalMessageId = String(record.message.id || messageId);
+      canonicalMessageIds.set(messageId, canonicalMessageId);
+      record.message.id = canonicalMessageId;
+      if (!record.message.channel_id || typeof record.message.channel_id !== 'string') {
+        throw new TypeError(`messageRecord.${messageId}.message has no string channel id`);
+      }
+      record.saved_location = record.saved_location && typeof record.saved_location === 'object' && !Array.isArray(record.saved_location)
+        ? record.saved_location
+        : null;
+      record.logged_attachments = Array.isArray(record.logged_attachments)
+        ? Array.from(new Set(record.logged_attachments.filter(id => typeof id === 'string')))
+        : [];
+      record.message.embeds.map(embed => {
+        if (embed.image !== undefined) {
+          const hasUrl = embed.image.url !== undefined;
+          const hasProxyUrl = embed.image.proxy_url !== undefined;
+          if (!hasUrl && !hasProxyUrl) delete embed.image;
+          else if (!hasUrl) embed.image.url = embed.image.proxy_url;
+          else if (!hasProxyUrl) embed.image.proxy_url = embed.image.url;
+        }
+        return embed;
+      });
+      normalizedRecords[canonicalMessageId] = normalizedRecords[canonicalMessageId]
+        ? this.mergeSavedRecords(normalizedRecords[canonicalMessageId], record)
+        : record;
+      if (canonicalMessageId !== messageId) {
+        Logger.warn(`Re-keyed persisted message record ${messageId} to its canonical message id ${canonicalMessageId}`);
+      }
+    }
+    data.messageRecord = normalizedRecords;
+    // Re-key every category reference before sanitization. Category membership is evidence
+    // that cannot always be inferred later (for example a non-Anti-Nuke purged record).
+    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+      for (const [channelId, ids] of Object.entries(data[key])) {
+        if (!Array.isArray(ids)) continue;
+        data[key][channelId] = ids.map(id => canonicalMessageIds.get(id) || id);
+      }
+    }
+    data = this.sanitizeDataPayload(data);
+    // Rebuild missing indexes from canonical records. Existing category membership is
+    // retained independently so edited-and-deleted or purged records are not collapsed.
+    const isIndexed = (key, id) => Object.values(data[key]).some(ids => ids.includes(id));
+    for (const [messageId, record] of Object.entries(data.messageRecord)) {
+      const channelId = record.message.channel_id;
+      if (record.edit_history?.length && !isIndexed('editedMessageRecord', messageId)) {
+        (data.editedMessageRecord[channelId] ||= []).push(messageId);
+      }
+      if (record.delete_data
+        && !isIndexed('deletedMessageRecord', messageId)
+        && !isIndexed('purgedMessageRecord', messageId)) {
+        const target = record.delete_data.anti_nuke ? data.purgedMessageRecord : data.deletedMessageRecord;
+        (target[channelId] ||= []).push(messageId);
+      }
+    }
+    data = this.sanitizeDataPayload(data);
+    const validationErrors = this.getDataPayloadValidationErrors(data, { strict: true });
+    if (validationErrors.length) {
+      throw new TypeError(`Normalized logger payload is invalid: ${validationErrors.join('; ')}`);
+    }
+    return data;
+  }
+  sanitizeDataPayload(data) {
+    if (!this.isValidDataPayload(data)) throw new TypeError('Logger payload has an invalid structure');
+    const validRecords = data.messageRecord;
+    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+      const canonicalMap = {};
+      const seen = new Set();
+      for (const ids of Object.values(data[key])) {
+        if (!Array.isArray(ids)) continue;
+        for (const id of ids) {
+          if (typeof id !== 'string' || seen.has(id) || !Object.prototype.hasOwnProperty.call(validRecords, id)) continue;
+          const channelId = validRecords[id]?.message?.channel_id;
+          if (!channelId) continue;
+          (canonicalMap[channelId] ||= []).push(id);
+          seen.add(id);
+        }
+      }
+      data[key] = canonicalMap;
+    }
+    data.suppressedForumThreadIds = Array.from(new Set((data.suppressedForumThreadIds || [])
+      .filter(id => typeof id === 'string' && /^\d+$/.test(id))));
+    return data;
+  }
+  getDataPayloadExtensions(data) {
+    const knownKeys = new Set([
+      'mlv2RemakeSchemaVersion',
+      'messageRecord',
+      'deletedMessageRecord',
+      'editedMessageRecord',
+      'purgedMessageRecord',
+      'suppressedForumThreadIds'
+    ]);
+    return Object.fromEntries(
+      Object.entries(data || {})
+        .filter(([key]) => !knownKeys.has(key))
+        .map(([key, value]) => [key, this.cloneDataValue(value)])
+    );
+  }
+  installDataPayload(data) {
+    data = this.sanitizeDataPayload(data);
+    // Preserve additive top-level metadata owned by other forks. Known core fields are
+    // regenerated by this fork, while foreign extensions survive a round trip unchanged.
+    this.dataPayloadExtensions = this.getDataPayloadExtensions(data);
+    this.messageRecord = data.messageRecord;
+    this.messageRecordIds = new Set(Object.keys(this.messageRecord));
+    this.deletedMessageRecord = data.deletedMessageRecord;
+    this.editedMessageRecord = data.editedMessageRecord;
+    this.purgedMessageRecord = data.purgedMessageRecord;
+    this.suppressedForumThreadIds = new Set(data.suppressedForumThreadIds);
+    const createSetMap = map => new Map(Object.entries(map).map(([channelId, ids]) => [channelId, new Set(ids)]));
+    this.deletedMessageSet = createSetMap(this.deletedMessageRecord);
+    this.editedMessageSet = createSetMap(this.editedMessageRecord);
+    this.purgedMessageSet = createSetMap(this.purgedMessageRecord);
+    this.sortedDeletedMessageIds = new Map();
+    this.sortedPurgedMessageIds = new Map();
+  }
+  getRecordActivityTime(record) {
+    const times = [
+      Number(record?.delete_data?.time),
+      Number(record?.message?.edited_timestamp),
+      Number(record?.message?.timestamp)
+    ].filter(Number.isFinite);
+    for (const edit of record?.edit_history || []) {
+      const numeric = Number(edit?.time);
+      const parsed = Number.isFinite(numeric) ? numeric : Date.parse(edit?.time);
+      if (Number.isFinite(parsed)) times.push(parsed);
+    }
+    return times.length ? Math.max(...times) : 0;
+  }
+  mergeSavedRecords(persistedRecord, sessionRecord) {
+    // A message ID can carry independent edit, delete, media, hidden, and forum state.
+    // Never choose one whole record as the winner: merge those fields deterministically.
+    if (!persistedRecord) return this.cloneDataValue(sessionRecord);
+    if (!sessionRecord) return this.cloneDataValue(persistedRecord);
+    const persisted = this.cloneDataValue(persistedRecord);
+    const session = this.cloneDataValue(sessionRecord);
+    const persistedIsNewer = this.getRecordActivityTime(persisted) > this.getRecordActivityTime(session);
+    const older = persistedIsNewer ? session : persisted;
+    const newer = persistedIsNewer ? persisted : session;
+    const merged = { ...older, ...newer };
+    merged.message = { ...(older.message || {}), ...(newer.message || {}) };
+    if (persisted.saved_location || session.saved_location) {
+      merged.saved_location = this.mergePlainDataObjects(older.saved_location || {}, newer.saved_location || {});
+    }
+    if (persisted.delete_data || session.delete_data) {
+      merged.delete_data = this.mergePlainDataObjects(older.delete_data || {}, newer.delete_data || {});
+      if (persisted.delete_data?.hidden || session.delete_data?.hidden) merged.delete_data.hidden = true;
+      const persistedTime = Number(persisted.delete_data?.time) || 0;
+      const sessionTime = Number(session.delete_data?.time) || 0;
+      if (persistedTime > sessionTime) merged.delete_data.time = persisted.delete_data.time;
+    }
+    const edits = new Map();
+    for (const edit of [...(persisted.edit_history || []), ...(session.edit_history || [])]) {
+      if (!edit || typeof edit !== 'object') continue;
+      edits.set(JSON.stringify([edit.time ?? null, edit.content ?? null]), edit);
+    }
+    if (edits.size) {
+      merged.edit_history = Array.from(edits.values()).sort((a, b) => {
+        const time = value => Number(value?.time) || Date.parse(value?.time) || 0;
+        const difference = time(a) - time(b);
+        return difference || String(a?.content || '').localeCompare(String(b?.content || ''));
+      });
+    } else merged.edit_history = null;
+    if (persisted.edits_hidden || session.edits_hidden) merged.edits_hidden = true;
+    merged.ghost_pinged = !!(persisted.ghost_pinged || session.ghost_pinged);
+    merged.local_mentioned = !!(persisted.local_mentioned || session.local_mentioned);
+    const loggedAttachments = Array.from(new Set([
+      ...(persisted.logged_attachments || []),
+      ...(session.logged_attachments || [])
+    ]));
+    if (loggedAttachments.length) merged.logged_attachments = loggedAttachments;
+    return merged;
+  }
+  mergeCategoryIndexes(persistedMap, sessionMap, messageRecord) {
+    const merged = {};
+    for (const map of [persistedMap || {}, sessionMap || {}]) {
+      for (const [channelId, ids] of Object.entries(map)) {
+        if (!Array.isArray(ids)) continue;
+        if (!merged[channelId]) merged[channelId] = [];
+        merged[channelId].push(...ids);
+      }
+    }
+    for (const [channelId, ids] of Object.entries(merged)) {
+      merged[channelId] = Array.from(new Set(ids.filter(id => typeof id === 'string' && messageRecord[id])));
+      if (!merged[channelId].length) delete merged[channelId];
+    }
+    return merged;
+  }
+  mergeDataPayloads(persistedData, sessionData) {
+    // Category maps are merged independently because one message may legitimately be both
+    // edited and deleted. Each individual channel index is still de-duplicated and validated.
+    const persisted = this.sanitizeDataPayload(this.cloneDataValue(persistedData));
+    const session = this.sanitizeDataPayload(this.cloneDataValue(sessionData));
+    // Opaque extensions are merged without interpreting their schema. Disk values win on
+    // conflicts because the temporary no-save session does not own foreign persisted state.
+    const mergedExtensions = this.mergePlainDataObjects(
+      this.getDataPayloadExtensions(session),
+      this.getDataPayloadExtensions(persisted)
+    );
+    const messageRecord = {};
+    for (const messageId of new Set([...Object.keys(persisted.messageRecord), ...Object.keys(session.messageRecord)])) {
+      messageRecord[messageId] = this.mergeSavedRecords(persisted.messageRecord[messageId], session.messageRecord[messageId]);
+    }
+    const merged = {
+      ...mergedExtensions,
+      mlv2RemakeSchemaVersion: DATA_SCHEMA_VERSION,
+      messageRecord,
+      deletedMessageRecord: this.mergeCategoryIndexes(persisted.deletedMessageRecord, session.deletedMessageRecord, messageRecord),
+      editedMessageRecord: this.mergeCategoryIndexes(persisted.editedMessageRecord, session.editedMessageRecord, messageRecord),
+      purgedMessageRecord: this.mergeCategoryIndexes(persisted.purgedMessageRecord, session.purgedMessageRecord, messageRecord),
+      suppressedForumThreadIds: Array.from(new Set([
+        ...persisted.suppressedForumThreadIds,
+        ...session.suppressedForumThreadIds
+      ]))
+    };
+    for (const [messageId, record] of Object.entries(messageRecord)) {
+      const channelId = record?.message?.channel_id;
+      if (!channelId) continue;
+      const isIndexed = key => Object.values(merged[key]).some(ids => ids.includes(messageId));
+      if (record.edit_history?.length && !isIndexed('editedMessageRecord')) {
+        (merged.editedMessageRecord[channelId] ||= []).push(messageId);
+      }
+      if (record.delete_data && !isIndexed('deletedMessageRecord') && !isIndexed('purgedMessageRecord')) {
+        const target = record.delete_data.anti_nuke ? merged.purgedMessageRecord : merged.deletedMessageRecord;
+        (target[channelId] ||= []).push(messageId);
+      }
+    }
+    return this.sanitizeDataPayload(merged);
+  }
+  applySavedMessagesCapToPayload(data, cap = this.settings.savedMessagesCap) {
+    // Apply caps to the detached merged payload before any file is replaced. Removing a
+    // forum/thread root also removes its children, matching normal runtime cap behavior.
+    data = this.sanitizeDataPayload(this.cloneDataValue(data));
+    if (!Number.isInteger(cap) || cap < 0) return data;
+    const idsToRemove = new Set();
+    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+      const uniqueIds = Array.from(new Set(Object.values(data[key]).flat()));
+      uniqueIds.sort((a, b) => this.getRecordActivityTime(data.messageRecord[b]) - this.getRecordActivityTime(data.messageRecord[a]) || b.localeCompare(a));
+      uniqueIds.slice(cap).forEach(id => idsToRemove.add(id));
+    }
+    const rootIds = Array.from(idsToRemove).filter(id => data.messageRecord[id]?.delete_data?.forum_thread_delete);
+    for (const rootId of rootIds) {
+      for (const [messageId, record] of Object.entries(data.messageRecord)) {
+        if (record?.message?.channel_id === rootId) idsToRemove.add(messageId);
+      }
+      for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+        for (const id of data[key][rootId] || []) idsToRemove.add(id);
+      }
+      if (/^\d+$/.test(rootId)) data.suppressedForumThreadIds.push(rootId);
+    }
+    for (const id of idsToRemove) delete data.messageRecord[id];
+    return this.sanitizeDataPayload(data);
+  }
+  readDataPayloadFile(name) {
+    // Read the JSON file directly. BdApi.Data.load() may return BetterDiscord's cached copy,
+    // which can be stale after this plugin's direct atomic filesystem writes.
+    const filePath = this.nodeModules.path.join(this.pluginDir, `${name}.config.json`);
+    if (!this.nodeModules.fs.existsSync(filePath)) return { status: 'missing', filePath };
+    try {
+      const parsed = JSON.parse(this.nodeModules.fs.readFileSync(filePath, 'utf8'));
+      const newerVersion = this.getUnsupportedDataSchemaVersion(parsed?.data);
+      if (newerVersion !== null) {
+        const error = new Error(`Logger data schema ${newerVersion} is newer than supported schema ${DATA_SCHEMA_VERSION}`);
+        error.code = 'MLV2_NEWER_DATA_SCHEMA';
+        return { status: 'incompatible', filePath, error };
+      }
+      const data = this.normalizePersistedDataPayload(parsed?.data);
+      const validationErrors = this.getDataPayloadValidationErrors(data, { strict: true });
+      if (validationErrors.length) {
+        return {
+          status: 'invalid',
+          filePath,
+          validationErrors,
+          error: new TypeError(`JSON does not contain a valid data payload: ${validationErrors.join('; ')}`)
+        };
+      }
+      return { status: 'valid', filePath, data };
+    } catch (error) {
+      return { status: 'invalid', filePath, error };
+    }
+  }
+  loadPersistedDataForNoSaveMerge() {
+    const primary = this.readDataPayloadFile(this.getName() + 'Data');
+    if (primary.status === 'incompatible') throw primary.error;
+    if (primary.status === 'valid') {
+      return { data: primary.data, source: 'primary', filePath: primary.filePath };
+    }
+    const backup = this.readDataPayloadFile(this.getName() + 'DataBackup');
+    if (backup.status === 'incompatible') throw backup.error;
+    if (backup.status === 'valid') {
+      Logger.warn(`Primary logger data was ${primary.status} during no-save recovery; using the valid backup.`, primary.error);
+      return { data: backup.data, source: 'backup', filePath: backup.filePath };
+    }
+    if (primary.status === 'missing' && backup.status === 'missing') {
+      return { data: this.createDefaultDataPayload(), source: 'empty', filePath: primary.filePath };
+    }
+    const error = new Error('Primary and backup logger data could not be validated');
+    error.cause = { primary: primary.error, backup: backup.error };
+    throw error;
+  }
+  cancelPendingDataWrites() {
+    // Epoch invalidation also stops an already-running async write before its final rename.
+    this._dataWriteEpoch = (this._dataWriteEpoch || 0) + 1;
+    if (this.requestedDataSave) clearTimeout(this.requestedDataSave);
+    if (this.saveBackupTimeout) clearTimeout(this.saveBackupTimeout);
+    this.requestedDataSave = 0;
+    this.saveBackupTimeout = 0;
+    this.autoBackupSaveInterupts = 0;
+  }
+  reportNoSaveDataError(stage, error, savingRemainsDisabled = true) {
+    Logger.error(`No-save data recovery failed during ${stage}.`, {
+      stage,
+      savingRemainsDisabled,
+      primaryPath: this.nodeModules.path.join(this.pluginDir, `${this.getName()}Data.config.json`),
+      backupPath: this.nodeModules.path.join(this.pluginDir, `${this.getName()}DataBackup.config.json`),
+      error,
+      cause: error?.cause
+    });
+    const status = savingRemainsDisabled
+      ? 'Saving remains disabled. Reopen settings to retry.'
+      : 'The primary data was saved, but a later recovery step failed.';
+    this._showNotification(
+      'Message Logger Data Recovery Error',
+      `${status} View the console log for more details.`,
+      'error',
+      [],
+      0
+    );
+  }
+  async rewriteCanonicalDataPayload() {
+    // This is deliberately a primary-only migration write. Keeping the previous backup
+    // untouched gives users one additional recovery point until the next normal backup.
+    const writeEpoch = this._dataWriteEpoch || 0;
+    const result = await this.writeDataPayloadAtomic(
+      this.getName() + 'Data',
+      this.cloneDataValue(this._getDataPayload()),
+      {
+        synchronous: true,
+        notifyError: false,
+        shouldCommit: () => this.__started !== false
+          && !this.settings.dontSaveData
+          && this._dataWriteEpoch === writeEpoch
+      }
+    );
+    if (result.cancelled) {
+      Logger.log('Canonical data migration write was cancelled before commit.');
+      return false;
+    }
+    if (!result.ok) {
+      this._dataNeedsCanonicalRewrite = true;
+      Logger.error('Failed to atomically rewrite normalized legacy/mixed-fork logger data.', {
+        mlv2RemakeSchemaVersion: DATA_SCHEMA_VERSION,
+        primaryPath: this.nodeModules.path.join(this.pluginDir, `${this.getName()}Data.config.json`),
+        error: result.error
+      });
+      this._showNotification(
+        'Message Logger Data Migration Error',
+        'The normalized data could not be saved. View the console log for more details.',
+        'error',
+        [],
+        0
+      );
+      return false;
+    }
+    this._dataNeedsCanonicalRewrite = false;
+    Logger.log(`Legacy/mixed-fork logger data migration to schema ${DATA_SCHEMA_VERSION} completed successfully.`);
+    this._showNotification(
+      'Message Logger Data Migration',
+      'Legacy or mixed-fork logger data was migrated successfully.',
+      'success',
+      [],
+      5000
+    );
+    return true;
+  }
+  writeDataPayloadAtomic(name, data, options = {}) {
+    return new Promise(resolve => {
+      this.efficientlySaveData(
+        name,
+        'data',
+        data,
+        (error, cancelled = false) => resolve({ ok: !error && !cancelled, error, cancelled }),
+        !!options.synchronous,
+        {
+          notifyError: options.notifyError !== false,
+          shouldCommit: options.shouldCommit
+        }
+      );
+    });
+  }
+  async mergeNoSaveSessionIntoPersistedData() {
+    // Transaction order is intentional: load -> merge -> cap -> install -> primary -> backup.
+    // The setting stays logically disabled until at least one complete primary write succeeds.
+    if (!this._needsNoSaveDataMerge) return true;
+    this.cancelPendingDataWrites();
+    const writeEpoch = this._dataWriteEpoch;
+    this._noSaveMergeInProgress = true;
+    this._noSaveMergeDirty = false;
+    let stage = 'loading persisted data';
+    try {
+      const loaded = this.loadPersistedDataForNoSaveMerge();
+      stage = 'merging persisted and session data';
+      const merged = this.applySavedMessagesCapToPayload(
+        this.mergeDataPayloads(loaded.data, this._getDataPayload())
+      );
+      this.installDataPayload(merged);
+      const shouldCommit = () => this.__started !== false && this._noSaveMergeInProgress && this._dataWriteEpoch === writeEpoch;
+      let attempts = 0;
+      do {
+        this._noSaveMergeDirty = false;
+        stage = attempts ? 'saving session changes captured during recovery' : 'saving merged primary data';
+        const result = await this.writeDataPayloadAtomic(
+          this.getName() + 'Data',
+          this.cloneDataValue(this._getDataPayload()),
+          { notifyError: false, shouldCommit }
+        );
+        if (result.cancelled) {
+          Logger.log('No-save data recovery was cancelled because saving was disabled again.');
+          this._noSaveMergeInProgress = false;
+          this.settings.dontSaveData = true;
+          if (this.__started !== false) this.saveSettings();
+          return false;
+        }
+        if (!result.ok) throw result.error || new Error('Atomic primary data write failed');
+        attempts++;
+      } while (this._noSaveMergeDirty && attempts < 3);
+      if (this._noSaveMergeDirty) {
+        stage = 'final synchronous primary data write';
+        this._noSaveMergeDirty = false;
+        const result = await this.writeDataPayloadAtomic(
+          this.getName() + 'Data',
+          this.cloneDataValue(this._getDataPayload()),
+          { synchronous: true, notifyError: false, shouldCommit }
+        );
+        if (result.cancelled) {
+          this._noSaveMergeInProgress = false;
+          this.settings.dontSaveData = true;
+          if (this.__started !== false) this.saveSettings();
+          return false;
+        }
+        if (!result.ok) throw result.error || new Error('Final atomic primary data write failed');
+      }
+      this._needsNoSaveDataMerge = false;
+      this._noSaveMergeInProgress = false;
+      this.settings.dontSaveData = false;
+      this.saveSettings();
+      if (this.settings.autoBackup) {
+        stage = 'saving merged backup data';
+        const backupResult = await this.writeDataPayloadAtomic(
+          this.getName() + 'DataBackup',
+          this.cloneDataValue(this._getDataPayload()),
+          {
+            notifyError: false,
+            shouldCommit: () => this.__started !== false && !this.settings.dontSaveData && this._dataWriteEpoch === writeEpoch
+          }
+        );
+        if (backupResult.cancelled) {
+          Logger.log('Merged backup write was cancelled because saving was disabled again.');
+        } else if (!backupResult.ok) {
+          this.reportNoSaveDataError(stage, backupResult.error || new Error('Atomic backup write failed'), false);
+        }
+      }
+      Logger.log(`Recovered no-save session data using ${loaded.source} persisted data.`, {
+        records: Object.keys(this.messageRecord).length,
+        deleted: Object.values(this.deletedMessageRecord).flat().length,
+        edited: Object.values(this.editedMessageRecord).flat().length,
+        purged: Object.values(this.purgedMessageRecord).flat().length,
+        suppressedRoots: this.suppressedForumThreadIds.size
+      });
+      return true;
+    } catch (error) {
+      this._noSaveMergeInProgress = false;
+      this.settings.dontSaveData = true;
+      try {
+        this.saveSettings();
+      } catch (settingsError) {
+        Logger.error('Could not persist the fail-closed no-save setting after recovery failure.', settingsError);
+      }
+      this.reportNoSaveDataError(stage, error, true);
+      return false;
+    }
+  }
+  handleDataSaveSetting(disabled) {
+    if (disabled) {
+      this.cancelPendingDataWrites();
+      Logger.log('Data saving disabled; pending primary and backup writes were cancelled.');
+      return;
+    }
+    if (!this._needsNoSaveDataMerge) {
+      this.saveData();
+      if (this.settings.autoBackup) this.saveBackup();
+      return;
+    }
+    this.settings.dontSaveData = true;
+    this.saveSettings();
+    if (!this._noSaveMergePromise) {
+      this._noSaveMergePromise = this.mergeNoSaveSessionIntoPersistedData()
+        .finally(() => { this._noSaveMergePromise = null; });
+    }
+  }
   cleanUpStaleDataTempFiles() {
     try {
       const fs = this.nodeModules.fs;
@@ -2368,14 +3094,23 @@ module.exports = class MessageLoggerV2 {
       const errorPageModule = DiscordModules.ErrorPageClasses;
       this.handleDataSaving.errorPageClass = errorPageModule?.errorPage ? ('.' + errorPageModule.errorPage) : '.error-page-not-found';
     }
+    if (this.settings.dontSaveData && !this._noSaveMergeInProgress) {
+      this.requestedDataSave = 0;
+      return;
+    }
     if (!this.messageRecord || document.querySelector(this.handleDataSaving.errorPageClass)) return;
-    if (!Object.keys(this.messageRecord).length && !this.suppressedForumThreadIds?.size) return Data.delete(this.getName() + 'Data', 'data');
-    const callback = err => {
+    // Empty state uses the same complete-payload atomic path instead of BdApi.Data.delete(),
+    // so clearing the last record cannot reintroduce a non-atomic persistence branch.
+    const payload = !Object.keys(this.messageRecord).length && !this.suppressedForumThreadIds?.size
+      ? this.createDefaultDataPayload()
+      : this._getDataPayload();
+    const writeEpoch = this._dataWriteEpoch || 0;
+    const callback = (err, cancelled = false) => {
       if (err) {
         UI.showToast('There has been an error saving the data file', { type: "error" });
         Logger.error('There has been an error saving the data file', err);
       }
-      if (scheduleBackup && this.settings.autoBackup) {
+      if (!cancelled && scheduleBackup && this.settings.autoBackup) {
         if (this.saveBackupTimeout) this.autoBackupSaveInterupts++;
         if (this.autoBackupSaveInterupts < 4) {
           if (this.saveBackupTimeout) clearTimeout(this.saveBackupTimeout);
@@ -2384,19 +3119,32 @@ module.exports = class MessageLoggerV2 {
       }
       this.requestedDataSave = 0;
     };
-    this.efficientlySaveData(this.getName() + 'Data', 'data', this._getDataPayload(), callback, synchronous);
+    this.efficientlySaveData(
+      this.getName() + 'Data',
+      'data',
+      payload,
+      callback,
+      synchronous,
+      { shouldCommit: () => (synchronous || this.__started !== false) && !this.settings.dontSaveData && (this._dataWriteEpoch || 0) === writeEpoch }
+    );
   }
   saveData() {
-    if (!this.settings.dontSaveData && !this.requestedDataSave) this.requestedDataSave = setTimeout(() => this.handleDataSaving(), 1000);
+    if (this.settings.dontSaveData) {
+      if (this._noSaveMergeInProgress) this._noSaveMergeDirty = true;
+      return;
+    }
+    if (!this.requestedDataSave) this.requestedDataSave = setTimeout(() => this.handleDataSaving(), 1000);
   }
-  async efficientlySaveData(name, key, data, callback, synchronous = false) {
+  async efficientlySaveData(name, key, data, callback, synchronous = false, options = {}) {
+    // The optional commit predicate is checked both before writing and immediately before
+    // rename. Disabling saving increments the epoch, so a completed stale temp file is
+    // discarded instead of replacing the destination after the user's mode change.
     let tempPath;
     try {
-      let loadedData;
-      try {
-        loadedData = Data.load(name, key);
-      } catch { }
-      if (loadedData) for (const k in data) loadedData[k] = data[k];
+      if (options.shouldCommit && !options.shouldCommit()) {
+        if (callback) callback(null, true);
+        return;
+      }
       const filePath = this.nodeModules.path.join(this.pluginDir, `${name}.config.json`);
       const serializedData = JSON.stringify({ [key]: data });
       const fs = this.nodeModules.fs;
@@ -2404,21 +3152,53 @@ module.exports = class MessageLoggerV2 {
       tempPath = filePath + tempSuffix;
       if (synchronous && typeof fs?.writeFileSync === "function" && typeof fs?.renameSync === "function") {
         fs.writeFileSync(tempPath, serializedData, "utf8");
+        if (options.shouldCommit && !options.shouldCommit()) {
+          fs.unlinkSync(tempPath);
+          tempPath = null;
+          if (callback) callback(null, true);
+          return;
+        }
         fs.renameSync(tempPath, filePath);
-      } else if (fs?.promises?.writeFile && fs?.promises?.rename) {
+      } else if (fs?.promises?.writeFile && (typeof fs?.renameSync === 'function' || fs?.promises?.rename)) {
         await fs.promises.writeFile(tempPath, serializedData, "utf8");
-        await fs.promises.rename(tempPath, filePath);
-      } else if (typeof fs?.writeFile === "function" && typeof fs?.rename === "function") {
+        if (options.shouldCommit && !options.shouldCommit()) {
+          await fs.promises.unlink(tempPath);
+          tempPath = null;
+          if (callback) callback(null, true);
+          return;
+        }
+        // Renaming is fast and remains synchronous so disable/unload cannot interleave after
+        // the predicate check and submit an older rename that finishes after a newer write.
+        if (typeof fs.renameSync === 'function') fs.renameSync(tempPath, filePath);
+        else await fs.promises.rename(tempPath, filePath);
+      } else if (typeof fs?.writeFile === "function" && (typeof fs?.renameSync === 'function' || typeof fs?.rename === "function")) {
         await new Promise((resolve, reject) =>
           fs.writeFile(tempPath, serializedData, "utf8", err => (err ? reject(err) : resolve()))
         );
-        await new Promise((resolve, reject) =>
-          fs.rename(tempPath, filePath, err => (err ? reject(err) : resolve()))
-        );
+        if (options.shouldCommit && !options.shouldCommit()) {
+          await new Promise(resolve => fs.unlink(tempPath, () => resolve()));
+          tempPath = null;
+          if (callback) callback(null, true);
+          return;
+        }
+        if (typeof fs.renameSync === 'function') fs.renameSync(tempPath, filePath);
+        else {
+          await new Promise((resolve, reject) =>
+            fs.rename(tempPath, filePath, err => (err ? reject(err) : resolve()))
+          );
+        }
       } else {
         throw new TypeError("No supported atomic filesystem write method");
       }
       tempPath = null;
+      let loadedData;
+      try {
+        loadedData = Data.load(name, key);
+      } catch { }
+      if (loadedData) {
+        for (const key of Object.keys(loadedData)) delete loadedData[key];
+        for (const dataKey in data) loadedData[dataKey] = data[dataKey];
+      }
       if (callback) callback(null);
     } catch (e) {
       if (tempPath) {
@@ -2429,22 +3209,36 @@ module.exports = class MessageLoggerV2 {
           else if (typeof fs?.unlink === "function") await new Promise(resolve => fs.unlink(tempPath, () => resolve()));
         } catch { }
       }
-      UI.showToast('There has been an error saving the data file', { type: "error" });
+      if (options.notifyError !== false) UI.showToast('There has been an error saving the data file', { type: "error" });
       Logger.error('Error saving data file', e);
       if (callback) callback(e);
     }
   }
   saveBackup() {
-    const callback = err => {
+    if (this.settings.dontSaveData && !this._noSaveMergeInProgress) {
+      this.saveBackupTimeout = 0;
+      return;
+    }
+    const writeEpoch = this._dataWriteEpoch || 0;
+    const callback = (err, cancelled = false) => {
       if (err) {
         UI.showToast('There has been an error saving the data file', { type: "error" });
         Logger.error('Error saving backup file', err);
       }
       this.saveBackupTimeout = 0;
       this.autoBackupSaveInterupts = 0;
-      if (!Data.load(this.getName() + 'DataBackup', 'data')?.messageRecord) this.saveBackupTimeout = setTimeout(() => this.saveBackup(), 300);
+      if (!cancelled && !this.settings.dontSaveData && !Data.load(this.getName() + 'DataBackup', 'data')?.messageRecord) {
+        this.saveBackupTimeout = setTimeout(() => this.saveBackup(), 300);
+      }
     };
-    this.efficientlySaveData(this.getName() + 'DataBackup', 'data', this._getDataPayload(), callback);
+    this.efficientlySaveData(
+      this.getName() + 'DataBackup',
+      'data',
+      this._getDataPayload(),
+      callback,
+      false,
+      { shouldCommit: () => this.__started !== false && !this.settings.dontSaveData && (this._dataWriteEpoch || 0) === writeEpoch }
+    );
   }
   parseHTML(html) {
     var template = document.createElement('template');
@@ -3307,6 +4101,8 @@ module.exports = class MessageLoggerV2 {
   }
   _getDataPayload() {
     return {
+      ...this.cloneDataValue(this.dataPayloadExtensions || {}),
+      mlv2RemakeSchemaVersion: DATA_SCHEMA_VERSION,
       messageRecord: this.messageRecord,
       deletedMessageRecord: this.deletedMessageRecord,
       editedMessageRecord: this.editedMessageRecord,

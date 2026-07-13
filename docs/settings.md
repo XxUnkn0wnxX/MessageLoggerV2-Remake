@@ -59,7 +59,7 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Disable saving data | Off | Keeps logs only for the current session and disables automatic backups. |
+| Disable saving data | Off | Keeps new logs in memory and disables automatic backups. Existing disk history remains untouched. If the plugin started in this mode, re-enabling saving validates and merges disk history with eligible session records before atomically replacing the primary file. A failed recovery leaves saving disabled and directs you to the console. |
 | Auto backup data | Off | Maintains a fallback copy of the logger data. It reduces, but cannot eliminate, data-loss risk. |
 | Deleted messages color | Empty | Sets deleted text and forum/thread tints; an empty value uses the built-in red. |
 | Cache media locally | On | Master switch for caching attachments, embed images, and stickers. |
@@ -86,6 +86,12 @@ BetterDiscord stores the plugin's data beside the installed plugin:
 - `MLV2_IMAGE_CACHE/`: default attachment cache.
 
 The two locked legacy cache settings remain present in `MessageLoggerV2.config.json` with a value of `true`. Editing either value to `false` does not disable the fork's required caching behavior; the plugin restores and saves `true` the next time it starts.
+
+When saving is disabled, queued primary and backup writes are cancelled. Re-enabling it without reloading keeps the current in-memory behavior. Re-enabling it after a no-save reload performs a one-time disk/session merge, removes duplicate indexes, preserves hidden and forum/thread state, applies the configured saved-message cap, writes the primary atomically, and updates the backup only after the primary succeeds. If the primary is missing or invalid, an available valid backup is used; if recovery cannot validate a source or complete the primary write, neither file is replaced and saving remains disabled.
+
+When a data file was written by a legacy or different MessageLoggerV2 fork, the plugin normalizes the complete payload to its current schema and atomically rewrites the primary file. The standard message record and deleted/edited/purged indexes remain compatible with current logger forks; this fork's forum/thread, saved-location, suppression, Anti-Nuke, and cache fields are additive. Surviving legacy and enhanced fields are merged, while metadata already removed by another fork is left blank. Unknown top-level metadata owned by another fork is retained, including during no-save recovery. Migration progress, success, and errors use the selected BetterDiscord-notification or custom-toast mode; detailed errors are also written to the console.
+
+If the primary is missing or invalid, a valid backup is normalized and used to atomically recreate the primary. The backup itself is deliberately left untouched during that migration as a rollback copy; a later normal backup can update it after the restored primary is active. A data or backup schema created by a newer version of this fork is never downgraded: loading and saving fail closed until the plugin is updated.
 
 Disabling a display option does not necessarily delete its stored records. Use **Remove From Log** or **Clear log** when permanent removal is intended.
 

@@ -15,6 +15,7 @@ A maintained BetterDiscord message logger for deleted, edited, purged, and ghost
 - Whitelist, blacklist, mute, author, and local-action controls.
 - Search filters, context-menu actions, notifications, hidden records, and media caching.
 - Attachment-only messages, stickers, and compact embed/file references in logger views.
+- Atomic legacy/mixed-fork data normalization while retaining the standard logger record and index format.
 
 ## Install
 
@@ -30,6 +31,7 @@ The default scope is whitelist-only, although the selected channel and DMs have 
 - [Settings reference](docs/settings.md)
 - [Help and usage](docs/help.md)
 - [Official test matrix](docs/tests.md)
+- [Developer architecture](docs/architecture.md)
 - [Project TODO](TODO.md)
 
 The same help pages are available inside Discord from **MessageLoggerV2 Settings > Help** or the question-mark button in the logger window.
@@ -37,6 +39,8 @@ The same help pages are available inside Discord from **MessageLoggerV2 Settings
 ## Compatibility
 
 Do not run this plugin alongside **NoDeleteMessages** or **SuppressUserMentions**. The plugin reports both combinations as unsupported.
+
+The data file keeps the standard `messageRecord`, deleted, edited, and purged indexes used by current MessageLoggerV2 forks. This fork stores its forum/thread, location, suppression, Anti-Nuke, and cache metadata additively. When an older build rewrites the file, surviving legacy and enhanced fields are normalized into the current schema and the complete primary payload is replaced atomically; enhanced metadata removed by the older build remains blank because it cannot be reconstructed. A missing primary is restored from a valid backup, unknown top-level fork metadata is retained, and a schema created by a newer version fails closed instead of being downgraded.
 
 ## Support
 

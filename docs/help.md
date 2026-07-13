@@ -150,6 +150,20 @@ Notification settings affect alerts only. Logging scope is controlled separately
 
 ## Troubleshooting
 
+### Saving was re-enabled after a no-save reload
+
+When **Disable saving data** was active at startup, the plugin leaves existing disk history untouched and starts a temporary in-memory session. Turning saving back on validates the disk history, merges it with eligible session records, applies saved-message caps, and atomically replaces the primary file before updating the backup. Duplicate category entries are removed while deleted, edited, purged, hidden, forum/thread, and suppressed-root state is preserved.
+
+If validation or the primary write fails, saving remains disabled and the existing primary and backup files remain untouched. The plugin reports a short error through your selected BetterDiscord-notification or custom-toast mode and writes detailed paths, stage information, and the underlying error to the console.
+
+### Legacy or mixed-fork data was detected
+
+The plugin accepts the legacy `deletedata` and `editHistory` names as input, merges them with any surviving canonical and enhanced fields, rebuilds channel indexes, and rewrites the complete primary data payload atomically. The standard core fields remain readable by current MessageLoggerV2 forks. Metadata that an older fork already removed, such as saved forum/thread details, cannot be recreated and remains blank.
+
+You will receive a migration-in-progress alert followed by success through your selected BetterDiscord-notification or custom-toast mode. If the rewrite fails, the existing primary and backup remain available, and the error alert directs you to detailed console information.
+
+If the primary file is missing or invalid, the same normalization is applied to a valid backup before the plugin atomically recreates the primary. The original backup remains untouched during this recovery. Files marked with a schema newer than the installed plugin are not replaced from an older backup; the plugin fails closed so updating it cannot destroy newer data.
+
 ### Nothing is logged
 
 1. Check **Only log whitelist**.

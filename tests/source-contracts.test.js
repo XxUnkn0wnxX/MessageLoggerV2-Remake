@@ -113,6 +113,11 @@ test('required legacy cache toggles stay visible, locked, and forced on', () => 
   assert.equal(plugin.settings.aggresiveMessageCaching, true);
   assert.equal(plugin.settings.newCacheAllImages, true);
   assert.equal(plugin.ensureRequiredLegacySettings(), false);
+
+  plugin.settings = {};
+  assert.equal(plugin.ensureRequiredLegacySettings(), true);
+  assert.equal(plugin.settings.aggresiveMessageCaching, true);
+  assert.equal(plugin.settings.newCacheAllImages, true);
 });
 
 test('atomic persistence and startup cleanup remain wired into the plugin', () => {
@@ -120,4 +125,24 @@ test('atomic persistence and startup cleanup remain wired into the plugin', () =
   assert.match(source, /fs\.renameSync\(tempPath, filePath\)/);
   assert.match(source, /await fs\.promises\.rename\(tempPath, filePath\)/);
   assert.match(source, /this\.getName\(\) \+ 'DataBackup'/);
+});
+
+test('no-save recovery remains guarded and ordered before backup persistence', () => {
+  assert.match(source, /this\._needsNoSaveDataMerge = !!this\.settings\.dontSaveData/);
+  assert.match(source, /loadPersistedDataForNoSaveMerge\(\)/);
+  assert.match(source, /mergeDataPayloads\(loaded\.data, this\._getDataPayload\(\)\)/);
+  assert.match(source, /applySavedMessagesCapToPayload/);
+  assert.match(source, /Data Recovery Error/);
+  assert.match(source, /View the console log for more details/);
+  assert.match(source, /this\.cancelPendingDataWrites\?\.\(\)/);
+  const recovery = source.slice(source.indexOf('async mergeNoSaveSessionIntoPersistedData()'), source.indexOf('handleDataSaveSetting(disabled)'));
+  assert.ok(recovery.indexOf("this.getName() + 'Data'") < recovery.indexOf("this.getName() + 'DataBackup'"));
+});
+
+test('legacy data migration uses canonical whole-file output and routed notifications', () => {
+  assert.match(source, /const DATA_SCHEMA_VERSION = 1;/);
+  assert.match(source, /mlv2RemakeSchemaVersion: DATA_SCHEMA_VERSION,[\s\S]*messageRecord: this\.messageRecord/);
+  assert.match(source, /Legacy or mixed-fork logger data detected\. Migration to the current schema is in progress\./);
+  assert.match(source, /rewriteCanonicalDataPayload\(\)[\s\S]*writeDataPayloadAtomic\([\s\S]*this\.getName\(\) \+ 'Data'/);
+  assert.match(source, /Message Logger Data Migration Error[\s\S]*View the console log for more details\./);
 });
