@@ -1,6 +1,8 @@
 # 📝 MessageLoggerV2 Remake
 
-A maintained BetterDiscord message logger for deleted, edited, purged, and ghost-pinged messages. This fork also restores logged forum posts and channel threads, preserves their metadata, and provides controls for hiding or permanently removing related records.
+A maintained BetterDiscord message logger for deleted, edited, purged, and ghost-pinged messages.
+
+This fork also restores logged forum posts and channel threads, preserves their metadata, and provides controls for hiding or permanently removing related records.
 
 > [!IMPORTANT]
 > Message content and optionally attachments are stored locally. Review the logging scope and cache settings before enabling the plugin.
@@ -12,7 +14,11 @@ A maintained BetterDiscord message logger for deleted, edited, purged, and ghost
 - Deleted, edited, purged, and ghost-ping history, plus a bounded memory-only **Sent** tab that clears on reload.
 - In-chat restoration of logged deleted and purged messages, saved edit history, configurable tints, and unseen-event counts.
 - Attachment-only messages, embeds, stickers, voice messages, and other file references remain manageable in logger views.
-- Search filters, scoped log views, context-menu actions, double-click-to-jump logger rows, state-aware captured toggle keybinds for all logs, the selected channel, or the selected server, a Hidden tab, and one local-only permanent-delete flow across restored messages, logger-window rows, and forum/thread mounts: right-click **Delete** confirms, while Shift reveals Trash and Shift-click removes immediately—even when Discord omits server-delete actions for messages you cannot moderate. Shortcut view changes also close an open native media viewer first, regardless of whether Discord or the logger opened it.
+- Search filters, scoped log views, context-menu actions, double-click-to-jump logger rows, and a Hidden tab.
+- Captured toggle keybinds for all logs, the selected channel, and the selected server. Switching views closes any open native media viewer first.
+- One local-only permanent-delete flow across restored messages, logger rows, and forum/thread mounts.
+  - Right-click **Delete** confirms removal.
+  - Shift reveals Trash; Shift-click removes immediately, even when Discord hides server-delete controls.
 
 ### 🧵 Forums, threads, and channel recovery
 
@@ -26,10 +32,12 @@ A maintained BetterDiscord message logger for deleted, edited, purged, and ghost
 
 - Server, channel, DM, thread, mute, NSFW, bot, blocked-user, author, and local-action logging controls.
 - Separate guild/DM alert toggles, notification location lists, selected-location overrides, native BetterDiscord notifications, and custom actionable toasts.
-- One-per-change console and routed notification feedback for high-impact settings, with info-blue enabled states, theme-neutral disabled states, warning-colored backup diagnostics, and red errors.
+- One console entry and routed alert per high-impact setting change.
+- Info-blue enabled states, theme-neutral disabled states, warning-colored backup diagnostics, and red errors.
 - Optional local media caching, cache-size/type controls, local-only rendering, CDN fallback, custom cache paths, and cached-file cleanup when records are removed.
 - Safe no-save sessions: re-enabling saving after a reload validates and merges disk and session history before an atomic primary-file replacement.
-- Atomic legacy/mixed-fork normalization, recoverable settings-config repair, clearly reported valid-backup recovery, configurable bounded backup timing with optional queue/write diagnostics, additive enhanced metadata, and fail-closed protection for newer schemas.
+- Atomic legacy/mixed-fork normalization and recoverable settings-config repair.
+- Clearly reported valid-backup recovery, configurable bounded backup timing, optional queue/write diagnostics, additive metadata, and fail-closed newer-schema protection.
 - Built-in settings/help pages, update notes, automatic update checks, and compatibility with legacy flat media caches.
 
 ## 📦 Install

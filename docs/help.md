@@ -8,11 +8,15 @@ MessageLoggerV2 starts in whitelist-only mode.
 2. Open **Message Logger**.
 3. Add the target to the whitelist.
 
-To log all eligible unmuted servers instead, disable **Only log whitelist** under **Ignores and overrides**. The selected channel and DMs also have enabled-by-default logging overrides; see the [settings reference](settings.md#logging-scope).
+For broader logging, disable **Only log whitelist** under **Ignores and overrides**. The selected channel and DMs also have enabled-by-default overrides; see the [settings reference](settings.md#logging-scope).
 
-Default shortcuts are `Ctrl+M` for all logs, `Ctrl+N` for the selected channel, and `Ctrl+S` for the selected server. They can be changed under Misc settings; the server shortcut is unavailable in DMs.
+Default shortcuts, configurable under Misc settings:
 
-Logged message content and any enabled media cache remain local to this device. Review **Cache media locally** and **Disable saving data** under Misc settings if needed.
+- `Ctrl+M`: all logs.
+- `Ctrl+N`: selected channel.
+- `Ctrl+S`: selected server; unavailable in DMs.
+
+> Logged content and enabled media caches remain local to this device. Review **Cache media locally** and **Disable saving data** before using the plugin.
 
 ## 📂 Opening Logs
 
@@ -25,8 +29,8 @@ Logged message content and any enabled media cache remain local to this device. 
   - `Ctrl+N` by default: toggle logs filtered to the channel selected when the shortcut is pressed.
   - `Ctrl+S` by default: toggle logs filtered to the server selected when the shortcut is pressed. It is unavailable in DMs and group DMs.
   - `Ctrl+M` and `Ctrl+N` remain available in DMs and group DMs; only the server shortcut is restricted there.
-  - If the open logger already has the shortcut's exact filter state—even when opened manually—the shortcut closes it. A different logger state closes and reopens in the requested state.
-  - Discord's native media viewer closes first—even when opened from a normal live message—then stacked MessageLogger help, filter-help, tracked plugin-owned panels, and logger user popouts close top-down before the requested logger view reopens. All other Discord settings, modals, and panels remain untouched.
+  - A matching view closes, including one opened manually. A different logger view closes and reopens with the requested filter.
+  - A native media viewer closes first, even if it came from a normal Discord message. MessageLogger help, filter-help, tracked plugin panels, and logger user popouts then close top-down; other Discord panels remain open.
   - Custom printable/navigation shortcuts require modifiers and exactly one trigger key; `F1` through `F24` may be used alone. Overlapping bindings are rejected inline.
   - Clear any recorder to disable that shortcut.
 
@@ -77,7 +81,12 @@ Right-click a timestamp for group-level actions.
 
 ### Message actions
 
-Double-click a saved message row to jump to its Discord location when one remains available. This includes blank row space beside an attachment, without selecting the row. A warning-orange username in the logger window marks a valid destination; the normal username color means no jump target remains. Links, avatars, the attachment or media itself, and Delete controls retain their own actions, so clicking an image still opens Discord's media viewer. Deleted-channel Anti-Nuke records and other records without a live message channel or saved forum/thread parent do nothing.
+Double-click a saved row to jump when a destination remains available.
+
+- Blank space beside an attachment also jumps without selecting the row.
+- A warning-orange username marks an available destination; the normal username color means no destination remains.
+- Links, avatars, media, and Delete controls retain their own actions. Clicking an image still opens Discord's media viewer.
+- Deleted-channel Anti-Nuke records and records with no live channel or saved forum/thread parent do nothing.
 
 Right-click saved messages in the logger or channel view to access applicable actions:
 
@@ -91,7 +100,12 @@ Right-click saved messages in the logger or channel view to access applicable ac
 
 **Hide** preserves the record and moves it to the Hidden tab. Red **Delete** actions permanently delete the stored logger record; their confirmation identifies the action as local to the logger.
 
-The same permanent-delete flow applies to restored deleted messages in chat, rows inside logger windows, and restored forum cards, sidebar threads, and thread-browser cards. Right-click the saved item and choose red **Delete** for confirmation. Hold Shift while hovering to expose Trash, then Shift-click it for immediate removal; this gesture is consumed without extending the browser's text selection. If permissions hide Discord's top-level Delete or Trash because you did not post the message and lack moderation permissions, the logger adds matching local-only context and Shift actions to that exact restored row. Normal live Discord messages are not intercepted, and the fallbacks never grant or invoke a server delete.
+The same permanent-delete flow applies to restored chat messages, logger rows, forum cards, sidebar threads, and thread-browser cards:
+
+- Right-click the saved item and choose red **Delete** to confirm removal.
+- Hold Shift while hovering to reveal Trash; Shift-click removes immediately without selecting text.
+- If Discord hides Delete or Trash because you lack permission, the logger adds a matching local-only action for that exact restored row.
+- Normal live Discord messages remain untouched. Logger fallbacks never grant or call a server delete.
 
 ### Media-only records
 
@@ -152,12 +166,17 @@ Notification settings affect alerts only. Logging scope is controlled separately
 - Hiding or unhiding the root applies to all related child records.
 - Removing the root from the logger removes all related records.
 - Child messages can be hidden, unhidden, or removed individually while the root remains.
-- Jumping from a child record opens the exact message when its live thread still exists. Fully deleted threads fall back to the restored parent card or thread entry. Jump is unavailable when both the thread and its parent channel are gone.
+- Child records jump to their live thread message when it still exists; otherwise they fall back to the restored parent. No live thread or parent means no Jump action.
 - A restored forum card opens a logger view limited to that thread.
-- Fully restored forum cards, sidebar thread entries, thread-browser cards, and logger-window rows have a logger-owned Trash button because those entries are DOM clones rather than Discord message components. The plugin reuses Discord's observed Delete action when available, or combines another current native toolbar button with Discord's own Trash icon when permissions hide Delete. Trash appears only while Shift is held and removes immediately when clicked without starting text selection; ordinary right-click **Delete** confirms first, including before deleting a root and its saved children.
+- Fully restored cards, thread entries, and logger rows are DOM clones, so the logger provides their Trash control.
+  - It reuses Discord's observed Delete action when possible; otherwise it combines a current native toolbar button with Discord's Trash icon.
+  - Trash appears only while Shift is held and removes immediately. Right-click **Delete** still confirms first, including root-and-child removal.
 - **Automatically refresh new forum posts** uses Discord's native **New Post(s)** control so new cards appear without leaving and reopening the forum.
-- Fully deleted forum cards and thread entries use an anchor system: Discord must have at least one live forum post or thread entry whose current layout can be cloned. If the list is empty, deleted items remain logged but are not rendered until a live item exists.
-- **Anti Nuke** captures a deleted parent forum or text channel under **Purged**, overriding all normal logging ignores and location rules unless Anti Nuke itself is disabled. Thread/forum-post, total-message, and total-attachment caps default to `10` and are shared across one deletion event. Capture runs newest-first; attachments are considered only after their owning message is admitted, while root messages bypass the total-message cap but their files still consume the attachment cap. Blank or `0` is unlimited and unsafe for large channels. Anti Nuke records do not offer Jump because their parent channel is gone.
+- Fully deleted cards and thread entries need at least one live item as a layout anchor. Without one, they remain logged but unrendered.
+- **Anti Nuke** captures a deleted parent forum or text channel under **Purged** and bypasses normal scope rules.
+  - Thread/forum, message, and attachment caps default to `10` per deletion event.
+  - Capture is newest-first. Attachments count only after their message is admitted; roots bypass the message cap but their attachments still count.
+  - Blank or `0` is unlimited and unsafe for large channels. Anti-Nuke records cannot Jump because their parent channel is gone.
 - Parent-channel “started a thread” system messages are left to Discord and are not logged.
 - Message-history caching and hierarchical media storage stay enabled internally so complete post/thread deletions do not lose unloaded messages or media paths.
 - Flat media-cache files from older versions or forks remain supported for rendering.
@@ -166,27 +185,32 @@ Notification settings affect alerts only. Logging scope is controlled separately
 
 ### Saving was re-enabled after a no-save reload
 
-When **Disable saving data** was active at startup, the plugin leaves existing disk history untouched and starts a temporary in-memory session. Turning saving back on validates the disk history, merges it with eligible session records, applies saved-message caps, and atomically replaces the primary file before updating the backup. Duplicate category entries are removed while deleted, edited, purged, hidden, forum/thread, and suppressed-root state is preserved.
+After a no-save reload:
 
-Disabling saving reports that new logger changes will remain in memory and will not be written to disk. Re-enabling saving without a reload reports that those in-memory logger changes are queued to save. Re-enabling it after a no-save reload instead reports that saved history and in-memory logger changes are being merged. All messages follow your selected BetterDiscord-notification or custom-toast mode and also write details to the console.
+1. Existing disk history stays untouched while the logger starts a temporary in-memory session.
+2. Re-enabling saving validates and merges disk and eligible session records, de-duplicates indexes, preserves saved state, applies caps, then atomically writes the primary before the backup.
+3. A failed validation or primary write leaves saving disabled and both existing files untouched.
 
-If validation or the primary write fails, saving remains disabled and the existing primary and backup files remain untouched. The plugin reports a short error through your selected BetterDiscord-notification or custom-toast mode and writes detailed paths, stage information, and the underlying error to the console.
+Disabling saving reports the memory-only state. Re-enabling without a reload queues in-memory changes; re-enabling after a reload reports the merge. Every message uses the selected notification mode and includes console detail.
 
 ### Legacy or mixed-fork data was detected
 
-The plugin accepts the legacy `deletedata` and `editHistory` names as input, merges them with any surviving canonical and enhanced fields, rebuilds channel indexes, and rewrites the complete primary data payload atomically. The standard core fields remain readable by current MessageLoggerV2 forks. Metadata that an older fork already removed, such as saved forum/thread details, cannot be recreated and remains blank.
-
-You will receive a migration-in-progress alert followed by success through your selected BetterDiscord-notification or custom-toast mode. If the rewrite fails, the existing primary and backup remain available, and the error alert directs you to detailed console information.
-
-If the primary file is missing or invalid, the same normalization is applied to a valid backup before the plugin atomically recreates the primary. Your selected notification mode reports that the valid backup was loaded and the main data file is being rebuilt, then reports recovery-specific success or failure. The console includes the recovery reason and detailed write errors. The original backup remains untouched during this recovery. Files marked with a schema newer than the installed plugin are not replaced from an older backup; the plugin fails closed so updating it cannot destroy newer data.
-
-The separate **Debug** settings group can report automatic-backup queue delays, reschedules, cancellations, starts, verification retries, and completions. Console logging and routed debug toasts are independent and both default off; enabling them does not change the backup schedule or normal error alerts.
-
-If `MessageLoggerV2.config.json` contains common hand-editing damage, such as extra or missing commas or unbalanced braces/brackets, startup salvages every valid setting it can decode and defaults only missing or invalid owned keys. The exact damaged text is kept in `MessageLoggerV2.config.corrupt-backup.json` before the repaired config is atomically rewritten. An existing repaired config is never treated as a first install.
+- Legacy `deletedata` and `editHistory` fields are merged with surviving canonical and enhanced data, indexes are rebuilt, and the complete primary is atomically rewritten.
+- Current MessageLoggerV2 forks can still read the core fields. Metadata an older fork removed cannot be recreated and remains blank.
+- Migration reports progress and success through the selected notification mode. On failure, the primary and backup remain available and the alert directs you to the console.
+- A missing or invalid primary is rebuilt from a valid normalized backup. The backup remains untouched; newer schemas fail closed instead of being downgraded.
+- **Debug** can report backup queueing, reschedules, cancellations, starts, retries, and completions. Console and toast diagnostics are independent and off by default.
+- Startup salvages common config comma/bracket damage, preserves valid settings, saves the exact damaged text as `MessageLoggerV2.config.corrupt-backup.json`, and never treats an existing repaired config as a first install.
 
 ### High-impact setting feedback
 
-Changing **Only log whitelist**, **Auto backup data**, **Cache media locally**, **Enable Anti Nuke**, **Automatic updates**, **Only render locally cached attachments**, or **Delete cached files with log records** writes the new state once to the console and reports it once through your selected notification mode. Enabled states use the info color; disabled states use Discord's theme-neutral presentation. If the native notification API cannot request a grey type, the plugin keeps its theme-colored native card and uses a neutral icon. Rapid changes replace the previous alert for that setting, setting alerts do not pause while hovered, and left- or right-clicking either a native card or custom setting toast dismisses it immediately. Debug alerts remain warning-colored, and actual errors remain red.
+These settings report one console entry and one routed alert: **Only log whitelist**, **Auto backup data**, **Cache media locally**, **Enable Anti Nuke**, **Automatic updates**, **Only render locally cached attachments**, and **Delete cached files with log records**.
+
+- Enabled: info color.
+- Disabled: theme-neutral presentation; native cards use a neutral icon when BetterDiscord cannot request grey.
+- Rapid changes replace only that setting's previous alert.
+- Hover does not pause setting alerts. Left- or right-click dismisses them immediately.
+- Debug alerts remain warning-colored; errors remain red.
 
 ### Nothing is logged
 
@@ -207,9 +231,9 @@ Enable **Show Hidden tab in logger** under Display settings. Disabling the tab d
 
 ### Attachments are unavailable
 
-Remote Discord attachment and sticker URLs can expire or return `403`/`404`. Keep **Cache media locally** enabled when local preservation is required. Enable **Only render locally cached attachments** to block CDN fallback; uncached or unavailable files remain manageable as full-filename placeholders. Content already expired before it was cached cannot be recovered.
-
-Enable **Delete cached files with log records** to remove related local media when records are permanently removed. This applies to individual records, purges, automatic cap cleanup, and complete thread/forum removals, and cannot be undone. Successful file deletions are written to the console and confirmed through the same notification mode used for logger alerts.
+- Remote attachment and sticker URLs can expire or return `403`/`404`. Keep **Cache media locally** enabled when local preservation matters.
+- Enable **Only render locally cached attachments** to block CDN fallback. Missing files remain as full-filename placeholders; already-expired content cannot be recovered.
+- **Delete cached files with log records** removes related media during permanent record, purge, cap, or thread/forum cleanup. It cannot be undone and reports successful deletion through the console and selected notification mode.
 
 ### Plugin conflicts
 

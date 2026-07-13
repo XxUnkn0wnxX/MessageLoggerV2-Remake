@@ -34,7 +34,10 @@ The whitelist and blacklist are managed from the **Message Logger** submenu in s
 
 `Ignore messages posted by you` and `Ignore message deletes from you` answer different questions: the first checks who authored each message; the second checks whether the deletion was initiated locally.
 
-Self-related gates are cumulative across sent, edited, deleted, bulk-delete, ghost-ping, forum, and thread events. An author ignore excludes your message regardless of who acts on it; an event-specific local ignore only excludes actions initiated by this client.
+Self-related gates are cumulative across sent, edited, deleted, bulk-delete, ghost-ping, forum, and thread events:
+
+- An author ignore excludes your message regardless of who acts on it.
+- A local-action ignore excludes only actions initiated by this client.
 
 ## 🎨 Display Settings
 
@@ -89,21 +92,31 @@ BetterDiscord stores the plugin's data beside the installed plugin:
 - `MessageLoggerV2DataBackup.config.json`: optional backup.
 - `MLV2_IMAGE_CACHE/`: default attachment cache.
 
-The two locked legacy cache settings remain present in `MessageLoggerV2.config.json` with a value of `true`. Editing either value to `false` does not disable the fork's required caching behavior; the plugin restores and saves `true` the next time it starts.
+### Config safety
 
-At startup, the plugin fills every missing setting from the current defaults and repairs invalid types, nested toast options, numeric bounds, lists, colors, keybind arrays, and the automatic-backup interval before saving the canonical config. Valid custom values are retained, including paths, colors, caps, lists, keybinds, cleared/disabled keybinds, and backup intervals within range. Unknown top-level and nested keys are also retained for compatibility with other forks.
+- The two legacy cache settings remain present and locked to `true`. Manual `false` values are restored at startup.
+- Missing or invalid owned settings are repaired to current defaults. Valid custom values and unknown fork-specific keys are retained.
+- Keybinds accept modifiers plus one key, or `F1`–`F24` alone. Unsafe, duplicate, or overlapping combinations are rejected.
+- Damaged JSON is repaired when possible; valid individual values are retained and the original is saved as `MessageLoggerV2.config.corrupt-backup.json`.
+- First-time help appears only when no config existed. Legacy, incomplete, and repaired configs do not trigger it.
 
-Logger keybinds accept modifiers plus exactly one trigger key; `F1` through `F24` can also be used without a modifier. Modifier-only, bare printable/navigation, multi-trigger, identical, and subset/overlapping bindings are rejected so a shortcut cannot hijack ordinary chat input or make the other logger action unreachable.
+### Saving and recovery
 
-If the JSON itself is damaged, the plugin repairs common extra, trailing, or missing commas and missing, extra, or mismatched braces/brackets. When the complete document cannot be rebuilt directly, valid settings are ingested individually and only missing or invalid owned keys receive defaults. The exact damaged source is saved as `MessageLoggerV2.config.corrupt-backup.json`, then the recovered config is rewritten through a same-directory temporary file and atomic rename. Commas and brackets inside quoted values are never treated as structure. The first-user help appears only when `MessageLoggerV2.config.json` did not exist and a new all-default config was generated; an existing legacy, incomplete, or repaired config never triggers it.
+- **Disable saving data** keeps new records in memory and cancels queued primary and backup writes.
+- Re-enabling without a reload queues the current in-memory changes. Re-enabling after a no-save reload merges disk and session history, de-duplicates indexes, preserves hidden/forum/thread state, applies normal caps, then atomically writes the primary before the backup.
+- Progress and errors use the selected notification mode and include detailed console output. A failed recovery leaves existing files untouched and saving disabled.
+- If the primary is missing or invalid, a valid backup is normalized and atomically rebuilds it. The backup remains untouched as a rollback copy and reports **Valid backup loaded. Rebuilding the main data file.**
 
-When saving is disabled, a neutral state message explains that new logger changes will remain in memory and will not be written to disk; queued primary and backup writes are cancelled. Re-enabling it without reloading reports that the current in-memory logger changes are queued for saving. Re-enabling it after a no-save reload reports that saved history is being merged with in-memory logger changes, then performs the one-time merge, removes duplicate indexes, preserves hidden and forum/thread state, applies the configured saved-message cap, writes the primary atomically, and updates the backup only after the primary succeeds. All state messages use the selected BetterDiscord-notification or custom-toast mode and include a detailed console message. If the primary is missing or invalid, an available valid backup is used; if recovery cannot validate a source or complete the primary write, neither file is replaced and saving remains disabled.
+### Compatibility
 
-When a data file was written by a legacy or different MessageLoggerV2 fork, the plugin normalizes the complete payload to its current schema and atomically rewrites the primary file. The standard message record and deleted/edited/purged indexes remain compatible with current logger forks; this fork's forum/thread, saved-location, suppression, Anti-Nuke, and cache fields are additive. Surviving legacy and enhanced fields are merged, while metadata already removed by another fork is left blank. Unknown top-level metadata owned by another fork is retained, including during no-save recovery. Migration progress, success, and errors use the selected BetterDiscord-notification or custom-toast mode; detailed errors are also written to the console.
+- Legacy and other-fork data is normalized into the current complete schema and atomically rewritten.
+- Core message and index fields remain readable by current MessageLoggerV2 forks; this fork adds forum/thread, saved-location, suppression, Anti-Nuke, and cache metadata.
+- Surviving metadata and unknown top-level fork keys are retained. Metadata removed by another fork remains blank.
+- A newer data or backup schema is never downgraded: the logger fails closed until it is updated.
 
-If the primary is missing or invalid, a valid backup is normalized and used to atomically recreate the primary. The selected notification mode reports **Valid backup loaded. Rebuilding the main data file.**, followed by a recovery-specific success or error; the console records the reason and detailed failure information. The backup itself is deliberately left untouched during that recovery as a rollback copy, and a later normal backup can update it after the restored primary is active. A data or backup schema created by a newer version of this fork is never downgraded: loading and saving fail closed until the plugin is updated.
+### Removing records
 
-Disabling a display option does not necessarily delete its stored records. Use the red **Delete** action or **Clear log** when permanent removal is intended.
+Disabling a display option does not delete stored records. Use the red **Delete** action or **Clear log** for permanent removal.
 
 ## 🔔 Toast Notifications
 
@@ -130,7 +143,10 @@ Guilds and DMs have separate notification controls. These affect alerts, not whe
 
 The notification whitelist and blacklist are managed from the same server, channel, DM, and thread context menus as the logging lists.
 
-**Disable toasts for local user** suppresses alerts for actions initiated by this Discord client. It does not suppress a remote deletion merely because you authored the deleted message or thread. If **Ignore messages posted by you** is also enabled, your ignored message or thread root does not produce an alert.
+**Disable toasts for local user** suppresses alerts for actions initiated by this Discord client.
+
+- It does not suppress a remote deletion only because you authored the message or thread.
+- If **Ignore messages posted by you** is enabled too, the ignored message or thread root produces no alert.
 
 ## 🛡️ Anti Nuke
 
@@ -141,9 +157,14 @@ The notification whitelist and blacklist are managed from the same server, chann
 | Total message cap | `10` | One total shared allowance for child replies across all captured threads/forum posts plus ordinary parent-channel messages. Root messages do not consume this cap, so the total saved record count can exceed it. Blank or `0` is unlimited. |
 | Total attachment cap | `10` | One total shared allowance for Discord file attachments across the deleted channel. A single message can consume the entire cap. Blank or `0` is unlimited. |
 
-All three caps are shared across one parent-channel deletion event. Thread/forum roots are captured newest-first, replies within them are captured newest-first, and the remaining message allowance then captures the newest ordinary parent-channel messages. The attachment allowance is consumed only after its owning message is admitted by the message cap, so attachments from an excluded message are never stored. It only governs Discord file attachments; roots are still retained when their attachments exceed the budget. Anti Nuke intentionally bypasses normal logging ignores and overrides; only its own toggle disables capture. Unlimited values can freeze or crash Discord or use substantial disk space on large channels.
+All three caps apply to one parent-channel deletion event:
 
-Anti Nuke records are archival because their parent channel no longer exists, so they do not offer **Jump to Message**. The same channel-aware rule applies outside Anti Nuke: Jump is omitted whenever neither the message channel nor a saved thread/forum parent still exists.
+- Thread/forum roots, then their replies, then ordinary parent-channel messages are captured newest-first.
+- Attachments count only after their message is admitted. Excluded messages never store attachments; roots remain even if their attachments exceed the budget.
+- Anti Nuke bypasses normal logging ignores and overrides; only its own toggle disables capture.
+- Blank or `0` is unlimited and can freeze Discord or use substantial disk space on large channels.
+
+Anti-Nuke records are archival because their parent channel no longer exists, so they cannot **Jump to Message**. The same rule applies whenever neither the message channel nor a saved thread/forum parent remains.
 
 ## 📏 Message Caps
 
@@ -155,7 +176,10 @@ Anti Nuke records are archival because their parent channel no longer exists, so
 
 Caps are enforced periodically. Increasing a cap does not restore records that were already removed.
 
-Message-history caching and hierarchical media storage are core behavior and no longer have separate toggles. Disabling either made complete forum-post and thread deletions vulnerable to missing unloaded messages or inconsistent media paths. Legacy flat-cache files from older versions and other logger forks remain readable; only new downloads are forced into hierarchical folders.
+Message-history caching and hierarchical media storage are core behavior with no separate toggles.
+
+- Disabling either made complete post/thread deletions vulnerable to missing unloaded messages or inconsistent media paths.
+- Legacy flat-cache files remain readable; new downloads use hierarchical folders.
 
 ## 🔧 Advanced
 
@@ -190,7 +214,13 @@ The plugin reports only settings with broad logging, persistence, media, update,
 - **Only render locally cached attachments**
 - **Delete cached files with log records**
 
-Each change writes one explicit `enabled` or `disabled` message to the console and follows the selected BetterDiscord-notification or custom-toast mode. Enabled states use Discord's info/brand color. Disabled states use a theme-neutral grey custom toast; BetterDiscord's native route keeps its theme-colored card and substitutes a neutral icon because the native API has no grey notification type. Rapid changes to the same setting instantly replace its earlier active or queued alert without removing alerts for other settings. Setting-state alerts continue counting down while hovered, and a left or right click dismisses either notification style immediately. Debug alerts remain warning-colored, and errors remain red.
+Each change writes one explicit `enabled` or `disabled` console message and follows the selected notification mode.
+
+- Enabled: Discord info/brand color.
+- Disabled: a theme-neutral grey custom toast; native BetterDiscord cards use a neutral icon because the API has no grey type.
+- Rapid changes replace only that setting's active or queued alert.
+- Setting alerts continue while hovered; left- or right-click dismisses either style immediately.
+- Debug alerts remain warning-colored; errors remain red.
 
 ## 🖱️ Settings Actions
 
@@ -202,7 +232,7 @@ Each change writes one explicit `enabled` or `disabled` message to the console a
 ## 🧵 Forum Posts and Threads
 
 - Forum posts and channel threads retain server, parent-channel, thread, author, and message metadata when available.
-- Fully deleted forum cards and thread entries use an anchor system. At least one live forum post or thread entry must exist so its current Discord layout can be cloned; logged deletions remain unrendered while that list is empty.
+- Fully deleted cards and thread entries require one live item as a layout anchor. Logged deletions remain unrendered while the list is empty.
 - Hiding or unhiding a saved root post applies to its related child messages. Individual child messages can still be managed separately.
 - Permanently removing a saved root post also removes related messages and cached attachment references for that thread ID.
 - Thread-created system rows in parent channels are never stored as deleted or purged messages.

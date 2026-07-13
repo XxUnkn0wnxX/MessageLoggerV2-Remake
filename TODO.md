@@ -13,7 +13,9 @@ Status: Implemented and live validated
 
 ### Problem
 
-When **Disable saving data** is enabled, reloading the plugin or Discord starts the logger with an empty in-memory record while leaving existing history on disk. If saving is later re-enabled, the temporary session can overwrite that older disk-backed history.
+When **Disable saving data** is enabled, reloading starts the logger with an empty in-memory record while leaving existing history on disk.
+
+Without a merge, re-enabling saving could overwrite that older disk-backed history with the temporary session.
 
 ### Required Behavior
 
@@ -91,4 +93,6 @@ Status: Completed
 - [x] Keep shutdown flushes on the same safe write path.
 - [x] Add automated tests for normal, backup, shutdown, failure, and stale-cleanup paths.
 
-Implemented in [729da2024e8b7c5e18b582879bf9fd5b0ed80720](https://git.slowb.ro/XxUnkn0wnxX/MessageLoggerV2-Remake/commit/729da2024e8b7c5e18b582879bf9fd5b0ed80720) and completed with startup cleanup and official tests in [927b99e6949b2a8457c680428997fea4a5766188](https://git.slowb.ro/XxUnkn0wnxX/MessageLoggerV2-Remake/commit/927b99e6949b2a8457c680428997fea4a5766188).
+Implemented in 729da2024e8b7c5e18b582879bf9fd5b0ed80720.
+
+Startup cleanup and official tests completed in 927b99e6949b2a8457c680428997fea4a5766188.

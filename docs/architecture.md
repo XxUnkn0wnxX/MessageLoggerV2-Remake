@@ -1,20 +1,31 @@
 # 🏗️ Developer Architecture
 
-This document maps the major responsibilities inside the distributed `MessageLoggerV2.plugin.js` file. The plugin remains a single-file BetterDiscord artifact, so use the method names and state fields below as stable search anchors when maintaining it.
+This document maps the major responsibilities inside the distributed `MessageLoggerV2.plugin.js` file.
+
+The plugin remains a single-file BetterDiscord artifact. Use the method names and state fields below as stable search anchors when maintaining it.
 
 ## 🔄 Lifecycle and Compatibility
 
 - `start`, `initialize`, and `stop` own plugin startup, module readiness, timers, patches, synchronous shutdown persistence, and cleanup.
 - `DiscordModules` lazily resolves Discord Webpack exports. Missing-module fixes must follow the runtime trace workflow in `AGENTS.md`; do not hide lookup warnings without proving the live export path.
 - `getChanges`, `checkNewUpdate`, and `performUpdate` provide the in-plugin changelog and maintained-fork updater.
-- Startup settings normalization preserves old installations, migrates legacy caps, validates captured keybind arrays, and forces the two locked cache compatibility settings on. `loadSettingsConfigForStartup`, `parseRecoverableSettingsJson`, and `recoverSettingsConfigText` run before BetterDiscord can mistake invalid JSON for an empty first-install cache; they repair common comma/bracket damage, salvage valid individual settings, atomically rewrite the config, and retain the exact corrupt source as a recovery backup.
+- Startup normalization preserves old installations, migrates legacy caps, validates keybind arrays, and forces the two locked cache settings on.
+  - `loadSettingsConfigForStartup`, `parseRecoverableSettingsJson`, and `recoverSettingsConfigText` run before BetterDiscord can mistake invalid JSON for a new install.
+  - They repair common comma/bracket damage, salvage valid values, atomically rewrite the config, and retain the exact corrupt source as a recovery backup.
 
 ## ⚙️ Settings and Scope Policy
 
 - `getSettingsPanel`, `createSetting`, and `createGroup` build the accordion settings interface. `buildSetting` assigns changes only to BetterDiscord's panel-level callback because BetterDiscord invokes both item-level and panel-level callbacks when both are supplied.
-- Logger shortcuts embed BetterDiscord's native `KeybindInput` recorder inside the standard settings row. A thin validation wrapper rejects unsafe or overlapping chords across the all-log, selected-channel, and selected-server bindings inline and clears stale pressed state whenever capture finishes. Capture-phase document listeners compare normalized, order-independent pressed-key sets; the recorder's window-capture listener always precedes document capture and suppresses those events while a new binding is being recorded. Shortcut toggling compares the requested filter with the logger's actual filter, so manually and programmatically opened views behave identically. Matching states close; differing states close and reopen after Discord's exported native-media modal key, every tracked MessageLogger-owned modal key, and user popout settles. This intentionally includes media viewers opened from normal Discord messages but no other native Discord panel. A transition token cancels stale rapid reopens, and no global modal/layer clearing is used.
+- Logger shortcuts use BetterDiscord's native `KeybindInput` recorder in the normal settings row.
+  - Validation rejects unsafe or overlapping all-log, channel, and server chords inline, then clears stale pressed state when capture finishes.
+  - Capture-phase listeners compare normalized, order-independent key sets. The recorder's earlier window-capture listener suppresses these checks while recording.
+  - Toggling compares the requested filter with the actual logger state: matching views close; different views close then reopen.
+  - Reopening waits for native media, tracked MessageLogger modals, and logger user popouts. This includes media opened from normal Discord messages, but no other Discord panel.
+  - A transition token cancels stale rapid reopens; no global modal or layer clearing is used.
 - The standalone warning-colored Debug group keeps console and routed-toast diagnostics independently opt-in. `reportDebugEvent` is the shared router and currently accepts only automatic-backup lifecycle events.
-- `reportSettingState` keeps console detail and routed alerts aligned. `reportMajorSettingChange` deliberately covers only broad logging, persistence, media, update, and destructive settings; enabled states route as info and disabled states route through the theme-neutral presentation. Per-setting replacement keys discard obsolete alerts after rapid changes.
+- `reportSettingState` keeps console detail and routed alerts aligned.
+- `reportMajorSettingChange` covers only broad logging, persistence, media, update, and destructive settings. Enabled states are info; disabled states use the theme-neutral presentation.
+- Per-setting replacement keys discard obsolete alerts after rapid changes.
 - Logging scope combines whitelist, blacklist, muted server/channel, NSFW, selected-channel, and DM rules.
 - Author and local-action gates are intentionally separate: bot, blocked-user, self-author, local-edit, and local-delete rules must remain per message.
 - Guild and DM notification lists affect alerts rather than record eligibility.
@@ -34,14 +45,22 @@ This document maps the major responsibilities inside the distributed `MessageLog
 - `cleanUpStaleDataTempFiles` removes only old logger-owned temp files.
 - When the plugin starts with `dontSaveData`, disk history is intentionally skipped and the session starts empty. `_needsNoSaveDataMerge` distinguishes this from toggling saving without a reload.
 - `loadPersistedDataForNoSaveMerge` reads files directly because BetterDiscord's data API can return a cached payload after direct atomic writes.
-- The namespaced `mlv2RemakeSchemaVersion` marks this fork's additive canonical payload without replacing the standard four logger maps. Current forks can ignore the marker and enhanced fields; when another fork drops them, their absence triggers normalization on the next load. A schema newer than this build is never rewritten automatically, and unknown top-level fork extensions are retained.
-- Persisted forum/thread metadata, saved locations, suppression lists, and locked cache-setting keys are optional compatibility additions. Older forks without them remain valid; legacy `deletedata` and `editHistory` values are merged into canonical `delete_data` and `edit_history`, while missing enhanced values receive safe empty defaults.
-- `prepareDataPayloadForNormalization` fills only reconstructable derived collections and refuses to invent a missing core `messageRecord`. `normalizePersistedDataPayload` then normalizes records, re-keys mismatched message IDs, de-duplicates edit/cache identities, rebuilds indexes by the record's canonical channel, and performs strict final validation.
+- `mlv2RemakeSchemaVersion` marks this fork's additive canonical payload without replacing the standard four logger maps.
+  - Current forks can ignore the marker and enhanced fields; their absence after another fork writes the file triggers normalization on the next load.
+  - A newer schema is never rewritten automatically. Unknown top-level fork extensions are retained.
+- Forum/thread metadata, saved locations, suppression lists, and locked cache-setting keys are optional compatibility additions.
+  - Older forks without them remain valid.
+  - Legacy `deletedata` and `editHistory` values merge into `delete_data` and `edit_history`; missing enhanced values receive safe empty defaults.
+- `prepareDataPayloadForNormalization` fills only reconstructable derived collections and refuses to invent a missing core `messageRecord`.
+  - `normalizePersistedDataPayload` normalizes records, re-keys mismatched IDs, de-duplicates edit/cache identities, rebuilds canonical channel indexes, and performs final validation.
 - A detected legacy/mixed payload is installed only after normalization succeeds, then `rewriteCanonicalDataPayload` atomically replaces the entire primary file. The old backup is deliberately retained until a later normal backup, and progress/failure uses the configured notification router.
-- `selectStartupDataPayload` distinguishes a missing primary from a fresh empty payload and restores a valid backup even when automatic backup writing is currently disabled. Backup restoration is tracked separately from legacy migration so console and routed progress/success/failure messages describe rebuilding the primary file. `readDataPayloadFile` applies the same normalization to no-save recovery sources.
+- `selectStartupDataPayload` distinguishes a missing primary from a fresh empty payload and restores a valid backup even when automatic backup writing is disabled.
+  - Backup restoration is separate from legacy migration so console and routed messages describe rebuilding the primary accurately.
+  - `readDataPayloadFile` applies the same normalization to no-save recovery sources.
 - A higher `mlv2RemakeSchemaVersion` is an incompatible state rather than corruption: startup and no-save recovery stop before falling back or writing. Opaque extension conflicts use a persisted-wins recursive merge because the temporary no-save session does not own another fork's disk state.
 - `mergeSavedRecords` combines same-ID records field-by-field: newer session message fields, unioned edit history and media IDs, preserved delete/forum metadata, and hidden state that cannot be silently cleared by a collision.
-- `mergeDataPayloads` unions category indexes and suppressed roots. `applySavedMessagesCapToPayload` applies caps to the detached result before persistence and cascades removed forum/thread roots to children. Recovery cap cleanup intentionally does not delete local media while the transaction can still fail; preserving a harmless orphaned cache file is safer than irreversible pre-commit deletion.
+- `mergeDataPayloads` unions category indexes and suppressed roots. `applySavedMessagesCapToPayload` caps the detached result before persistence and cascades removed forum/thread roots to children.
+- Recovery cap cleanup does not delete local media while the transaction can still fail; a harmless orphaned cache file is safer than irreversible pre-commit deletion.
 - `mergeNoSaveSessionIntoPersistedData` is a transaction ordered as load, validate, merge, cap, install, primary write, then backup. Primary failure keeps saving disabled and leaves both files untouched.
 - `cancelPendingDataWrites` clears queued timers and increments a write epoch. Async writers check that epoch before rename.
 - Recovery failures always log detailed stage, path, cause, and state information, then route a concise alert through `_showNotification` so the selected native-notification/custom-toast mode is respected.
@@ -80,16 +99,28 @@ This document maps the major responsibilities inside the distributed `MessageLog
 
 - Message-content and message-component patches render saved edits and deletions in live chat.
 - Deleted text/background tinting, forum cards, restored thread entries, and logger views share saved record state but use different mounted DOM targets.
-- Discord-rendered saved deletions keep Discord's native context-menu confirmation and Shift-Trash behavior. The final `MessageActions.deleteMessage` call becomes local logger **Delete** only when the message ID, channel ID, `delete_data`, and deleted/purged indexes all match; every normal or edit-only Discord message continues to the original delete action. Local-only interception returns a completed Promise so Discord dismisses its native confirmation normally, including after plugin hot reloads, without calling the server-delete endpoint. If permissions omit Discord's top-level context **Delete**, the logger inserts a red local-only equivalent for the exact indexed saved deletion and sends it through the logger confirmation instead. If Discord omits Trash, the logger likewise adds its own presentation-only action to that restored row's native toolbar; neither fallback calls Discord's server-delete path.
-- Hand-built restored forum/thread clones and logger-window rows use explicit `data-ml2-*` ownership markers and receive a logger-owned Delete control because they have no Discord React action toolbar. The logger copies an observed native Delete action exactly when available; when permissions hide it, the logger combines another current toolbar action's structure/classes with Discord's own Trash icon. Icon resolution accepts direct/default functions and the unambiguous minified single-function module export used by some current Discord builds, while rejecting ambiguous modules. Neither path retains Discord's live callback or message props. All logger-owned Trash controls use Discord's current theme-aware `--text-feedback-critical` foreground on the host, SVG, and Trash paths, with `--status-danger` as a compatibility fallback; an inline permission fallback is the native action element itself and mounts in the lowest shared native-action row, avoiding an extra wrapper or stretched row beneath the positioned toolbar container. If the row is initially incomplete, the early outer fallback is rebuilt in the final row so moving it cannot trigger cleanup of its React icon root. The visual Trash affordance is gated by a root marker and appears only while Shift is held; ordinary right-click **Delete** confirms, while Shift-click Trash removes immediately. A Shift-only `mousedown` guard prevents that bypass gesture from extending browser text selection without altering ordinary focus behavior. Nested toolbar mutations are resolved back to their closest native toolbar so Discord's own Trash immediately replaces the permission fallback instead of showing both. Both paths share the complete record/index/media/UI cleanup helper.
+- Discord-rendered saved deletions retain Discord's native context-menu confirmation and Shift-Trash behavior.
+  - The final `MessageActions.deleteMessage` becomes local logger **Delete** only when message ID, channel ID, `delete_data`, and deleted/purged indexes all match. Normal and edit-only Discord messages keep Discord's original action.
+  - Local interception returns a completed Promise so Discord dismisses its confirmation without calling the server-delete endpoint, including after hot reloads.
+  - If permissions hide native Delete or Trash, the logger adds a red local-only equivalent only for that exact indexed saved deletion. Neither fallback calls Discord's server-delete path.
+- Hand-built forum/thread clones and logger rows use `data-ml2-*` ownership markers and logger-owned Delete controls because they have no Discord React action toolbar.
+  - The logger copies an observed Delete action when available. Otherwise it combines a current native toolbar button with Discord's Trash icon; ambiguous icon exports are rejected.
+  - Logger controls retain neither Discord's live callback nor message props. Their host, SVG, and paths use `--text-feedback-critical` with `--status-danger` fallback.
+  - Permission fallbacks mount in the lowest shared action row. An early outer fallback is rebuilt there rather than moved, protecting its React icon root.
+  - A root marker shows Trash only while Shift is held. Right-click **Delete** confirms; Shift-click removes immediately. A Shift-only `mousedown` guard prevents text selection.
+  - Nested mutations resolve to their closest toolbar so native Trash replaces a fallback instead of duplicating it. Both paths share the same record/index/media/UI cleanup helper.
 - Sorted ID caches accelerate logger rendering and must be invalidated when category indexes change.
-- Jump logic uses live message routes when available, restored forum/thread parents as fallback, and suppresses Jump when no valid destination exists. Logger-viewer rows route non-interactive double-clicks through this same validity gate and tint only their jumpable usernames with Discord's theme-aware warning color. Actual links, media, and controls keep their native actions, while blank attachment-wrapper space remains row navigation; a second-mousedown guard prevents browser selection only when that row jump is valid.
+- Jump uses live message routes when available, restored forum/thread parents as fallback, and is absent when no destination exists.
+- Logger rows use the same gate for non-interactive double-clicks and tint only jumpable usernames with Discord's warning color.
+- Links, media, and controls retain native actions. Blank attachment-wrapper space remains row navigation; a second-mousedown guard prevents selection only for a valid row jump.
 
 ## 🖱️ Logger UI and Record Actions
 
 - The logger window provides deleted, edited, purged, sent, ghost-ping, and optional Hidden tabs.
 - Filters support server, channel, user, content/message, and media predicates.
-- The all-logs shortcut clears stale filters; the selected-channel and selected-server shortcuts resolve their current location at invocation time. The server shortcut treats an active DM or group DM as no server even if Discord retains stale guild state. A matching view closes, while a different or stale view closes and reopens with the requested filter. Empty recorder arrays disable their shortcut.
+- The all-logs shortcut clears stale filters; channel and server shortcuts resolve their location at invocation time.
+- The server shortcut treats DMs and group DMs as having no server, even if Discord retains stale guild state.
+- Matching views close. Different or stale views close and reopen with the requested filter. Empty recorder arrays disable their shortcut.
 - Hide/unhide changes visibility without deleting records; red Delete actions and Clear Log permanently update records, indexes, restored entries, and optional cached files.
 - Context-menu injections expose scope lists and record actions while preserving Discord and other plugins' native items.
 
@@ -97,7 +128,8 @@ This document maps the major responsibilities inside the distributed `MessageLog
 
 - `_showNotification` is the single routing point between BetterDiscord native notifications and the plugin's custom toasts.
 - Custom toast colors use Discord CSS variables. The plugin-owned `neutral` state becomes a theme-grey custom toast or a supported native `info` notification with a neutral icon, because BetterDiscord exposes no grey notification type.
-- Setting-state alerts use wall-clock expiry rather than hover pause. Custom setting toasts dismiss immediately through their own handlers. Native setting alerts include a unique content marker so the plugin can bind whole-card left/right-click dismissal and an independent visible progress animation after BetterDiscord mounts the card; the normal wall-clock timer remains the fallback if the card cannot be found.
+- Setting-state alerts use wall-clock expiry rather than hover pause; custom setting toasts dismiss through their own handlers.
+- Native setting alerts use a unique content marker for whole-card left/right-click dismissal and a visible progress animation after BetterDiscord mounts the card. The wall-clock timer remains the fallback.
 - Native notifications use a memory-only FIFO queue with hover-aware yielding; queue state is never persisted.
 - Guild and DM event settings, local-user rules, active-location overrides, and notification lists are evaluated separately from logging eligibility.
 

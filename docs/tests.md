@@ -1,6 +1,9 @@
 # 🧪 Official Test Matrix
 
-The repository uses Node's built-in test runner. Tests call the real methods exported by `MessageLoggerV2.plugin.js` through a minimal BetterDiscord mock. They do not start Discord, modify BetterDiscord data, or copy files into the live plugins folder.
+The repository uses Node's built-in test runner.
+
+- Tests call real `MessageLoggerV2.plugin.js` methods through a minimal BetterDiscord mock.
+- They do not start Discord, modify BetterDiscord data, or copy files into the live plugins folder.
 
 ## 📋 Requirements
 
@@ -73,7 +76,9 @@ npm run test:runtime-contracts
 
 ## 💬 Live Discord Matrix
 
-The following behavior depends on Discord's current Webpack exports, Flux events, React tree, or mounted DOM. Node tests cannot prove it, so these remain targeted manual checks after Discord UI updates or related plugin changes.
+The following checks depend on Discord's current Webpack exports, Flux events, React tree, or mounted DOM.
+
+Run the relevant targeted manual check after a Discord UI update or related plugin change; Node tests cannot prove these runtime behaviors.
 
 | ID | Area | Manual validation |
 | --- | --- | --- |
@@ -119,4 +124,4 @@ tests/
   source-contracts.test.js
 ```
 
-The helper provides only the BetterDiscord APIs needed to load the exported class. Tests should add narrow mocks on each plugin instance instead of growing the helper into a fake Discord client.
+The helper exposes only the BetterDiscord APIs needed to load the exported class. Add narrow mocks to each plugin instance instead of turning the helper into a fake Discord client.
