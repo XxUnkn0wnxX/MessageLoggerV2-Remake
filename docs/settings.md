@@ -162,7 +162,7 @@ Message-history caching and hierarchical media storage are core behavior and no 
 
 ## 🐞 Debug
 
-Both Debug setting labels use Discord's native warning color so the opt-in controls remain visible in light and dark themes.
+The Debug category title and both setting labels use Discord's native warning color so the opt-in controls remain visible in light and dark themes.
 
 | Setting | Default | Behavior |
 | --- | --- | --- |

@@ -2364,7 +2364,11 @@ module.exports = class MessageLoggerV2 {
         ]
       },
       {
-        name: 'Debug',
+        name: React.createElement(
+          'span',
+          { style: { color: 'var(--text-warning, var(--status-warning))' } },
+          'Debug'
+        ),
         id: 'ml2-settings-debug',
         collapsible: true,
         shown: false,
