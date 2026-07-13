@@ -93,7 +93,7 @@ This document maps the major responsibilities inside the distributed `MessageLog
 
 - `_showNotification` is the single routing point between BetterDiscord native notifications and the plugin's custom toasts.
 - Custom toast colors use Discord CSS variables. The plugin-owned `neutral` state becomes a theme-grey custom toast or a supported native `info` notification with a neutral icon, because BetterDiscord exposes no grey notification type.
-- Setting-state alerts use wall-clock expiry rather than hover pause. Custom setting toasts also dismiss immediately on a mouse action, while their normal timeout retains the standard exit animation.
+- Setting-state alerts use wall-clock expiry rather than hover pause. Custom setting toasts dismiss immediately through their own handlers. Native setting alerts include a unique content marker so the plugin can bind whole-card left/right-click dismissal and an independent visible progress animation after BetterDiscord mounts the card; the normal wall-clock timer remains the fallback if the card cannot be found.
 - Native notifications use a memory-only FIFO queue with hover-aware yielding; queue state is never persisted.
 - Guild and DM event settings, local-user rules, active-location overrides, and notification lists are evaluated separately from logging eligibility.
 

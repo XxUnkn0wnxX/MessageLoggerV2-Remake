@@ -251,6 +251,9 @@ test('high-impact setting changes use routed theme-aware state feedback', () => 
   assert.match(source, /_dismissReplaceableNotification\(replaceKey\)[\s\S]*notification\.replaceKey !== replaceKey[\s\S]*active\.handle\?\.close/);
   assert.match(source, /if \(timeout > 0 && pauseOnHover\)[\s\S]*pointerenter[\s\S]*pointerleave/);
   assert.match(source, /notification\.pauseOnHover === false[\s\S]*active\.forceCloseTimer = setTimeout/);
+  assert.match(source, /data-mlv2-native-notification-id[\s\S]*_attachNativeNotificationInteractions\(active\)/);
+  assert.match(source, /card\.addEventListener\('click', dismiss, true\)[\s\S]*card\.addEventListener\('contextmenu', dismiss, true\)/);
+  assert.match(source, /\.bd-notification-progress[\s\S]*progress\?\.animate\?/);
   assert.match(source, /Notification mode changed to[\s\S]*Using BetterDiscord notifications[\s\S]*type: 'info'/);
 });
 

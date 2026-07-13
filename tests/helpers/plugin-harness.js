@@ -34,7 +34,11 @@ const UI = {
 class MockBdApi {
   constructor() {
     return {
-      React: {},
+      React: {
+        createElement(type, props, ...children) {
+          return { type, props: { ...props, children } };
+        }
+      },
       ReactDOM: {},
       Webpack: { Filters: {} },
       UI,

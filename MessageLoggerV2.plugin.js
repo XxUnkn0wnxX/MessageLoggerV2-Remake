@@ -392,6 +392,7 @@ module.exports = class MessageLoggerV2 {
           'Reports when saving is disabled or re-enabled, including whether in-memory logger changes stay memory-only, queue directly, or merge with saved history first.',
           'Adds routed state feedback for high-impact logging, backup, media, Anti-Nuke, update, and destructive-cache settings without making ordinary toggles noisy.',
           'Prevents BetterDiscord settings callbacks from running twice and replaces stale same-setting alerts when toggles change rapidly.',
+          'Makes native BetterDiscord setting alerts dismissible from the whole card and keeps their visible countdown moving while hovered.',
           'Cancels stale primary and backup writes when saving is disabled, and keeps saving disabled when recovery cannot complete safely.',
           'Normalizes legacy and mixed-fork data into the current additive schema without duplicating records or discarding surviving enhanced metadata.',
           'Reports valid-backup recovery separately while atomically rebuilding the main data file.',
@@ -4284,6 +4285,7 @@ module.exports = class MessageLoggerV2 {
     active.finished = true;
     clearTimeout(active.yieldTimer);
     clearTimeout(active.forceCloseTimer);
+    this._cleanupNativeNotificationInteractions(active);
     if (this._nativeNotificationActive === active) this._nativeNotificationActive = null;
     try {
       active.handle?.close?.();
@@ -4303,7 +4305,8 @@ module.exports = class MessageLoggerV2 {
         duration: timeout === 0 ? Infinity : timeout,
         actions,
         replaceKey,
-        pauseOnHover
+        pauseOnHover,
+        instantDismiss
       };
       if (type === 'neutral') {
         notification.icon = () => React.createElement(
@@ -4347,6 +4350,8 @@ module.exports = class MessageLoggerV2 {
       yieldRemaining: null,
       yieldLastTick: null,
       forceCloseTimer: null,
+      interactionAttachTimer: null,
+      interactionCleanup: null,
       finished: false,
       finish: null
     };
@@ -4355,12 +4360,22 @@ module.exports = class MessageLoggerV2 {
       active.finished = true;
       clearTimeout(active.yieldTimer);
       clearTimeout(active.forceCloseTimer);
+      this._cleanupNativeNotificationInteractions(active);
       if (this._nativeNotificationActive === active) this._nativeNotificationActive = null;
       if (!this._nativeNotificationQueueStopped) setTimeout(() => this._drainNativeNotificationQueue(), 0);
     };
     this._nativeNotificationActive = active;
     try {
-      const { replaceKey, pauseOnHover, ...displayNotification } = notification;
+      const { replaceKey, pauseOnHover, instantDismiss, ...displayNotification } = notification;
+      if (pauseOnHover === false || instantDismiss) {
+        // BetterDiscord does not expose card interaction hooks. A unique marker lets the
+        // plugin attach behavior to this notification only after React mounts the card.
+        displayNotification.content = React.createElement(
+          'span',
+          { 'data-mlv2-native-notification-id': notification.id },
+          notification.content
+        );
+      }
       active.handle = UI.showNotification({
         ...displayNotification,
         onClose: active.finish
@@ -4374,6 +4389,7 @@ module.exports = class MessageLoggerV2 {
       active.finish();
       return;
     }
+    this._attachNativeNotificationInteractions(active);
     // BetterDiscord pauses native notification expiry while hovered. Setting-state alerts
     // opt out by using this independent wall-clock timer, which closes the native card even
     // if the pointer remains over it.
@@ -4389,6 +4405,74 @@ module.exports = class MessageLoggerV2 {
       active.forceCloseTimer?.unref?.();
     }
     this._scheduleNativeNotificationYield();
+  }
+  _cleanupNativeNotificationInteractions(active) {
+    if (!active) return;
+    clearTimeout(active.interactionAttachTimer);
+    active.interactionAttachTimer = null;
+    try {
+      active.interactionCleanup?.();
+    } catch {}
+    active.interactionCleanup = null;
+  }
+  _attachNativeNotificationInteractions(active, attempt = 0) {
+    const notification = active?.notification;
+    if (!notification || active.finished) return;
+    if (notification.pauseOnHover !== false && !notification.instantDismiss) return;
+    if (!globalThis.document?.querySelector) return;
+    const marker = document.querySelector(
+      `[data-mlv2-native-notification-id="${notification.id}"]`
+    );
+    const card = marker?.closest?.('.bd-notification');
+    if (!card) {
+      // React may commit the native notification after UI.showNotification returns. Poll for
+      // at most one second, then leave the independent expiry timer as the safe fallback.
+      if (attempt >= 60) return;
+      active.interactionAttachTimer = setTimeout(
+        () => this._attachNativeNotificationInteractions(active, attempt + 1),
+        16
+      );
+      active.interactionAttachTimer?.unref?.();
+      return;
+    }
+    active.interactionAttachTimer = null;
+    const previousCursor = card.style.cursor;
+    const dismiss = event => {
+      if (active.finished) return;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      event.stopImmediatePropagation?.();
+      try {
+        active.handle?.close?.();
+      } finally {
+        active.finish();
+      }
+    };
+    if (notification.instantDismiss) {
+      card.style.cursor = 'pointer';
+      card.addEventListener('click', dismiss, true);
+      card.addEventListener('contextmenu', dismiss, true);
+    }
+    let progressAnimation = null;
+    if (notification.pauseOnHover === false
+      && Number.isFinite(active.duration)
+      && active.duration > 0) {
+      const progress = card.querySelector?.('.bd-notification-progress');
+      const remaining = Math.max(0, active.shownAt + active.duration - Date.now());
+      const startingWidth = `${Math.min(100, remaining / active.duration * 100)}%`;
+      progressAnimation = progress?.animate?.(
+        [{ width: startingWidth }, { width: '0%' }],
+        { duration: remaining, easing: 'linear', fill: 'forwards' }
+      ) || null;
+    }
+    active.interactionCleanup = () => {
+      if (notification.instantDismiss) {
+        card.removeEventListener('click', dismiss, true);
+        card.removeEventListener('contextmenu', dismiss, true);
+        card.style.cursor = previousCursor;
+      }
+      progressAnimation?.cancel?.();
+    };
   }
   _scheduleNativeNotificationYield() {
     const active = this._nativeNotificationActive;
@@ -4422,6 +4506,7 @@ module.exports = class MessageLoggerV2 {
     active.finished = true;
     clearTimeout(active.yieldTimer);
     clearTimeout(active.forceCloseTimer);
+    this._cleanupNativeNotificationInteractions(active);
     try {
       active.handle?.close?.();
     } catch {}
@@ -4450,7 +4535,8 @@ module.exports = class MessageLoggerV2 {
         type: 'info',
         duration: 5000,
         replaceKey,
-        pauseOnHover: false
+        pauseOnHover: false,
+        instantDismiss: true
       });
     } else {
       this.showToast(message, {

@@ -424,6 +424,94 @@ test('non-hovering native setting alerts expire on wall-clock time', async t => 
   assert.equal(plugin._nativeNotificationActive, null);
 });
 
+test('native setting cards keep progressing and dismiss on left or right click', t => {
+  const previousDocument = global.document;
+  const originalShowNotification = UI.showNotification;
+  t.after(() => {
+    global.document = previousDocument;
+    UI.showNotification = originalShowNotification;
+  });
+  let currentMarker = null;
+  let closed = 0;
+  let animationStarts = 0;
+  let animationCancels = 0;
+  const listeners = new Map();
+  const progress = {
+    animate(frames, options) {
+      animationStarts++;
+      assert.equal(frames.at(-1).width, '0%');
+      assert.ok(options.duration > 0);
+      return { cancel() { animationCancels++; } };
+    }
+  };
+  const card = {
+    style: { cursor: '' },
+    addEventListener(type, listener, capture) {
+      listeners.set(`${type}:${capture}`, listener);
+    },
+    removeEventListener(type, listener, capture) {
+      if (listeners.get(`${type}:${capture}`) === listener) listeners.delete(`${type}:${capture}`);
+    },
+    querySelector(selector) {
+      return selector === '.bd-notification-progress' ? progress : null;
+    }
+  };
+  const marker = { closest: selector => selector === '.bd-notification' ? card : null };
+  global.document = {
+    querySelector(selector) {
+      return selector === currentMarker ? marker : null;
+    }
+  };
+  UI.showNotification = notification => {
+    const markerId = notification.content.props['data-mlv2-native-notification-id'];
+    currentMarker = `[data-mlv2-native-notification-id="${markerId}"]`;
+    return { close() { closed++; } };
+  };
+  const plugin = createPlugin({
+    _nativeNotificationQueueStopped: false,
+    _nativeNotificationQueue: [],
+    _nativeNotificationActive: null,
+    _nativeNotificationSequence: 0
+  });
+  const enqueue = () => plugin._enqueueNativeNotification({
+    title: 'Setting',
+    content: 'Enabled',
+    type: 'info',
+    duration: 60_000,
+    replaceKey: 'setting:test',
+    pauseOnHover: false,
+    instantDismiss: true
+  });
+  const event = () => {
+    const calls = [];
+    return {
+      calls,
+      preventDefault() { calls.push('preventDefault'); },
+      stopPropagation() { calls.push('stopPropagation'); },
+      stopImmediatePropagation() { calls.push('stopImmediatePropagation'); }
+    };
+  };
+
+  enqueue();
+  assert.equal(animationStarts, 1);
+  assert.equal(card.style.cursor, 'pointer');
+  const leftClick = event();
+  listeners.get('click:true')(leftClick);
+  assert.deepEqual(leftClick.calls, ['preventDefault', 'stopPropagation', 'stopImmediatePropagation']);
+  assert.equal(closed, 1);
+  assert.equal(plugin._nativeNotificationActive, null);
+
+  enqueue();
+  assert.equal(animationStarts, 2);
+  const rightClick = event();
+  listeners.get('contextmenu:true')(rightClick);
+  assert.deepEqual(rightClick.calls, ['preventDefault', 'stopPropagation', 'stopImmediatePropagation']);
+  assert.equal(closed, 2);
+  assert.equal(plugin._nativeNotificationActive, null);
+  assert.equal(animationCancels, 2);
+  assert.equal(card.style.cursor, '');
+});
+
 test('automatic backup state feedback covers enabled, disabled, and saving-paused paths', () => {
   const notifications = [];
   let backupSaves = 0;

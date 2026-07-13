@@ -183,7 +183,7 @@ The plugin reports only settings with broad logging, persistence, media, update,
 - **Only render locally cached attachments**
 - **Delete cached files with log records**
 
-Each change writes one explicit `enabled` or `disabled` message to the console and follows the selected BetterDiscord-notification or custom-toast mode. Enabled states use Discord's info/brand color. Disabled states use a theme-neutral grey custom toast; BetterDiscord's native route keeps its theme-colored card and substitutes a neutral icon because the native API has no grey notification type. Rapid changes to the same setting instantly replace its earlier active or queued alert without removing alerts for other settings. Setting-state alerts continue counting down while hovered, and a mouse click dismisses a custom setting toast immediately. Debug alerts remain warning-colored, and errors remain red.
+Each change writes one explicit `enabled` or `disabled` message to the console and follows the selected BetterDiscord-notification or custom-toast mode. Enabled states use Discord's info/brand color. Disabled states use a theme-neutral grey custom toast; BetterDiscord's native route keeps its theme-colored card and substitutes a neutral icon because the native API has no grey notification type. Rapid changes to the same setting instantly replace its earlier active or queued alert without removing alerts for other settings. Setting-state alerts continue counting down while hovered, and a left or right click dismisses either notification style immediately. Debug alerts remain warning-colored, and errors remain red.
 
 ## 🖱️ Settings Actions
 
