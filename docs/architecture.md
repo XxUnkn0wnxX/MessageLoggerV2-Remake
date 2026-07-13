@@ -75,7 +75,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 ## 🧵 Forum Posts and Channel Threads
 
 - Forum/thread metadata snapshots preserve parent IDs, names, types, paths, starter IDs, and card information after live Discord objects disappear.
-- Complete root deletion stores the root and eligible children under the thread ID; root hide/unhide/remove actions cascade through `getForumThreadRecordIds`.
+- Complete root deletion stores the root and eligible children under the thread ID; root hide/unhide/remove actions cascade through `getForumThreadRecordIds`. A synthetic forum/thread root uses the title, while any separately keyed starter record retains its message content.
 - Restored forum cards, channel sidebar entries, and thread-browser entries require a live Discord item as a DOM/React layout anchor. Their saved preview text is passed through the logger's native markup parser so mentions render without parsing the separately generated author and deletion labels.
 - Thread-scoped logger views, context labels, jump routing, tinting, and suppression must continue distinguishing forum posts from ordinary channel threads.
 

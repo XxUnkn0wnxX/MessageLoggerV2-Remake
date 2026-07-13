@@ -207,6 +207,78 @@ test('forum and channel-thread context labels remain distinct', () => {
   assert.equal(plugin.getSavedThreadVisibilityLabel(thread, false), 'Unhide Thread');
 });
 
+test('synthetic thread and forum roots keep the title separate from starter message content', () => {
+  const author = { id: 'author', username: 'Author', discriminator: '0', public_flags: 0 };
+  for (const { label, parentType, threadId } of [
+    { label: 'channel thread', parentType: 0, threadId: '200' },
+    { label: 'forum post', parentType: 15, threadId: '300' }
+  ]) {
+    const plugin = createPlugin({
+      settings: { ignoreBots: false },
+      forumThreadMetadataCache: new Map([[threadId, {
+        id: threadId,
+        name: 'old title',
+        ownerId: author.id,
+        starterMessageId: `${threadId}1`,
+        starterContent: 'old starter content',
+        starterAuthor: author,
+        card: { title: 'old title', preview: 'old starter content' }
+      }]]),
+      tools: {
+        getChannel: id => id === 'parent' ? { id, name: 'parent', type: parentType, guild_id: 'guild' } : null,
+        getServer: () => ({ id: 'guild', name: 'Server' }),
+        getUser: () => author
+      }
+    });
+    const root = plugin.createForumThreadDeleteFallbackMessage({
+      id: threadId,
+      parent_id: 'parent',
+      type: 11,
+      name: 'test',
+      guild_id: 'guild',
+      owner_id: author.id
+    });
+
+    assert.equal(root.id, threadId, `${label} root keeps the thread ID`);
+    assert.equal(root.channel_id, threadId, `${label} root remains self-keyed`);
+    assert.equal(root.content, 'test', `${label} root uses the title`);
+    assert.notEqual(root.content, 'old starter content', `${label} root does not copy starter content`);
+  }
+});
+
+test('starter edits replace cached thread content before deletion capture', () => {
+  const original = {
+    id: '201',
+    channel_id: '200',
+    guild_id: 'guild',
+    content: 'before edit',
+    type: 0,
+    flags: 0,
+    attachments: [],
+    embeds: [],
+    author: { id: 'author', username: 'Author' }
+  };
+  const plugin = createPlugin({
+    cachedMessageRecord: [structuredClone(original)],
+    cachedMessageIds: new Set([original.id]),
+    cachedMessagesMap: new Map([[original.id, structuredClone(original)]]),
+    channelMessages: {},
+    messageStore: { getMessages: () => null },
+    settings: { cacheAllImages: false },
+    cleanupMessageObject: message => message,
+    shouldIgnoreMessageAuthor: () => false,
+    shouldIgnoreSelfMessage: () => false
+  });
+  const edited = plugin.syncMessageUpdatePayload(
+    { ...original, content: 'after edit', edited_timestamp: '2026-07-14T00:00:00.000Z' },
+    original
+  );
+
+  assert.equal(edited.content, 'after edit');
+  assert.equal(plugin.cachedMessagesMap.get(original.id).content, 'after edit');
+  assert.deepEqual(plugin.getCachedForumThreadMessages('200').map(message => message.content), ['after edit']);
+});
+
 test('newly captured records already match the canonical persisted shape', () => {
   const plugin = createPlugin({
     localUser: { id: 'local-user' },

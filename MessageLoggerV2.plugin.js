@@ -6113,7 +6113,10 @@ module.exports = class MessageLoggerV2 {
       channel_id: threadId,
       reactions: [],
       guild_id: channel.guild_id || metadata.guildId,
-      content: metadata.card?.preview || metadata.starterContent || metadata.name || channel.name || '[deleted thread]',
+      // This synthetic record represents the deleted thread itself. Prefer its title so the
+      // separately saved real starter message retains the message body without producing two
+      // identical-looking logger rows.
+      content: metadata.name || channel.name || metadata.card?.title || metadata.card?.preview || metadata.starterContent || '[deleted thread]',
       type: 0,
       embeds: [],
       author: fallbackAuthor,
