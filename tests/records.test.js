@@ -207,7 +207,7 @@ test('native Trash consumes only exact indexed saved deletions', () => {
   assert.deepEqual(dispatches, [{ type: 'MESSAGE_DELETE', id: messageId, channelId, ML2: true }]);
 });
 
-test('native MessageActions wrapper calls Discord only for non-logger deletions', () => {
+test('native MessageActions wrapper calls Discord only for non-logger deletions', async () => {
   const run = ({ id, indexed = null, record = null, threadCreated = false }) => {
     const channelId = 'wrapper-channel';
     const plugin = createPlugin({
@@ -232,23 +232,41 @@ test('native MessageActions wrapper calls Discord only for non-logger deletions'
       saveData() {}
     });
     let originalCalls = 0;
-    plugin.processNativeMessageDeleteAction([channelId, id], () => { originalCalls++; });
-    return { originalCalls, plugin };
+    const originalResult = { native: true };
+    const result = plugin.processNativeMessageDeleteAction([channelId, id], () => {
+      originalCalls++;
+      return originalResult;
+    });
+    return { originalCalls, originalResult, plugin, result };
   };
   const saved = id => ({
     message: { id, channel_id: 'wrapper-channel' },
     delete_data: { hidden: false }
   });
 
-  assert.equal(run({ id: 'live' }).originalCalls, 1);
-  assert.equal(run({
+  const live = run({ id: 'live' });
+  assert.equal(live.originalCalls, 1);
+  assert.equal(live.result, live.originalResult);
+  const edit = run({
     id: 'edit',
     record: { message: { id: 'edit', channel_id: 'wrapper-channel' }, edit_history: [{}] }
-  }).originalCalls, 1);
-  assert.equal(run({ id: 'unindexed', record: saved('unindexed') }).originalCalls, 1);
-  assert.equal(run({ id: 'deleted', indexed: 'deleted', record: saved('deleted') }).originalCalls, 0);
-  assert.equal(run({ id: 'purged', indexed: 'purged', record: saved('purged') }).originalCalls, 0);
-  assert.equal(run({ id: 'thread-system', indexed: 'deleted', record: saved('thread-system'), threadCreated: true }).originalCalls, 1);
+  });
+  assert.equal(edit.originalCalls, 1);
+  assert.equal(edit.result, edit.originalResult);
+  const unindexed = run({ id: 'unindexed', record: saved('unindexed') });
+  assert.equal(unindexed.originalCalls, 1);
+  assert.equal(unindexed.result, unindexed.originalResult);
+  const deleted = run({ id: 'deleted', indexed: 'deleted', record: saved('deleted') });
+  assert.equal(deleted.originalCalls, 0);
+  assert.equal(typeof deleted.result?.then, 'function');
+  assert.equal(await deleted.result, undefined);
+  const purged = run({ id: 'purged', indexed: 'purged', record: saved('purged') });
+  assert.equal(purged.originalCalls, 0);
+  assert.equal(typeof purged.result?.then, 'function');
+  assert.equal(await purged.result, undefined);
+  const threadSystem = run({ id: 'thread-system', indexed: 'deleted', record: saved('thread-system'), threadCreated: true });
+  assert.equal(threadSystem.originalCalls, 1);
+  assert.equal(threadSystem.result, threadSystem.originalResult);
 });
 
 test('local Delete confirms without Shift and Shift activation removes immediately', () => {

@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.1
+ * @version 2.8.1.1
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -452,7 +452,8 @@ module.exports = class MessageLoggerV2 {
         type: 'fixed',
         items: [
           'Restores the advertised logger shortcuts and adds native BetterDiscord capture controls for custom or disabled bindings.',
-          'Lets Discord\'s native Trash action remove restored messages from the local log, adds a permission-independent local-only fallback, and shows matching Trash controls only while Shift is held; ordinary right-click Delete still confirms.',
+          'Lets Discord\'s native Trash action remove restored messages from the local log, adds the local-only fallback only when native Trash is absent, and shows matching Trash controls only while Shift is held; ordinary right-click Delete still confirms.',
+          'Keeps Discord\'s native Delete confirmation lifecycle intact after plugin hot reloads when Trash performs a local-only logger removal.',
           'Uses Discord native forum refresh behavior and repairs deleted tint, jump, context-menu, purge, and restore edge cases.',
           'Improves settings validation, accordion navigation, help screens, documentation, and legacy cache compatibility.',
           'Restores the legacy aggressive message caching and new cache system controls as locked-on indicators and resets false config values at startup.',
@@ -7910,7 +7911,11 @@ module.exports = class MessageLoggerV2 {
     // Shift-click reaches it directly. Consume only an exact indexed logger deletion and
     // translate it into the same local cleanup as Remove From Log. Every live message keeps
     // Discord's original network-delete path below.
-    if (this.handleNativeSavedRecordDelete(channelId, messageId)) return;
+    if (this.handleNativeSavedRecordDelete(channelId, messageId)) {
+      // Discord's native confirmation waits on the async delete contract before dismissing.
+      // Resolve it after local cleanup without calling the original server-delete endpoint.
+      return Promise.resolve();
+    }
     this.rememberLocalDeleteId(messageId);
     return original(...args);
   }
