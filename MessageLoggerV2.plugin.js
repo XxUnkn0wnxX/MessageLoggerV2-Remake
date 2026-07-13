@@ -814,13 +814,18 @@ module.exports = class MessageLoggerV2 {
         const resolvedCachePath = this.imageCacheServerSimulator.resolveNewCachePath({ channelId });
         if (!resolvedCachePath) return null;
         const joinBase = resolvedCachePath + "/";
-        let pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId})` + ext);
-        if (this.nodeModules.fs.existsSync(pathname)) return pathname;
         const record = this.messageRecord[messageId];
-        const authorId = record?.message?.author?.id || this.cachedMessagesMap.get(messageId)?.author?.id;
-        if (authorId) {
-          pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${messageId} by ${authorId})` + ext);
+        const sourceMessageIds = record
+          ? this.getRecordCacheSourceMessageIds(record)
+          : new Set([String(messageId)]);
+        for (const sourceMessageId of sourceMessageIds) {
+          let pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${sourceMessageId})` + ext);
           if (this.nodeModules.fs.existsSync(pathname)) return pathname;
+          const authorId = record?.message?.author?.id || this.cachedMessagesMap.get(sourceMessageId)?.author?.id;
+          if (authorId) {
+            pathname = this.nodeModules.path.join(joinBase, attachmentId + ` (${sourceMessageId} by ${authorId})` + ext);
+            if (this.nodeModules.fs.existsSync(pathname)) return pathname;
+          }
         }
         return null;
       },
@@ -3746,6 +3751,74 @@ module.exports = class MessageLoggerV2 {
     if (!record.edit_history.length) record.edit_history = null;
     delete record.editHistory;
   }
+  foldSeparateThreadStarterRecords(data, onlyThreadIds = null) {
+    const records = data?.messageRecord;
+    if (!records || typeof records !== 'object' || Array.isArray(records)) return [];
+    const allowedThreadIds = onlyThreadIds
+      ? new Set(Array.from(onlyThreadIds, id => String(id)))
+      : null;
+    const folded = [];
+    for (const [rootId, rootRecord] of Object.entries(records)) {
+      if (allowedThreadIds && !allowedThreadIds.has(rootId)) continue;
+      const rootMessage = rootRecord?.message;
+      const rootDeleteData = rootRecord?.delete_data;
+      const metadata = rootDeleteData?.forum_metadata;
+      if (!rootDeleteData?.forum_thread_delete || !rootMessage || !metadata) continue;
+      const starterMessageId = metadata.starterMessageId && String(metadata.starterMessageId);
+      if (!starterMessageId || starterMessageId === rootId) continue;
+      const starterRecord = records[starterMessageId];
+      const starterMessage = starterRecord?.message;
+      // IDs, rather than content, define the one starter that belongs in the structural root.
+      // Replies B/C and ordinary channel messages can never match these two identity checks.
+      if (!starterMessage
+        || String(starterMessage.id) !== starterMessageId
+        || String(starterMessage.channel_id) !== rootId) continue;
+
+      const foldedRecord = this.mergeSavedRecords(starterRecord, rootRecord);
+      foldedRecord.message = {
+        ...this.cloneDataValue(starterMessage),
+        id: rootId,
+        channel_id: rootId
+      };
+      foldedRecord.delete_data = this.mergePlainDataObjects(
+        starterRecord.delete_data || {},
+        rootDeleteData
+      );
+      if (starterRecord.delete_data?.hidden || rootDeleteData.hidden) foldedRecord.delete_data.hidden = true;
+      foldedRecord.delete_data.forum_thread_delete = true;
+      delete foldedRecord.delete_data.forum_thread_message_delete;
+      foldedRecord.delete_data.forum_metadata = {
+        ...this.cloneDataValue(metadata),
+        starterMessageId,
+        starterContent: starterMessage.content ?? metadata.starterContent ?? null,
+        starterAuthor: starterMessage.author
+          ? this.cloneDataValue(starterMessage.author)
+          : metadata.starterAuthor || null,
+        starterTimestamp: starterMessage.timestamp ?? metadata.starterTimestamp ?? null,
+        starterFoldedIntoRoot: true
+      };
+      // Root location metadata describes the deleted thread in its parent and must win over the
+      // starter's otherwise equivalent channel snapshot.
+      foldedRecord.saved_location = rootRecord.saved_location
+        ? this.cloneDataValue(rootRecord.saved_location)
+        : this.cloneDataValue(starterRecord.saved_location || null);
+      records[rootId] = foldedRecord;
+      delete records[starterMessageId];
+
+      // Preserve every category the starter belonged to, but index the single logical record by
+      // the stable thread ID. Sanitization later de-duplicates and restores the canonical channel.
+      for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
+        for (const ids of Object.values(data[key] || {})) {
+          if (!Array.isArray(ids)) continue;
+          for (let index = 0; index < ids.length; index++) {
+            if (String(ids[index]) === starterMessageId) ids[index] = rootId;
+          }
+        }
+      }
+      folded.push({ rootId, starterMessageId });
+    }
+    return folded;
+  }
   getDataPayloadValidationErrors(data, options = {}) {
     const isRecordMap = value => !!value && typeof value === 'object' && !Array.isArray(value);
     const errors = [];
@@ -3857,6 +3930,11 @@ module.exports = class MessageLoggerV2 {
         data[key][channelId] = ids.map(id => canonicalMessageIds.get(id) || id);
       }
     }
+    // Discord forum posts are naturally self-keyed, while some channel threads have a distinct
+    // thread ID and starter-message ID. Canonical storage treats both as one logical root record:
+    // the title stays in metadata and the starter payload becomes the root message. Existing
+    // two-record files are folded during the same atomic canonical rewrite used for migrations.
+    this.foldSeparateThreadStarterRecords(data);
     data = this.sanitizeDataPayload(data);
     // Rebuild missing indexes from canonical records. Existing category membership is
     // retained independently so edited-and-deleted or purged records are not collapsed.
@@ -6069,6 +6147,38 @@ module.exports = class MessageLoggerV2 {
     }
     return savedCount;
   }
+  foldSavedThreadStarterIntoRoot(threadId) {
+    if (!threadId) return false;
+    const data = {
+      messageRecord: this.messageRecord,
+      deletedMessageRecord: this.deletedMessageRecord,
+      editedMessageRecord: this.editedMessageRecord,
+      purgedMessageRecord: this.purgedMessageRecord
+    };
+    const [folded] = this.foldSeparateThreadStarterRecords(data, [threadId]);
+    if (!folded) return false;
+    const canonical = this.sanitizeDataPayload({
+      ...data,
+      suppressedForumThreadIds: Array.from(this.suppressedForumThreadIds || [])
+    });
+    this.messageRecord = canonical.messageRecord;
+    this.deletedMessageRecord = canonical.deletedMessageRecord;
+    this.editedMessageRecord = canonical.editedMessageRecord;
+    this.purgedMessageRecord = canonical.purgedMessageRecord;
+    this.messageRecordIds?.delete(folded.starterMessageId);
+    this.messageRecordIds?.add(folded.rootId);
+    const createSetMap = map => new Map(
+      Object.entries(map).map(([channelId, ids]) => [channelId, new Set(ids)])
+    );
+    this.deletedMessageSet = createSetMap(this.deletedMessageRecord);
+    this.editedMessageSet = createSetMap(this.editedMessageRecord);
+    this.purgedMessageSet = createSetMap(this.purgedMessageRecord);
+    this.sortedDeletedMessageIds?.delete(threadId);
+    this.sortedPurgedMessageIds?.delete(threadId);
+    this.noTintIds?.delete(folded.starterMessageId);
+    if (this.editModifiers) delete this.editModifiers[folded.starterMessageId];
+    return true;
+  }
   annotateSavedForumThreadMessage(message, channel = null) {
     const thread = channel || (message?.channel_id ? this.tools.getChannel(message.channel_id) : null);
     if (!message?.id || !this.isForumThreadChannel(thread)) return;
@@ -6113,10 +6223,9 @@ module.exports = class MessageLoggerV2 {
       channel_id: threadId,
       reactions: [],
       guild_id: channel.guild_id || metadata.guildId,
-      // This synthetic record represents the deleted thread itself. Prefer its title so the
-      // separately saved real starter message retains the message body without producing two
-      // identical-looking logger rows.
-      content: metadata.name || channel.name || metadata.card?.title || metadata.card?.preview || metadata.starterContent || '[deleted thread]',
+      // The title is structural metadata. The message field mirrors a forum post by carrying only
+      // the starter body (or an explicit placeholder when Discord supplied no starter payload).
+      content: metadata.starterContent || metadata.card?.preview || '[starter message unavailable]',
       type: 0,
       embeds: [],
       author: fallbackAuthor,
@@ -6400,7 +6509,8 @@ module.exports = class MessageLoggerV2 {
   }
   saveDeletedChannelCaptureMessage(message, targetMap, context, options = {}) {
     if (!context?.captureEnabled) return false;
-    if (!options.threadRoot && !this.hasDeletedChannelMessageCaptureSlot(context)) return false;
+    const consumesMessageSlot = !options.threadRoot && !options.threadStarterForRoot;
+    if (consumesMessageSlot && !this.hasDeletedChannelMessageCaptureSlot(context)) return false;
     if (!this.shouldCaptureDeletedChannelMessage(message)) return false;
     const targetSet = targetMap === this.deletedMessageRecord ? this.deletedMessageSet : this.purgedMessageSet;
     if (targetSet.get(message.channel_id)?.has(message.id)) return false;
@@ -6434,6 +6544,10 @@ module.exports = class MessageLoggerV2 {
       context.captured++;
       return true;
     }
+    // A distinct channel-thread starter becomes the already-counted structural root payload.
+    // It still consumes attachment allowance, but not a reply-message slot or a second record in
+    // the final capture count. Ordinary thread replies continue through the normal cap below.
+    if (options.threadStarterForRoot) return true;
     return this.consumeDeletedChannelMessageCaptureSlot(context);
   }
   getDeletedChannelThreadMetadata(channel, context, starterMessage = null) {
@@ -6507,7 +6621,23 @@ module.exports = class MessageLoggerV2 {
         threadRoot: true
       });
     }
+    const distinctStarterMessageId = metadata.starterMessageId
+      && String(metadata.starterMessageId) !== String(channel.id)
+      ? String(metadata.starterMessageId)
+      : null;
+    const starterMessage = distinctStarterMessageId
+      ? eligibleMessages.find(message => String(message.id) === distinctStarterMessageId)
+      : null;
+    if (starterMessage) {
+      this.saveDeletedChannelCaptureMessage(starterMessage, this.purgedMessageRecord, context, {
+        channel,
+        location,
+        threadMetadata: metadata,
+        threadStarterForRoot: true
+      });
+    }
     for (const message of eligibleMessages) {
+      if (starterMessage && message === starterMessage) continue;
       if (!this.hasDeletedChannelMessageCaptureSlot(context)) break;
       this.saveDeletedChannelCaptureMessage(message, this.purgedMessageRecord, context, {
         channel,
@@ -6522,6 +6652,7 @@ module.exports = class MessageLoggerV2 {
       rootRecord.delete_data.forum_metadata = metadata;
       rootRecord.delete_data.forum_name = metadata.name || channel.name || null;
     }
+    this.foldSavedThreadStarterIntoRoot(channel.id);
     return context.captured - before;
   }
   captureQueuedThreadsFromDeletedChannel(context) {
@@ -6621,6 +6752,7 @@ module.exports = class MessageLoggerV2 {
       savedRecord.delete_data.forum_metadata = metadata;
       savedRecord.delete_data.forum_name = metadata?.name || channel.name || null;
     }
+    this.foldSavedThreadStarterIntoRoot(threadId);
     if (!savedThreadMessageCount && !savedRecord?.delete_data) return callDefault(...args);
     if (this.settings.showDeletedCount) {
       if (!this.deletedChatMessagesCount[threadId]) this.deletedChatMessagesCount[threadId] = 0;
@@ -7572,7 +7704,7 @@ module.exports = class MessageLoggerV2 {
     const message = record?.message;
     const ids = new Set();
     if (!message?.id) return ids;
-    ids.add(String(message.id));
+    this.getRecordCacheSourceMessageIds(record).forEach(id => ids.add(id));
     for (const attachment of message.attachments || []) {
       if (attachment?.id) ids.add(String(attachment.id));
     }
@@ -7590,6 +7722,17 @@ module.exports = class MessageLoggerV2 {
     }
     for (const id of record.logged_attachments || []) {
       if (id) ids.add(String(id));
+    }
+    return ids;
+  }
+  getRecordCacheSourceMessageIds(record) {
+    const messageId = record?.message?.id;
+    const ids = new Set();
+    if (!messageId) return ids;
+    ids.add(String(messageId));
+    const metadata = record.delete_data?.forum_metadata;
+    if (metadata?.starterFoldedIntoRoot && metadata.starterMessageId) {
+      ids.add(String(metadata.starterMessageId));
     }
     return ids;
   }
@@ -7670,6 +7813,7 @@ module.exports = class MessageLoggerV2 {
     const message = record?.message;
     if (!message?.id) return 0;
     const messageId = String(message.id);
+    const sourceMessageIds = this.getRecordCacheSourceMessageIds(record);
     const mediaIds = this.getRecordCachedMediaIds(record);
     const roots = new Set();
     if (this.settings.imageCacheDir) {
@@ -7681,8 +7825,10 @@ module.exports = class MessageLoggerV2 {
     } catch (error) {
       Logger.warn('Could not resolve active media cache path:', error.message);
     }
-    const escapedMessageId = messageId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const messagePattern = new RegExp(` \\(${escapedMessageId}(?: by \\d+)?\\)\\.[^.]+$`);
+    const messagePatterns = Array.from(sourceMessageIds, sourceMessageId => {
+      const escapedMessageId = sourceMessageId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(` \\(${escapedMessageId}(?: by \\d+)?\\)\\.[^.]+$`);
+    });
     const legacyMediaIds = new Set(Array.from(mediaIds).filter(mediaId =>
       !this.isCachedMediaIdReferencedElsewhere(mediaId, messageId)
     ));
@@ -7730,7 +7876,7 @@ module.exports = class MessageLoggerV2 {
       for (const entry of readEntries(directory)) {
         if (!entry.isFile() || entry.isSymbolicLink()) continue;
         const legacyMediaMatch = Array.from(legacyMediaIds).some(mediaId => entry.name.startsWith(`${mediaId}.`));
-        if (!messagePattern.test(entry.name) && !legacyMediaMatch) continue;
+        if (!messagePatterns.some(pattern => pattern.test(entry.name)) && !legacyMediaMatch) continue;
         const target = this.nodeModules.path.join(directory, entry.name);
         const resolvedTarget = this.nodeModules.path.resolve(target);
         if (resolvedTarget !== root && !resolvedTarget.startsWith(root + this.nodeModules.path.sep)) continue;
@@ -7746,8 +7892,10 @@ module.exports = class MessageLoggerV2 {
         }
       }
     };
-    this.cacheDeletionMessageIds.add(messageId);
-    const suppressionTimeout = setTimeout(() => this.cacheDeletionMessageIds.delete(messageId), 30000);
+    sourceMessageIds.forEach(id => this.cacheDeletionMessageIds.add(id));
+    const suppressionTimeout = setTimeout(() => {
+      sourceMessageIds.forEach(id => this.cacheDeletionMessageIds.delete(id));
+    }, 30000);
     suppressionTimeout.unref?.();
     for (const root of roots) {
       if (!this.nodeModules.fs.existsSync(root)) continue;
@@ -7759,7 +7907,7 @@ module.exports = class MessageLoggerV2 {
     }
     for (const [cacheKey, objectUrl] of Object.entries(this.imageCacheServerSimulator?.cached || {})) {
       const hashParts = cacheKey.split('#')[1]?.split(',') || [];
-      if (hashParts[2] !== messageId) continue;
+      if (!sourceMessageIds.has(hashParts[2])) continue;
       if (objectUrl?.startsWith?.('blob:')) URL.revokeObjectURL(objectUrl);
       delete this.imageCacheServerSimulator.cached[cacheKey];
     }
@@ -9294,7 +9442,9 @@ module.exports = class MessageLoggerV2 {
       const threadId = record?.message?.id;
       if (!threadId) return [];
       const metadata = getForumRecordMetadata(record);
-      const hasDistinctStarter = !!metadata.starterMessageId && metadata.starterMessageId !== threadId;
+      const hasDistinctStarter = !!metadata.starterMessageId
+        && metadata.starterMessageId !== threadId
+        && !metadata.starterFoldedIntoRoot;
       const ids = new Set();
       const addId = (id) => {
         if (!id || ids.has(id)) return;
@@ -9305,7 +9455,7 @@ module.exports = class MessageLoggerV2 {
         if (this.shouldIgnoreMessageAuthor(message) || this.shouldIgnoreSelfMessage(message)) return;
         ids.add(id);
       };
-      if (!metadata.starterMessageId || metadata.starterMessageId === threadId) addId(threadId);
+      if (!hasDistinctStarter) addId(threadId);
       const addFromMap = (map) => {
         const channelIds = map?.[threadId];
         if (!Array.isArray(channelIds)) return;
@@ -9326,7 +9476,9 @@ module.exports = class MessageLoggerV2 {
       if (this.menu.open) this.ModalStack.closeModal(this.style.menu);
       const threadId = message.id;
       const metadata = getForumRecordMetadata(record);
-      const hasDistinctStarter = !!metadata.starterMessageId && metadata.starterMessageId !== threadId;
+      const hasDistinctStarter = !!metadata.starterMessageId
+        && metadata.starterMessageId !== threadId
+        && !metadata.starterFoldedIntoRoot;
       const titleText = getForumRecordTitle(record);
       const deletedAt = record.delete_data?.time ? this.createTimeStamp(record.delete_data.time, true) : this.createTimeStamp(Date.now(), true);
       const header = document.createElement('div');

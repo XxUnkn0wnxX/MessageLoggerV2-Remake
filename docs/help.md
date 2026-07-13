@@ -163,7 +163,8 @@ Notification settings affect alerts only. Logging scope is controlled separately
 ## 🧵 Forum Posts and Channel Threads
 
 - Deleting a complete forum post or thread saves the eligible root and child messages under one thread ID.
-- Synthetic forum/thread roots display the latest title; a separately saved starter message displays its latest content while normal edit history remains available.
+- A deleted forum post or thread appears as one root row: its latest title is highlighted in the location line and its initial message body appears as the row content.
+- Replies and their edits remain separate saved messages. Only a distinct initial thread starter is folded into the root.
 - Author ignores apply per message. A saved thread can therefore contain messages from some authors but not others.
 - Hiding or unhiding the root applies to all related child records.
 - Removing the root from the logger removes all related records.

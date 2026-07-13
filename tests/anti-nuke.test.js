@@ -84,3 +84,58 @@ test('Anti-Nuke excludes thread-created system and unsupported messages', () => 
   assert.equal(plugin.shouldCaptureDeletedChannelMessage({ id: '4', channel_id: 'c', type: 7 }), false);
   assert.equal(plugin.shouldCaptureDeletedChannelMessage({ id: '5', channel_id: 'c', type: 0, flags: 64 }), false);
 });
+
+test('Anti-Nuke folds the initial thread starter into the root without consuming a reply slot', () => {
+  const calls = [];
+  const plugin = createPlugin({
+    settings: {
+      antiNukeEnabled: true,
+      antiNukeThreadCap: 1,
+      antiNukeMessageCap: 1,
+      antiNukeAttachmentCap: 10
+    },
+    purgedMessageRecord: {},
+    messageRecord: {},
+    getCachedMessagesForDeletedChannel: () => [],
+    saveDeletedChannelCaptureMessage(message, _target, context, options = {}) {
+      calls.push({ id: message.id, options });
+      if (options.threadRoot) {
+        context.captured++;
+        return true;
+      }
+      if (options.threadStarterForRoot) return true;
+      return this.consumeDeletedChannelMessageCaptureSlot(context);
+    },
+    foldSavedThreadStarterIntoRoot: () => true
+  });
+  const context = plugin.createDeletedChannelCaptureContext(
+    { id: 'parent', guild_id: 'guild', name: 'general', type: 0 },
+    { id: 'guild', name: 'Server' }
+  );
+  const thread = { id: '400', parent_id: 'parent', guild_id: 'guild', name: 'test', type: 11 };
+  const root = { id: '400', channel_id: '400', content: 'placeholder', type: 0, attachments: [] };
+  const starter = { id: '401', channel_id: '400', content: 'testa', type: 0, attachments: [] };
+  const messageB = { id: '402', channel_id: '400', content: 'message B', type: 0, attachments: [] };
+  const messageC = { id: '403', channel_id: '400', content: 'message C', type: 0, attachments: [] };
+  const metadata = {
+    id: '400',
+    parentId: 'parent',
+    parentType: 0,
+    name: 'test',
+    starterMessageId: '401'
+  };
+
+  plugin.captureThreadFromDeletedChannel(thread, context, {
+    root,
+    messages: [messageB, starter, messageC],
+    metadata
+  });
+
+  assert.deepEqual(calls.map(call => call.id), ['400', '401', '402']);
+  assert.equal(calls[1].options.threadStarterForRoot, true);
+  assert.equal(calls[2].options.threadStarterForRoot, undefined);
+  assert.equal(context.capturedThreads, 1);
+  assert.equal(context.capturedMessages, 1, 'only message B consumes the sole reply slot');
+  assert.equal(context.captured, 2, 'the logical root and one reply are counted once each');
+  assert.equal(context.remainingMessages, 0);
+});

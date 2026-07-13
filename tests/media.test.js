@@ -96,6 +96,23 @@ test('record media IDs cover messages, attachments, stickers, embeds, and later 
   ]));
 });
 
+test('folded thread roots retain the original starter cache identity', () => {
+  const plugin = createPlugin();
+  const record = {
+    message: { id: 'thread', attachments: [{ id: 'attachment' }], embeds: [] },
+    delete_data: {
+      forum_thread_delete: true,
+      forum_metadata: {
+        starterMessageId: 'starter',
+        starterFoldedIntoRoot: true
+      }
+    }
+  };
+
+  assert.deepEqual(plugin.getRecordCacheSourceMessageIds(record), new Set(['thread', 'starter']));
+  assert.deepEqual(plugin.getRecordCachedMediaIds(record), new Set(['thread', 'starter', 'attachment']));
+});
+
 test('sticker media keeps common image formats and rejects unsupported formats', () => {
   const plugin = createPlugin();
 
@@ -132,5 +149,41 @@ test('removing a record deletes only its related cached files', t => {
   assert.equal(plugin.deleteCachedFilesForRecord(record), 2);
   assert.equal(fs.existsSync(path.join(cacheDir, 'attachment.png')), false);
   assert.equal(fs.existsSync(path.join(cacheDir, 'attachment (200).png')), false);
+  assert.equal(fs.existsSync(path.join(cacheDir, 'unrelated (999).png')), true);
+});
+
+test('removing a folded thread root deletes media cached under its original starter ID', t => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-folded-media-test-'));
+  t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
+  const record = {
+    message: {
+      id: '400',
+      channel_id: '400',
+      attachments: [{ id: 'attachment', filename: 'image.png' }]
+    },
+    delete_data: {
+      forum_thread_delete: true,
+      forum_metadata: {
+        starterMessageId: '401',
+        starterFoldedIntoRoot: true
+      }
+    }
+  };
+  fs.writeFileSync(path.join(cacheDir, 'attachment (401).png'), 'folded starter');
+  fs.writeFileSync(path.join(cacheDir, 'unrelated (999).png'), 'keep');
+  const plugin = createPlugin({
+    messageRecord: { 400: record },
+    settings: { imageCacheDir: cacheDir },
+    nodeModules: { fs, path },
+    imageCacheServerSimulator: {
+      _getBaseCachePath: () => cacheDir,
+      cached: {}
+    },
+    cacheDeletionMessageIds: new Set(),
+    queueCachedFilesDeletedToast() {}
+  });
+
+  assert.equal(plugin.deleteCachedFilesForRecord(record), 1);
+  assert.equal(fs.existsSync(path.join(cacheDir, 'attachment (401).png')), false);
   assert.equal(fs.existsSync(path.join(cacheDir, 'unrelated (999).png')), true);
 });

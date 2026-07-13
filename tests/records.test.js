@@ -207,7 +207,7 @@ test('forum and channel-thread context labels remain distinct', () => {
   assert.equal(plugin.getSavedThreadVisibilityLabel(thread, false), 'Unhide Thread');
 });
 
-test('synthetic thread and forum roots keep the title separate from starter message content', () => {
+test('synthetic thread and forum fallbacks keep the starter body out of title metadata', () => {
   const author = { id: 'author', username: 'Author', discriminator: '0', public_flags: 0 };
   for (const { label, parentType, threadId } of [
     { label: 'channel thread', parentType: 0, threadId: '200' },
@@ -241,9 +241,168 @@ test('synthetic thread and forum roots keep the title separate from starter mess
 
     assert.equal(root.id, threadId, `${label} root keeps the thread ID`);
     assert.equal(root.channel_id, threadId, `${label} root remains self-keyed`);
-    assert.equal(root.content, 'test', `${label} root uses the title`);
-    assert.notEqual(root.content, 'old starter content', `${label} root does not copy starter content`);
+    assert.equal(root.content, 'old starter content', `${label} fallback uses the cached starter body`);
+    assert.notEqual(root.content, 'test', `${label} fallback does not duplicate the title as content`);
   }
+});
+
+test('distinct thread starters fold into one root while replies remain separate records', () => {
+  const rootId = '400';
+  const starterId = '401';
+  const replyId = '402';
+  const author = { id: 'author', username: 'Author', public_flags: 0 };
+  const plugin = createPlugin({
+    cleanupMessageObject(message) {
+      return {
+        ...message,
+        attachments: Array.isArray(message.attachments) ? message.attachments : [],
+        embeds: Array.isArray(message.embeds) ? message.embeds : []
+      };
+    }
+  });
+  const legacyTwoRecordPayload = {
+    messageRecord: {
+      [rootId]: {
+        message: {
+          id: rootId,
+          channel_id: rootId,
+          guild_id: 'guild',
+          content: 'test',
+          timestamp: 100,
+          attachments: [],
+          embeds: [],
+          author
+        },
+        delete_data: {
+          time: 300,
+          forum_thread_delete: true,
+          forum_parent_id: 'parent',
+          forum_metadata: { name: 'test', starterMessageId: starterId }
+        }
+      },
+      [starterId]: {
+        message: {
+          id: starterId,
+          channel_id: rootId,
+          guild_id: 'guild',
+          content: 'testa',
+          timestamp: 101,
+          attachments: [{ id: 'attachment', filename: 'starter.png' }],
+          embeds: [],
+          author
+        },
+        delete_data: { time: 300, forum_thread_message_delete: true },
+        edit_history: [{ content: 'starter before edit', time: 200 }],
+        logged_attachments: ['later-media']
+      },
+      [replyId]: {
+        message: {
+          id: replyId,
+          channel_id: rootId,
+          guild_id: 'guild',
+          content: 'message B',
+          timestamp: 102,
+          attachments: [],
+          embeds: [],
+          author
+        },
+        delete_data: { time: 299, forum_thread_message_delete: true }
+      }
+    },
+    deletedMessageRecord: { [rootId]: [rootId, starterId, replyId] },
+    editedMessageRecord: { [rootId]: [starterId] },
+    purgedMessageRecord: {},
+    suppressedForumThreadIds: []
+  };
+
+  const normalized = plugin.normalizePersistedDataPayload(legacyTwoRecordPayload);
+  const root = normalized.messageRecord[rootId];
+
+  assert.deepEqual(Object.keys(normalized.messageRecord).sort(), [rootId, replyId]);
+  assert.equal(root.message.id, rootId);
+  assert.equal(root.message.channel_id, rootId);
+  assert.equal(root.message.content, 'testa');
+  assert.deepEqual(root.message.attachments, [{ id: 'attachment', filename: 'starter.png' }]);
+  assert.deepEqual(root.edit_history, [{ content: 'starter before edit', time: 200 }]);
+  assert.deepEqual(root.logged_attachments, ['later-media']);
+  assert.equal(root.delete_data.forum_metadata.name, 'test', 'the title stays in metadata');
+  assert.equal(root.delete_data.forum_metadata.starterMessageId, starterId, 'the original starter ID remains traceable');
+  assert.equal(root.delete_data.forum_metadata.starterFoldedIntoRoot, true);
+  assert.equal(root.delete_data.forum_thread_delete, true);
+  assert.equal(root.delete_data.forum_thread_message_delete, undefined);
+  assert.equal(normalized.messageRecord[replyId].message.content, 'message B');
+  assert.deepEqual(normalized.deletedMessageRecord, { [rootId]: [rootId, replyId] });
+  assert.deepEqual(normalized.editedMessageRecord, { [rootId]: [rootId] });
+  assert.equal(JSON.stringify(plugin.normalizePersistedDataPayload(normalized)), JSON.stringify(normalized));
+});
+
+test('self-keyed forum starters do not fold or alter their message payload', () => {
+  const rootId = '500';
+  const root = {
+    message: { id: rootId, channel_id: rootId, content: 'forum body', timestamp: 100 },
+    delete_data: {
+      time: 200,
+      forum_thread_delete: true,
+      forum_metadata: { name: 'forum title', starterMessageId: rootId }
+    }
+  };
+  const data = {
+    messageRecord: { [rootId]: root },
+    deletedMessageRecord: { [rootId]: [rootId] },
+    editedMessageRecord: {},
+    purgedMessageRecord: {}
+  };
+  const plugin = createPlugin();
+
+  assert.deepEqual(plugin.foldSeparateThreadStarterRecords(data), []);
+  assert.equal(data.messageRecord[rootId], root);
+  assert.equal(root.message.content, 'forum body');
+});
+
+test('live thread capture folding rebuilds de-duplicated indexes without touching replies', () => {
+  const rootId = '600';
+  const starterId = '601';
+  const replyId = '602';
+  const root = {
+    message: { id: rootId, channel_id: rootId, content: 'title', timestamp: 100 },
+    delete_data: {
+      time: 200,
+      forum_thread_delete: true,
+      forum_metadata: { name: 'title', starterMessageId: starterId }
+    }
+  };
+  const starter = {
+    message: { id: starterId, channel_id: rootId, content: 'initial body', timestamp: 101 },
+    delete_data: { time: 200, forum_thread_message_delete: true }
+  };
+  const reply = {
+    message: { id: replyId, channel_id: rootId, content: 'message B', timestamp: 102 },
+    delete_data: { time: 200, forum_thread_message_delete: true }
+  };
+  const plugin = createPlugin({
+    messageRecord: { [rootId]: root, [starterId]: starter, [replyId]: reply },
+    messageRecordIds: new Set([rootId, starterId, replyId]),
+    deletedMessageRecord: { [rootId]: [rootId, starterId, replyId] },
+    editedMessageRecord: {},
+    purgedMessageRecord: {},
+    deletedMessageSet: new Map([[rootId, new Set([rootId, starterId, replyId])]]),
+    editedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    suppressedForumThreadIds: new Set(),
+    noTintIds: new Set([starterId]),
+    editModifiers: { [starterId]: { editNum: 0 } }
+  });
+
+  assert.equal(plugin.foldSavedThreadStarterIntoRoot(rootId), true);
+  assert.deepEqual(Object.keys(plugin.messageRecord).sort(), [rootId, replyId]);
+  assert.equal(plugin.messageRecord[rootId].message.content, 'initial body');
+  assert.equal(plugin.messageRecord[replyId], reply);
+  assert.deepEqual(plugin.deletedMessageRecord, { [rootId]: [rootId, replyId] });
+  assert.deepEqual(plugin.deletedMessageSet.get(rootId), new Set([rootId, replyId]));
+  assert.equal(plugin.messageRecordIds.has(starterId), false);
+  assert.equal(plugin.messageRecordIds.has(replyId), true);
+  assert.equal(plugin.noTintIds.has(starterId), false);
+  assert.equal(plugin.editModifiers[starterId], undefined);
 });
 
 test('starter edits replace cached thread content before deletion capture', () => {

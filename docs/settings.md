@@ -154,7 +154,7 @@ The notification whitelist and blacklist are managed from the same server, chann
 | --- | --- | --- |
 | Enable Anti Nuke | On | Captures a bounded snapshot under **Purged** when a parent forum or text channel is deleted. This emergency path overrides whitelist, blacklist, mute, NSFW, bot, blocked-user, self-author, and local-delete rules. Turning it off suppresses the entire cascade. |
 | Thread and forum post cap | `10` | Limits structural thread/forum-post roots captured per deleted parent channel. Blank or `0` is unlimited. |
-| Total message cap | `10` | One total shared allowance for child replies across all captured threads/forum posts plus ordinary parent-channel messages. Root messages do not consume this cap, so the total saved record count can exceed it. Blank or `0` is unlimited. |
+| Total message cap | `10` | One shared allowance for replies across captured threads/forum posts plus ordinary parent-channel messages. Root payloads, including a distinct starter folded into a channel-thread root, do not consume this cap. Blank or `0` is unlimited. |
 | Total attachment cap | `10` | One total shared allowance for Discord file attachments across the deleted channel. A single message can consume the entire cap. Blank or `0` is unlimited. |
 
 All three caps apply to one parent-channel deletion event:
