@@ -131,7 +131,7 @@ test('backup debug console and routed-toast controls are independent and disable
 
   plugin.settings.debugLogging = false;
   plugin.settings.debugToasts = true;
-  plugin.reportDebugEvent('toast-only event', 'warning', 2500);
+  plugin.reportDebugEvent('toast-only event', 2500);
   assert.equal(loggerEvents.length, 1);
   assert.deepEqual(notifications.at(-1), [
     'Message Logger Debug',
@@ -142,9 +142,36 @@ test('backup debug console and routed-toast controls are independent and disable
   ]);
 
   plugin.settings.debugLogging = true;
-  plugin.reportDebugEvent('combined event', 'success');
+  plugin.reportDebugEvent('combined event');
   assert.deepEqual(loggerEvents.at(-1), ['log', '[Debug] combined event']);
   assert.equal(notifications.at(-1)[1], 'combined event');
+  assert.equal(notifications.at(-1)[2], 'warning');
+});
+
+test('debug warning alerts honor the selected native-notification or custom-toast route', () => {
+  const nativeNotifications = [];
+  const customToasts = [];
+  const plugin = createPlugin({
+    settings: {
+      debugLogging: false,
+      debugToasts: true,
+      useNotificationsInstead: true
+    },
+    _enqueueNativeNotification(notification) { nativeNotifications.push(notification); },
+    showToast(content, options) { customToasts.push([content, options]); }
+  });
+
+  plugin.reportDebugEvent('native route');
+  assert.equal(nativeNotifications.length, 1);
+  assert.equal(nativeNotifications[0].type, 'warning');
+  assert.equal(customToasts.length, 0);
+
+  plugin.settings.useNotificationsInstead = false;
+  plugin.reportDebugEvent('custom route');
+  assert.equal(nativeNotifications.length, 1);
+  assert.equal(customToasts.length, 1);
+  assert.equal(customToasts[0][0], 'custom route');
+  assert.equal(customToasts[0][1].type, 'warning');
 });
 
 test('backup debug lifecycle reports the queue delay, write start, and completion', () => {
@@ -177,6 +204,7 @@ test('backup debug lifecycle reports the queue delay, write start, and completio
       'Automatic backup completed successfully.'
     ]
   );
+  assert.deepEqual(notifications.map(event => event[2]), ['warning', 'warning', 'warning']);
 });
 
 test('canonical migration atomically rewrites only the primary and reports success', async t => {

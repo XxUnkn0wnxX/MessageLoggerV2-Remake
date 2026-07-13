@@ -1899,13 +1899,15 @@ module.exports = class MessageLoggerV2 {
     const seconds = delayMs / 1000;
     return `${seconds} second${seconds === 1 ? '' : 's'}`;
   }
-  reportDebugEvent(message, type = 'info', timeout = 4000) {
+  reportDebugEvent(message, timeout = 4000) {
     // Debug output is intentionally opt-in and currently limited to automatic-backup
     // lifecycle events. The two settings are independent so developers can use either the
     // console, the selected notification/toast route, or both without affecting errors.
+    // All debug notifications deliberately use the warning type so they share the same
+    // attention color as the Debug category in both light and dark Discord themes.
     if (this.settings?.debugLogging) Logger.log(`[Debug] ${message}`);
     if (this.settings?.debugToasts) {
-      this._showNotification('Message Logger Debug', message, type, [], timeout);
+      this._showNotification('Message Logger Debug', message, 'warning', [], timeout);
     }
   }
   queueAutoBackup(delayMs, reason = 'queued') {
@@ -1921,7 +1923,7 @@ module.exports = class MessageLoggerV2 {
     this.saveBackupTimeout = 0;
     this.autoBackupSaveInterupts = 0;
     if (!enabled && hadPendingBackup) {
-      this.reportDebugEvent('Pending automatic backup cancelled because Auto backup was disabled.', 'warning');
+      this.reportDebugEvent('Pending automatic backup cancelled because Auto backup was disabled.');
     }
     if (enabled && !this.settings.dontSaveData) this.saveBackup();
   }
@@ -3295,7 +3297,7 @@ module.exports = class MessageLoggerV2 {
       this.cancelPendingDataWrites();
       Logger.log('Data saving disabled; pending primary and backup writes were cancelled.');
       if (hadPendingBackup) {
-        this.reportDebugEvent('Pending automatic backup cancelled because data saving was disabled.', 'warning');
+        this.reportDebugEvent('Pending automatic backup cancelled because data saving was disabled.');
       }
       return;
     }
@@ -3476,7 +3478,7 @@ module.exports = class MessageLoggerV2 {
   saveBackup() {
     if (this.settings.dontSaveData && !this._noSaveMergeInProgress) {
       this.saveBackupTimeout = 0;
-      this.reportDebugEvent('Automatic backup skipped because data saving is disabled.', 'warning');
+      this.reportDebugEvent('Automatic backup skipped because data saving is disabled.');
       return;
     }
     this.reportDebugEvent('Automatic backup started.');
@@ -3496,9 +3498,9 @@ module.exports = class MessageLoggerV2 {
       if (!err && !cancelled && !this.settings.dontSaveData && !backupWasLoaded) {
         this.queueAutoBackup(300, 'verification retry queued');
       } else if (cancelled) {
-        this.reportDebugEvent('Automatic backup write was cancelled before commit.', 'warning');
+        this.reportDebugEvent('Automatic backup write was cancelled before commit.');
       } else if (!err) {
-        this.reportDebugEvent('Automatic backup completed successfully.', 'success');
+        this.reportDebugEvent('Automatic backup completed successfully.');
       }
     };
     this.efficientlySaveData(

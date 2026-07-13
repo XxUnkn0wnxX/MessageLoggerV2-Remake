@@ -64,7 +64,7 @@ npm run test:runtime-contracts
 | AT-26 | No-save failure safety | Empty sessions, corrupt sources, failed renames, and stale in-flight writes cannot erase or replace existing history. |
 | AT-27 | No-save state | No-reload toggles retain existing behavior; reload recovery preserves hidden, forum/thread, suppression, cap, and backup ordering contracts. |
 | AT-28 | Cross-fork normalization | Legacy aliases, mixed enhanced fields, missing derived maps, scoped de-duplication, canonical defaults on newly captured records, idempotent output across changing Discord channel-store availability, canonical output shape, whole-file atomic migration, routed migration and backup-rebuild status, missing-primary backup restoration, opaque fork extensions, newer-schema fail-closed behavior, and legacy round trips remain covered. |
-| AT-29 | Backup diagnostics | Console and routed-toast debug controls remain independent and off by default; queue delays, write starts, and successful completions are reported when enabled. |
+| AT-29 | Backup diagnostics | Console and routed-toast debug controls remain independent and off by default; backup events use the warning type and follow the selected native-notification or custom-toast route. |
 
 ## 💬 Live Discord Matrix
 

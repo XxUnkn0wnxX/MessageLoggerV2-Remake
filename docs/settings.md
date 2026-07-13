@@ -167,7 +167,7 @@ The Debug category title and both setting labels use Discord's native warning co
 | Setting | Default | Behavior |
 | --- | --- | --- |
 | Enable debug logging | Off | Writes automatic-backup queue delay, reschedule, cancellation, write start, verification retry, and completion events to the console. |
-| Show debug messages as toasts | Off | Sends the same backup events through the selected BetterDiscord-notification or custom-toast mode. This is independent of console debug logging. |
+| Show debug messages as toasts | Off | Sends the same backup events through the selected BetterDiscord-notification or custom-toast mode. Every debug alert uses the native warning color, and this control is independent of console debug logging. |
 
 Debug output currently covers only the automatic-backup lifecycle. It does not change backup timing, persistence, or normal error reporting.
 

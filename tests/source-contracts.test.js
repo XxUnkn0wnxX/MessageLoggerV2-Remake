@@ -217,7 +217,7 @@ test('backup diagnostics remain opt-in under their own warning-colored Debug cat
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Enable debug logging[\s\S]*id: 'debugLogging'[\s\S]*type: 'switch'/);
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Show debug messages as toasts[\s\S]*id: 'debugToasts'[\s\S]*type: 'switch'/);
   assert.match(source, /if \(this\.settings\?\.debugLogging\) Logger\.log\(`\[Debug\] \$\{message\}`\)/);
-  assert.match(source, /if \(this\.settings\?\.debugToasts\)[\s\S]*this\._showNotification\('Message Logger Debug'/);
+  assert.match(source, /if \(this\.settings\?\.debugToasts\)[\s\S]*this\._showNotification\('Message Logger Debug', message, 'warning'/);
 });
 
 test('no-save recovery remains guarded and ordered before backup persistence', () => {
