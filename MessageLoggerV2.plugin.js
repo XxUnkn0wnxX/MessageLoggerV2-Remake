@@ -327,6 +327,7 @@ module.exports = class MessageLoggerV2 {
       }
       const toastsContainer = document.querySelector('.mlv2-toasts');
       if (toastsContainer) toastsContainer.remove();
+      this._replaceableToasts?.clear?.();
       const toastStyles = document.querySelector('#mlv2-toast-styles');
       if (toastStyles) toastStyles.remove();
       if (this.imageCacheServerSimulator?.cleanUp) {
@@ -390,6 +391,7 @@ module.exports = class MessageLoggerV2 {
           'Preserves disk-backed history when saving is re-enabled after a no-save reload by validating, merging, capping, and atomically replacing the completed payload.',
           'Reports when saving is disabled or re-enabled, including whether in-memory logger changes stay memory-only, queue directly, or merge with saved history first.',
           'Adds routed state feedback for high-impact logging, backup, media, Anti-Nuke, update, and destructive-cache settings without making ordinary toggles noisy.',
+          'Prevents BetterDiscord settings callbacks from running twice and replaces stale same-setting alerts when toggles change rapidly.',
           'Cancels stale primary and backup writes when saving is disabled, and keeps saving disabled when recovery cannot complete safely.',
           'Normalizes legacy and mixed-fork data into the current additive schema without duplicating records or discarding surviving enhanced metadata.',
           'Reports valid-backup recovery separately while atomically rebuilding the main data file.',
@@ -569,6 +571,7 @@ module.exports = class MessageLoggerV2 {
     this._nativeNotificationQueue = [];
     this._nativeNotificationActive = null;
     this._nativeNotificationSequence = 0;
+    this._replaceableToasts = new Map();
     DiscordModules.ModalActions.closeModal(`${this.getName()}_DEP_MODAL`);
     if (globalThis.PluginUpdates?.plugins) delete PluginUpdates.plugins['https://gitlab.com/_Lighty_/bdstuff/raw/main/public/plugins/MessageLoggerV2.plugin.js'];
     if (Plugins.get('NoDeleteMessages') && Plugins.isEnabled('NoDeleteMessages'))
@@ -1741,14 +1744,17 @@ module.exports = class MessageLoggerV2 {
     }
   }
   buildSetting(data) {
-    const { id } = data;
+    // BetterDiscord invokes an individual setting callback before its panel-level callback.
+    // Keep the callback only at panel level; supplying it in both places duplicates saves,
+    // feature actions, console entries, and notifications for every settings interaction.
+    const { id, onChange, ...settingData } = data;
     const setting = UI.buildSettingsPanel({
       settings: [{
         id: this.obfuscatedClass(id),
-        ...data,
+        ...settingData,
       }],
       onChange(c, id, v) {
-        data.onChange(v);
+        onChange(v);
       },
     });
     return setting;
@@ -1929,21 +1935,27 @@ module.exports = class MessageLoggerV2 {
         'Message Logger Automatic Backup',
         'Automatic backups enabled, but data saving is disabled; backup writes will resume after data saving is re-enabled.',
         'Automatic backups enabled, but they will remain paused until data saving is re-enabled.',
-        'info'
+        'info',
+        5000,
+        'setting:autoBackup'
       );
     } else if (enabled) {
       this.reportSettingState(
         'Message Logger Automatic Backup',
         'Automatic backups enabled; creating a backup now and scheduling future backups after saved logger changes.',
         'Automatic backups enabled. Creating a backup now; future backups follow saved logger changes.',
-        'info'
+        'info',
+        5000,
+        'setting:autoBackup'
       );
     } else {
       this.reportSettingState(
         'Message Logger Automatic Backup',
         `Automatic backups disabled.${hadPendingBackup ? ' The pending automatic backup was cancelled.' : ''}`,
         `Automatic backups disabled.${hadPendingBackup ? ' The pending backup was cancelled.' : ''}`,
-        'neutral'
+        'neutral',
+        5000,
+        'setting:autoBackup'
       );
     }
     if (!enabled && hadPendingBackup) {
@@ -2529,12 +2541,13 @@ module.exports = class MessageLoggerV2 {
         };
       }
       else if (!setting.onChange) {
+        // createSetting owns the value update and single settings-file save. This callback
+        // contains side effects only; saving here as well would write every ordinary toggle
+        // twice even after BetterDiscord's duplicate callback path is removed.
         setting.callback = val => {
-          this.settings[config.id] = val;
           if (config.action && actions[config.action]) {
             actions[config.action](val);
           }
-          this.saveSettings();
         };
       }
       if (config.inlineValidation && config.validator === 'number') {
@@ -3158,11 +3171,16 @@ module.exports = class MessageLoggerV2 {
       0
     );
   }
-  reportSettingState(title, consoleMessage, notificationMessage, type = 'info', timeout = 5000) {
+  reportSettingState(title, consoleMessage, notificationMessage, type = 'info', timeout = 5000, replaceKey = null) {
     // High-impact settings use one routing point so console detail and the user's selected
-    // BetterDiscord-notification/custom-toast mode cannot drift apart.
+    // BetterDiscord-notification/custom-toast mode cannot drift apart. A per-setting key
+    // replaces an obsolete alert when the same toggle changes again before it disappears.
     Logger.log(consoleMessage);
-    this._showNotification(title, notificationMessage, type, [], timeout);
+    this._showNotification(title, notificationMessage, type, [], timeout, {
+      replaceKey,
+      pauseOnHover: false,
+      instantDismiss: true
+    });
   }
   reportDataSavingResume(requiresRecoveryMerge) {
     // Re-enabling saving has two intentionally different paths. Avoid calling session data
@@ -3178,7 +3196,8 @@ module.exports = class MessageLoggerV2 {
       consoleMessage,
       notificationMessage,
       'info',
-      5000
+      5000,
+      'setting:dontSaveData'
     );
   }
   reportDataSavingDisabled() {
@@ -3189,7 +3208,8 @@ module.exports = class MessageLoggerV2 {
       'Data saving disabled; new logger changes will remain in memory and will not be written to disk. Pending primary and backup writes were cancelled.',
       'Data saving disabled. New logger changes will stay in memory and will not be written to disk.',
       'neutral',
-      5000
+      5000,
+      'setting:dontSaveData'
     );
   }
   reportMajorSettingChange(settingId, enabled) {
@@ -3235,7 +3255,8 @@ module.exports = class MessageLoggerV2 {
       `High-impact setting changed (${settingId}=${enabled}): ${message}`,
       message,
       enabled ? 'info' : 'neutral',
-      settingId === 'deleteCachedFilesWithRecords' && enabled ? 8000 : 5000
+      settingId === 'deleteCachedFilesWithRecords' && enabled ? 8000 : 5000,
+      `setting:${settingId}`
     );
   }
   async rewriteCanonicalDataPayload() {
@@ -4037,7 +4058,19 @@ module.exports = class MessageLoggerV2 {
     }
   }
   showToast(content, options = {}) {
-    const { type = '', icon = '', timeout = 3000, onClick = () => { }, onContext = () => { } } = options;
+    const {
+      type = '',
+      icon = '',
+      timeout = 3000,
+      onClick = () => { },
+      onContext = () => { },
+      replaceKey = null,
+      pauseOnHover = true,
+      instantDismiss = false
+    } = options;
+    // Replaceable setting alerts keep only the latest state. Dismiss the previous custom
+    // toast before creating its replacement so rapid off/on changes never stack.
+    this._replaceableToasts?.get(replaceKey)?.__mlv2Dismiss?.(true);
     let container = document.querySelector('.mlv2-toasts');
     if (!container) {
       container = document.createElement('div');
@@ -4143,22 +4176,37 @@ module.exports = class MessageLoggerV2 {
     let timeoutStartedAt = 0;
     let timeoutRemaining = timeout;
     let timeoutPaused = false;
-    const remove = () => {
-      if (removeTimeoutId) return;
+    let removed = false;
+    const finalizeRemoval = () => {
+      if (removed) return;
+      removed = true;
+      toast.remove();
+      if (replaceKey && this._replaceableToasts?.get(replaceKey) === toast) {
+        this._replaceableToasts.delete(replaceKey);
+      }
+      if (!container.children.length) container.remove();
+    };
+    const remove = (immediate = false) => {
+      if (removed || removeTimeoutId !== null && !immediate) return;
+      if (timeoutId !== null) clearTimeout(timeoutId);
       timeoutId = null;
+      if (removeTimeoutId !== null) {
+        clearTimeout(removeTimeoutId);
+        removeTimeoutId = null;
+      }
+      if (immediate) return finalizeRemoval();
       toast.style.opacity = '0';
       toast.style.transform = 'translateX(400px)';
       removeTimeoutId = setTimeout(() => {
-        toast.remove();
-        if (!container.children.length) {
-          container.remove();
-        }
+        removeTimeoutId = null;
+        finalizeRemoval();
       }, 300);
     };
     const clearTimeouts = () => {
       if (timeoutId !== null) clearTimeout(timeoutId);
       if (removeTimeoutId !== null) clearTimeout(removeTimeoutId);
       timeoutId = null;
+      removeTimeoutId = null;
     };
     const resumeTimeout = () => {
       if (timeout <= 0 || removeTimeoutId !== null || !timeoutPaused && timeoutId !== null) return;
@@ -4183,14 +4231,14 @@ module.exports = class MessageLoggerV2 {
       e.preventDefault();
       e.stopPropagation();
       clearTimeouts();
-      remove();
+      remove(instantDismiss);
       onClick();
     };
     const handleRightClick = (e) => {
       e.preventDefault();
       e.stopPropagation();
       clearTimeouts();
-      remove();
+      remove(instantDismiss);
       onContext();
     };
     const handleMiddleClick = (e) => {
@@ -4198,7 +4246,7 @@ module.exports = class MessageLoggerV2 {
         e.preventDefault();
         e.stopPropagation();
         clearTimeouts();
-        remove();
+        remove(instantDismiss);
       }
     };
     toast.addEventListener('click', handleClick);
@@ -4207,15 +4255,43 @@ module.exports = class MessageLoggerV2 {
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       clearTimeouts();
-      remove();
+      remove(instantDismiss);
     });
-    if (timeout > 0) {
+    if (timeout > 0 && pauseOnHover) {
       toast.addEventListener('pointerenter', pauseTimeout);
       toast.addEventListener('pointerleave', resumeTimeout);
     }
+    // Expose only the narrow lifecycle operation needed by same-setting replacement.
+    toast.__mlv2Dismiss = (immediate = true) => {
+      clearTimeouts();
+      remove(immediate);
+    };
+    if (replaceKey) (this._replaceableToasts ||= new Map()).set(replaceKey, toast);
     return toast;
   }
-  _showNotification(title, content, type, actions, timeout = 4500) {
+  _dismissReplaceableNotification(replaceKey) {
+    if (!replaceKey) return;
+    // Remove both routes so changing notification mode cannot leave an old custom toast
+    // beside a new native notification (or the reverse).
+    this._replaceableToasts?.get(replaceKey)?.__mlv2Dismiss?.(true);
+    if (this._nativeNotificationQueue?.length) {
+      this._nativeNotificationQueue = this._nativeNotificationQueue.filter(
+        notification => notification.replaceKey !== replaceKey
+      );
+    }
+    const active = this._nativeNotificationActive;
+    if (active?.notification?.replaceKey !== replaceKey) return;
+    active.finished = true;
+    clearTimeout(active.yieldTimer);
+    clearTimeout(active.forceCloseTimer);
+    if (this._nativeNotificationActive === active) this._nativeNotificationActive = null;
+    try {
+      active.handle?.close?.();
+    } catch {}
+  }
+  _showNotification(title, content, type, actions, timeout = 4500, options = {}) {
+    const { replaceKey = null, pauseOnHover = true, instantDismiss = false } = options;
+    this._dismissReplaceableNotification(replaceKey);
     if (this.settings.useNotificationsInstead) {
       const notification = {
         title,
@@ -4225,7 +4301,9 @@ module.exports = class MessageLoggerV2 {
         // theme-colored icon when the plugin requests a grey disabled state.
         type: type === 'neutral' ? 'info' : type,
         duration: timeout === 0 ? Infinity : timeout,
-        actions
+        actions,
+        replaceKey,
+        pauseOnHover
       };
       if (type === 'neutral') {
         notification.icon = () => React.createElement(
@@ -4240,7 +4318,10 @@ module.exports = class MessageLoggerV2 {
         type,
         onClick: actions?.[0]?.onClick,
         onContext: actions?.[1]?.onClick,
-        timeout
+        timeout,
+        replaceKey,
+        pauseOnHover,
+        instantDismiss
       });
     }
   }
@@ -4265,6 +4346,7 @@ module.exports = class MessageLoggerV2 {
       yieldTimer: null,
       yieldRemaining: null,
       yieldLastTick: null,
+      forceCloseTimer: null,
       finished: false,
       finish: null
     };
@@ -4272,13 +4354,15 @@ module.exports = class MessageLoggerV2 {
       if (active.finished) return;
       active.finished = true;
       clearTimeout(active.yieldTimer);
+      clearTimeout(active.forceCloseTimer);
       if (this._nativeNotificationActive === active) this._nativeNotificationActive = null;
       if (!this._nativeNotificationQueueStopped) setTimeout(() => this._drainNativeNotificationQueue(), 0);
     };
     this._nativeNotificationActive = active;
     try {
+      const { replaceKey, pauseOnHover, ...displayNotification } = notification;
       active.handle = UI.showNotification({
-        ...notification,
+        ...displayNotification,
         onClose: active.finish
       });
     } catch (error) {
@@ -4289,6 +4373,20 @@ module.exports = class MessageLoggerV2 {
     if (!active.handle) {
       active.finish();
       return;
+    }
+    // BetterDiscord pauses native notification expiry while hovered. Setting-state alerts
+    // opt out by using this independent wall-clock timer, which closes the native card even
+    // if the pointer remains over it.
+    if (notification.pauseOnHover === false && Number.isFinite(active.duration) && active.duration > 0) {
+      active.forceCloseTimer = setTimeout(() => {
+        if (active.finished) return;
+        try {
+          active.handle?.close?.();
+        } finally {
+          active.finish();
+        }
+      }, active.duration);
+      active.forceCloseTimer?.unref?.();
     }
     this._scheduleNativeNotificationYield();
   }
@@ -4323,6 +4421,7 @@ module.exports = class MessageLoggerV2 {
     if (!active) return;
     active.finished = true;
     clearTimeout(active.yieldTimer);
+    clearTimeout(active.forceCloseTimer);
     try {
       active.handle?.close?.();
     } catch {}
@@ -4342,15 +4441,25 @@ module.exports = class MessageLoggerV2 {
       && now - this.lastNotificationTest.time < 500) return;
     this.lastNotificationTest = { mode: useNotifications, time: now };
     const message = useNotifications ? 'Using BetterDiscord notifications' : 'Using custom toasts';
+    const replaceKey = 'setting:useNotificationsInstead';
+    this._dismissReplaceableNotification(replaceKey);
     if (useNotifications) {
       this._enqueueNativeNotification({
         title: 'Notification Test',
         content: message,
         type: 'info',
-        duration: 5000
+        duration: 5000,
+        replaceKey,
+        pauseOnHover: false
       });
     } else {
-      this.showToast(message, { type: 'info', timeout: 5000 });
+      this.showToast(message, {
+        type: 'info',
+        timeout: 5000,
+        replaceKey,
+        pauseOnHover: false,
+        instantDismiss: true
+      });
     }
   }
   _getChangedAttachments(oldAttachments, newAttachments, messageId, channelId, guildId) {

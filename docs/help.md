@@ -169,7 +169,7 @@ The separate **Debug** settings group can report automatic-backup queue delays, 
 
 ### High-impact setting feedback
 
-Changing **Only log whitelist**, **Auto backup data**, **Cache media locally**, **Enable Anti Nuke**, **Automatic updates**, **Only render locally cached attachments**, or **Delete cached files with log records** writes the new state to the console and reports it through your selected notification mode. Enabled states use the info color; disabled states use Discord's theme-neutral presentation. If the native notification API cannot request a grey type, the plugin keeps its theme-colored native card and uses a neutral icon. Debug alerts remain warning-colored, and actual errors remain red.
+Changing **Only log whitelist**, **Auto backup data**, **Cache media locally**, **Enable Anti Nuke**, **Automatic updates**, **Only render locally cached attachments**, or **Delete cached files with log records** writes the new state once to the console and reports it once through your selected notification mode. Enabled states use the info color; disabled states use Discord's theme-neutral presentation. If the native notification API cannot request a grey type, the plugin keeps its theme-colored native card and uses a neutral icon. Rapid changes replace the previous alert for that setting, setting alerts do not pause while hovered, and clicking a custom setting toast dismisses it immediately. Debug alerts remain warning-colored, and actual errors remain red.
 
 ### Nothing is logged
 

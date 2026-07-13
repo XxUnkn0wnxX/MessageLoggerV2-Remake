@@ -220,6 +220,20 @@ test('backup diagnostics remain opt-in under their own warning-colored Debug cat
   assert.match(source, /if \(this\.settings\?\.debugToasts\)[\s\S]*this\._showNotification\('Message Logger Debug', message, 'warning'/);
 });
 
+test('settings callbacks have one BetterDiscord owner', () => {
+  const buildSetting = source.slice(source.indexOf('buildSetting(data)'), source.indexOf('createSetting(data)'));
+  assert.match(buildSetting, /const \{ id, onChange, \.\.\.settingData \} = data/);
+  assert.match(buildSetting, /settings: \[\{[\s\S]*\.\.\.settingData/);
+  assert.match(buildSetting, /onChange\(c, id, v\) \{[\s\S]*onChange\(v\)/);
+  assert.doesNotMatch(buildSetting, /\.\.\.data/);
+  const ordinaryCallback = source.slice(
+    source.indexOf('else if (!setting.onChange)'),
+    source.indexOf('if (config.inlineValidation')
+  );
+  assert.match(ordinaryCallback, /setting\.callback = val =>/);
+  assert.doesNotMatch(ordinaryCallback, /saveSettings\(\)/);
+});
+
 test('high-impact setting changes use routed theme-aware state feedback', () => {
   for (const [settingName, action] of [
     ['Only log whitelist', 'reportLoggingScope'],
@@ -233,6 +247,10 @@ test('high-impact setting changes use routed theme-aware state feedback', () => 
   assert.match(source, /enabled \? 'info' : 'neutral'/);
   assert.match(source, /'neutral': \{ bg: 'var\(--background-tertiary, #4f545c\)', fg: 'var\(--text-default, #fff\)'/);
   assert.match(source, /type: type === 'neutral' \? 'info' : type[\s\S]*var\(--interactive-normal\)/);
+  assert.match(source, /reportSettingState\(title,[\s\S]*replaceKey[\s\S]*pauseOnHover: false[\s\S]*instantDismiss: true/);
+  assert.match(source, /_dismissReplaceableNotification\(replaceKey\)[\s\S]*notification\.replaceKey !== replaceKey[\s\S]*active\.handle\?\.close/);
+  assert.match(source, /if \(timeout > 0 && pauseOnHover\)[\s\S]*pointerenter[\s\S]*pointerleave/);
+  assert.match(source, /notification\.pauseOnHover === false[\s\S]*active\.forceCloseTimer = setTimeout/);
   assert.match(source, /Notification mode changed to[\s\S]*Using BetterDiscord notifications[\s\S]*type: 'info'/);
 });
 

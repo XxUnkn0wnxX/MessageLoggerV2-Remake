@@ -6,6 +6,7 @@ const test = require('node:test');
 
 const {
   Data,
+  UI,
   createPlugin,
   loggerEvents,
   resetHarness
@@ -174,6 +175,34 @@ test('debug warning alerts honor the selected native-notification or custom-toas
   assert.equal(customToasts[0][1].type, 'warning');
 });
 
+test('BetterDiscord settings invoke each plugin callback exactly once', t => {
+  const originalBuildSettingsPanel = UI.buildSettingsPanel;
+  t.after(() => { UI.buildSettingsPanel = originalBuildSettingsPanel; });
+  UI.buildSettingsPanel = panel => panel;
+  const changes = [];
+  let saves = 0;
+  const plugin = createPlugin({
+    obfuscatedClass: id => id,
+    settings: { antiNukeEnabled: true },
+    saveSettings() { saves++; }
+  });
+
+  const panel = plugin.createSetting({
+    id: 'antiNukeEnabled',
+    type: 'switch',
+    callback(value) { changes.push(value); }
+  });
+
+  // BetterDiscord invokes an item callback first when present, then the panel callback.
+  panel.settings[0].onChange?.(false);
+  panel.onChange(null, panel.settings[0].id, false);
+
+  assert.equal(panel.settings[0].onChange, undefined);
+  assert.deepEqual(changes, [false]);
+  assert.equal(plugin.settings.antiNukeEnabled, false);
+  assert.equal(saves, 1);
+});
+
 test('neutral state alerts use a theme-colored native card or custom grey toast', () => {
   const nativeNotifications = [];
   const customToasts = [];
@@ -215,8 +244,184 @@ test('high-impact setting feedback uses info for enabled and neutral for disable
 
   assert.deepEqual(notifications.map(event => event[2]), settingIds.flatMap(() => ['info', 'neutral']));
   assert.ok(notifications.every(event => /enabled|disabled/i.test(event[1])));
+  assert.deepEqual(
+    notifications.map(event => event[5].replaceKey),
+    settingIds.flatMap(settingId => [`setting:${settingId}`, `setting:${settingId}`])
+  );
+  assert.ok(notifications.every(event => event[5].pauseOnHover === false));
+  assert.ok(notifications.every(event => event[5].instantDismiss === true));
   assert.equal(loggerEvents.filter(event => event[0] === 'log'
     && String(event[1]).includes('High-impact setting changed')).length, settingIds.length * 2);
+});
+
+test('rapid same-setting alerts replace the previous routed notification only', () => {
+  const nativeNotifications = [];
+  let nativeClosed = 0;
+  const nativePlugin = createPlugin({
+    settings: { useNotificationsInstead: true },
+    _nativeNotificationQueue: [
+      { replaceKey: 'setting:antiNukeEnabled', content: 'queued stale state' },
+      { replaceKey: 'setting:cacheAllImages', content: 'unrelated state' }
+    ],
+    _nativeNotificationActive: {
+      notification: { replaceKey: 'setting:antiNukeEnabled' },
+      finished: false,
+      yieldTimer: null,
+      forceCloseTimer: null,
+      handle: { close() { nativeClosed++; } }
+    },
+    _enqueueNativeNotification(notification) { nativeNotifications.push(notification); }
+  });
+
+  nativePlugin._showNotification(
+    'Anti Nuke',
+    'Anti Nuke enabled.',
+    'info',
+    [],
+    5000,
+    { replaceKey: 'setting:antiNukeEnabled', pauseOnHover: false, instantDismiss: true }
+  );
+
+  assert.equal(nativeClosed, 1);
+  assert.equal(nativePlugin._nativeNotificationActive, null);
+  assert.deepEqual(nativePlugin._nativeNotificationQueue.map(item => item.replaceKey), ['setting:cacheAllImages']);
+  assert.equal(nativeNotifications[0].replaceKey, 'setting:antiNukeEnabled');
+  assert.equal(nativeNotifications[0].pauseOnHover, false);
+
+  const customToasts = [];
+  const customDismissals = [];
+  const customPlugin = createPlugin({
+    settings: { useNotificationsInstead: false },
+    _replaceableToasts: new Map([[
+      'setting:antiNukeEnabled',
+      { __mlv2Dismiss(immediate) { customDismissals.push(immediate); } }
+    ]]),
+    showToast(content, options) { customToasts.push([content, options]); }
+  });
+
+  customPlugin._showNotification(
+    'Anti Nuke',
+    'Anti Nuke disabled.',
+    'neutral',
+    [],
+    5000,
+    { replaceKey: 'setting:antiNukeEnabled', pauseOnHover: false, instantDismiss: true }
+  );
+
+  assert.deepEqual(customDismissals, [true]);
+  assert.equal(customToasts[0][1].replaceKey, 'setting:antiNukeEnabled');
+  assert.equal(customToasts[0][1].pauseOnHover, false);
+  assert.equal(customToasts[0][1].instantDismiss, true);
+});
+
+test('custom setting toasts replace immediately, ignore hover, and dismiss on click', t => {
+  const previousDocument = global.document;
+  const previousRequestAnimationFrame = global.requestAnimationFrame;
+  t.after(() => {
+    global.document = previousDocument;
+    global.requestAnimationFrame = previousRequestAnimationFrame;
+  });
+
+  const elements = [];
+  const makeElement = tagName => {
+    const listeners = {};
+    const element = {
+      tagName,
+      className: '',
+      id: '',
+      innerHTML: '',
+      style: {},
+      children: [],
+      parentNode: null,
+      removed: false,
+      listeners,
+      appendChild(child) {
+        this.children.push(child);
+        child.parentNode = this;
+        return child;
+      },
+      addEventListener(name, listener) { listeners[name] = listener; },
+      remove() {
+        this.removed = true;
+        if (this.parentNode) {
+          this.parentNode.children = this.parentNode.children.filter(child => child !== this);
+          this.parentNode = null;
+        }
+      }
+    };
+    elements.push(element);
+    return element;
+  };
+  const appMount = makeElement('div');
+  appMount.id = 'app-mount';
+  const head = makeElement('head');
+  global.document = {
+    head,
+    createElement: makeElement,
+    querySelector(selector) {
+      if (selector === '#app-mount') return appMount;
+      if (selector === '.mlv2-toasts') {
+        return elements.find(element => element.className === 'mlv2-toasts' && !element.removed) || null;
+      }
+      if (selector === '#mlv2-toast-styles') {
+        return elements.find(element => element.id === 'mlv2-toast-styles' && !element.removed) || null;
+      }
+      return null;
+    }
+  };
+  global.requestAnimationFrame = callback => callback();
+  const plugin = createPlugin({ _replaceableToasts: new Map() });
+  const options = {
+    type: 'info',
+    timeout: 60_000,
+    replaceKey: 'setting:antiNukeEnabled',
+    pauseOnHover: false,
+    instantDismiss: true
+  };
+
+  const first = plugin.showToast('Anti Nuke enabled.', options);
+  const second = plugin.showToast('Anti Nuke disabled.', { ...options, type: 'neutral' });
+
+  assert.equal(first.removed, true);
+  assert.equal(second.listeners.pointerenter, undefined);
+  assert.equal(second.listeners.pointerleave, undefined);
+  assert.equal(plugin._replaceableToasts.get(options.replaceKey), second);
+
+  second.listeners.click({ preventDefault() {}, stopPropagation() {} });
+
+  assert.equal(second.removed, true);
+  assert.equal(plugin._replaceableToasts.has(options.replaceKey), false);
+});
+
+test('non-hovering native setting alerts expire on wall-clock time', async t => {
+  const originalShowNotification = UI.showNotification;
+  t.after(() => { UI.showNotification = originalShowNotification; });
+  let closed = 0;
+  UI.showNotification = notification => ({
+    close() {
+      closed++;
+      notification.onClose?.();
+    }
+  });
+  const plugin = createPlugin({
+    _nativeNotificationQueueStopped: false,
+    _nativeNotificationQueue: [],
+    _nativeNotificationActive: null,
+    _nativeNotificationSequence: 0
+  });
+
+  plugin._enqueueNativeNotification({
+    title: 'State',
+    content: 'Enabled',
+    type: 'info',
+    duration: 10,
+    replaceKey: 'setting:test',
+    pauseOnHover: false
+  });
+  await new Promise(resolve => setTimeout(resolve, 30));
+
+  assert.equal(closed, 1);
+  assert.equal(plugin._nativeNotificationActive, null);
 });
 
 test('automatic backup state feedback covers enabled, disabled, and saving-paused paths', () => {
@@ -232,6 +437,9 @@ test('automatic backup state feedback covers enabled, disabled, and saving-pause
   assert.equal(backupSaves, 1);
   assert.equal(notifications.at(-1)[2], 'info');
   assert.match(notifications.at(-1)[1], /enabled.*creating a backup now/i);
+  assert.equal(notifications.at(-1)[5].replaceKey, 'setting:autoBackup');
+  assert.equal(notifications.at(-1)[5].pauseOnHover, false);
+  assert.equal(notifications.at(-1)[5].instantDismiss, true);
 
   plugin.saveBackupTimeout = setTimeout(() => {}, 60_000);
   plugin.handleAutoBackupSetting(false);
@@ -257,8 +465,13 @@ test('notification mode changes log and preview the selected route as info', () 
   plugin.handleNotificationModeChange(false);
 
   assert.deepEqual(previews, [true, false]);
-  assert.ok(loggerEvents.some(event => event[1] === 'Notification mode changed to BetterDiscord notifications.'));
-  assert.ok(loggerEvents.some(event => event[1] === 'Notification mode changed to custom toasts.'));
+  assert.deepEqual(
+    loggerEvents.filter(event => String(event[1]).startsWith('Notification mode changed to')),
+    [
+      ['log', 'Notification mode changed to BetterDiscord notifications.'],
+      ['log', 'Notification mode changed to custom toasts.']
+    ]
+  );
 
   const nativeNotifications = [];
   const customToasts = [];
@@ -273,8 +486,13 @@ test('notification mode changes log and preview the selected route as info', () 
 
   assert.equal(nativeNotifications[0].type, 'info');
   assert.match(nativeNotifications[0].content, /BetterDiscord notifications/);
+  assert.equal(nativeNotifications[0].replaceKey, 'setting:useNotificationsInstead');
+  assert.equal(nativeNotifications[0].pauseOnHover, false);
   assert.equal(customToasts[0][1].type, 'info');
   assert.match(customToasts[0][0], /custom toasts/);
+  assert.equal(customToasts[0][1].replaceKey, 'setting:useNotificationsInstead');
+  assert.equal(customToasts[0][1].pauseOnHover, false);
+  assert.equal(customToasts[0][1].instantDismiss, true);
 });
 
 test('backup debug lifecycle reports the queue delay, write start, and completion', () => {

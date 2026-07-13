@@ -26,7 +26,7 @@ A maintained BetterDiscord message logger for deleted, edited, purged, and ghost
 
 - Server, channel, DM, thread, mute, NSFW, bot, blocked-user, author, and local-action logging controls.
 - Separate guild/DM alert toggles, notification location lists, selected-location overrides, native BetterDiscord notifications, and custom actionable toasts.
-- Console and routed notification feedback for high-impact settings, with info-blue enabled states, theme-neutral disabled states, warning-colored backup diagnostics, and red errors.
+- One-per-change console and routed notification feedback for high-impact settings, with info-blue enabled states, theme-neutral disabled states, warning-colored backup diagnostics, and red errors.
 - Optional local media caching, cache-size/type controls, local-only rendering, CDN fallback, custom cache paths, and cached-file cleanup when records are removed.
 - Safe no-save sessions: re-enabling saving after a reload validates and merges disk and session history before an atomic primary-file replacement.
 - Atomic legacy/mixed-fork normalization, clearly reported valid-backup recovery, configurable bounded backup timing with optional queue/write diagnostics, additive enhanced metadata, and fail-closed protection for newer schemas.
