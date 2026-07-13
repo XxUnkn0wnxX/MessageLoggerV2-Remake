@@ -19,8 +19,10 @@ Logged message content and any enabled media cache remain local to this device. 
 - Use **Message Logger > Open Logs** from supported context menus.
 - Use **Open Log For Guild**, **Channel**, **Thread**, **DM**, or **User** where available.
 - Keyboard shortcuts are captured under **Misc settings**:
-  - `Ctrl+M` by default: clear any old filter and open all logs.
-  - `Ctrl+N` by default: open logs filtered to the channel selected when the shortcut is pressed.
+  - `Ctrl+M` by default: toggle all logs.
+  - `Ctrl+N` by default: toggle logs filtered to the channel selected when the shortcut is pressed.
+  - If the open logger already has the shortcut's exact filter state—even when opened manually—the shortcut closes it. A different logger state closes and reopens in the requested state.
+  - Discord's native media viewer closes first—even when opened from a normal live message—then stacked MessageLogger help, filter-help, tracked plugin-owned panels, and logger user popouts close top-down before the requested logger view reopens. All other Discord settings, modals, and panels remain untouched.
   - Custom printable/navigation shortcuts require modifiers and exactly one trigger key; `F1` through `F24` may be used alone. Overlapping bindings are rejected inline.
   - Clear either recorder to disable that shortcut.
 

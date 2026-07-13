@@ -65,6 +65,35 @@ test('legacy configs gain shortcut defaults while valid custom and cleared bindi
   assert.deepEqual(invalid.openFilteredLogsKeybind, ['Control', 'n']);
 });
 
+test('a valid legacy file initializes missing settings without corruption classification', t => {
+  const pluginDir = temporaryDirectory(t);
+  const plugin = createPlugin({ pluginDir });
+  const configPath = path.join(pluginDir, 'MessageLoggerV2.config.json');
+  const original = JSON.stringify({
+    settings: {
+      autoBackup: true,
+      flags: 2,
+      forkSpecificSetting: { keep: true }
+    }
+  });
+  fs.writeFileSync(configPath, original, 'utf8');
+
+  const result = plugin.loadSettingsConfigForStartup(defaults, { fs, path });
+  assert.equal(result.existed, true);
+  assert.equal(result.repaired, false);
+  assert.equal(result.backupPath, null);
+  assert.equal(fs.existsSync(path.join(pluginDir, 'MessageLoggerV2.config.corrupt-backup.json')), false);
+
+  const settings = normalizeRecovered(plugin, result.settings);
+  assert.equal(settings.autoBackup, true);
+  assert.equal(settings.autoBackupIntervalSeconds, 20);
+  assert.equal(settings.debugLogging, false);
+  assert.equal(settings.debugToasts, false);
+  assert.deepEqual(settings.openLogsKeybind, ['Control', 'm']);
+  assert.deepEqual(settings.openFilteredLogsKeybind, ['Control', 'n']);
+  assert.deepEqual(settings.forkSpecificSetting, { keep: true });
+});
+
 test('a trailing comma preserves existing settings and restores only missing defaults', () => {
   const plugin = createPlugin();
   const original = `{

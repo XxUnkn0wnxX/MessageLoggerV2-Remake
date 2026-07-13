@@ -22,6 +22,68 @@ function keyboardEvent(key, overrides = {}) {
   };
 }
 
+const waitForShortcutTransition = () => new Promise(resolve => setTimeout(resolve, 10));
+
+function createShortcutModalPlugin({
+  filter = '',
+  openKeys = [],
+  popoutCount = 0,
+  selectedChannelId = 'live-channel',
+  mediaViewerOpen = false
+} = {}) {
+  const modalKeys = new Set(openKeys);
+  if (mediaViewerOpen) modalKeys.add('discord-media-viewer');
+  const closeOrder = [];
+  let opened = 0;
+  let popoutCloses = 0;
+  const plugin = createPlugin({
+    style: { menu: 'logger-modal' },
+    loggerHelpModalKey: 'logger-help',
+    filterHelpModalKey: 'filter-help',
+    menu: { open: modalKeys.has('logger-modal'), filter, scrollPosition: 99, shownMessages: 5, messages: ['old'] },
+    _loggerOwnedModalKeys: new Set(openKeys),
+    _loggerShortcutTransitionId: 0,
+    _loggerShortcutReopenTimeout: null,
+    ModalStack: {
+      hasModalOpen(key) { return modalKeys.has(key); },
+      closeModal(key) {
+        closeOrder.push(key);
+        modalKeys.delete(key);
+      }
+    },
+    tools: {
+      getNativeMediaModal() {
+        return { modalKey: 'discord-media-viewer' };
+      },
+      popoutStack: [],
+      popoutManager: {
+        popouts: new Map(Array.from({ length: popoutCount }, (_, index) => [index, {}])),
+        closeAllPopouts() {
+          popoutCloses++;
+          this.popouts.clear();
+        }
+      }
+    },
+    getSelectedTextChannel() {
+      return selectedChannelId ? { id: selectedChannelId } : null;
+    },
+    openWindow() {
+      opened++;
+      this.menu.open = true;
+      modalKeys.add(this.style.menu);
+      this.trackLoggerOwnedModalKey(this.style.menu);
+    },
+    showToast(...args) { toastEvents.push(args); }
+  });
+  return {
+    closeOrder,
+    modalKeys,
+    plugin,
+    get opened() { return opened; },
+    get popoutCloses() { return popoutCloses; }
+  };
+}
+
 test.beforeEach(resetHarness);
 
 test('keybind normalization accepts native captures, aliases, order changes, and disabled bindings', () => {
@@ -147,62 +209,136 @@ test('global shortcut matching is exact, order independent, repeat safe, and con
   assert.deepEqual(actions, [false, true]);
 });
 
-test('shortcut actions clear stale filters, resolve the live channel, and refilter an open logger', () => {
-  let opened = 0;
-  let refiltered = 0;
-  const plugin = createPlugin({
-    menu: { open: false, filter: 'channel:stale', scrollPosition: 99 },
-    openWindow() { opened++; },
-    refilterMessages() { refiltered++; },
-    getSelectedTextChannel() { return { id: 'live-channel' }; },
-    showToast(...args) { toastEvents.push(args); }
+test('shortcuts toggle matching manually opened all and selected-channel logger states closed', () => {
+  const all = createShortcutModalPlugin({ openKeys: ['logger-modal'], filter: '' });
+  assert.equal(all.plugin.openLogsFromShortcut(false), true);
+  assert.equal(all.opened, 0);
+  assert.equal(all.modalKeys.has('logger-modal'), false);
+  assert.equal(all.plugin.menu.open, false);
+  assert.equal(all.plugin.menu.filter, '');
+
+  const filtered = createShortcutModalPlugin({
+    openKeys: ['logger-modal'],
+    filter: 'channel:live-channel'
   });
-
-  assert.equal(plugin.openLogsFromShortcut(false), true);
-  assert.equal(plugin.menu.filter, '');
-  assert.equal(plugin.menu.scrollPosition, 0);
-  assert.equal(opened, 1);
-
-  assert.equal(plugin.openLogsFromShortcut(true), true);
-  assert.equal(plugin.menu.filter, 'channel:live-channel');
-  assert.equal(opened, 2);
-
-  plugin.menu.open = true;
-  assert.equal(plugin.openLogsFromShortcut(false), true);
-  assert.equal(plugin.menu.filter, '');
-  assert.equal(refiltered, 1);
-  assert.equal(opened, 2);
+  assert.equal(filtered.plugin.openLogsFromShortcut(true), true);
+  assert.equal(filtered.opened, 0);
+  assert.equal(filtered.modalKeys.has('logger-modal'), false);
+  assert.equal(filtered.plugin.menu.open, false);
 });
 
-test('a stale menu flag after modal close reopens instead of refiltering detached UI', () => {
-  let opened = 0;
-  let refiltered = 0;
-  const plugin = createPlugin({
-    style: { menu: 'logger-modal' },
-    ModalStack: { hasModalOpen() { return false; } },
-    menu: { open: true, filter: 'channel:stale', scrollPosition: 10, shownMessages: 5, messages: ['old'] },
-    openWindow() { opened++; },
-    refilterMessages() { refiltered++; }
+test('shortcuts close and reopen when switching all, selected-channel, or custom manual states', async () => {
+  const state = createShortcutModalPlugin({ openKeys: ['logger-modal'], filter: '' });
+
+  assert.equal(state.plugin.openLogsFromShortcut(true), true);
+  await waitForShortcutTransition();
+  assert.equal(state.opened, 1);
+  assert.equal(state.plugin.menu.filter, 'channel:live-channel');
+  assert.equal(state.modalKeys.has('logger-modal'), true);
+
+  assert.equal(state.plugin.openLogsFromShortcut(false), true);
+  await waitForShortcutTransition();
+  assert.equal(state.opened, 2);
+  assert.equal(state.plugin.menu.filter, '');
+
+  state.plugin.menu.filter = 'message:custom';
+  assert.equal(state.plugin.openLogsFromShortcut(true), true);
+  await waitForShortcutTransition();
+  assert.equal(state.opened, 3);
+  assert.equal(state.plugin.menu.filter, 'channel:live-channel');
+});
+
+test('stacked MessageLogger help pages close top-down before the matching logger reopens', async () => {
+  const state = createShortcutModalPlugin({
+    openKeys: ['logger-modal', 'filter-help', 'logger-help', 'unrelated-discord-modal'],
+    filter: ''
+  });
+  // Only keys opened through MessageLogger are owned. The unrelated modal must not be touched.
+  state.plugin._loggerOwnedModalKeys.delete('unrelated-discord-modal');
+  // Reopening a stable named page must move it to the top of the owned stack.
+  state.plugin.trackLoggerOwnedModalKey('filter-help');
+
+  assert.equal(state.plugin.openLogsFromShortcut(false), true);
+  await waitForShortcutTransition();
+  assert.deepEqual(state.closeOrder, ['filter-help', 'logger-help', 'logger-modal']);
+  assert.equal(state.opened, 1);
+  assert.equal(state.modalKeys.has('logger-modal'), true);
+  assert.equal(state.modalKeys.has('unrelated-discord-modal'), true);
+  assert.equal(state.popoutCloses, 1);
+});
+
+test('a matching logger with an owned popout closes the popout and reopens the logger', async () => {
+  const state = createShortcutModalPlugin({
+    openKeys: ['logger-modal'],
+    filter: '',
+    popoutCount: 1
   });
 
-  assert.equal(plugin.openLogsFromShortcut(false), true);
-  assert.equal(plugin.menu.open, false);
-  assert.equal(plugin.menu.filter, '');
-  assert.equal(plugin.menu.shownMessages, -1);
-  assert.deepEqual(plugin.menu.messages, []);
-  assert.equal(opened, 1);
-  assert.equal(refiltered, 0);
+  assert.equal(state.plugin.openLogsFromShortcut(false), true);
+  await waitForShortcutTransition();
+  assert.equal(state.popoutCloses, 1);
+  assert.equal(state.opened, 1);
+  assert.equal(state.modalKeys.has('logger-modal'), true);
+});
+
+test('any native Discord media viewer closes before the requested logger state opens', async () => {
+  const normalDiscordMedia = createShortcutModalPlugin({ mediaViewerOpen: true });
+
+  assert.equal(normalDiscordMedia.plugin.openLogsFromShortcut(false), true);
+  await waitForShortcutTransition();
+  assert.deepEqual(normalDiscordMedia.closeOrder, ['discord-media-viewer']);
+  assert.equal(normalDiscordMedia.modalKeys.has('discord-media-viewer'), false);
+  assert.equal(normalDiscordMedia.opened, 1);
+  assert.equal(normalDiscordMedia.modalKeys.has('logger-modal'), true);
+
+  const loggerMedia = createShortcutModalPlugin({
+    openKeys: ['logger-modal'],
+    filter: '',
+    mediaViewerOpen: true
+  });
+
+  assert.equal(loggerMedia.plugin.openLogsFromShortcut(false), true);
+  await waitForShortcutTransition();
+  assert.deepEqual(loggerMedia.closeOrder, ['discord-media-viewer', 'logger-modal']);
+  assert.equal(loggerMedia.opened, 1, 'the matching logger reopens after its overlaid media viewer closes');
+  assert.equal(loggerMedia.modalKeys.has('logger-modal'), true);
+});
+
+test('rapid shortcut switches cancel stale queued logger reopens', async () => {
+  const state = createShortcutModalPlugin({ openKeys: ['logger-modal'], filter: '' });
+  assert.equal(state.plugin.openLogsFromShortcut(true), true);
+  assert.equal(state.plugin.openLogsFromShortcut(false), true);
+  await waitForShortcutTransition();
+  assert.equal(state.opened, 1);
+  assert.equal(state.plugin.menu.filter, '');
+  assert.equal(state.modalKeys.has('logger-modal'), true);
+});
+
+test('a stale menu flag after modal close reopens the requested actual state', async () => {
+  const state = createShortcutModalPlugin({ filter: 'channel:stale' });
+  state.plugin.menu.open = true;
+
+  assert.equal(state.plugin.openLogsFromShortcut(false), true);
+  assert.equal(state.plugin.menu.open, false);
+  assert.equal(state.plugin.menu.filter, '');
+  assert.equal(state.plugin.menu.shownMessages, -1);
+  assert.deepEqual(state.plugin.menu.messages, []);
+  await waitForShortcutTransition();
+  assert.equal(state.opened, 1);
+  assert.equal(state.plugin.menu.open, true);
 });
 
 test('filtered shortcut fails visibly when no text channel is selected', () => {
-  const plugin = createPlugin({
-    menu: { open: false, filter: '', scrollPosition: 0 },
-    selectedChannel: null,
-    getSelectedTextChannel() { return null; },
-    showToast(...args) { toastEvents.push(args); }
+  const state = createShortcutModalPlugin({
+    openKeys: ['logger-modal'],
+    filter: '',
+    selectedChannelId: null
   });
+  const { plugin } = state;
 
   assert.equal(plugin.openLogsFromShortcut(true), false);
   assert.equal(toastEvents.length, 1);
   assert.match(toastEvents[0][0], /Select a channel/);
+  assert.equal(state.modalKeys.has('logger-modal'), true, 'failed navigation must leave the current logger untouched');
+  assert.deepEqual(state.closeOrder, []);
 });

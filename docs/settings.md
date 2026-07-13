@@ -74,8 +74,8 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Cache all attachment types | Off | Also caches videos, audio, and other non-image files. |
 | Max cache file size | `0` MB | Skips larger attachment files; blank or `0` disables the limit. Embed images and stickers are unaffected. |
 | Display open logs button | On | Shows the logger button beside channel search. |
-| Open all logs keybind | `Ctrl+M` | Uses BetterDiscord's native keybind recorder. The shortcut clears any stale logger filter before opening; clear the recorder to disable it. Unsafe or overlapping captures are rejected inline. |
-| Open selected channel logs keybind | `Ctrl+N` | Uses BetterDiscord's native keybind recorder and resolves the selected channel when pressed. It also refilters an already-open logger; clear the recorder to disable it. Unsafe or overlapping captures are rejected inline. |
+| Toggle all logs keybind | `Ctrl+M` | Uses BetterDiscord's native keybind recorder. It closes an open unfiltered logger; any other logger state or stacked plugin-owned panel closes and reopens as all logs. An open native media viewer closes first, including one opened from a normal Discord message. Clear the recorder to disable it. Unsafe or overlapping captures are rejected inline. |
+| Toggle selected channel logs keybind | `Ctrl+N` | Resolves the selected channel when pressed. It closes an open logger already filtered to that exact channel; any other logger state or stacked plugin-owned panel closes and reopens with that channel filter. Native media viewers close first; all other Discord panels remain open. Clear the recorder to disable it. |
 | Automatically refresh new forum posts | On | Uses Discord's native **New Post(s)** control so cards appear without leaving and reopening the forum. |
 | Block spam edit notifications | Off | Reduces repeated edit notifications from rapid edits. |
 

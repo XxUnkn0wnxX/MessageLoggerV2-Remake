@@ -149,8 +149,8 @@ test('all fresh-install settings defaults remain stable', () => {
 });
 
 test('native BetterDiscord keybind recorders drive capture-phase logger shortcuts', () => {
-  assert.match(source, /name: 'Open all logs keybind'[\s\S]*?id: 'openLogsKeybind'[\s\S]*?type: 'keybind'[\s\S]*?validator: 'loggerKeybind'[\s\S]*?max: 4[\s\S]*?clearable: true/);
-  assert.match(source, /name: 'Open selected channel logs keybind'[\s\S]*?id: 'openFilteredLogsKeybind'[\s\S]*?type: 'keybind'[\s\S]*?validator: 'loggerKeybind'[\s\S]*?max: 4[\s\S]*?clearable: true/);
+  assert.match(source, /name: 'Toggle all logs keybind'[\s\S]*?id: 'openLogsKeybind'[\s\S]*?type: 'keybind'[\s\S]*?validator: 'loggerKeybind'[\s\S]*?max: 4[\s\S]*?clearable: true/);
+  assert.match(source, /name: 'Toggle selected channel logs keybind'[\s\S]*?id: 'openFilteredLogsKeybind'[\s\S]*?type: 'keybind'[\s\S]*?validator: 'loggerKeybind'[\s\S]*?max: 4[\s\S]*?clearable: true/);
   const recorder = source.slice(source.indexOf('createValidatedLoggerKeybindRecorder(config)'), source.indexOf('normalizeAutoBackupIntervalSeconds(value)'));
   assert.match(recorder, /Components\.KeybindInput/);
   assert.match(recorder, /plugin\._pressedShortcutKeys\?\.clear\?\.\(\)/);
@@ -164,6 +164,17 @@ test('native BetterDiscord keybind recorders drive capture-phase logger shortcut
   assert.match(source, /window\.addEventListener\('blur', this\.shortcutBlurListener\)/);
   assert.match(source, /window\.removeEventListener\('blur', this\.shortcutBlurListener\)/);
   assert.match(source, /this\.ensureLoggerKeybindSettings\(this\.settings, defaultSettings\)/);
+  const shortcutFlow = source.slice(
+    source.indexOf('cancelPendingLoggerShortcutTransition()'),
+    source.indexOf('ensureRequiredLegacySettings(settings = this.settings)')
+  );
+  assert.match(shortcutFlow, /alreadyInDesiredState[\s\S]*hasAuxiliaryModal[\s\S]*scheduleLoggerShortcutReopen/);
+  assert.match(shortcutFlow, /getOpenLoggerOwnedModalKeys\(\)[\s\S]*\.reverse\(\)[\s\S]*closeModal/);
+  assert.match(shortcutFlow, /getOpenNativeMediaViewerModalKey[\s\S]*closeModal/);
+  assert.match(source, /_nativeMediaModal = \{ openMediaModal: openerFunc, modalKey, module \}/);
+  assert.match(shortcutFlow, /_loggerShortcutTransitionId[\s\S]*_loggerShortcutReopenTimeout/);
+  assert.doesNotMatch(shortcutFlow, /closeAllModals|LAYER_POP_ALL|MODAL_POP_ALL/);
+  assert.ok((source.match(/trackLoggerOwnedModalKey\(modalKey, name\)/g) || []).length >= 4);
 });
 
 test('native and cloned Trash actions remain scoped to indexed logger deletions', () => {

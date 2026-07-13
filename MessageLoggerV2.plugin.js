@@ -325,6 +325,7 @@ module.exports = class MessageLoggerV2 {
         window.removeEventListener('blur', this.shortcutBlurListener);
       }
       this._pressedShortcutKeys?.clear?.();
+      this.cancelPendingLoggerShortcutTransition?.();
       this.removeOpenLogsButton();
       if (this.style?.css) {
         DOM.removeStyle(this.style.css);
@@ -332,9 +333,11 @@ module.exports = class MessageLoggerV2 {
       if (this.stringHeldCaptive) {
         DOM.removeStyle(this.stringHeldCaptive);
       }
+      this.dismissLoggerShortcutSurfaces?.();
       if (this.ModalStack?.closeModal && this.style?.menu) {
         this.ModalStack.closeModal(this.style.menu);
       }
+      this._loggerOwnedModalKeys?.clear?.();
       if (typeof this._modalsApiUnsubcribe === 'function') {
         this._modalsApiUnsubcribe();
       }
@@ -451,7 +454,8 @@ module.exports = class MessageLoggerV2 {
         title: 'Compatibility and interface',
         type: 'fixed',
         items: [
-          'Restores the advertised logger shortcuts and adds native BetterDiscord capture controls for custom or disabled bindings.',
+          'Restores the advertised logger shortcuts, adds native BetterDiscord capture controls, and makes each shortcut toggle its actual all-logs or selected-channel state.',
+          'Closes native media viewers first and stacked MessageLogger help and panel modals top-down before shortcut view switches, while leaving every other Discord panel untouched.',
           'Lets Discord\'s native Trash action remove restored messages from the local log, adds the local-only fallback only when native Trash is absent, and shows matching Trash controls only while Shift is held; ordinary right-click Delete still confirms.',
           'Keeps Discord\'s native Delete confirmation lifecycle intact after plugin hot reloads when Trash performs a local-only logger removal.',
           'Resolves minified single-function Trash icon exports, keeps every logger-owned Trash glyph danger-red, adds a top-level local Delete when permissions hide Discord\'s item, and standardizes permanent logger actions as red Delete entries.',
@@ -1156,7 +1160,12 @@ module.exports = class MessageLoggerV2 {
                   typeof v === 'function' && v.toString().includes('startingIndex')
                 );
                 if (openerFunc) {
-                  this._nativeMediaModal = { openMediaModal: openerFunc, module };
+                  // Discord exports the media viewer's stable modal key beside its opener.
+                  // Retaining that key lets logger shortcuts close only an active media viewer,
+                  // including viewers opened from ordinary Discord messages, without touching
+                  // any unrelated Discord modal or layer.
+                  const modalKey = Object.values(module).find(value => typeof value === 'string' && value);
+                  this._nativeMediaModal = { openMediaModal: openerFunc, modalKey, module };
                   Logger.log('Found native media modal');
                   return this._nativeMediaModal;
                 }
@@ -1269,6 +1278,9 @@ module.exports = class MessageLoggerV2 {
     this.menu.classes = {};
     this.menu.filter = '';
     this.menu.open = false;
+    this._loggerShortcutTransitionId = 0;
+    this._loggerShortcutReopenTimeout = null;
+    this._loggerOwnedModalKeys = new Set();
     const ImageModal = this.tools.findImageModal() ?? (() => React.createElement("div", undefined, "Image Modal failed!"));
     const MaskedLink = DiscordModules.MaskedLink || {};
     const renderLinkComponent = props => React.createElement(MaskedLink, props);
@@ -2121,8 +2133,106 @@ module.exports = class MessageLoggerV2 {
     }
     return this._pressedShortcutKeys.delete(key);
   }
+  cancelPendingLoggerShortcutTransition() {
+    if (this._loggerShortcutReopenTimeout) clearTimeout(this._loggerShortcutReopenTimeout);
+    this._loggerShortcutReopenTimeout = null;
+    this._loggerShortcutTransitionId = (this._loggerShortcutTransitionId || 0) + 1;
+    return this._loggerShortcutTransitionId;
+  }
+  resetLoggerMenuRenderState(filter = '') {
+    if (!this.menu) return;
+    this.menu.filter = filter;
+    this.menu.open = false;
+    this.menu.shownMessages = -1;
+    if (this.menu.messages) this.menu.messages.length = 0;
+  }
+  getOpenLoggerOwnedModalKeys() {
+    const knownKeys = [
+      this.style?.menu,
+      this.loggerHelpModalKey,
+      this.filterHelpModalKey,
+      this.style?.menu && `${this.style.menu}-deleted-cached-files`
+    ].filter(Boolean);
+    const keys = new Set([...(this._loggerOwnedModalKeys || []), ...knownKeys]);
+    return Array.from(keys).filter(key => this.ModalStack?.hasModalOpen?.(key));
+  }
+  getOpenNativeMediaViewerModalKey() {
+    // The native viewer is the sole Discord-owned panel included in logger shortcut
+    // transitions. The exported key is shared by viewers opened from MessageLogger and
+    // normal Discord messages, while every other Discord modal remains out of scope.
+    const modalKey = this.tools?.getNativeMediaModal?.()?.modalKey;
+    return modalKey && this.ModalStack?.hasModalOpen?.(modalKey) ? modalKey : null;
+  }
+  hasAdditionalLoggerShortcutModal(loggerModalOpen) {
+    const hasOwnedPopout = (this.tools?.popoutManager?.popouts?.size || 0) > 0
+      || (this.tools?.popoutStack?.length || 0) > 0;
+    return Boolean(this.getOpenNativeMediaViewerModalKey())
+      || hasOwnedPopout
+      || this.getOpenLoggerOwnedModalKeys().some(key => !loggerModalOpen || key !== this.style.menu);
+  }
+  dismissLoggerShortcutSurfaces() {
+    // A native media viewer can sit above either MessageLogger or ordinary Discord content, so
+    // close its scoped modal key before working down through the plugin-owned stack. No generic
+    // Discord modal/layer clear is used; settings and every other application panel stay open.
+    const mediaModalKey = this.getOpenNativeMediaViewerModalKey();
+    if (mediaModalKey) {
+      try {
+        this.ModalStack?.closeModal?.(mediaModalKey);
+      } catch (error) {
+        Logger.warn('Could not close Discord media viewer before toggling logger shortcuts:', error);
+      }
+    }
+    // Reverse insertion order mirrors the owned modal stack so multiple help/filter pages are
+    // dismissed from the top down before the logger reopens.
+    for (const key of this.getOpenLoggerOwnedModalKeys().reverse()) {
+      try {
+        this.ModalStack?.closeModal?.(key);
+      } catch (error) {
+        Logger.warn(`Could not close MessageLogger modal ${String(key)} before toggling shortcuts:`, error);
+      }
+    }
+    try { this.tools?.popoutManager?.closeAllPopouts?.(); } catch {}
+  }
+  scheduleLoggerShortcutReopen(desiredFilter, transitionId, attempt = 0) {
+    if (transitionId !== this._loggerShortcutTransitionId) return;
+    const openOwnedModalKeys = this.getOpenLoggerOwnedModalKeys();
+    const openMediaModalKey = this.getOpenNativeMediaViewerModalKey();
+    if ((openOwnedModalKeys.length || openMediaModalKey) && attempt < 20) {
+      // Some Discord builds settle stacked modal removals over separate store updates. Retry any
+      // still-open scoped key while waiting, rather than opening the logger underneath a help
+      // page or native media viewer.
+      if (openMediaModalKey) {
+        try { this.ModalStack?.closeModal?.(openMediaModalKey); } catch {}
+      }
+      for (const key of openOwnedModalKeys.slice().reverse()) {
+        try { this.ModalStack?.closeModal?.(key); } catch {}
+      }
+      this._loggerShortcutReopenTimeout = setTimeout(
+        () => this.scheduleLoggerShortcutReopen(desiredFilter, transitionId, attempt + 1),
+        25
+      );
+      return;
+    }
+    this._loggerShortcutReopenTimeout = null;
+    if (transitionId !== this._loggerShortcutTransitionId) return;
+    if (openOwnedModalKeys.length || openMediaModalKey) {
+      // Never stack a new logger beneath a scoped page that refused to close.
+      Logger.warn('MessageLogger shortcut panel stack did not close in time for a view switch.', {
+        openOwnedModalKeys,
+        mediaViewerOpen: Boolean(openMediaModalKey)
+      });
+      this.showToast?.('Could not switch logger views because a logger or media panel did not close.', { type: 'warning' });
+      return;
+    }
+    // Reassert the desired filter because delayed modal cleanup from the old window may have
+    // cleared it while Discord's modal store was settling.
+    this.resetLoggerMenuRenderState(desiredFilter);
+    this.menu.scrollPosition = 0;
+    this.openWindow();
+  }
   openLogsFromShortcut(filterSelectedChannel = false) {
     if (!this.menu) return false;
+    let desiredFilter = '';
     if (filterSelectedChannel) {
       // Resolve the channel when the shortcut fires. `this.selectedChannel` is maintained by
       // UI observations and can briefly lag behind a fast navigation action.
@@ -2132,28 +2242,29 @@ module.exports = class MessageLoggerV2 {
         this.showToast('Select a channel before using the filtered logger shortcut.', { type: 'warning' });
         return false;
       }
-      this.menu.filter = `channel:${selectedChannel.id}`;
-    } else {
-      // "Open all logs" must clear a filter left by a prior channel shortcut or context-menu
-      // action; otherwise the old Ctrl+M description would still be misleading.
-      this.menu.filter = '';
+      desiredFilter = `channel:${selectedChannel.id}`;
     }
-    this.menu.scrollPosition = 0;
     const loggerModalOpen = this.ModalStack?.hasModalOpen
       ? this.ModalStack.hasModalOpen(this.style.menu)
       : this.menu.open;
-    if (loggerModalOpen) {
-      this.menu.open = true;
-      this.refilterMessages();
+    const alreadyInDesiredState = String(this.menu.filter ?? '') === desiredFilter;
+    const hasAuxiliaryModal = this.hasAdditionalLoggerShortcutModal(loggerModalOpen);
+    const transitionId = this.cancelPendingLoggerShortcutTransition();
+    this.dismissLoggerShortcutSurfaces();
+    this.resetLoggerMenuRenderState(alreadyInDesiredState && loggerModalOpen && !hasAuxiliaryModal ? '' : desiredFilter);
+    this.menu.scrollPosition = 0;
+    // A logger window already showing the requested actual filter behaves as a true toggle,
+    // regardless of whether it was opened by a shortcut, toolbar click, or context menu. If a
+    // help/confirmation modal is stacked above it, reopen the logger instead of closing both.
+    if (loggerModalOpen && alreadyInDesiredState && !hasAuxiliaryModal) {
       return true;
     }
-    // patchModal deliberately delays cleanup so Discord's modal store can settle. If a
-    // shortcut lands in that window, reset only stale render state while retaining the new
-    // desired filter, then reopen instead of refiltering detached DOM.
-    this.menu.open = false;
-    this.menu.shownMessages = -1;
-    if (this.menu.messages) this.menu.messages.length = 0;
-    this.openWindow();
+    // Opening from an owned help/panel modal and switching between all/channel views use the same
+    // guarded transition. A token prevents rapid A/B/A key presses from reopening stale views.
+    this._loggerShortcutReopenTimeout = setTimeout(
+      () => this.scheduleLoggerShortcutReopen(desiredFilter, transitionId),
+      0
+    );
     return true;
   }
   ensureRequiredLegacySettings(settings = this.settings) {
@@ -3082,8 +3193,8 @@ module.exports = class MessageLoggerV2 {
             action: 'toggleLogsButton'
           },
           {
-            name: 'Open all logs keybind',
-            note: 'Defaults to Ctrl + M. Record modifiers plus one key (or F1-F24 alone); unsafe or overlapping captures are rejected. Clear it to disable this shortcut.',
+            name: 'Toggle all logs keybind',
+            note: 'Defaults to Ctrl + M. Matching all logs close; another logger state closes and reopens as all logs. Any open native media viewer closes first, including one opened from a normal Discord message. Record modifiers plus one key (or F1-F24 alone); unsafe or overlapping captures are rejected. Clear it to disable this shortcut.',
             id: 'openLogsKeybind',
             type: 'keybind',
             validator: 'loggerKeybind',
@@ -3091,8 +3202,8 @@ module.exports = class MessageLoggerV2 {
             clearable: true
           },
           {
-            name: 'Open selected channel logs keybind',
-            note: 'Defaults to Ctrl + N. Record a distinct safe combination; the selected channel is resolved when pressed. Clear it to disable this shortcut.',
+            name: 'Toggle selected channel logs keybind',
+            note: 'Defaults to Ctrl + N. Matching selected-channel logs close; another logger state closes and reopens for the currently selected channel. Any open native media viewer closes first; all other Discord panels remain untouched. Record a distinct safe combination; clear it to disable this shortcut.',
             id: 'openFilteredLogsKeybind',
             type: 'keybind',
             validator: 'loggerKeybind',
@@ -7094,6 +7205,16 @@ module.exports = class MessageLoggerV2 {
     if (callback) ret.addEventListener('click', callback);
     return ret;
   }
+  trackLoggerOwnedModalKey(key, requestedKey = null) {
+    const modalKey = key ?? requestedKey;
+    if (modalKey !== null && modalKey !== undefined) {
+      const ownedKeys = (this._loggerOwnedModalKeys ||= new Set());
+      // Reopening a stable named modal moves it back to the top of the tracked stack.
+      ownedKeys.delete(modalKey);
+      ownedKeys.add(modalKey);
+    }
+    return key;
+  }
   getKeyByValue(obj, value) {
     for (const key in obj) {
       if (obj.hasOwnProperty(key) && obj[key] === value) {
@@ -7106,7 +7227,7 @@ module.exports = class MessageLoggerV2 {
     const item = options.items?.[0] || options;
     const isVideo = item.type === "VIDEO";
     if (isVideo) {
-      ModalActions.openModal(props =>
+      const modalKey = ModalActions.openModal(props =>
         React.createElement(
           this.tools.manaModule.Modal,
           {
@@ -7137,6 +7258,7 @@ module.exports = class MessageLoggerV2 {
           )
         ), { modalKey: name }
       );
+      this.trackLoggerOwnedModalKey(modalKey, name);
       return;
     }
     if (image) {
@@ -7175,7 +7297,7 @@ module.exports = class MessageLoggerV2 {
         renderForwardComponent: () => null,
         shouldAnimate: true
       };
-      ModalActions.openModal(props =>
+      const modalKey = ModalActions.openModal(props =>
         React.createElement(
           this.tools.manaModule.Modal,
           { ...props, size: this.tools.resolvedModalStuff.ModalSize.DYNAMIC },
@@ -7184,10 +7306,11 @@ module.exports = class MessageLoggerV2 {
           )
         ), { modalKey: name }
       );
+      this.trackLoggerOwnedModalKey(modalKey, name);
       return;
     }
     if (options.ml2Data) {
-      ModalActions.openModal(props => {
+      const modalKey = ModalActions.openModal(props => {
         const actions = [];
         if (options.confirmText) {
           actions.push({
@@ -7212,6 +7335,7 @@ module.exports = class MessageLoggerV2 {
           children: options.children,
         });
       }, { modalKey: name });
+      this.trackLoggerOwnedModalKey(modalKey, name);
       if (options.className) {
         requestAnimationFrame(() => {
           const containers = document.querySelectorAll('[data-mana-component="modal"]');
@@ -7221,7 +7345,7 @@ module.exports = class MessageLoggerV2 {
       }
     } else {
       const isCritical = !options.confirmButtonColor || options.confirmButtonColor === Components.Button.Colors.RED;
-      ModalActions.openModal(props => {
+      const modalKey = ModalActions.openModal(props => {
         return React.createElement(this.tools.manaModule.ConfirmModal, {
           ...props,
           size: options.size,
@@ -7234,6 +7358,7 @@ module.exports = class MessageLoggerV2 {
           children: options.children,
         });
       }, { modalKey: name });
+      this.trackLoggerOwnedModalKey(modalKey, name);
     }
   }
   getMessageAny(id) {
@@ -9888,6 +10013,9 @@ module.exports = class MessageLoggerV2 {
   patchModal() {
     this._modalsApiUnsubcribe = this.ModalStack.useModalsStore.subscribe(_ => {
       setTimeout(() => {
+        for (const key of this._loggerOwnedModalKeys || []) {
+          if (!this.ModalStack.hasModalOpen(key)) this._loggerOwnedModalKeys.delete(key);
+        }
         let modalOpen = this.ModalStack.hasModalOpen(this.style.menu);
         if (this.menu.open && !modalOpen) {
           this.menu.filter = '';
@@ -11154,8 +11282,10 @@ module.exports = class MessageLoggerV2 {
                         Separate the search tags with commas.
                         Example: server: tom's bd stuff, message: heck
                         Shortcut help:
-                        "${this.formatLoggerKeybind(this.settings.openLogsKeybind)}" - Open all message logs.
-                        "${this.formatLoggerKeybind(this.settings.openFilteredLogsKeybind)}" - Open message logs with the currently selected channel filtered.\n\n</div>`.replaceAll('\n', '</br>')
+                        "${this.formatLoggerKeybind(this.settings.openLogsKeybind)}" - Toggle all message logs.
+                        "${this.formatLoggerKeybind(this.settings.openFilteredLogsKeybind)}" - Toggle message logs filtered to the currently selected channel.
+                        A matching logger view closes. A different view or stacked MessageLogger help page closes and reopens in the requested state.
+                        An open Discord media viewer closes first, including one opened from a normal live message; other Discord panels remain open.\n\n</div>`.replaceAll('\n', '</br>')
             ),
             extraHelp
           ])
@@ -11169,6 +11299,9 @@ module.exports = class MessageLoggerV2 {
     return textBox;
   }
   openWindow(type) {
+    // A manual toolbar/context action supersedes a queued shortcut transition. The scheduled
+    // callback clears its own handle before entering here, so it is not cancelled accidentally.
+    if (this._loggerShortcutReopenTimeout) this.cancelPendingLoggerShortcutTransition();
     if (this.menu.open) {
       if (type) this.openTab(type);
       return;
