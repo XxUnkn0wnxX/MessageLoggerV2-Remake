@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.2.11
+ * @version 2.8.0.2.12
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -410,6 +410,7 @@ module.exports = class MessageLoggerV2 {
         items: [
           'Uses Discord native forum refresh behavior and repairs deleted tint, jump, context-menu, purge, and restore edge cases.',
           'Improves settings validation, accordion navigation, help screens, documentation, and legacy cache compatibility.',
+          'Restores the legacy aggressive message caching and new cache system controls as locked-on indicators and resets false config values at startup.',
           'Moves source and automatic updates to the maintained XxUnkn0wnxX fork.',
           'Prevents blank Discord pages during plugin reloads, removes duplicate synthetic thread starters, and adds a temporary deleted-file viewer.'
         ]
@@ -603,12 +604,14 @@ module.exports = class MessageLoggerV2 {
       blockSpamEdit: false,
       cacheAllImages: true,
       newCacheAllImagesPath: '',
+      newCacheAllImages: true,
       newSaveAllFileTypes: false,
       addUserIdToSavedMediaFilename: false,
       alwaysNotifChannel: false,
       alwaysNotifGuild: false,
       notifOnlyWhitelist: false,
       notificationWhitelist: [],
+      aggresiveMessageCaching: true,
       renderCap: 50,
       maxShownEdits: 0,
       hideNewerEditsFirst: true,
@@ -685,11 +688,7 @@ module.exports = class MessageLoggerV2 {
       delete this.settings.channelDeleteCaptureCap;
       settingsChanged = true;
     }
-    for (const legacySetting of ['aggresiveMessageCaching', 'newCacheAllImages']) {
-      if (!Object.prototype.hasOwnProperty.call(this.settings, legacySetting)) continue;
-      delete this.settings[legacySetting];
-      settingsChanged = true;
-    }
+    if (this.ensureRequiredLegacySettings()) settingsChanged = true;
     const numericSettings = {
       maxShownEdits: { fallback: 0, min: 0 },
       maxCacheFileSize: { fallback: 0, min: 0 },
@@ -1741,6 +1740,15 @@ module.exports = class MessageLoggerV2 {
     if (current.value === undefined) current.value = this.settings[current.id];
     return this.buildSetting(current);
   }
+  ensureRequiredLegacySettings(settings = this.settings) {
+    let changed = false;
+    for (const settingId of ['aggresiveMessageCaching', 'newCacheAllImages']) {
+      if (settings[settingId] === true) continue;
+      settings[settingId] = true;
+      changed = true;
+    }
+    return changed;
+  }
   createGroup(group) {
     const { name, id, collapsible, shown, settings, onDrawerToggle, reactKey = id } = group;
     const list = [];
@@ -1916,6 +1924,28 @@ module.exports = class MessageLoggerV2 {
             note: 'Master switch for caching attachments, embed images, and stickers.',
             id: 'cacheAllImages',
             type: 'switch'
+          },
+          {
+            name: 'Aggresive message caching (makes sure we have the data of any deleted or edited messages)',
+            note: 'Legacy setting: this must remain enabled on this fork for reliable forum and thread restoration.',
+            id: 'aggresiveMessageCaching',
+            type: 'switch',
+            disabled: true,
+            onChange: () => {
+              this.settings.aggresiveMessageCaching = true;
+              this.saveSettings();
+            }
+          },
+          {
+            name: 'Use new cached images system',
+            note: 'Organizes cached media by server and channel. Legacy setting: this must remain enabled on this fork for reliable forum and thread media restoration.',
+            id: 'newCacheAllImages',
+            type: 'switch',
+            disabled: true,
+            onChange: () => {
+              this.settings.newCacheAllImages = true;
+              this.saveSettings();
+            }
           },
           {
             name: "Always show notifications for selected channel",

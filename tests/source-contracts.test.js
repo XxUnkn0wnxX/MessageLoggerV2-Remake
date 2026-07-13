@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { createPlugin } = require('./helpers/plugin-harness');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'MessageLoggerV2.plugin.js'), 'utf8');
 
@@ -63,12 +64,14 @@ test('all fresh-install settings defaults remain stable', () => {
     blockSpamEdit: false,
     cacheAllImages: true,
     newCacheAllImagesPath: '',
+    newCacheAllImages: true,
     newSaveAllFileTypes: false,
     addUserIdToSavedMediaFilename: false,
     alwaysNotifChannel: false,
     alwaysNotifGuild: false,
     notifOnlyWhitelist: false,
     notificationWhitelist: [],
+    aggresiveMessageCaching: true,
     renderCap: 50,
     maxShownEdits: 0,
     hideNewerEditsFirst: true,
@@ -95,10 +98,21 @@ test('all fresh-install settings defaults remain stable', () => {
   });
 });
 
-test('deprecated cache toggles stay migration-only', () => {
-  assert.match(source, /for \(const legacySetting of \['aggresiveMessageCaching', 'newCacheAllImages'\]\)/);
-  const defaults = source.slice(source.indexOf('const defaultSettings = {'), source.indexOf('const Flags = {'));
-  assert.doesNotMatch(defaults, /aggresiveMessageCaching|newCacheAllImages:/);
+test('required legacy cache toggles stay visible, locked, and forced on', () => {
+  assert.match(source, /if \(this\.ensureRequiredLegacySettings\(\)\) settingsChanged = true;/);
+  assert.match(source, /name: 'Aggresive message caching \(makes sure we have the data of any deleted or edited messages\)'[\s\S]*?id: 'aggresiveMessageCaching'[\s\S]*?disabled: true/);
+  assert.match(source, /name: 'Use new cached images system'[\s\S]*?Organizes cached media by server and channel\.[\s\S]*?id: 'newCacheAllImages'[\s\S]*?disabled: true/);
+
+  const plugin = createPlugin({
+    settings: {
+      aggresiveMessageCaching: false,
+      newCacheAllImages: false
+    }
+  });
+  assert.equal(plugin.ensureRequiredLegacySettings(), true);
+  assert.equal(plugin.settings.aggresiveMessageCaching, true);
+  assert.equal(plugin.settings.newCacheAllImages, true);
+  assert.equal(plugin.ensureRequiredLegacySettings(), false);
 });
 
 test('atomic persistence and startup cleanup remain wired into the plugin', () => {

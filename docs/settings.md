@@ -63,6 +63,8 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Auto backup data | Off | Maintains a fallback copy of the logger data. It reduces, but cannot eliminate, data-loss risk. |
 | Deleted messages color | Empty | Sets deleted text and forum/thread tints; an empty value uses the built-in red. |
 | Cache media locally | On | Master switch for caching attachments, embed images, and stickers. |
+| Aggresive message caching | On (locked) | Legacy setting retained for compatibility. It must remain enabled on this fork so message history is available for reliable forum and thread restoration. A saved `false` value is reset to `true` at startup. |
+| Use new cached images system | On (locked) | Legacy setting retained for compatibility. The organized server/channel cache layout must remain enabled for reliable forum and thread media restoration. A saved `false` value is reset to `true` at startup. |
 | Always show notifications for selected channel | Off | Allows enabled alerts while viewing the active channel, thread, or parent forum and overrides notification location lists there. |
 | Always show notifications for selected guild | Off | Treats the currently open server as an override for notification location lists. |
 | Add user ID to saved media filename | Off | Includes the author ID in hierarchical cache filenames. |
@@ -82,6 +84,8 @@ BetterDiscord stores the plugin's data beside the installed plugin:
 - `MessageLoggerV2Data.config.json`: active logs.
 - `MessageLoggerV2DataBackup.config.json`: optional backup.
 - `MLV2_IMAGE_CACHE/`: default attachment cache.
+
+The two locked legacy cache settings remain present in `MessageLoggerV2.config.json` with a value of `true`. Editing either value to `false` does not disable the fork's required caching behavior; the plugin restores and saves `true` the next time it starts.
 
 Disabling a display option does not necessarily delete its stored records. Use **Remove From Log** or **Clear log** when permanent removal is intended.
 
