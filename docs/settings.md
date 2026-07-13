@@ -1,8 +1,8 @@
-# Settings Reference
+# ⚙️ Settings Reference
 
 This page documents the controls shown in **BetterDiscord Settings > Plugins > MessageLoggerV2 Settings**. Defaults refer to a fresh installation; older installations retain saved values when new settings are added.
 
-## Logging Scope
+## 🎯 Logging Scope
 
 The whitelist and blacklist are managed from the **Message Logger** submenu in server, channel, DM, and thread context menus.
 
@@ -15,7 +15,7 @@ The whitelist and blacklist are managed from the **Message Logger** submenu in s
 5. Outside whitelist-only mode, unlisted targets are logged unless excluded by blacklist, mute, or NSFW settings.
 6. Threads and forum posts inherit relevant parent-channel whitelist, blacklist, mute, and notification scope.
 
-## Ignores and Overrides
+## 🚫 Ignores and Overrides
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
@@ -36,7 +36,7 @@ The whitelist and blacklist are managed from the **Message Logger** submenu in s
 
 Self-related gates are cumulative across sent, edited, deleted, bulk-delete, ghost-ping, forum, and thread events. An author ignore excludes your message regardless of who acts on it; an event-specific local ignore only excludes actions initiated by this client.
 
-## Display Settings
+## 🎨 Display Settings
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
@@ -55,7 +55,7 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Menu sort direction | New to old | Controls message ordering in the logger window. |
 | Use BdApi basic notifications | On | Uses BetterDiscord notifications instead of the plugin's custom toasts. Switching it off immediately dismisses the active native notification and clears its memory-only queue. |
 
-## Misc Settings
+## 🧰 Misc Settings
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
@@ -95,7 +95,7 @@ If the primary is missing or invalid, a valid backup is normalized and used to a
 
 Disabling a display option does not necessarily delete its stored records. Use **Remove From Log** or **Clear log** when permanent removal is intended.
 
-## Toast Notifications
+## 🔔 Toast Notifications
 
 Guilds and DMs have separate notification controls. These affect alerts, not whether records are saved. BetterDiscord notifications from every location share one memory-only FIFO queue; custom toasts continue to stack.
 
@@ -122,7 +122,7 @@ The notification whitelist and blacklist are managed from the same server, chann
 
 **Disable toasts for local user** suppresses alerts for actions initiated by this Discord client. It does not suppress a remote deletion merely because you authored the deleted message or thread. If **Ignore messages posted by you** is also enabled, your ignored message or thread root does not produce an alert.
 
-## Anti Nuke
+## 🛡️ Anti Nuke
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
@@ -135,7 +135,7 @@ All three caps are shared across one parent-channel deletion event. Thread/forum
 
 Anti Nuke records are archival because their parent channel no longer exists, so they do not offer **Jump to Message**. The same channel-aware rule applies outside Anti Nuke: Jump is omitted whenever neither the message channel nor a saved thread/forum parent still exists.
 
-## Message Caps
+## 📏 Message Caps
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
@@ -147,7 +147,7 @@ Caps are enforced periodically. Increasing a cap does not restore records that w
 
 Message-history caching and hierarchical media storage are core behavior and no longer have separate toggles. Disabling either made complete forum-post and thread deletions vulnerable to missing unloaded messages or inconsistent media paths. Legacy flat-cache files from older versions and other logger forks remain readable; only new downloads are forced into hierarchical folders.
 
-## Advanced
+## 🔧 Advanced
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
@@ -157,14 +157,14 @@ Message-history caching and hierarchical media storage are core behavior and no 
 | Only render locally cached attachments | Off | Prevents uncached attachments from rendering through Discord CDN. The saved record shows a filename placeholder instead. Toggling this reevaluates open logger and channel views immediately. |
 | Delete cached files with log records | Off | Permanently deletes related cached attachments, embeds, and stickers whenever their final log record is removed, including purges and thread/forum cascades. |
 
-## Settings Actions
+## 🖱️ Settings Actions
 
 - **Stats**: shows saved and cached message counts.
 - **Check for update now!**: runs an immediate update check.
 - **Support server**: opens the BetterDiscord invite prompt.
 - **Help**: opens the built-in logger help page.
 
-## Forum Posts and Threads
+## 🧵 Forum Posts and Threads
 
 - Forum posts and channel threads retain server, parent-channel, thread, author, and message metadata when available.
 - Fully deleted forum cards and thread entries use an anchor system. At least one live forum post or thread entry must exist so its current Discord layout can be cloned; logged deletions remain unrendered while that list is empty.

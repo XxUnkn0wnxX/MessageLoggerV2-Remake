@@ -1,13 +1,13 @@
-# Official Test Matrix
+# 🧪 Official Test Matrix
 
 The repository uses Node's built-in test runner. Tests call the real methods exported by `MessageLoggerV2.plugin.js` through a minimal BetterDiscord mock. They do not start Discord, modify BetterDiscord data, or copy files into the live plugins folder.
 
-## Requirements
+## 📋 Requirements
 
 - Node.js 20 or newer is recommended.
 - No package installation is required.
 
-## Running Tests
+## ▶️ Running Tests
 
 Run the complete automated audit:
 
@@ -32,7 +32,7 @@ npm run test:runtime-contracts
 
 `pnpm test` and `bun run test` may also invoke the same scripts, but Node remains the test runtime.
 
-## Automated Matrix
+## 🤖 Automated Matrix
 
 | ID | Area | Automated contract |
 | --- | --- | --- |
@@ -65,7 +65,7 @@ npm run test:runtime-contracts
 | AT-27 | No-save state | No-reload toggles retain existing behavior; reload recovery preserves hidden, forum/thread, suppression, cap, and backup ordering contracts. |
 | AT-28 | Cross-fork normalization | Legacy aliases, mixed enhanced fields, missing derived maps, scoped de-duplication, canonical output shape, whole-file atomic migration, routed errors, missing-primary backup restoration, opaque fork extensions, newer-schema fail-closed behavior, and legacy round trips remain covered. |
 
-## Live Discord Matrix
+## 💬 Live Discord Matrix
 
 The following behavior depends on Discord's current Webpack exports, Flux events, React tree, or mounted DOM. Node tests cannot prove it, so these remain targeted manual checks after Discord UI updates or related plugin changes.
 
@@ -85,7 +85,7 @@ The following behavior depends on Discord's current Webpack exports, Flux events
 | RT-12 | Persistence recovery | In a disposable BetterDiscord profile, verify primary corruption loads a valid automatic backup when backup is enabled. Never corrupt the active profile for this check. |
 | RT-13 | No-save recovery | In a disposable profile, save known records, restart with saving disabled, create temporary deleted/edited/purged/forum records, then re-enable saving and confirm both generations survive another reload. |
 
-## Audit Policy
+## 🔍 Audit Policy
 
 - Run the complete automated suite before every commit that changes plugin behavior.
 - Run only the relevant `RT-*` checks for the subsystem changed.
@@ -93,7 +93,7 @@ The following behavior depends on Discord's current Webpack exports, Flux events
 - A passing automated suite does not replace runtime traces for missing Discord classes, modules, events, or mount points.
 - Add a regression test whenever a deterministic bug is fixed. Keep Discord-specific traces under ignored `tmp/` rather than committing them as tests.
 
-## Test Layout
+## 🗂️ Test Layout
 
 ```text
 tests/

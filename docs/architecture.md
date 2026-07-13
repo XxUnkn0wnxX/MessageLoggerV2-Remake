@@ -1,22 +1,22 @@
-# Developer Architecture
+# 🏗️ Developer Architecture
 
 This document maps the major responsibilities inside the distributed `MessageLoggerV2.plugin.js` file. The plugin remains a single-file BetterDiscord artifact, so use the method names and state fields below as stable search anchors when maintaining it.
 
-## Lifecycle and Compatibility
+## 🔄 Lifecycle and Compatibility
 
 - `start`, `initialize`, and `stop` own plugin startup, module readiness, timers, patches, synchronous shutdown persistence, and cleanup.
 - `DiscordModules` lazily resolves Discord Webpack exports. Missing-module fixes must follow the runtime trace workflow in `AGENTS.md`; do not hide lookup warnings without proving the live export path.
 - `getChanges`, `checkNewUpdate`, and `performUpdate` provide the in-plugin changelog and maintained-fork updater.
 - Startup settings normalization preserves old installations, migrates legacy caps, and forces the two locked cache compatibility settings on.
 
-## Settings and Scope Policy
+## ⚙️ Settings and Scope Policy
 
 - `getSettingsPanel`, `createSetting`, and `createGroup` build the accordion settings interface.
 - Logging scope combines whitelist, blacklist, muted server/channel, NSFW, selected-channel, and DM rules.
 - Author and local-action gates are intentionally separate: bot, blocked-user, self-author, local-edit, and local-delete rules must remain per message.
 - Guild and DM notification lists affect alerts rather than record eligibility.
 
-## Record Model and Indexes
+## 🗃️ Record Model and Indexes
 
 - `messageRecord` is the source of truth keyed by Discord message ID.
 - `deletedMessageRecord`, `editedMessageRecord`, and `purgedMessageRecord` are channel-to-ID indexes. A record may legitimately appear in more than one category, but each category/channel list must remain de-duplicated.
@@ -24,7 +24,7 @@ This document maps the major responsibilities inside the distributed `MessageLog
 - `suppressedForumThreadIds` prevents intentionally hidden or removed restored roots from reappearing.
 - `_getDataPayload`, `installDataPayload`, and `sanitizeDataPayload` define the persisted/runtime boundary and rebuild derived sets and sorted caches.
 
-## Persistence and No-Save Recovery
+## 💾 Persistence and No-Save Recovery
 
 - `saveData` batches ordinary writes; `handleDataSaving` creates the current payload and schedules optional backups.
 - `efficientlySaveData` writes complete JSON to a same-directory temporary file and atomically renames it over the destination. Its commit predicate prevents stale in-flight writes from renaming after saving is disabled.
@@ -43,21 +43,21 @@ This document maps the major responsibilities inside the distributed `MessageLog
 - `cancelPendingDataWrites` clears queued timers and increments a write epoch. Async writers check that epoch before rename.
 - Recovery failures always log detailed stage, path, cause, and state information, then route a concise alert through `_showNotification` so the selected native-notification/custom-toast mode is respected.
 
-## Discord Event Capture
+## 📡 Discord Event Capture
 
 - `patchMessages` and `onDispatchEvent` intercept Discord Flux message and channel events.
 - Create, update, single-delete, and bulk-delete paths update the record model and category indexes before scheduling persistence.
 - Thread-created system messages are intentionally excluded from logger interception so Discord retains native delete behavior.
 - Local-delete tracking distinguishes actions initiated by this client from remote deletions of locally authored messages.
 
-## Forum Posts and Channel Threads
+## 🧵 Forum Posts and Channel Threads
 
 - Forum/thread metadata snapshots preserve parent IDs, names, types, paths, starter IDs, and card information after live Discord objects disappear.
 - Complete root deletion stores the root and eligible children under the thread ID; root hide/unhide/remove actions cascade through `getForumThreadRecordIds`.
 - Restored forum cards, channel sidebar entries, and thread-browser entries require a live Discord item as a DOM/React layout anchor.
 - Thread-scoped logger views, context labels, jump routing, tinting, and suppression must continue distinguishing forum posts from ordinary channel threads.
 
-## Anti-Nuke Recovery
+## 🛡️ Anti-Nuke Recovery
 
 - Channel deletion capture stores bounded snapshots under Purged.
 - Thread/forum-root, total-message, and attachment caps are separate and apply newest-first.
@@ -65,7 +65,7 @@ This document maps the major responsibilities inside the distributed `MessageLog
 - Anti-Nuke intentionally overrides normal logging scope and author ignores; only its own enable switch disables the cascade.
 - Parent channels no longer exist, so Anti-Nuke records do not offer impossible jump actions.
 
-## Media Lifecycle
+## 🖼️ Media Lifecycle
 
 - Core message-history caching and the hierarchical server/channel cache layout remain enabled for forum/thread reliability.
 - `cacheMessageImages` and `cacheImage` handle attachments, embed images, stickers, file-type policy, custom paths, and size limits.
@@ -73,27 +73,27 @@ This document maps the major responsibilities inside the distributed `MessageLog
 - Cache-only rendering replaces unavailable remote media with manageable filename placeholders.
 - Optional cached-file deletion is record-aware and must never scan or delete outside configured cache roots.
 
-## Rendering, Tinting, and Navigation
+## 🎨 Rendering, Tinting, and Navigation
 
 - Message-content and message-component patches render saved edits and deletions in live chat.
 - Deleted text/background tinting, forum cards, restored thread entries, and logger views share saved record state but use different mounted DOM targets.
 - Sorted ID caches accelerate logger rendering and must be invalidated when category indexes change.
 - Jump logic uses live message routes when available, restored forum/thread parents as fallback, and suppresses Jump when no valid destination exists.
 
-## Logger UI and Record Actions
+## 🖱️ Logger UI and Record Actions
 
 - The logger window provides deleted, edited, purged, sent, ghost-ping, and optional Hidden tabs.
 - Filters support server, channel, user, content/message, and media predicates.
 - Hide/unhide changes visibility without deleting records; Remove From Log and Clear Log permanently update records, indexes, restored entries, and optional cached files.
 - Context-menu injections expose scope lists and record actions while preserving Discord and other plugins' native items.
 
-## Notifications
+## 🔔 Notifications
 
 - `_showNotification` is the single routing point between BetterDiscord native notifications and the plugin's custom toasts.
 - Native notifications use a memory-only FIFO queue with hover-aware yielding; queue state is never persisted.
 - Guild and DM event settings, local-user rules, active-location overrides, and notification lists are evaluated separately from logging eligibility.
 
-## Testing and Change Safety
+## 🧪 Testing and Change Safety
 
 - `tests/helpers/plugin-harness.js` loads the real exported class with narrow BetterDiscord mocks.
 - Persistence, merge, policy, records, media, Anti-Nuke, and source contracts have focused Node tests; `docs/tests.md` is the authoritative matrix.

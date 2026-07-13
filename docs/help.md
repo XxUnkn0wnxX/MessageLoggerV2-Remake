@@ -1,16 +1,16 @@
-# Help and Usage
+# ❓ Help and Usage
 
-## First Setup
+## 🚀 First Setup
 
 MessageLoggerV2 starts in whitelist-only mode.
 
-1. Right-click a server or channel.
+1. Right-click a server, channel, DM, or thread.
 2. Open **Message Logger**.
 3. Add the target to the whitelist.
 
 To log all eligible unmuted servers instead, disable **Only log whitelist** under **Ignores and overrides**. The selected channel and DMs also have enabled-by-default logging overrides; see the [settings reference](settings.md#logging-scope).
 
-## Opening Logs
+## 📂 Opening Logs
 
 - Click the **Open Logs** button beside channel search to open all logs.
 - Right-click that button to open logs filtered to the selected channel.
@@ -20,19 +20,18 @@ To log all eligible unmuted servers instead, disable **Only log whitelist** unde
   - `Ctrl+M`: open the logger.
   - `Ctrl+N`: open the logger filtered to the selected channel.
 
-## Logger Tabs
+## 📑 Logger Tabs
 
 - **Deleted**: individually deleted messages and deleted forum/thread roots.
 - **Edited**: saved edit history.
 - **Purged**: messages captured from bulk deletes.
+- **Sent**: the bounded in-memory message cache used to reconstruct later deletions and edits. It clears on plugin or Discord reload.
 - **Ghost pings**: removed mentions that targeted the local user.
 - **Hidden**: hidden records from every category, when enabled in Display settings.
 
 Unhiding a record returns it to its original category.
 
-Sent messages do not have a logger tab or persistent history. They are retained only in a bounded memory cache used to reconstruct later deletions and edits.
-
-## Filtering
+## 🔎 Filtering
 
 Enter comma-separated filters in the logger search field.
 
@@ -54,7 +53,7 @@ server:tom's bd stuff, message:heck
 
 The question-mark button beside the filter opens the built-in filter help.
 
-## Logger Window Controls
+## 🖱️ Logger Window Controls
 
 ### Delete-key actions
 
@@ -92,11 +91,11 @@ Right-click saved messages in the logger or channel view to access applicable ac
 
 **Clear log** applies to the selected tab and active filter. For example, clearing a channel-filtered Deleted tab removes matching deleted records, not every category and location.
 
-## Toasts and Notifications
+## 🔔 Toasts and Notifications
 
 For custom toasts:
 
-- Left-click: run the first available action. Saved events open the relevant logger tab; sent-message alerts jump directly.
+- Left-click: run the first available action. Saved events open the relevant logger tab; sent-message alerts jump directly to the live message.
 - Right-click: run the second action when available, normally jumping to the relevant message or forum/thread location.
 - Middle-click: dismiss the toast.
 - Hover: pause the remaining timeout until the pointer leaves.
@@ -104,14 +103,14 @@ For custom toasts:
 For BetterDiscord notifications:
 
 - Deleted, edited, and ghost-ping alerts provide **View** and **Jump**.
-- Sent-message alerts provide **Jump** only.
+- Sent-message alerts provide **Jump** only. The Sent tab itself is memory-only and clears on reload.
 - Bulk-delete summaries provide **View** only.
 - Guild and DM alerts share one memory-only FIFO queue. Persistent ghost pings yield after 4.5 seconds when another alert is waiting.
 - Hovering pauses the remaining notification timeout and queued ghost-ping yield.
 
 Notification settings affect alerts only. Logging scope is controlled separately.
 
-## Whitelist and Blacklist Rules
+## 🎯 Whitelist and Blacklist Rules
 
 ### Whitelist-only mode
 
@@ -132,7 +131,7 @@ Notification settings affect alerts only. Logging scope is controlled separately
 - **Always log DMs** bypasses normal scope checks for DMs.
 - **Always log ghost pings** can monitor ignored locations, but only persists the message if a ghost ping occurs.
 
-## Forum Posts and Channel Threads
+## 🧵 Forum Posts and Channel Threads
 
 - Deleting a complete forum post or thread saves the eligible root and child messages under one thread ID.
 - Author ignores apply per message. A saved thread can therefore contain messages from some authors but not others.
@@ -148,7 +147,7 @@ Notification settings affect alerts only. Logging scope is controlled separately
 - Message-history caching and hierarchical media storage stay enabled internally so complete post/thread deletions do not lose unloaded messages or media paths.
 - Flat media-cache files from older versions or forks remain supported for rendering.
 
-## Troubleshooting
+## 🛠️ Troubleshooting
 
 ### Saving was re-enabled after a no-save reload
 
@@ -189,4 +188,7 @@ Enable **Delete cached files with log records** to remove related local media wh
 
 ### Plugin conflicts
 
-**NoDeleteMessages** and **SuppressUserMentions** are unsupported alongside MessageLoggerV2 and should be disabled.
+- [SuppressUserMentions](https://github.com/Metalloriff/BetterDiscordPlugins/blob/master/SuppressUserMentions.plugin.js) patches Discord's mention detection and can interfere with mention and ghost-ping logs.
+- The original source for the historical **NoDeleteMessages** plugin could not be located.
+
+> Avoid plugins that suppress, retain, rewrite, or consume deletion events. They may prevent MessageLoggerV2 from recording or rendering deletions correctly.

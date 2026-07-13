@@ -1,4 +1,4 @@
-# Project TODO
+# 📋 Project TODO
 
 This file tracks planned MessageLoggerV2 work that should survive across development sessions.
 
@@ -7,7 +7,7 @@ Status markers:
 - [ ] Planned or incomplete.
 - [x] Implemented and verified.
 
-## Preserve Data After No-Save Sessions
+## 💾 Preserve Data After No-Save Sessions
 
 Status: Implemented; live validation pending
 
@@ -46,7 +46,7 @@ When **Disable saving data** is enabled, reloading the plugin or Discord starts 
 - [ ] Confirm hidden state and forum/thread root-child relationships survive the merge.
 - [ ] Confirm **Remove From Log** still removes the correct merged records.
 
-## Completed: Cross-Fork Data Normalization
+## ✅ Completed: Cross-Fork Data Normalization
 
 Status: Implemented; live validation pending
 
@@ -65,7 +65,7 @@ Status: Implemented; live validation pending
 
 Enhanced metadata that another fork completely removes cannot be reconstructed and remains blank after normalization.
 
-## Multi-Instance Storage Isolation
+## 🧩 Multi-Instance Storage Isolation
 
 Status: Backlog
 
@@ -75,7 +75,7 @@ Status: Backlog
 
 This is separate from the no-save merge. Until implemented, simultaneous Discord instances can still write the same logger files and the last complete writer wins.
 
-## Completed: Atomic Data Writes
+## ✅ Completed: Atomic Data Writes
 
 Status: Completed
 

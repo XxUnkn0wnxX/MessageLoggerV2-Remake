@@ -5180,7 +5180,7 @@ module.exports = class MessageLoggerV2 {
                                     Note: Custom toasts can stack and expose actions through mouse clicks.</br></br>
                                     LEFT-CLICK:</br>
                                     <div class="${this.style.textIndent}">
-                                        Runs the first available action. Saved events open the relevant logger tab; sent-message alerts jump directly because there is no Sent tab.</br>
+                                        Runs the first available action. Saved events open the relevant logger tab; sent-message alerts jump directly to the live message.</br>
                                     </div></br>
                                     RIGHT-CLICK:</br>
                                     <div class="${this.style.textIndent}">
@@ -5198,7 +5198,7 @@ module.exports = class MessageLoggerV2 {
                                     ACTIONS:</br>
                                     <div class="${this.style.textIndent}">
                                         Deleted, edited, and ghost-ping alerts provide View and Jump.</br>
-                                        Sent-message alerts provide Jump only because sent messages are not stored in a logger tab.</br>
+                                        Sent-message alerts provide Jump only. The Sent tab is a bounded memory cache and clears on plugin or Discord reload.</br>
                                         Bulk-delete summaries provide View only.</br>
                                         Persistent ghost pings yield after 4.5 seconds when another alert is waiting.</br>
                                         Hovering pauses the remaining timeout.
