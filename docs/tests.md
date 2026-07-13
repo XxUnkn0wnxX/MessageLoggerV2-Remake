@@ -38,7 +38,7 @@ npm run test:runtime-contracts
 | --- | --- | --- |
 | AT-01 | Plugin source | The distributed plugin parses successfully with `node --check`. |
 | AT-02 | Metadata and updates | Source and update URLs continue to target this fork's `main` branch. |
-| AT-03 | Settings defaults | Every fresh-install toggle, cap, list, nested toast option, and locked legacy cache toggle remains stable. |
+| AT-03 | Settings defaults | Every fresh-install toggle, cap, list, nested toast option, locked legacy cache toggle, and bounded automatic-backup interval remains stable. |
 | AT-04 | Primary persistence | Normal saves atomically replace the primary JSON file without leaving temp files. |
 | AT-05 | Shutdown persistence | Synchronous shutdown saves use the same atomic replacement path. |
 | AT-06 | Backup persistence | Backup data writes to its own atomic destination. |
@@ -63,7 +63,7 @@ npm run test:runtime-contracts
 | AT-25 | No-save merge | Disk and session payloads merge deterministically with de-duplicated deleted, edited, and purged indexes. |
 | AT-26 | No-save failure safety | Empty sessions, corrupt sources, failed renames, and stale in-flight writes cannot erase or replace existing history. |
 | AT-27 | No-save state | No-reload toggles retain existing behavior; reload recovery preserves hidden, forum/thread, suppression, cap, and backup ordering contracts. |
-| AT-28 | Cross-fork normalization | Legacy aliases, mixed enhanced fields, missing derived maps, scoped de-duplication, canonical defaults on newly captured records, idempotent output across changing Discord channel-store availability, canonical output shape, whole-file atomic migration, routed errors, missing-primary backup restoration, opaque fork extensions, newer-schema fail-closed behavior, and legacy round trips remain covered. |
+| AT-28 | Cross-fork normalization | Legacy aliases, mixed enhanced fields, missing derived maps, scoped de-duplication, canonical defaults on newly captured records, idempotent output across changing Discord channel-store availability, canonical output shape, whole-file atomic migration, routed migration and backup-rebuild status, missing-primary backup restoration, opaque fork extensions, newer-schema fail-closed behavior, and legacy round trips remain covered. |
 
 ## 💬 Live Discord Matrix
 
@@ -82,7 +82,7 @@ The following behavior depends on Discord's current Webpack exports, Flux events
 | RT-09 | Media lifecycle | Delete attachment-only, sticker, embed, video, and Add-to-Post media. Confirm cache/CDN fallback, placeholders, tinting, context actions, and optional local-file deletion. |
 | RT-10 | Anti-Nuke dispatch | Delete a populated text or forum channel. Confirm newest-first capture, configured budgets, root preservation, location metadata, and unavailable Jump actions. |
 | RT-11 | Settings UI | Open each settings group, confirm only one group remains expanded, and verify changed settings apply when the logger window is reopened without restarting Discord. |
-| RT-12 | Persistence recovery | In a disposable BetterDiscord profile, verify primary corruption loads a valid automatic backup when backup is enabled. Never corrupt the active profile for this check. |
+| RT-12 | Persistence recovery | In a disposable BetterDiscord profile, verify primary corruption loads a valid automatic backup, reports that the main file is being rebuilt, and retains the backup. Never corrupt the active profile for this check. |
 | RT-13 | No-save recovery | In a disposable profile, save known records, restart with saving disabled, create temporary deleted/edited/purged/forum records, then re-enable saving and confirm both generations survive another reload. |
 
 ## 🔍 Audit Policy

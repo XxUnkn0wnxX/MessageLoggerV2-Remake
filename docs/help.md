@@ -161,7 +161,7 @@ The plugin accepts the legacy `deletedata` and `editHistory` names as input, mer
 
 You will receive a migration-in-progress alert followed by success through your selected BetterDiscord-notification or custom-toast mode. If the rewrite fails, the existing primary and backup remain available, and the error alert directs you to detailed console information.
 
-If the primary file is missing or invalid, the same normalization is applied to a valid backup before the plugin atomically recreates the primary. The original backup remains untouched during this recovery. Files marked with a schema newer than the installed plugin are not replaced from an older backup; the plugin fails closed so updating it cannot destroy newer data.
+If the primary file is missing or invalid, the same normalization is applied to a valid backup before the plugin atomically recreates the primary. Your selected notification mode reports that the valid backup was loaded and the main data file is being rebuilt, then reports recovery-specific success or failure. The console includes the recovery reason and detailed write errors. The original backup remains untouched during this recovery. Files marked with a schema newer than the installed plugin are not replaced from an older backup; the plugin fails closed so updating it cannot destroy newer data.
 
 ### Nothing is logged
 

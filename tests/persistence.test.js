@@ -146,6 +146,42 @@ test('canonical migration atomically rewrites only the primary and reports succe
   assert.match(notifications.at(-1)[1], /migrated successfully/i);
 });
 
+test('backup recovery rebuilds the primary and reports recovery-specific success', async t => {
+  const pluginDir = temporaryDirectory(t);
+  const primaryPath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
+  const backupPath = path.join(pluginDir, 'MessageLoggerV2DataBackup.config.json');
+  fs.writeFileSync(primaryPath, '{broken-primary');
+  fs.writeFileSync(backupPath, '{"data":{"keep":"recovery point"}}');
+  const notifications = [];
+  const plugin = createPlugin({
+    pluginDir,
+    nodeModules: { fs, path },
+    settings: { dontSaveData: false },
+    __started: true,
+    _dataWriteEpoch: 0,
+    _dataNeedsCanonicalRewrite: true,
+    _canonicalRewriteReason: 'backup',
+    messageRecord: {},
+    deletedMessageRecord: {},
+    editedMessageRecord: {},
+    purgedMessageRecord: {},
+    suppressedForumThreadIds: new Set(),
+    _showNotification(...args) { notifications.push(args); }
+  });
+
+  assert.equal(await plugin.rewriteCanonicalDataPayload(), true);
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(primaryPath, 'utf8')).data,
+    plugin.createDefaultDataPayload()
+  );
+  assert.equal(fs.readFileSync(backupPath, 'utf8'), '{"data":{"keep":"recovery point"}}');
+  assert.equal(plugin._canonicalRewriteReason, null);
+  assert.equal(notifications.at(-1)[0], 'Message Logger Data Recovery');
+  assert.match(notifications.at(-1)[1], /backup loaded.*main data file.*rebuilt successfully/i);
+  assert.ok(loggerEvents.some(event => event[0] === 'log'
+    && String(event[1]).includes('rebuilt successfully from the valid backup')));
+});
+
 test('canonical migration failure preserves the old primary and routes a detailed error', async t => {
   const pluginDir = temporaryDirectory(t);
   const primaryPath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
@@ -181,6 +217,46 @@ test('canonical migration failure preserves the old primary and routes a detaile
   assert.match(notifications.at(-1)[1], /console log/i);
   assert.ok(loggerEvents.some(event => event[0] === 'error'
     && String(event[1]).includes('normalized legacy/mixed-fork')));
+  assert.deepEqual(fs.readdirSync(pluginDir).filter(name => name.includes('.tmp-')), []);
+});
+
+test('backup recovery failure preserves the old primary and reports rebuild details', async t => {
+  const pluginDir = temporaryDirectory(t);
+  const primaryPath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
+  fs.writeFileSync(primaryPath, '{broken-primary');
+  const controlledFs = {
+    ...fs,
+    renameSync() { throw new Error('simulated recovery rename failure'); },
+    promises: {
+      writeFile: fs.promises.writeFile.bind(fs.promises),
+      unlink: fs.promises.unlink.bind(fs.promises)
+    }
+  };
+  const notifications = [];
+  const plugin = createPlugin({
+    pluginDir,
+    nodeModules: { fs: controlledFs, path },
+    settings: { dontSaveData: false },
+    __started: true,
+    _dataWriteEpoch: 0,
+    _dataNeedsCanonicalRewrite: true,
+    _canonicalRewriteReason: 'backup',
+    messageRecord: {},
+    deletedMessageRecord: {},
+    editedMessageRecord: {},
+    purgedMessageRecord: {},
+    suppressedForumThreadIds: new Set(),
+    _showNotification(...args) { notifications.push(args); }
+  });
+
+  assert.equal(await plugin.rewriteCanonicalDataPayload(), false);
+  assert.equal(fs.readFileSync(primaryPath, 'utf8'), '{broken-primary');
+  assert.equal(plugin._dataNeedsCanonicalRewrite, true);
+  assert.equal(plugin._canonicalRewriteReason, 'backup');
+  assert.equal(notifications.at(-1)[0], 'Message Logger Data Recovery Error');
+  assert.match(notifications.at(-1)[1], /backup was loaded.*main data file.*could not be rebuilt.*console log/i);
+  assert.ok(loggerEvents.some(event => event[0] === 'error'
+    && String(event[1]).includes('rebuild primary logger data from the valid backup')));
   assert.deepEqual(fs.readdirSync(pluginDir).filter(name => name.includes('.tmp-')), []);
 });
 

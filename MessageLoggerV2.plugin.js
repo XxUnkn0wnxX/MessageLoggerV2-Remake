@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.0.2.13
+ * @version 2.8.0.2.14
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves all deleted and purged messages, as well as all edit history and ghost pings. With highly configurable ignore options, and even restoring deleted messages after restarting Discord.
@@ -13,6 +13,11 @@ const DISCORD_EPOCH = 14200704e5;
 // Persisted data is canonicalized to this additive schema. Older forks can ignore the
 // marker and enhanced fields while this fork can detect files rewritten without them.
 const DATA_SCHEMA_VERSION = 1;
+// Automatic backups rewrite the complete data payload. Keep the interval bounded so a
+// manually edited config cannot create constant disk churn or an unsafe browser timer.
+const DEFAULT_AUTO_BACKUP_INTERVAL_SECONDS = 20;
+const MIN_AUTO_BACKUP_INTERVAL_SECONDS = 10;
+const MAX_AUTO_BACKUP_INTERVAL_SECONDS = 86400;
 const { React, ReactDOM, Webpack, UI, Plugins, DOM, Patcher, Components, ContextMenu, Utils, Hooks, ReactUtils, Logger } = new BdApi('MessageLoggerV2');
 const { Data } = BdApi;
 const { Filters } = Webpack;
@@ -384,7 +389,9 @@ module.exports = class MessageLoggerV2 {
           'Correctly expires stale edit-notification spam tracking regardless of media-cache settings.',
           'Preserves disk-backed history when saving is re-enabled after a no-save reload by validating, merging, capping, and atomically replacing the completed payload.',
           'Cancels stale primary and backup writes when saving is disabled, and keeps saving disabled when recovery cannot complete safely.',
-          'Normalizes legacy and mixed-fork data into the current additive schema without duplicating records or discarding surviving enhanced metadata.'
+          'Normalizes legacy and mixed-fork data into the current additive schema without duplicating records or discarding surviving enhanced metadata.',
+          'Reports valid-backup recovery separately while atomically rebuilding the main data file.',
+          'Adds a validated 10-to-86,400-second automatic-backup interval, with 20 seconds as the default.'
         ]
       },
       {
@@ -573,6 +580,7 @@ module.exports = class MessageLoggerV2 {
     const defaultSettings = {
       obfuscateCSSClasses: true,
       autoBackup: false,
+      autoBackupIntervalSeconds: 20,
       dontSaveData: false,
       displayUpdateNotes: true,
       ignoreMutedGuilds: true,
@@ -649,43 +657,42 @@ module.exports = class MessageLoggerV2 {
     const Flags = {
       STARTUP_HELP: 1 << 1
     };
-    this.settings = (Data.load(this.getName(), 'settings') || defaultSettings);
-    let settingsChanged = false;
-    if (!this.settings || !Object.keys(this.settings).length) {
+    const loadedSettings = Data.load(this.getName(), 'settings');
+    const loadedSettingsAreUsable = !!loadedSettings
+      && typeof loadedSettings === 'object'
+      && !Array.isArray(loadedSettings)
+      && Object.keys(loadedSettings).length > 0;
+    this.settings = loadedSettingsAreUsable ? loadedSettings : structuredClone(defaultSettings);
+    // A first install is persisted just like a repaired config. Only existing malformed
+    // containers receive the corruption alert; a missing file is the normal fresh state.
+    let settingsChanged = !loadedSettingsAreUsable;
+    if (loadedSettings !== null && loadedSettings !== undefined && !loadedSettingsAreUsable) {
       UI.showToast(`[${this.getName()}] Settings file corrupted! All settings restored to default.`, { type: "error", timeout: 0 });
-      this.settings = defaultSettings;
+    }
+    const hadAutoBackupInterval = Object.prototype.hasOwnProperty.call(this.settings, 'autoBackupIntervalSeconds');
+    const configuredAutoBackupInterval = this.settings.autoBackupIntervalSeconds;
+    if (this.ensureAutoBackupIntervalSetting()) {
+      if (hadAutoBackupInterval) {
+        const parsedConfiguredInterval = Number(String(configuredAutoBackupInterval ?? '').trim());
+        const configuredIntervalWasValid = Number.isInteger(parsedConfiguredInterval)
+          && parsedConfiguredInterval >= MIN_AUTO_BACKUP_INTERVAL_SECONDS
+          && parsedConfiguredInterval <= MAX_AUTO_BACKUP_INTERVAL_SECONDS;
+        const message = configuredIntervalWasValid
+          ? `Auto-backup interval config value was converted to the canonical number ${this.settings.autoBackupIntervalSeconds}.`
+          : `Invalid auto-backup interval in config; reset to ${DEFAULT_AUTO_BACKUP_INTERVAL_SECONDS} seconds.`;
+        Logger[configuredIntervalWasValid ? 'log' : 'warn'](message, {
+          configuredValue: configuredAutoBackupInterval,
+          savedValue: this.settings.autoBackupIntervalSeconds,
+          minimum: MIN_AUTO_BACKUP_INTERVAL_SECONDS,
+          maximum: MAX_AUTO_BACKUP_INTERVAL_SECONDS
+        });
+      }
       settingsChanged = true;
     }
     const hadAntiNukeThreadCap = Object.prototype.hasOwnProperty.call(this.settings, 'antiNukeThreadCap');
     const hadAntiNukeMessageCap = Object.prototype.hasOwnProperty.call(this.settings, 'antiNukeMessageCap');
     const legacyChannelDeleteCaptureCap = this.settings.channelDeleteCaptureCap;
-    for (const [key, defaultValue] of Object.entries(defaultSettings)) {
-      const current = this.settings[key];
-      let normalized = current;
-      if (Array.isArray(defaultValue)) {
-        normalized = Array.isArray(current)
-          ? Array.from(new Set(current.filter(value => typeof value === 'string' && value.length)))
-          : structuredClone(defaultValue);
-      } else if (defaultValue && typeof defaultValue === 'object') {
-        const currentObject = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
-        normalized = {};
-        for (const [nestedKey, nestedDefault] of Object.entries(defaultValue)) {
-          normalized[nestedKey] = typeof currentObject[nestedKey] === typeof nestedDefault
-            ? currentObject[nestedKey]
-            : nestedDefault;
-        }
-      } else if (typeof defaultValue === 'number') {
-        const parsed = current === null || current === undefined || String(current).trim() === ''
-          ? defaultValue
-          : Number(current);
-        normalized = Number.isFinite(parsed) && Number.isInteger(parsed) ? parsed : defaultValue;
-      } else {
-        normalized = typeof current === typeof defaultValue ? current : defaultValue;
-      }
-      if (JSON.stringify(current) === JSON.stringify(normalized)) continue;
-      this.settings[key] = normalized;
-      settingsChanged = true;
-    }
+    if (this.normalizeSettingsAgainstDefaults(this.settings, defaultSettings)) settingsChanged = true;
     if (legacyChannelDeleteCaptureCap !== undefined) {
       const parsedLegacyCap = legacyChannelDeleteCaptureCap === null || String(legacyChannelDeleteCaptureCap).trim() === ''
         ? 0
@@ -707,7 +714,8 @@ module.exports = class MessageLoggerV2 {
       antiNukeThreadCap: { fallback: defaultSettings.antiNukeThreadCap, min: 0, emptyValue: 0 },
       antiNukeMessageCap: { fallback: defaultSettings.antiNukeMessageCap, min: 0, emptyValue: 0 },
       antiNukeAttachmentCap: { fallback: defaultSettings.antiNukeAttachmentCap, min: 0, emptyValue: 0 },
-      renderCap: { fallback: defaultSettings.renderCap, min: 0 }
+      renderCap: { fallback: defaultSettings.renderCap, min: 0 },
+      flags: { fallback: defaultSettings.flags, min: 0 }
     };
     for (const [id, limits] of Object.entries(numericSettings)) {
       const raw = this.settings[id];
@@ -930,6 +938,7 @@ module.exports = class MessageLoggerV2 {
     this._needsNoSaveDataMerge = !!this.settings.dontSaveData;
     let data;
     let dataLoadedFromBackup = false;
+    let backupRecoveryReason = null;
     if (this.settings.dontSaveData) {
       data = defaultConstruct();
     } else {
@@ -940,9 +949,8 @@ module.exports = class MessageLoggerV2 {
       data = selectedData.data;
       if (selectedData.source === 'backup') {
         dataLoadedFromBackup = true;
-        const reason = selectedData.primaryWasPresent ? 'could not be validated' : 'was missing';
-        Logger.warn(`Primary logger data ${reason}; restoring from the valid backup.`);
-        UI.showToast(`[${this.getName()}] Data ${reason}, loaded backup!`, { type: "warning", timeout: 5000 });
+        backupRecoveryReason = selectedData.primaryWasPresent ? 'could not be validated' : 'was missing';
+        Logger.warn(`Valid logger backup loaded because primary data ${backupRecoveryReason}; the main data file will be rebuilt after startup initialization.`);
       } else if (selectedData.source === 'empty') {
         if (selectedData.hadPersistedCandidate) {
           if (this.settings.autoBackup) {
@@ -971,8 +979,8 @@ module.exports = class MessageLoggerV2 {
           loadedPayloadSnapshot = JSON.stringify(backupData);
           data = this.normalizePersistedDataPayload(backupData);
           dataLoadedFromBackup = true;
-          Logger.warn('Primary logger data failed canonical normalization; loaded the valid backup instead.', primaryNormalizationError);
-          UI.showToast(`[${this.getName()}] Data could not be normalized, loaded backup!`, { type: "warning", timeout: 5000 });
+          backupRecoveryReason = 'failed canonical normalization';
+          Logger.warn('Valid logger backup loaded because primary data failed canonical normalization; the main data file will be rebuilt after startup initialization.', primaryNormalizationError);
         } catch (backupNormalizationError) {
           const error = new Error('Primary and backup logger data both failed canonical normalization');
           error.cause = { primaryNormalizationError, backupNormalizationError };
@@ -980,6 +988,12 @@ module.exports = class MessageLoggerV2 {
         }
       }
       this._dataNeedsCanonicalRewrite = dataLoadedFromBackup || loadedPayloadSnapshot !== JSON.stringify(data);
+      // Keep backup restoration distinct from an ordinary legacy-schema migration so every
+      // progress, success, and failure message accurately describes the primary-file rebuild.
+      this._canonicalRewriteReason = dataLoadedFromBackup
+        ? 'backup'
+        : this._dataNeedsCanonicalRewrite ? 'migration' : null;
+      this._backupRecoveryReason = backupRecoveryReason;
     }
     this.cachedMessageRecord = [];
     this.cachedMessageIds = new Set();
@@ -1650,14 +1664,25 @@ module.exports = class MessageLoggerV2 {
     // A legacy/mixed file is rewritten only after initialization succeeds. Normal saving
     // uses the same atomic temp-file replacement as every other write.
     if (this._dataNeedsCanonicalRewrite && !this.settings.dontSaveData) {
-      Logger.log(`Persisted logger data was normalized to schema ${DATA_SCHEMA_VERSION}; scheduling an atomic rewrite.`);
-      this._showNotification(
-        'Message Logger Data Migration',
-        'Legacy or mixed-fork logger data detected. Migration to the current schema is in progress.',
-        'info',
-        [],
-        5000
-      );
+      if (this._canonicalRewriteReason === 'backup') {
+        Logger.log(`Valid logger backup is loaded because primary data ${this._backupRecoveryReason || 'was unavailable'}; scheduling an atomic rebuild of the main data file.`);
+        this._showNotification(
+          'Message Logger Data Recovery',
+          'Valid backup loaded. Rebuilding the main data file.',
+          'warning',
+          [],
+          5000
+        );
+      } else {
+        Logger.log(`Persisted logger data was normalized to schema ${DATA_SCHEMA_VERSION}; scheduling an atomic rewrite.`);
+        this._showNotification(
+          'Message Logger Data Migration',
+          'Legacy or mixed-fork logger data detected. Migration to the current schema is in progress.',
+          'info',
+          [],
+          5000
+        );
+      }
       this._canonicalRewritePromise = this.rewriteCanonicalDataPayload()
         .finally(() => { this._canonicalRewritePromise = null; });
     }
@@ -1744,6 +1769,78 @@ module.exports = class MessageLoggerV2 {
       changed = true;
     }
     return changed;
+  }
+  normalizeSettingsAgainstDefaults(settings, defaults) {
+    // This is the common compatibility boundary for fresh installs, older forks, and
+    // hand-edited configs. Unknown top-level settings survive, while every setting owned by
+    // this build receives the expected primitive/collection shape and missing defaults.
+    let changed = false;
+    for (const [key, defaultValue] of Object.entries(defaults)) {
+      const current = settings[key];
+      let normalized = current;
+      if (Array.isArray(defaultValue)) {
+        normalized = Array.isArray(current)
+          ? Array.from(new Set(current.filter(value => typeof value === 'string' && value.length)))
+          : structuredClone(defaultValue);
+      } else if (defaultValue && typeof defaultValue === 'object') {
+        const currentObject = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+        // Preserve additive nested keys introduced by another fork while repairing every
+        // nested key this build owns. This mirrors the tolerant top-level settings policy.
+        normalized = structuredClone(currentObject);
+        for (const [nestedKey, nestedDefault] of Object.entries(defaultValue)) {
+          normalized[nestedKey] = typeof currentObject[nestedKey] === typeof nestedDefault
+            ? currentObject[nestedKey]
+            : nestedDefault;
+        }
+      } else if (typeof defaultValue === 'number') {
+        const parsed = current === null || current === undefined || String(current).trim() === ''
+          ? defaultValue
+          : Number(current);
+        normalized = Number.isFinite(parsed) && Number.isInteger(parsed) ? parsed : defaultValue;
+      } else {
+        normalized = typeof current === typeof defaultValue ? current : defaultValue;
+      }
+      if (JSON.stringify(current) === JSON.stringify(normalized)) continue;
+      settings[key] = normalized;
+      changed = true;
+    }
+    return changed;
+  }
+  normalizeAutoBackupIntervalSeconds(value) {
+    const parsed = typeof value === 'number' ? value : Number(String(value ?? '').trim());
+    return Number.isInteger(parsed)
+      && parsed >= MIN_AUTO_BACKUP_INTERVAL_SECONDS
+      && parsed <= MAX_AUTO_BACKUP_INTERVAL_SECONDS
+      ? parsed
+      : DEFAULT_AUTO_BACKUP_INTERVAL_SECONDS;
+  }
+  ensureAutoBackupIntervalSetting(settings = this.settings) {
+    const normalized = this.normalizeAutoBackupIntervalSeconds(settings.autoBackupIntervalSeconds);
+    if (settings.autoBackupIntervalSeconds === normalized) return false;
+    settings.autoBackupIntervalSeconds = normalized;
+    return true;
+  }
+  getAutoBackupIntervalMilliseconds() {
+    return this.normalizeAutoBackupIntervalSeconds(this.settings?.autoBackupIntervalSeconds) * 1000;
+  }
+  handleAutoBackupSetting(enabled) {
+    // Disabling automatic backups must also cancel a backup already waiting on the debounce
+    // timer. Enabling retains the legacy behavior of creating a fresh backup immediately.
+    if (this.saveBackupTimeout) clearTimeout(this.saveBackupTimeout);
+    this.saveBackupTimeout = 0;
+    this.autoBackupSaveInterupts = 0;
+    if (enabled && !this.settings.dontSaveData) this.saveBackup();
+  }
+  handleAutoBackupIntervalChange() {
+    // If a backup is already pending, apply the newly saved interval immediately rather
+    // than leaving one timer running with the old delay until the following data save.
+    if (!this.saveBackupTimeout) return;
+    clearTimeout(this.saveBackupTimeout);
+    this.saveBackupTimeout = 0;
+    this.autoBackupSaveInterupts = 0;
+    if (this.settings.autoBackup && !this.settings.dontSaveData) {
+      this.saveBackupTimeout = setTimeout(() => this.saveBackup(), this.getAutoBackupIntervalMilliseconds());
+    }
   }
   createGroup(group) {
     const { name, id, collapsible, shown, settings, onDrawerToggle, reactKey = id } = group;
@@ -1907,6 +2004,16 @@ module.exports = class MessageLoggerV2 {
             id: 'autoBackup',
             type: 'switch',
             action: 'handleBackup'
+          },
+          {
+            name: 'Auto backup interval (seconds)',
+            note: 'Wait time before refreshing the backup after saved data changes. Accepts 10 to 86,400 seconds. Default: 20; example: 300 is 5 minutes.',
+            id: 'autoBackupIntervalSeconds',
+            type: 'textbox',
+            validator: 'number',
+            min: MIN_AUTO_BACKUP_INTERVAL_SECONDS,
+            max: MAX_AUTO_BACKUP_INTERVAL_SECONDS,
+            action: 'rescheduleBackup'
           },
           {
             name: 'Deleted messages color',
@@ -2175,9 +2282,8 @@ module.exports = class MessageLoggerV2 {
       forceUpdateMessage: () => this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE' }),
       notificationModeChange: (val) => this.handleNotificationModeChange(val),
       handleDataSave: (val) => this.handleDataSaveSetting(val),
-      handleBackup: (val) => {
-        if (val && !this.settings.dontSaveData) this.saveBackup();
-      },
+      handleBackup: (val) => this.handleAutoBackupSetting(val),
+      rescheduleBackup: () => this.handleAutoBackupIntervalChange(),
       toggleLogsButton: (val) => {
         if (val) return this.addOpenLogsButton();
         this.removeOpenLogsButton();
@@ -2230,6 +2336,9 @@ module.exports = class MessageLoggerV2 {
           }
           if (config.min !== undefined && parsed < config.min) {
             return this.showToast(`Value must be at least ${config.min}!`, { type: 'error' });
+          }
+          if (config.max !== undefined && parsed > config.max) {
+            return this.showToast(`Value must be no more than ${config.max}!`, { type: 'error' });
           }
           this.settings[config.id] = parsed;
           if (config.action && actions[config.action]) {
@@ -2891,6 +3000,7 @@ module.exports = class MessageLoggerV2 {
   async rewriteCanonicalDataPayload() {
     // This is deliberately a primary-only migration write. Keeping the previous backup
     // untouched gives users one additional recovery point until the next normal backup.
+    const rebuildingFromBackup = this._canonicalRewriteReason === 'backup';
     const writeEpoch = this._dataWriteEpoch || 0;
     const result = await this.writeDataPayloadAtomic(
       this.getName() + 'Data',
@@ -2904,19 +3014,25 @@ module.exports = class MessageLoggerV2 {
       }
     );
     if (result.cancelled) {
-      Logger.log('Canonical data migration write was cancelled before commit.');
+      Logger.log(rebuildingFromBackup
+        ? 'Primary data rebuild from backup was cancelled before commit.'
+        : 'Canonical data migration write was cancelled before commit.');
       return false;
     }
     if (!result.ok) {
       this._dataNeedsCanonicalRewrite = true;
-      Logger.error('Failed to atomically rewrite normalized legacy/mixed-fork logger data.', {
+      Logger.error(rebuildingFromBackup
+        ? 'Failed to atomically rebuild primary logger data from the valid backup.'
+        : 'Failed to atomically rewrite normalized legacy/mixed-fork logger data.', {
         mlv2RemakeSchemaVersion: DATA_SCHEMA_VERSION,
         primaryPath: this.nodeModules.path.join(this.pluginDir, `${this.getName()}Data.config.json`),
         error: result.error
       });
       this._showNotification(
-        'Message Logger Data Migration Error',
-        'The normalized data could not be saved. View the console log for more details.',
+        rebuildingFromBackup ? 'Message Logger Data Recovery Error' : 'Message Logger Data Migration Error',
+        rebuildingFromBackup
+          ? 'The backup was loaded, but the main data file could not be rebuilt. View the console log for more details.'
+          : 'The normalized data could not be saved. View the console log for more details.',
         'error',
         [],
         0
@@ -2924,14 +3040,27 @@ module.exports = class MessageLoggerV2 {
       return false;
     }
     this._dataNeedsCanonicalRewrite = false;
-    Logger.log(`Legacy/mixed-fork logger data migration to schema ${DATA_SCHEMA_VERSION} completed successfully.`);
-    this._showNotification(
-      'Message Logger Data Migration',
-      'Legacy or mixed-fork logger data was migrated successfully.',
-      'success',
-      [],
-      5000
-    );
+    this._canonicalRewriteReason = null;
+    this._backupRecoveryReason = null;
+    if (rebuildingFromBackup) {
+      Logger.log('Primary logger data file was rebuilt successfully from the valid backup.');
+      this._showNotification(
+        'Message Logger Data Recovery',
+        'Backup loaded and the main data file was rebuilt successfully.',
+        'success',
+        [],
+        5000
+      );
+    } else {
+      Logger.log(`Legacy/mixed-fork logger data migration to schema ${DATA_SCHEMA_VERSION} completed successfully.`);
+      this._showNotification(
+        'Message Logger Data Migration',
+        'Legacy or mixed-fork logger data was migrated successfully.',
+        'success',
+        [],
+        5000
+      );
+    }
     return true;
   }
   writeDataPayloadAtomic(name, data, options = {}) {
@@ -3117,7 +3246,7 @@ module.exports = class MessageLoggerV2 {
         if (this.saveBackupTimeout) this.autoBackupSaveInterupts++;
         if (this.autoBackupSaveInterupts < 4) {
           if (this.saveBackupTimeout) clearTimeout(this.saveBackupTimeout);
-          this.saveBackupTimeout = setTimeout(() => this.saveBackup(), 20 * 1000);
+          this.saveBackupTimeout = setTimeout(() => this.saveBackup(), this.getAutoBackupIntervalMilliseconds());
         }
       }
       this.requestedDataSave = 0;

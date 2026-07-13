@@ -23,6 +23,7 @@ test('all fresh-install settings defaults remain stable', () => {
   assert.deepEqual(readDefaultSettings(), {
     obfuscateCSSClasses: true,
     autoBackup: false,
+    autoBackupIntervalSeconds: 20,
     dontSaveData: false,
     displayUpdateNotes: true,
     ignoreMutedGuilds: true,
@@ -96,6 +97,48 @@ test('all fresh-install settings defaults remain stable', () => {
     autoUpdate: true,
     versionInfo: ''
   });
+  assert.match(source, /loadedSettingsAreUsable[\s\S]*structuredClone\(defaultSettings\)[\s\S]*normalizeSettingsAgainstDefaults\(this\.settings, defaultSettings\)[\s\S]*if \(settingsChanged\) this\.saveSettings\(\);/);
+
+  const defaults = readDefaultSettings();
+  const migrated = {
+    autoBackup: 'invalid',
+    whitelist: ['guild-a', 123, 'guild-a'],
+    toastToggles: { sent: 'invalid', edited: false, forkSpecificAlert: true },
+    forkSpecificSetting: { enabled: true },
+    versionInfo: defaults.versionInfo
+  };
+  const plugin = createPlugin();
+  assert.equal(plugin.normalizeSettingsAgainstDefaults(migrated, defaults), true);
+  assert.equal(Object.keys(defaults).every(key => Object.prototype.hasOwnProperty.call(migrated, key)), true);
+  assert.equal(migrated.autoBackup, defaults.autoBackup);
+  assert.deepEqual(migrated.whitelist, ['guild-a']);
+  assert.deepEqual(migrated.toastToggles, {
+    sent: defaults.toastToggles.sent,
+    edited: false,
+    deleted: defaults.toastToggles.deleted,
+    ghostPings: defaults.toastToggles.ghostPings,
+    forkSpecificAlert: true
+  });
+  assert.deepEqual(migrated.forkSpecificSetting, { enabled: true });
+  assert.equal(plugin.normalizeSettingsAgainstDefaults(migrated, defaults), false);
+
+  const customized = structuredClone(defaults);
+  Object.assign(customized, {
+    autoBackup: true,
+    autoBackupIntervalSeconds: 300,
+    messageCacheCap: 4321,
+    savedMessagesCap: 9876,
+    deletedMessageColor: '#12abef',
+    newCacheAllImagesPath: '/custom/cache',
+    contextmenuSubmenuName: 'My Logger',
+    whitelist: ['guild-a', 'channel-b'],
+    forkSpecificSetting: { enabled: true }
+  });
+  customized.toastToggles.forkSpecificAlert = true;
+  const before = structuredClone(customized);
+  assert.equal(plugin.normalizeSettingsAgainstDefaults(customized, defaults), false);
+  assert.equal(plugin.ensureAutoBackupIntervalSetting(customized), false);
+  assert.deepEqual(customized, before);
 });
 
 test('required legacy cache toggles stay visible, locked, and forced on', () => {
@@ -127,6 +170,32 @@ test('atomic persistence and startup cleanup remain wired into the plugin', () =
   assert.match(source, /this\.getName\(\) \+ 'DataBackup'/);
 });
 
+test('automatic backup interval is configurable and bounded in settings and config', () => {
+  assert.match(source, /const DEFAULT_AUTO_BACKUP_INTERVAL_SECONDS = 20;/);
+  assert.match(source, /const MIN_AUTO_BACKUP_INTERVAL_SECONDS = 10;/);
+  assert.match(source, /const MAX_AUTO_BACKUP_INTERVAL_SECONDS = 86400;/);
+  assert.match(source, /name: 'Auto backup interval \(seconds\)'[\s\S]*id: 'autoBackupIntervalSeconds'[\s\S]*min: MIN_AUTO_BACKUP_INTERVAL_SECONDS[\s\S]*max: MAX_AUTO_BACKUP_INTERVAL_SECONDS/);
+  assert.match(source, /Invalid auto-backup interval in config; reset to/);
+  assert.match(source, /setTimeout\(\(\) => this\.saveBackup\(\), this\.getAutoBackupIntervalMilliseconds\(\)\)/);
+
+  const plugin = createPlugin({ settings: { autoBackupIntervalSeconds: 300 } });
+  assert.equal(plugin.normalizeAutoBackupIntervalSeconds(300), 300);
+  assert.equal(plugin.getAutoBackupIntervalMilliseconds(), 300_000);
+  for (const invalid of [null, '', 9, 86401, 10.5, 'not-a-number']) {
+    assert.equal(plugin.normalizeAutoBackupIntervalSeconds(invalid), 20);
+  }
+  assert.equal(plugin.normalizeAutoBackupIntervalSeconds(10), 10);
+  assert.equal(plugin.normalizeAutoBackupIntervalSeconds(86400), 86400);
+
+  plugin.settings = {};
+  assert.equal(plugin.ensureAutoBackupIntervalSetting(), true);
+  assert.equal(plugin.settings.autoBackupIntervalSeconds, 20);
+  assert.equal(plugin.ensureAutoBackupIntervalSetting(), false);
+  plugin.settings.autoBackupIntervalSeconds = 9;
+  assert.equal(plugin.ensureAutoBackupIntervalSetting(), true);
+  assert.equal(plugin.settings.autoBackupIntervalSeconds, 20);
+});
+
 test('no-save recovery remains guarded and ordered before backup persistence', () => {
   assert.match(source, /this\._needsNoSaveDataMerge = !!this\.settings\.dontSaveData/);
   assert.match(source, /loadPersistedDataForNoSaveMerge\(\)/);
@@ -145,4 +214,12 @@ test('legacy data migration uses canonical whole-file output and routed notifica
   assert.match(source, /Legacy or mixed-fork logger data detected\. Migration to the current schema is in progress\./);
   assert.match(source, /rewriteCanonicalDataPayload\(\)[\s\S]*writeDataPayloadAtomic\([\s\S]*this\.getName\(\) \+ 'Data'/);
   assert.match(source, /Message Logger Data Migration Error[\s\S]*View the console log for more details\./);
+});
+
+test('backup restoration reports the main-file rebuild through the notification router', () => {
+  assert.match(source, /this\._canonicalRewriteReason = dataLoadedFromBackup/);
+  assert.match(source, /Valid logger backup is loaded[\s\S]*scheduling an atomic rebuild of the main data file/);
+  assert.match(source, /this\._showNotification\([\s\S]*Message Logger Data Recovery[\s\S]*Valid backup loaded\. Rebuilding the main data file\./);
+  assert.match(source, /Message Logger Data Recovery Error[\s\S]*main data file could not be rebuilt[\s\S]*View the console log for more details\./);
+  assert.match(source, /Backup loaded and the main data file was rebuilt successfully\./);
 });
