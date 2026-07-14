@@ -740,7 +740,7 @@ test('full root deletion keeps a Purged starter in Purged while reply-only purge
   assert.deepEqual(replyOnlyPlugin.purgedMessageRecord, { [replyOnlyRootId]: [replyOnlyId] });
 });
 
-test('full forum or thread roots highlight only the root location title, never a reply', () => {
+test('forum and thread location titles highlight only the actual starter or folded root', () => {
   const rootId = '680';
   const replyId = '681';
   const plugin = createPlugin({
@@ -771,6 +771,44 @@ test('full forum or thread roots highlight only the root location title, never a
   assert.equal(
     plugin.isThreadStarterLogMessage(plugin.messageRecord[replyId], plugin.messageRecord[replyId].message),
     false
+  );
+
+  const partialForumId = '690';
+  const partialReplyId = '691';
+  plugin.messageRecord[partialForumId] = {
+    message: { id: partialForumId, channel_id: partialForumId, content: 'mounted forum starter' },
+    delete_data: {
+      forum_thread_message_delete: true,
+      location: { channelId: partialForumId, channelType: 11, parentType: 15 },
+      forum_metadata: { starterMessageId: partialForumId, isForumParent: true, parentType: 15 }
+    }
+  };
+  plugin.messageRecord[partialReplyId] = {
+    message: { id: partialReplyId, channel_id: partialForumId, content: 'mounted forum reply' },
+    delete_data: {
+      forum_thread_message_delete: true,
+      location: { channelId: partialForumId, channelType: 11, parentType: 15 },
+      forum_metadata: {
+        starterMessageId: partialReplyId,
+        isForumParent: true,
+        parentType: 15
+      }
+    }
+  };
+  assert.equal(
+    plugin.isThreadStarterLogMessage(
+      plugin.messageRecord[partialForumId],
+      plugin.messageRecord[partialForumId].message
+    ),
+    true
+  );
+  assert.equal(
+    plugin.isThreadStarterLogMessage(
+      plugin.messageRecord[partialReplyId],
+      plugin.messageRecord[partialReplyId].message
+    ),
+    false,
+    'a mounted forum reply cannot claim the shared post title through stale self-referencing metadata'
   );
 
   delete plugin.messageRecord[rootId];

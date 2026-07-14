@@ -7676,13 +7676,22 @@ module.exports = class MessageLoggerV2 {
     if (![10, 11, 12].includes(channelType)) return false;
     const threadId = liveChannel?.id || location.channelId || message.channel_id;
     const threadRecord = this.messageRecord?.[threadId];
+    const metadata = record?.delete_data?.forum_metadata || {};
+    const liveParent = liveChannel?.parent_id ? this.tools.getChannel(liveChannel.parent_id) : null;
+    const parentType = liveParent?.type ?? metadata.parentType ?? location.parentType;
+    // Forum starters are self-keyed: the post/thread ID is the starter-message ID. This remains
+    // authoritative while the native post is still mounted, even if an independently deleted or
+    // purged reply carries stale metadata that incorrectly names itself as the starter.
+    if (metadata.isForumParent || parentType === 15 || parentType === 16) {
+      return String(message.id) === String(threadId);
+    }
     // Once the structural root is saved, channel-thread starters are folded into that root and
     // forum starters are already self-keyed. Child metadata can be incomplete or can carry an old
     // starter hint, but it must never make a reply highlight the deleted root title in the logger.
     if (threadRecord?.delete_data?.forum_thread_delete) {
       return String(message.id) === String(threadRecord.message?.id || threadId);
     }
-    const starterMessageId = record?.delete_data?.forum_metadata?.starterMessageId
+    const starterMessageId = metadata.starterMessageId
       || threadRecord?.delete_data?.forum_metadata?.starterMessageId
       || this.forumThreadMetadataCache?.get(threadId)?.starterMessageId;
     return !!starterMessageId && starterMessageId === message.id;
