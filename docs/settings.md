@@ -56,7 +56,7 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Show Hidden tab in logger | Off | Adds the **Hidden** tab. Hidden records remain stored when the tab is disabled. |
 | Display update notes | On | Shows the plugin changelog after a version change. |
 | Menu sort direction | New to old | Controls message ordering in the logger window. |
-| Use BdApi basic notifications | On | Uses BetterDiscord notifications instead of the plugin's custom toasts. Switching it off immediately dismisses the active native notification and clears its memory-only queue. |
+| Use BdApi basic notifications | On | Selects BetterDiscord notifications or plugin custom toasts for every logger alert and system/UI message. Switching it off immediately dismisses the active native notification and clears its memory-only queue. |
 
 ## 🧰 Misc Settings
 
@@ -202,7 +202,7 @@ The Debug category title and both setting labels use Discord's native warning co
 | Setting | Default | Behavior |
 | --- | --- | --- |
 | Enable debug logging | Off | Writes automatic-backup queue delay, reschedule, cancellation, write start, verification retry, and completion events to the console. |
-| Show debug messages as toasts | Off | Sends the same backup events through the selected BetterDiscord-notification or custom-toast mode. Every debug alert uses the native warning color, and this control is independent of console debug logging. |
+| Show debug messages as toasts | Off | Sends the same backup events through the selected BetterDiscord-notification or custom-toast mode. Debug alerts are warning-colored, expire without pausing on hover, and dismiss on a left- or right-click. This control is independent of console debug logging. |
 
 Debug output currently covers only the automatic-backup lifecycle. It does not change backup timing, persistence, or normal error reporting.
 
@@ -223,8 +223,10 @@ Each change writes one explicit `enabled` or `disabled` console message and foll
 - Enabled: Discord info/brand color.
 - Disabled: a theme-neutral grey custom toast; native BetterDiscord cards use a neutral icon because the API has no grey type.
 - Rapid changes replace only that setting's active or queued alert.
-- Setting alerts continue while hovered; left- or right-click dismisses either style immediately.
+- Setting alerts keep expiring while hovered; left- or right-click dismisses either style immediately.
 - Debug alerts remain warning-colored; errors remain red.
+
+The same no-hover-pause and whole-card dismissal behavior applies to other system/UI feedback, including Hide/Unhide, validation, copy/delete confirmations, migration, backup recovery, no-save merging, and errors. Actual saved-message event alerts retain their View/Jump actions and hover-aware timeout behavior.
 
 ## 🖱️ Settings Actions
 

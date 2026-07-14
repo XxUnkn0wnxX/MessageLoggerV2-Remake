@@ -109,8 +109,8 @@ test('Anti-Nuke alerts use the destructive theme and target Nuked while ordinary
   let openedTab = null;
   let notification = null;
   const plugin = createPlugin({
-    _showNotification(title, message, type, nextActions) {
-      notification = { title, message, type };
+    _showNotification(title, message, type, nextActions, timeout, options) {
+      notification = { title, message, type, timeout, options };
       actions = nextActions;
     },
     openWindow(tab) {
@@ -127,7 +127,9 @@ test('Anti-Nuke alerts use the destructive theme and target Nuked while ordinary
   assert.deepEqual(notification, {
     title: 'Nuke Detected',
     message: 'Nuke Detected at Server, #deleted-channel; 3 saved records captured',
-    type: 'error'
+    type: 'error',
+    timeout: undefined,
+    options: undefined
   });
   assert.equal(actions[0].label, 'View');
   actions[0].onClick();

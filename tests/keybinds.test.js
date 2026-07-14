@@ -78,7 +78,7 @@ function createShortcutModalPlugin({
       modalKeys.add(this.style.menu);
       this.trackLoggerOwnedModalKey(this.style.menu);
     },
-    showToast(...args) { toastEvents.push(args); }
+    notifyUser(...args) { toastEvents.push(args); }
   });
   return {
     closeOrder,

@@ -28,6 +28,7 @@ function recordState() {
 function createRecordPlugin() {
   const state = recordState();
   const dispatches = [];
+  const notifications = [];
   const plugin = createPlugin({
     messageRecord: { [state.rootId]: state.root, [state.childId]: state.child },
     messageRecordIds: new Set([state.rootId, state.childId]),
@@ -46,9 +47,9 @@ function createRecordPlugin() {
     scheduleLoggerMenuRefresh() {},
     refreshForumThreadLogModal() {},
     saveData() {},
-    showToast() {}
+    _showNotification(...args) { notifications.push(args); }
   });
-  return { ...state, dispatches, plugin };
+  return { ...state, dispatches, notifications, plugin };
 }
 
 test.beforeEach(resetHarness);
@@ -204,8 +205,8 @@ test('hidden records and unanchored deleted forum or thread roots have no jump m
   assert.equal(plugin.canJumpToSavedRecord(forumRoot), false, 'Nuked records never expose a live jump mount point');
 });
 
-test('hiding and unhiding a forum or thread root cascades to its children', () => {
-  const { plugin, root, child, rootId, dispatches } = createRecordPlugin();
+test('hiding and unhiding a forum or thread root cascades and uses routed system feedback', () => {
+  const { plugin, root, child, rootId, dispatches, notifications } = createRecordPlugin();
 
   assert.equal(plugin.setSavedThreadHidden(root, true), true);
   assert.equal(root.delete_data.hidden, true);
@@ -219,6 +220,14 @@ test('hiding and unhiding a forum or thread root cascades to its children', () =
   assert.equal(child.delete_data.hidden, false);
   assert.equal(child.edits_hidden, false);
   assert.equal(plugin.suppressedForumThreadIds.has(rootId), false);
+  assert.deepEqual(notifications.map(args => [args[0], args[1]]), [
+    ['Logger Record Hidden', 'Hidden!'],
+    ['Logger Record Unhidden', 'Unhidden!']
+  ]);
+  for (const notification of notifications) {
+    assert.equal(notification[5].pauseOnHover, false);
+    assert.equal(notification[5].instantDismiss, true);
+  }
 });
 
 test('removing a forum or thread root removes all indexed children', () => {
@@ -623,7 +632,7 @@ test('Nuked tab separation preserves hidden Anti-Nuke records while its feature 
     saveData() {},
     scheduleLoggerMenuRefresh() {},
     refreshForumThreadLogModal() {},
-    showToast() {}
+    notifyUser() {}
   });
 
   assert.deepEqual(plugin.getFilteredMessages(), [normalPurgedId], 'Purged contains only ordinary bulk deletes');

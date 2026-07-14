@@ -139,7 +139,13 @@ test('backup debug console and routed-toast controls are independent and disable
     'toast-only event',
     'warning',
     [],
-    2500
+    2500,
+    {
+      replaceKey: null,
+      pauseOnHover: false,
+      instantDismiss: true,
+      routeOverride: null
+    }
   ]);
 
   plugin.settings.debugLogging = true;
@@ -153,18 +159,21 @@ test('debug warning alerts honor the selected native-notification or custom-toas
   const nativeNotifications = [];
   const customToasts = [];
   const plugin = createPlugin({
+    _notificationRouterReady: true,
     settings: {
       debugLogging: false,
       debugToasts: true,
       useNotificationsInstead: true
     },
     _enqueueNativeNotification(notification) { nativeNotifications.push(notification); },
-    showToast(content, options) { customToasts.push([content, options]); }
+    _showCustomToast(content, options) { customToasts.push([content, options]); }
   });
 
   plugin.reportDebugEvent('native route');
   assert.equal(nativeNotifications.length, 1);
   assert.equal(nativeNotifications[0].type, 'warning');
+  assert.equal(nativeNotifications[0].pauseOnHover, false);
+  assert.equal(nativeNotifications[0].instantDismiss, true);
   assert.equal(customToasts.length, 0);
 
   plugin.settings.useNotificationsInstead = false;
@@ -173,6 +182,34 @@ test('debug warning alerts honor the selected native-notification or custom-toas
   assert.equal(customToasts.length, 1);
   assert.equal(customToasts[0][0], 'custom route');
   assert.equal(customToasts[0][1].type, 'warning');
+  assert.equal(customToasts[0][1].pauseOnHover, false);
+  assert.equal(customToasts[0][1].instantDismiss, true);
+});
+
+test('system and UI feedback defaults to wall-clock expiry and whole-card dismissal', () => {
+  const notifications = [];
+  const plugin = createPlugin({
+    _showNotification(...args) { notifications.push(args); }
+  });
+
+  plugin.notifyUser('Hidden!', {
+    title: 'Logger Record Hidden',
+    type: 'success'
+  });
+
+  assert.deepEqual(notifications, [[
+    'Logger Record Hidden',
+    'Hidden!',
+    'success',
+    [],
+    3000,
+    {
+      replaceKey: null,
+      pauseOnHover: false,
+      instantDismiss: true,
+      routeOverride: null
+    }
+  ]]);
 });
 
 test('BetterDiscord settings invoke each plugin callback exactly once', t => {
@@ -207,9 +244,10 @@ test('neutral state alerts use a theme-colored native card or custom grey toast'
   const nativeNotifications = [];
   const customToasts = [];
   const plugin = createPlugin({
+    _notificationRouterReady: true,
     settings: { useNotificationsInstead: true },
     _enqueueNativeNotification(notification) { nativeNotifications.push(notification); },
-    showToast(content, options) { customToasts.push([content, options]); }
+    _showCustomToast(content, options) { customToasts.push([content, options]); }
   });
 
   plugin._showNotification('State', 'Disabled state', 'neutral', [], 5000);
@@ -258,6 +296,7 @@ test('rapid same-setting alerts replace the previous routed notification only', 
   const nativeNotifications = [];
   let nativeClosed = 0;
   const nativePlugin = createPlugin({
+    _notificationRouterReady: true,
     settings: { useNotificationsInstead: true },
     _nativeNotificationQueue: [
       { replaceKey: 'setting:antiNukeEnabled', content: 'queued stale state' },
@@ -291,12 +330,13 @@ test('rapid same-setting alerts replace the previous routed notification only', 
   const customToasts = [];
   const customDismissals = [];
   const customPlugin = createPlugin({
+    _notificationRouterReady: true,
     settings: { useNotificationsInstead: false },
     _replaceableToasts: new Map([[
       'setting:antiNukeEnabled',
       { __mlv2Dismiss(immediate) { customDismissals.push(immediate); } }
     ]]),
-    showToast(content, options) { customToasts.push([content, options]); }
+    _showCustomToast(content, options) { customToasts.push([content, options]); }
   });
 
   customPlugin._showNotification(
@@ -379,8 +419,8 @@ test('custom setting toasts replace immediately, ignore hover, and dismiss on cl
     instantDismiss: true
   };
 
-  const first = plugin.showToast('Anti Nuke enabled.', options);
-  const second = plugin.showToast('Anti Nuke disabled.', { ...options, type: 'neutral' });
+  const first = plugin._showCustomToast('Anti Nuke enabled.', options);
+  const second = plugin._showCustomToast('Anti Nuke disabled.', { ...options, type: 'neutral' });
 
   assert.equal(first.removed, true);
   assert.equal(second.listeners.pointerenter, undefined);
@@ -564,8 +604,9 @@ test('notification mode changes log and preview the selected route as info', () 
   const nativeNotifications = [];
   const customToasts = [];
   const previewPlugin = createPlugin({
+    _notificationRouterReady: true,
     _enqueueNativeNotification(notification) { nativeNotifications.push(notification); },
-    showToast(content, options) { customToasts.push([content, options]); }
+    _showCustomToast(content, options) { customToasts.push([content, options]); }
   });
 
   previewPlugin.showNotificationTest(true);

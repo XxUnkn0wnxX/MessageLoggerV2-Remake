@@ -519,7 +519,35 @@ test('backup diagnostics remain opt-in under their own warning-colored Debug cat
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Enable debug logging[\s\S]*id: 'debugLogging'[\s\S]*type: 'switch'/);
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Show debug messages as toasts[\s\S]*id: 'debugToasts'[\s\S]*type: 'switch'/);
   assert.match(source, /if \(this\.settings\?\.debugLogging\) Logger\.log\(`\[Debug\] \$\{message\}`\)/);
-  assert.match(source, /if \(this\.settings\?\.debugToasts\)[\s\S]*this\._showNotification\('Message Logger Debug', message, 'warning'/);
+  assert.match(source, /if \(this\.settings\?\.debugToasts\)[\s\S]*this\.notifyUser\(message,[\s\S]*title: 'Message Logger Debug'[\s\S]*type: 'warning'/);
+});
+
+test('system and UI feedback uses one native-or-custom router without changing event alerts', () => {
+  assert.doesNotMatch(source, /UI\.showToast\(/);
+  assert.doesNotMatch(source, /this\.showToast/);
+  assert.equal(
+    (source.match(/this\._showCustomToast\(/g) || []).length,
+    1,
+    'only the central router may invoke the custom toast renderer'
+  );
+
+  const systemRouter = source.slice(
+    source.indexOf('notifyUser(content, options = {})'),
+    source.indexOf('_dismissReplaceableNotification(replaceKey)')
+  );
+  assert.match(systemRouter, /pauseOnHover = false/);
+  assert.match(systemRouter, /instantDismiss = true/);
+  assert.match(systemRouter, /return this\._showNotification\(title, content, type, actions, timeout/);
+
+  const eventRouter = source.slice(
+    source.indexOf('_notifyEvent(eventType, channel, guild, messageId, options = {})'),
+    source.indexOf('_sortMessagesById(messages)')
+  );
+  assert.match(eventRouter, /this\._showNotification\(config\.title, message, config\.type, actions, timeout\)/);
+  assert.doesNotMatch(eventRouter, /notifyUser/);
+
+  assert.match(source, /setSavedThreadHidden\(record, hidden\)[\s\S]*this\.notifyUser\(hidden \? 'Hidden!' : 'Unhidden!'/);
+  assert.match(source, /reportSettingState\(title,[\s\S]*this\.notifyUser\(notificationMessage/);
 });
 
 test('settings callbacks have one BetterDiscord owner', () => {
@@ -549,7 +577,8 @@ test('high-impact setting changes use routed theme-aware state feedback', () => 
   assert.match(source, /enabled \? 'info' : 'neutral'/);
   assert.match(source, /'neutral': \{ bg: 'var\(--background-tertiary, #4f545c\)', fg: 'var\(--text-default, #fff\)'/);
   assert.match(source, /type: type === 'neutral' \? 'info' : type[\s\S]*var\(--interactive-normal\)/);
-  assert.match(source, /reportSettingState\(title,[\s\S]*replaceKey[\s\S]*pauseOnHover: false[\s\S]*instantDismiss: true/);
+  assert.match(source, /reportSettingState\(title,[\s\S]*this\.notifyUser\(notificationMessage,[\s\S]*replaceKey/);
+  assert.match(source, /notifyUser\(content, options = \{\}\)[\s\S]*pauseOnHover = false[\s\S]*instantDismiss = true/);
   assert.match(source, /_dismissReplaceableNotification\(replaceKey\)[\s\S]*notification\.replaceKey !== replaceKey[\s\S]*active\.handle\?\.close/);
   assert.match(source, /if \(timeout > 0 && pauseOnHover\)[\s\S]*pointerenter[\s\S]*pointerleave/);
   assert.match(source, /notification\.pauseOnHover === false[\s\S]*active\.forceCloseTimer = setTimeout/);
@@ -594,14 +623,15 @@ test('legacy data migration uses canonical whole-file output and routed notifica
   assert.match(source, /const DATA_SCHEMA_VERSION = 1;/);
   assert.match(source, /mlv2RemakeSchemaVersion: DATA_SCHEMA_VERSION,[\s\S]*messageRecord: this\.messageRecord/);
   assert.match(source, /Legacy or mixed-fork logger data detected\. Migration to the current schema is in progress\./);
+  assert.match(source, /this\.notifyUser\('Legacy or mixed-fork logger data detected\. Migration to the current schema is in progress\.'/);
   assert.match(source, /rewriteCanonicalDataPayload\(\)[\s\S]*writeDataPayloadAtomic\([\s\S]*this\.getName\(\) \+ 'Data'/);
-  assert.match(source, /Message Logger Data Migration Error[\s\S]*View the console log for more details\./);
+  assert.match(source, /this\.notifyUser\([\s\S]*The normalized data could not be saved\. View the console log for more details\.[\s\S]*Message Logger Data Migration Error/);
 });
 
 test('backup restoration reports the main-file rebuild through the notification router', () => {
   assert.match(source, /this\._canonicalRewriteReason = dataLoadedFromBackup/);
   assert.match(source, /Valid logger backup is loaded[\s\S]*scheduling an atomic rebuild of the main data file/);
-  assert.match(source, /this\._showNotification\([\s\S]*Message Logger Data Recovery[\s\S]*Valid backup loaded\. Rebuilding the main data file\./);
+  assert.match(source, /this\.notifyUser\('Valid backup loaded\. Rebuilding the main data file\.',[\s\S]*title: 'Message Logger Data Recovery'/);
   assert.match(source, /Message Logger Data Recovery Error[\s\S]*main data file could not be rebuilt[\s\S]*View the console log for more details\./);
   assert.match(source, /Backup loaded and the main data file was rebuilt successfully\./);
 });

@@ -22,7 +22,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
   - Toggling compares the requested filter with the actual logger state: matching views close; different views close then reopen.
   - Reopening waits for native media, tracked MessageLogger modals, and logger user popouts. This includes media opened from normal Discord messages, but no other Discord panel.
   - A transition token cancels stale rapid reopens; no global modal or layer clearing is used.
-- The standalone warning-colored Debug group keeps console and routed-toast diagnostics independently opt-in. `reportDebugEvent` is the shared router and currently accepts only automatic-backup lifecycle events.
+- The standalone warning-colored Debug group keeps console and routed diagnostics independently opt-in. `reportDebugEvent` currently accepts only automatic-backup lifecycle events and sends UI feedback through `notifyUser`.
 - `reportSettingState` keeps console detail and routed alerts aligned.
 - `reportMajorSettingChange` covers only broad logging, persistence, media, update, and destructive settings. Enabled states are info; disabled states use the theme-neutral presentation.
 - Per-setting replacement keys discard obsolete alerts after rapid changes.
@@ -65,7 +65,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 - Recovery cap cleanup does not delete local media while the transaction can still fail; a harmless orphaned cache file is safer than irreversible pre-commit deletion.
 - `mergeNoSaveSessionIntoPersistedData` is a transaction ordered as load, validate, merge, cap, install, primary write, then backup. Primary failure keeps saving disabled and leaves both files untouched.
 - `cancelPendingDataWrites` clears queued timers and increments a write epoch. Async writers check that epoch before rename.
-- Recovery failures always log detailed stage, path, cause, and state information, then route a concise alert through `_showNotification` so the selected native-notification/custom-toast mode is respected.
+- Recovery failures always log detailed stage, path, cause, and state information, then route a concise alert through `notifyUser` so the selected native-notification/custom-toast mode is respected.
 
 ## 📡 Discord Event Capture
 
@@ -131,10 +131,12 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 
 ## 🔔 Notifications
 
-- `_showNotification` is the single routing point between BetterDiscord native notifications and the plugin's custom toasts.
+- `_showNotification` is the single low-level routing point between BetterDiscord native notifications and the plugin's custom toasts. `_showCustomToast` is an internal renderer and is called only by this router.
+- `notifyUser` is the system/UI feedback entry point used by settings, Debug, Hide/Unhide, validation, startup, migration, merge, recovery, and action results. It defaults to wall-clock expiry with whole-card left/right-click dismissal.
+- `_notifyEvent` sends actual saved-message events directly through `_showNotification`, preserving View/Jump actions and hover-aware timing.
 - Custom toast colors use Discord CSS variables. The plugin-owned `neutral` state becomes a theme-grey custom toast or a supported native `info` notification with a neutral icon, because BetterDiscord exposes no grey notification type.
-- Setting-state alerts use wall-clock expiry rather than hover pause; custom setting toasts dismiss through their own handlers.
-- Native setting alerts use a unique content marker for whole-card left/right-click dismissal and a visible progress animation after BetterDiscord mounts the card. The wall-clock timer remains the fallback.
+- System/UI alerts use wall-clock expiry rather than hover pause; custom alerts dismiss through their own handlers.
+- Native system/UI alerts use a unique content marker for whole-card left/right-click dismissal and a visible progress animation after BetterDiscord mounts the card. The wall-clock timer remains the fallback.
 - Native notifications use a memory-only FIFO queue with hover-aware yielding; queue state is never persisted.
 - Guild and DM event settings, local-user rules, active-location overrides, and notification lists are evaluated separately from logging eligibility.
 

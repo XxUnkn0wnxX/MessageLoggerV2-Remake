@@ -265,6 +265,9 @@ const PopoutComponent = ({
 module.exports = class MessageLoggerV2 {
   constructor(meta) {
     this.meta = meta;
+    // Startup failures can occur before settings and the queued native-notification runtime
+    // exist. The global router uses this flag to select its safe pre-initialization path.
+    this._notificationRouterReady = false;
   }
   getName() {
     return this.meta.name;
@@ -287,7 +290,11 @@ module.exports = class MessageLoggerV2 {
       } catch (err) {
         Logger.error('Failed to start!', err);
         this.stop();
-        UI.showToast(`[**${this.getName()}**] Failed to start!`, { type: 'error', timeout: 0 });
+        this.notifyUser(`[${this.getName()}] Failed to start!`, {
+          title: 'Message Logger Startup Error',
+          type: 'error',
+          timeout: 0
+        });
       }
     };
     this.pluginDir = Plugins.folder || globalThis.ContentManager?.pluginsFolder;
@@ -312,6 +319,7 @@ module.exports = class MessageLoggerV2 {
       }
       this._destructiveChannelDeleteContexts?.clear?.();
       this._nativeDeletedForumPreviewText?.clear?.();
+      this._notificationRouterReady = false;
       this._clearNativeNotificationQueue();
       if (this.menu?.filterSetTimeout) clearTimeout(this.menu.filterSetTimeout);
       if (this.keydownListener) {
@@ -433,7 +441,8 @@ module.exports = class MessageLoggerV2 {
       Logger.log('Update check response:', response.status, response.statusText);
       if (!response.ok) {
         if (showNoUpdateNotice) {
-          UI.showToast(`[${this.getName()}] Failed to check for updates (${response.status})`, {
+          this.notifyUser(`[${this.getName()}] Failed to check for updates (${response.status})`, {
+            title: 'Message Logger Update Error',
             type: "error",
             timeout: 5000
           });
@@ -444,22 +453,20 @@ module.exports = class MessageLoggerV2 {
       const remoteVersion = this.getVersionFromContent(remoteContent);
       const currentVersion = this.getVersion();
       if (this.checkVersionNewer(currentVersion, remoteVersion)) {
-        UI.showNotification({
+        this.notifyUser(`v${currentVersion} -> v${remoteVersion}`, {
           title: `${this.getName()} Update Available`,
-          content: `v${currentVersion} -> v${remoteVersion}`,
-          type: "info",
-          duration: 2 * 60 * 60 * 1000,
+          type: 'info',
           actions: [
             {
-              label: "Update Now",
-              onClick: () => {
-                this.performUpdate(remoteContent, remoteVersion);
-              }
+              label: 'Update Now',
+              onClick: () => this.performUpdate(remoteContent, remoteVersion)
             }
-          ]
+          ],
+          timeout: 2 * 60 * 60 * 1000
         });
       } else if (showNoUpdateNotice) {
-        UI.showToast(`[${this.getName()}] You're on the latest version (v${currentVersion})`, {
+        this.notifyUser(`[${this.getName()}] You're on the latest version (v${currentVersion})`, {
+          title: 'Message Logger Update Check',
           type: "success",
           timeout: 3000
         });
@@ -467,7 +474,8 @@ module.exports = class MessageLoggerV2 {
     } catch (error) {
       Logger.error('Update check failed:', error);
       if (showNoUpdateNotice) {
-        UI.showToast(`[${this.getName()}] Failed to check for updates`, {
+        this.notifyUser(`[${this.getName()}] Failed to check for updates`, {
+          title: 'Message Logger Update Error',
           type: "error",
           timeout: 5000
         });
@@ -491,7 +499,8 @@ module.exports = class MessageLoggerV2 {
             const currentContent = this.nodeModules.fs.readFileSync(pluginPath, 'utf-8');
             this.nodeModules.fs.writeFileSync(backupPath, currentContent, 'utf-8');
             this.nodeModules.fs.writeFileSync(pluginPath, remoteContent, 'utf-8');
-            UI.showToast(`[${this.getName()}] Successfully updated to v${remoteVersion}!`, {
+            this.notifyUser(`[${this.getName()}] Successfully updated to v${remoteVersion}!`, {
+              title: 'Message Logger Updated',
               type: "success",
               timeout: 3000
             });
@@ -504,7 +513,8 @@ module.exports = class MessageLoggerV2 {
             }, 750);
           } catch (error) {
             Logger.error('Update failed:', error);
-            UI.showToast(`[${this.getName()}] Update failed! Check console for details.`, {
+            this.notifyUser(`[${this.getName()}] Update failed! Check console for details.`, {
+              title: 'Message Logger Update Error',
               type: "error",
               timeout: 0
             });
@@ -547,23 +557,38 @@ module.exports = class MessageLoggerV2 {
     }
   }
   initialize() {
-    if (this.__started) return UI.showToast(`[**${this.getName()}**] Tried to start twice..`, { timeout: 0 }, { type: "warning" });
+    if (this.__started) return this.notifyUser(`[${this.getName()}] Tried to start twice.`, {
+      title: 'Message Logger Startup Warning',
+      type: 'warning',
+      timeout: 0
+    });
     this.__started = true;
     this._nativeNotificationQueueStopped = false;
     this._nativeNotificationQueue = [];
     this._nativeNotificationActive = null;
     this._nativeNotificationSequence = 0;
     this._replaceableToasts = new Map();
+    this._notificationRouterReady = true;
     DiscordModules.ModalActions.closeModal(`${this.getName()}_DEP_MODAL`);
     if (globalThis.PluginUpdates?.plugins) delete PluginUpdates.plugins['https://gitlab.com/_Lighty_/bdstuff/raw/main/public/plugins/MessageLoggerV2.plugin.js'];
     if (Plugins.get('NoDeleteMessages') && Plugins.isEnabled('NoDeleteMessages'))
-      UI.showToast(`[**${this.getName()}**] Using **NoDeleteMessages** with **${this.getName()}** is completely unsupported and will cause issues. Please either disable **NoDeleteMessages** or delete it to avoid issues.`, { type: "warning" });
+      this.notifyUser(`[${this.getName()}] Using NoDeleteMessages is completely unsupported and will cause issues. Disable or remove NoDeleteMessages.`, {
+        title: 'Message Logger Compatibility Warning',
+        type: 'warning'
+      });
     if (Plugins.get('SuppressUserMentions') && Plugins.isEnabled('SuppressUserMentions'))
-      UI.showToast(`[**${this.getName()}**] Using **SuppressUserMentions** with **${this.getName()}** is completely unsupported and will cause issues. Please either disable **SuppressUserMentions** or delete it to avoid issues.`, { type: "warning" });
+      this.notifyUser(`[${this.getName()}] Using SuppressUserMentions is completely unsupported and will cause issues. Disable or remove SuppressUserMentions.`, {
+        title: 'Message Logger Compatibility Warning',
+        type: 'warning'
+      });
     const missingCritical = DiscordModules._validateCritical();
     if (missingCritical.length) {
       Logger.error('Critical Discord modules missing:', missingCritical);
-      UI.showToast(`[**${this.getName()}**] Warning: Some Discord modules failed to load (${missingCritical.join(', ')}). Some features may not work correctly.`, { type: 'warning', timeout: 10000 });
+      this.notifyUser(`Some Discord modules failed to load (${missingCritical.join(', ')}). Some features may not work correctly.`, {
+        title: 'Message Logger Module Warning',
+        type: 'warning',
+        timeout: 10000
+      });
     }
     const defaultSettings = {
       obfuscateCSSClasses: true,
@@ -674,12 +699,16 @@ module.exports = class MessageLoggerV2 {
         parserRepairs: startupSettingsConfig.issueCount,
         strictParseError: startupSettingsConfig.strictParseError
       });
-      UI.showToast(
+      this.notifyUser(
         `[${this.getName()}] Settings config corruption detected and repaired. Valid settings were preserved; invalid or missing settings will use defaults. View the console log for details.`,
-        { type: 'warning', timeout: 10000 }
+        { title: 'Message Logger Settings Warning', type: 'warning', timeout: 10000 }
       );
     } else if (loadedSettings !== null && loadedSettings !== undefined && !loadedSettingsAreUsable) {
-      UI.showToast(`[${this.getName()}] Settings file corrupted! All settings restored to default.`, { type: "error", timeout: 0 });
+      this.notifyUser(`[${this.getName()}] Settings file corrupted! All settings restored to default.`, {
+        title: 'Message Logger Settings Error',
+        type: 'error',
+        timeout: 0
+      });
     }
     // Existing users must not receive the first-install help merely because an old/corrupt
     // config omitted the flags field. A genuinely missing config still follows the normal
@@ -991,9 +1020,17 @@ module.exports = class MessageLoggerV2 {
       } else if (selectedData.source === 'empty') {
         if (selectedData.hadPersistedCandidate) {
           if (this.settings.autoBackup) {
-            UI.showToast(`[${this.getName()}] Data and backup files were corrupted. All deleted/edited/purged/nuked messages have been erased.`, { type: "error", timeout: 0 });
+            this.notifyUser(`[${this.getName()}] Data and backup files were corrupted. All deleted/edited/purged/nuked messages have been erased.`, {
+              title: 'Message Logger Data Error',
+              type: 'error',
+              timeout: 0
+            });
           } else {
-            UI.showToast(`[${this.getName()}] Data was corrupted! Recommended to turn on auto backup in settings! All deleted/edited/purged/nuked messages have been erased.`, { type: "error", timeout: 0 });
+            this.notifyUser(`[${this.getName()}] Data was corrupted! Recommended to turn on auto backup in settings! All deleted/edited/purged/nuked messages have been erased.`, {
+              title: 'Message Logger Data Error',
+              type: 'error',
+              timeout: 0
+            });
           }
         } else {
           Logger.log('No persisted logger primary or backup was found; starting with an empty payload.');
@@ -1048,7 +1085,10 @@ module.exports = class MessageLoggerV2 {
     this.settings.imageCacheDir = defaultImageCacheDir;
     const imageCacheDirFailure = () => {
       this.settings.imageCacheDir = defaultImageCacheDir;
-      UI.showToast(`[**${this.getName()}**] Failed to access custom image cache dir. It has been reset to plugins folder!`, { type: "error" });
+      this.notifyUser(`[${this.getName()}] Failed to access the custom image cache directory. It has been reset to the plugins folder.`, {
+        title: 'Message Logger Media Cache Error',
+        type: 'error'
+      });
     };
     if (this.settings.cacheAllImages && !this.nodeModules.fs.existsSync(this.settings.imageCacheDir)) {
       try {
@@ -1831,22 +1871,18 @@ module.exports = class MessageLoggerV2 {
     if (this._dataNeedsCanonicalRewrite && !this.settings.dontSaveData) {
       if (this._canonicalRewriteReason === 'backup') {
         Logger.log(`Valid logger backup is loaded because primary data ${this._backupRecoveryReason || 'was unavailable'}; scheduling an atomic rebuild of the main data file.`);
-        this._showNotification(
-          'Message Logger Data Recovery',
-          'Valid backup loaded. Rebuilding the main data file.',
-          'warning',
-          [],
-          5000
-        );
+        this.notifyUser('Valid backup loaded. Rebuilding the main data file.', {
+          title: 'Message Logger Data Recovery',
+          type: 'warning',
+          timeout: 5000
+        });
       } else {
         Logger.log(`Persisted logger data was normalized to schema ${DATA_SCHEMA_VERSION}; scheduling an atomic rewrite.`);
-        this._showNotification(
-          'Message Logger Data Migration',
-          'Legacy or mixed-fork logger data detected. Migration to the current schema is in progress.',
-          'info',
-          [],
-          5000
-        );
+        this.notifyUser('Legacy or mixed-fork logger data detected. Migration to the current schema is in progress.', {
+          title: 'Message Logger Data Migration',
+          type: 'info',
+          timeout: 5000
+        });
       }
       this._canonicalRewritePromise = this.rewriteCanonicalDataPayload()
         .finally(() => { this._canonicalRewritePromise = null; });
@@ -2210,7 +2246,10 @@ module.exports = class MessageLoggerV2 {
         openOwnedModalKeys,
         mediaViewerOpen: Boolean(openMediaModalKey)
       });
-      this.showToast?.('Could not switch logger views because a logger or media panel did not close.', { type: 'warning' });
+      this.notifyUser('Could not switch logger views because a logger or media panel did not close.', {
+        title: 'Message Logger Shortcut',
+        type: 'warning'
+      });
       return;
     }
     // Reassert the desired filter because delayed modal cleanup from the old window may have
@@ -2228,7 +2267,7 @@ module.exports = class MessageLoggerV2 {
       const selectedChannel = this.getSelectedTextChannel?.() || this.selectedChannel;
       if (!selectedChannel?.id) {
         Logger.warn('Filtered logger shortcut was pressed without a selected text channel.');
-        this.showToast('Select a channel before using the filtered logger shortcut.', { type: 'warning' });
+        this.notifyUser('Select a channel before using the filtered logger shortcut.', { type: 'warning' });
         return false;
       }
       desiredFilter = `channel:${selectedChannel.id}`;
@@ -2239,7 +2278,7 @@ module.exports = class MessageLoggerV2 {
       const selectedGuildId = this.getSelectedGuildId?.();
       if (!selectedGuildId) {
         Logger.warn('Server logger shortcut was pressed without a selected server.');
-        this.showToast('Select a server before using the server logger shortcut.', { type: 'warning' });
+        this.notifyUser('Select a server before using the server logger shortcut.', { type: 'warning' });
         return false;
       }
       desiredFilter = `server:${selectedGuildId}`;
@@ -2735,7 +2774,7 @@ module.exports = class MessageLoggerV2 {
       onValid(validation.value);
       return true;
     }
-    this.showToast(validation.message, { type: 'error' });
+    this.notifyUser(validation.message, { type: 'error' });
     return false;
   }
   createInlineValidatedNumberInput(config, onValid) {
@@ -2868,7 +2907,11 @@ module.exports = class MessageLoggerV2 {
     // attention color as the Debug category in both light and dark Discord themes.
     if (this.settings?.debugLogging) Logger.log(`[Debug] ${message}`);
     if (this.settings?.debugToasts) {
-      this._showNotification('Message Logger Debug', message, 'warning', [], timeout);
+      this.notifyUser(message, {
+        title: 'Message Logger Debug',
+        type: 'warning',
+        timeout
+      });
     }
   }
   queueAutoBackup(delayMs, reason = 'queued') {
@@ -3513,10 +3556,10 @@ module.exports = class MessageLoggerV2 {
           const trimmed = String(val ?? '').trim();
           try {
             if (trimmed && !this.nodeModules.fs.statSync(trimmed).isDirectory()) {
-              return this.showToast('Cache path must be an existing folder!', { type: 'error' });
+              return this.notifyUser('Cache path must be an existing folder!', { type: 'error' });
             }
           } catch {
-            return this.showToast('Cache path must be an existing folder!', { type: 'error' });
+            return this.notifyUser('Cache path must be an existing folder!', { type: 'error' });
           }
           this.settings[config.id] = trimmed;
           this.saveSettings();
@@ -3526,7 +3569,7 @@ module.exports = class MessageLoggerV2 {
         setting.onChange = val => {
           const trimmed = String(val ?? '').trim();
           if (trimmed && !/^#?[0-9a-f]{6}$/i.test(trimmed)) {
-            return this.showToast('Color must be a 6-digit hex value!', { type: 'error' });
+            return this.notifyUser('Color must be a 6-digit hex value!', { type: 'error' });
           }
           this.settings[config.id] = trimmed && !trimmed.startsWith('#') ? `#${trimmed}` : trimmed;
           if (config.action && actions[config.action]) actions[config.action](this.settings[config.id]);
@@ -4435,23 +4478,22 @@ module.exports = class MessageLoggerV2 {
     const status = savingRemainsDisabled
       ? 'Saving remains disabled. Reopen settings to retry.'
       : 'The primary data was saved, but a later recovery step failed.';
-    this._showNotification(
-      'Message Logger Data Recovery Error',
-      `${status} View the console log for more details.`,
-      'error',
-      [],
-      0
-    );
+    this.notifyUser(`${status} View the console log for more details.`, {
+      title: 'Message Logger Data Recovery Error',
+      type: 'error',
+      timeout: 0
+    });
   }
   reportSettingState(title, consoleMessage, notificationMessage, type = 'info', timeout = 5000, replaceKey = null) {
     // High-impact settings use one routing point so console detail and the user's selected
     // BetterDiscord-notification/custom-toast mode cannot drift apart. A per-setting key
     // replaces an obsolete alert when the same toggle changes again before it disappears.
     Logger.log(consoleMessage);
-    this._showNotification(title, notificationMessage, type, [], timeout, {
-      replaceKey,
-      pauseOnHover: false,
-      instantDismiss: true
+    this.notifyUser(notificationMessage, {
+      title,
+      type,
+      timeout,
+      replaceKey
     });
   }
   reportDataSavingResume(requiresRecoveryMerge) {
@@ -4562,14 +4604,15 @@ module.exports = class MessageLoggerV2 {
         primaryPath: this.nodeModules.path.join(this.pluginDir, `${this.getName()}Data.config.json`),
         error: result.error
       });
-      this._showNotification(
-        rebuildingFromBackup ? 'Message Logger Data Recovery Error' : 'Message Logger Data Migration Error',
+      this.notifyUser(
         rebuildingFromBackup
           ? 'The backup was loaded, but the main data file could not be rebuilt. View the console log for more details.'
           : 'The normalized data could not be saved. View the console log for more details.',
-        'error',
-        [],
-        0
+        {
+          title: rebuildingFromBackup ? 'Message Logger Data Recovery Error' : 'Message Logger Data Migration Error',
+          type: 'error',
+          timeout: 0
+        }
       );
       return false;
     }
@@ -4578,22 +4621,18 @@ module.exports = class MessageLoggerV2 {
     this._backupRecoveryReason = null;
     if (rebuildingFromBackup) {
       Logger.log('Primary logger data file was rebuilt successfully from the valid backup.');
-      this._showNotification(
-        'Message Logger Data Recovery',
-        'Backup loaded and the main data file was rebuilt successfully.',
-        'success',
-        [],
-        5000
-      );
+      this.notifyUser('Backup loaded and the main data file was rebuilt successfully.', {
+        title: 'Message Logger Data Recovery',
+        type: 'success',
+        timeout: 5000
+      });
     } else {
       Logger.log(`Legacy/mixed-fork logger data migration to schema ${DATA_SCHEMA_VERSION} completed successfully.`);
-      this._showNotification(
-        'Message Logger Data Migration',
-        'Legacy or mixed-fork logger data was migrated successfully.',
-        'success',
-        [],
-        5000
-      );
+      this.notifyUser('Legacy or mixed-fork logger data was migrated successfully.', {
+        title: 'Message Logger Data Migration',
+        type: 'success',
+        timeout: 5000
+      });
     }
     return true;
   }
@@ -4780,7 +4819,11 @@ module.exports = class MessageLoggerV2 {
     const writeEpoch = this._dataWriteEpoch || 0;
     const callback = (err, cancelled = false) => {
       if (err) {
-        UI.showToast('There has been an error saving the data file', { type: "error" });
+        this.notifyUser('There has been an error saving the data file. View the console log for details.', {
+          title: 'Message Logger Data Saving Error',
+          type: 'error',
+          replaceKey: 'system:data-save-error'
+        });
         Logger.error('There has been an error saving the data file', err);
       }
       if (!cancelled && scheduleBackup && this.settings.autoBackup) {
@@ -4802,7 +4845,10 @@ module.exports = class MessageLoggerV2 {
       payload,
       callback,
       synchronous,
-      { shouldCommit: () => (synchronous || this.__started !== false) && !this.settings.dontSaveData && (this._dataWriteEpoch || 0) === writeEpoch }
+      {
+        notifyError: false,
+        shouldCommit: () => (synchronous || this.__started !== false) && !this.settings.dontSaveData && (this._dataWriteEpoch || 0) === writeEpoch
+      }
     );
   }
   saveData() {
@@ -4886,7 +4932,13 @@ module.exports = class MessageLoggerV2 {
           else if (typeof fs?.unlink === "function") await new Promise(resolve => fs.unlink(tempPath, () => resolve()));
         } catch { }
       }
-      if (options.notifyError !== false) UI.showToast('There has been an error saving the data file', { type: "error" });
+      if (options.notifyError !== false) {
+        this.notifyUser('There has been an error saving the data file. View the console log for details.', {
+          title: 'Message Logger Data Saving Error',
+          type: 'error',
+          replaceKey: 'system:data-save-error'
+        });
+      }
       Logger.error('Error saving data file', e);
       if (callback) callback(e);
     }
@@ -4901,7 +4953,11 @@ module.exports = class MessageLoggerV2 {
     const writeEpoch = this._dataWriteEpoch || 0;
     const callback = (err, cancelled = false) => {
       if (err) {
-        UI.showToast('There has been an error saving the data file', { type: "error" });
+        this.notifyUser('There has been an error saving the backup file. View the console log for details.', {
+          title: 'Message Logger Backup Error',
+          type: 'error',
+          replaceKey: 'system:backup-save-error'
+        });
         Logger.error('Error saving backup file', err);
       }
       this.saveBackupTimeout = 0;
@@ -4925,7 +4981,10 @@ module.exports = class MessageLoggerV2 {
       this._getDataPayload(),
       callback,
       false,
-      { shouldCommit: () => this.__started !== false && !this.settings.dontSaveData && (this._dataWriteEpoch || 0) === writeEpoch }
+      {
+        notifyError: false,
+        shouldCommit: () => this.__started !== false && !this.settings.dontSaveData && (this._dataWriteEpoch || 0) === writeEpoch
+      }
     );
   }
   parseHTML(html) {
@@ -5353,7 +5412,7 @@ module.exports = class MessageLoggerV2 {
       return fallback;
     }
   }
-  showToast(content, options = {}) {
+  _showCustomToast(content, options = {}) {
     const {
       type = '',
       icon = '',
@@ -5565,6 +5624,43 @@ module.exports = class MessageLoggerV2 {
     if (replaceKey) (this._replaceableToasts ||= new Map()).set(replaceKey, toast);
     return toast;
   }
+  resolveNotificationRoutePreference(routeOverride = null) {
+    if (typeof routeOverride === 'boolean') return routeOverride;
+    if (typeof this.settings?.useNotificationsInstead === 'boolean') {
+      return this.settings.useNotificationsInstead;
+    }
+    // Startup errors and compatibility warnings may occur before initialize() installs the
+    // normalized settings object. Honor the saved preference when BetterDiscord can read it;
+    // otherwise use this fork's native-notification default.
+    try {
+      const persisted = Data.load(this.getName(), 'settings');
+      if (typeof persisted?.useNotificationsInstead === 'boolean') {
+        return persisted.useNotificationsInstead;
+      }
+    } catch {}
+    return true;
+  }
+  notifyUser(content, options = {}) {
+    const {
+      title = this.getName?.() || 'MessageLoggerV2',
+      type = 'info',
+      timeout = 3000,
+      actions = [],
+      replaceKey = null,
+      // Direct user-action feedback should expire on wall-clock time and dismiss from either
+      // mouse button. Event alerts with View/Jump actions call _showNotification directly and
+      // retain their hover-aware behavior.
+      pauseOnHover = false,
+      instantDismiss = true,
+      routeOverride = null
+    } = options;
+    return this._showNotification(title, content, type, actions, timeout, {
+      replaceKey,
+      pauseOnHover,
+      instantDismiss,
+      routeOverride
+    });
+  }
   _dismissReplaceableNotification(replaceKey) {
     if (!replaceKey) return;
     // Remove both routes so changing notification mode cannot leave an old custom toast
@@ -5587,9 +5683,14 @@ module.exports = class MessageLoggerV2 {
     } catch {}
   }
   _showNotification(title, content, type, actions, timeout = 4500, options = {}) {
-    const { replaceKey = null, pauseOnHover = true, instantDismiss = false } = options;
+    const {
+      replaceKey = null,
+      pauseOnHover = true,
+      instantDismiss = false,
+      routeOverride = null
+    } = options;
     this._dismissReplaceableNotification(replaceKey);
-    if (this.settings.useNotificationsInstead) {
+    if (this.resolveNotificationRoutePreference(routeOverride)) {
       const notification = {
         title,
         content,
@@ -5610,9 +5711,16 @@ module.exports = class MessageLoggerV2 {
           '\u25CF'
         );
       }
+      // Fatal startup failures can arrive before the managed queue is initialized. They still
+      // pass through this router and honor the saved route, but use BetterDiscord directly so
+      // initialize() cannot orphan an early queued card when it resets runtime state.
+      if (!this._notificationRouterReady) {
+        const { replaceKey: _replaceKey, pauseOnHover: _pauseOnHover, instantDismiss: _instantDismiss, ...displayNotification } = notification;
+        return UI.showNotification(displayNotification);
+      }
       this._enqueueNativeNotification(notification);
     } else {
-      this.showToast(content, {
+      return this._showCustomToast(content, {
         type,
         onClick: actions?.[0]?.onClick,
         onContext: actions?.[1]?.onClick,
@@ -5734,6 +5842,9 @@ module.exports = class MessageLoggerV2 {
     const previousCursor = card.style.cursor;
     const dismiss = event => {
       if (active.finished) return;
+      // Keep explicit notification action buttons usable. The card background still dismisses
+      // immediately, while View/Update controls retain their own BetterDiscord callbacks.
+      if (event.target?.closest?.('button, a, [role="button"]')) return;
       event.preventDefault?.();
       event.stopPropagation?.();
       event.stopImmediatePropagation?.();
@@ -5821,27 +5932,13 @@ module.exports = class MessageLoggerV2 {
       && now - this.lastNotificationTest.time < 500) return;
     this.lastNotificationTest = { mode: useNotifications, time: now };
     const message = useNotifications ? 'Using BetterDiscord notifications' : 'Using custom toasts';
-    const replaceKey = 'setting:useNotificationsInstead';
-    this._dismissReplaceableNotification(replaceKey);
-    if (useNotifications) {
-      this._enqueueNativeNotification({
-        title: 'Notification Test',
-        content: message,
-        type: 'info',
-        duration: 5000,
-        replaceKey,
-        pauseOnHover: false,
-        instantDismiss: true
-      });
-    } else {
-      this.showToast(message, {
-        type: 'info',
-        timeout: 5000,
-        replaceKey,
-        pauseOnHover: false,
-        instantDismiss: true
-      });
-    }
+    this.notifyUser(message, {
+      title: 'Notification Test',
+      type: 'info',
+      timeout: 5000,
+      replaceKey: 'setting:useNotificationsInstead',
+      routeOverride: useNotifications
+    });
   }
   _getChangedAttachments(oldAttachments, newAttachments, messageId, channelId, guildId) {
     const logged = this.messageRecord[messageId]?.logged_attachments ?? [];
@@ -5926,7 +6023,10 @@ module.exports = class MessageLoggerV2 {
     this.refreshForumThreadLogModal(threadId);
     this._scheduleForumCardRestore?.();
     this._scheduleThreadRestore?.();
-    this.showToast(hidden ? 'Hidden!' : 'Unhidden!', { type: 'success' });
+    this.notifyUser(hidden ? 'Hidden!' : 'Unhidden!', {
+      title: hidden ? 'Logger Record Hidden' : 'Logger Record Unhidden',
+      type: 'success'
+    });
     return true;
   }
   hideSavedDeletedRecord(record) {
@@ -5943,7 +6043,7 @@ module.exports = class MessageLoggerV2 {
     this.saveData();
     this.scheduleLoggerMenuRefresh();
     this.refreshForumThreadLogModal(message.channel_id);
-    this.showToast('Hidden!', { type: 'success' });
+    this.notifyUser('Hidden!', { title: 'Logger Record Hidden', type: 'success' });
     return true;
   }
   unhideSavedDeletedRecord(record) {
@@ -5955,7 +6055,7 @@ module.exports = class MessageLoggerV2 {
     this.saveData();
     this.scheduleLoggerMenuRefresh();
     this.refreshForumThreadLogModal(message.channel_id);
-    this.showToast('Unhidden!', { type: 'success' });
+    this.notifyUser('Unhidden!', { title: 'Logger Record Unhidden', type: 'success' });
     return true;
   }
   hideSavedEdits(record) {
@@ -5966,7 +6066,7 @@ module.exports = class MessageLoggerV2 {
     this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: message.id });
     this.scheduleLoggerMenuRefresh();
     this.refreshForumThreadLogModal(message.channel_id);
-    this.showToast('Hidden!', { type: 'success' });
+    this.notifyUser('Hidden!', { title: 'Logger Record Hidden', type: 'success' });
     return true;
   }
   unhideSavedEdits(record) {
@@ -5977,7 +6077,7 @@ module.exports = class MessageLoggerV2 {
     this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: message.id });
     this.scheduleLoggerMenuRefresh();
     this.refreshForumThreadLogModal(message.channel_id);
-    this.showToast('Unhidden!', { type: 'success' });
+    this.notifyUser('Unhidden!', { title: 'Logger Record Unhidden', type: 'success' });
     return true;
   }
   _openUserContextMenu(event, user, channel) {
@@ -5995,36 +6095,36 @@ module.exports = class MessageLoggerV2 {
       addElement(`Add to ${displayName}`, () => {
         list.push(id);
         this.saveSettings();
-        this.showToast('Added!', { type: 'success' });
+        this.notifyUser('Added!', { type: 'success' });
       });
       addElement(`Add to ${displayName.replace('Whitelist', 'Blacklist').replace('whitelist', 'blacklist')}`, () => {
         oppositeList.push(id);
         this.saveSettings();
-        this.showToast('Added!', { type: 'success' });
+        this.notifyUser('Added!', { type: 'success' });
       });
     } else if (idx === -1) {
       addElement(`Remove From ${displayName.replace('Whitelist', 'Blacklist').replace('whitelist', 'blacklist')}`, () => {
         oppositeList.splice(oppositeIdx, 1);
         this.saveSettings();
-        this.showToast('Removed!', { type: 'success' });
+        this.notifyUser('Removed!', { type: 'success' });
       });
       addElement(`Move to ${displayName}`, () => {
         oppositeList.splice(oppositeIdx, 1);
         list.push(id);
         this.saveSettings();
-        this.showToast('Moved!', { type: 'success' });
+        this.notifyUser('Moved!', { type: 'success' });
       });
     } else {
       addElement(`Remove From ${displayName}`, () => {
         list.splice(idx, 1);
         this.saveSettings();
-        this.showToast('Removed!', { type: 'success' });
+        this.notifyUser('Removed!', { type: 'success' });
       });
       addElement(`Move to ${displayName.replace('Whitelist', 'Blacklist').replace('whitelist', 'blacklist')}`, () => {
         list.splice(idx, 1);
         oppositeList.push(id);
         this.saveSettings();
-        this.showToast('Moved!', { type: 'success' });
+        this.notifyUser('Moved!', { type: 'success' });
       });
     }
   }
@@ -6383,7 +6483,7 @@ module.exports = class MessageLoggerV2 {
     }
     const parentId = record.delete_data.forum_parent_id || metadata.parentId;
     if (!parentId) {
-      this.showToast('Could not find parent forum channel for this deleted post.', { type: 'error' });
+      this.notifyUser('Could not find parent forum channel for this deleted post.', { type: 'error' });
       return true;
     }
     const parent = this.tools.getChannel(parentId);
@@ -8539,12 +8639,14 @@ module.exports = class MessageLoggerV2 {
       this.pendingCachedFileDeletionLabels.clear();
       const visible = names.slice(0, 4).join('\n');
       const extra = names.length > 4 ? `\n+${names.length - 4} more` : '';
-      this._showNotification(
-        names.length === 1 ? 'Cached Attachment Deleted' : 'Cached Attachments Deleted',
+      this.notifyUser(
         `${names.length === 1 ? 'Deleted cached attachment' : 'Deleted cached attachments'}: ${visible}${extra}`,
-        'success',
-        [{ label: 'View files', onClick: () => this.showDeletedCachedFilesModal(names) }],
-        3000
+        {
+          title: names.length === 1 ? 'Cached Attachment Deleted' : 'Cached Attachments Deleted',
+          type: 'success',
+          actions: [{ label: 'View files', onClick: () => this.showDeletedCachedFilesModal(names) }],
+          timeout: 3000
+        }
       );
     }, 150);
   }
@@ -9922,7 +10024,13 @@ module.exports = class MessageLoggerV2 {
     if (!this.installEditHistoryPatch(MessageContent)) {
       const tryInstall = (attempts) => {
         if (!this.__started || attempts > 60) {
-          if (attempts > 60) UI.showToast('Failed to patch message content component, edit history will not show!', { type: "error", timeout: 0 });
+          if (attempts > 60) {
+            this.notifyUser('Failed to patch the message content component; edit history will not show. View the console log for details.', {
+              title: 'Message Logger Patch Error',
+              type: 'error',
+              timeout: 0
+            });
+          }
           return;
         }
         if (!this.installEditHistoryPatch()) setTimeout(() => tryInstall(attempts + 1), 1000);
@@ -10621,7 +10729,7 @@ module.exports = class MessageLoggerV2 {
               else this.noTintIds.delete(threadId);
               tintForumCardByThreadId(threadId);
               applyRestoredThreadTint(threadId);
-              this.showToast(hasTint ? 'Removed!' : 'Added!', { type: 'success' });
+              this.notifyUser(hasTint ? 'Removed!' : 'Added!', { type: 'success' });
             }
           }
         );
@@ -10655,7 +10763,7 @@ module.exports = class MessageLoggerV2 {
           action: () => {
             ContextMenu.close();
             this.nodeModules.electron.clipboard.writeText(threadId);
-            this.showToast('Copied!', { type: 'success' });
+            this.notifyUser('Copied!', { type: 'success' });
           }
         }
       );
@@ -11521,25 +11629,25 @@ module.exports = class MessageLoggerV2 {
         noUserInfo = true;
       }
       profImg.addEventListener('click', () => {
-        if (noUserInfo) return this.showToast('Could not get user info!', { type: 'error' });
+        if (noUserInfo) return this.notifyUser('Could not get user info!', { type: 'error' });
         setTimeout(() => {
           this.tools.showUserPopout(profImg, author, message.channel_id);
         }, 0);
       });
       profImg.addEventListener('contextmenu', e => {
-        if (noUserInfo) return this.showToast('Could not get user info! You can only delete or copy to clipboard!', { timeout: 5000 });
+        if (noUserInfo) return this.notifyUser('Could not get user info! You can only delete or copy to clipboard!', { type: 'error', timeout: 5000 });
         this._openUserContextMenu(e, author, channel);
       });
       const nameLink = element.getElementsByClassName(classes.extra[10])[0];
       this.markLoggerViewerJumpAvailableAuthor(nameLink, record);
       nameLink.addEventListener('click', () => {
-        if (noUserInfo) return this.showToast('Could not get user info!', { type: 'error' });
+        if (noUserInfo) return this.notifyUser('Could not get user info!', { type: 'error' });
         setTimeout(() => {
           this.tools.showUserPopout(nameLink, author, message.channel_id);
         }, 0);
       });
       nameLink.addEventListener('contextmenu', e => {
-        if (noUserInfo) return this.showToast('Could not get user info! You can only delete or copy to clipboard!', { type: 'error', timeout: 5000 });
+        if (noUserInfo) return this.notifyUser('Could not get user info! You can only delete or copy to clipboard!', { type: 'error', timeout: 5000 });
         this._openUserContextMenu(e, author, channel);
       });
       const timestampEl = element.getElementsByClassName(classes.extra[11])[0];
@@ -11591,7 +11699,7 @@ module.exports = class MessageLoggerV2 {
                       result += `> ${record.message.content.replaceAll('\n', '\n> ')}\n`;
                     }
                     this.nodeModules.electron.clipboard.writeText(result);
-                    this.showToast('Copied!', { type: 'success' });
+                    this.notifyUser('Copied!', { type: 'success' });
                   }
                 },
                 {
@@ -11662,7 +11770,7 @@ module.exports = class MessageLoggerV2 {
                 action: () => {
                   ContextMenu.close();
                   this.nodeModules.electron.clipboard.writeText(editNum == -1 ? record.message.content : record.edit_history[editNum].content);
-                  this.showToast('Copied!', { type: 'success' });
+                  this.notifyUser('Copied!', { type: 'success' });
                 }
               },
               {
@@ -11673,7 +11781,7 @@ module.exports = class MessageLoggerV2 {
                   const content = editNum == -1 ? record.message.content : record.edit_history[editNum].content;
                   const result = `> **${record.message.author.username}** | ${this.createTimeStamp(record.message.timestamp, true)}\n> ${content.replaceAll('\n', '\n> ')}`;
                   this.nodeModules.electron.clipboard.writeText(result);
-                  this.showToast('Copied!', { type: 'success' });
+                  this.notifyUser('Copied!', { type: 'success' });
                 }
               }
             );
@@ -11719,7 +11827,7 @@ module.exports = class MessageLoggerV2 {
                   ContextMenu.close();
                   this.deleteEditedMessageFromRecord(messageId, editNum);
                   this.scheduleLoggerMenuRefresh();
-                  this.showToast('Deleted!', { type: 'success' });
+                  this.notifyUser('Deleted!', { type: 'success' });
                 }
               });
             }
@@ -11793,7 +11901,7 @@ module.exports = class MessageLoggerV2 {
               action: () => {
                 ContextMenu.close();
                 this.nodeModules.electron.clipboard.writeText(messageId);
-                this.showToast('Copied!', { type: 'success' });
+                this.notifyUser('Copied!', { type: 'success' });
               }
             },
             {
@@ -11802,7 +11910,7 @@ module.exports = class MessageLoggerV2 {
               action: () => {
                 ContextMenu.close();
                 this.nodeModules.electron.clipboard.writeText(message.author.id);
-                this.showToast('Copied!', { type: 'success' });
+                this.notifyUser('Copied!', { type: 'success' });
               }
             }
           );
@@ -12391,14 +12499,14 @@ module.exports = class MessageLoggerV2 {
   openTab(tab) {
     if (!this.isLoggerTabAvailable(tab)) {
       if (tab === 'nuked') {
-        this.showToast('Enable Anti Nuke to view saved Nuked records.', { type: 'warning', timeout: 5000 });
+        this.notifyUser('Enable Anti Nuke to view saved Nuked records.', { type: 'warning', timeout: 5000 });
       }
       return false;
     }
     const tabBar = document.getElementById(this.style.menuTabBar);
-    if (!tabBar) return this.showToast(`Error switching to tab ${tab}!`, { type: 'error', timeout: 3000 });
+    if (!tabBar) return this.notifyUser(`Error switching to tab ${tab}!`, { type: 'error', timeout: 3000 });
     const nextTab = tabBar.querySelector('#' + tab);
-    if (!nextTab) return this.showToast(`Error switching to tab ${tab}!`, { type: 'error', timeout: 3000 });
+    if (!nextTab) return this.notifyUser(`Error switching to tab ${tab}!`, { type: 'error', timeout: 3000 });
     tabBar.querySelector(`.${this.style.tabSelected}`)?.classList.remove(this.style.tabSelected);
     nextTab.classList.add(this.style.tabSelected);
     this.menu.selectedTab = tab;
@@ -12536,7 +12644,7 @@ module.exports = class MessageLoggerV2 {
     if (this._loggerShortcutReopenTimeout) this.cancelPendingLoggerShortcutTransition();
     if (type && !this.isLoggerTabAvailable(type)) {
       if (type === 'nuked') {
-        this.showToast('Enable Anti Nuke to view saved Nuked records.', { type: 'warning', timeout: 5000 });
+        this.notifyUser('Enable Anti Nuke to view saved Nuked records.', { type: 'warning', timeout: 5000 });
       }
       return;
     }
@@ -12645,7 +12753,11 @@ module.exports = class MessageLoggerV2 {
         this.refilterMessages();
       } catch (e) {
         if (loadAttempts > 4) {
-          UI.showToast(`Couldn't load menu messages! Report this issue to NightBirde, error info is in console`, { type: "error", timeout: 0 });
+          this.notifyUser(`Couldn't load logger messages. Error details are in the console.`, {
+            title: 'Message Logger UI Error',
+            type: 'error',
+            timeout: 0
+          });
           Logger.error('Failed loading menu', e);
           return;
         }
@@ -12771,7 +12883,7 @@ module.exports = class MessageLoggerV2 {
               else { this.noTintIds.delete(messageId); }
               this._scheduleTintForMessage?.(channelId, messageId);
               this._tintSweep?.();
-              this.showToast(hasTint ? 'Removed!' : 'Added!', { type: 'success' });
+              this.notifyUser(hasTint ? 'Removed!' : 'Added!', { type: 'success' });
             }
           );
         }
@@ -13113,7 +13225,7 @@ module.exports = class MessageLoggerV2 {
           () => {
             localRequest.get(element.src, {}, (data) => {
               if (data.statusCode != 200) {
-                this.showToast('Failed to copy. Details in the console.', { type: 'error' });
+                this.notifyUser('Failed to copy. Details in the console.', { type: 'error' });
                 Logger.error(data);
               }
               DiscordNative.clipboard.copyImage(data.chunksArr, "image.png");

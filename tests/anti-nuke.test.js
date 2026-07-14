@@ -608,7 +608,7 @@ test('deleted-channel capture adopts visible and hidden Deleted/Purged records i
   plugin.saveData = () => {};
   plugin.scheduleLoggerMenuRefresh = () => {};
   plugin.refreshForumThreadLogModal = () => {};
-  plugin.showToast = () => {};
+  plugin.notifyUser = () => {};
   assert.equal(plugin.unhideSavedDeletedRecord(records[directDeletedId]), true);
   assert.equal(records[directDeletedId].delete_data.hidden, false);
   assert.equal(plugin.nukedMessageSet.get(parentId).has(directDeletedId), true);

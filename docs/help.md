@@ -123,6 +123,12 @@ The same permanent-delete flow applies to restored chat messages, logger rows, f
 
 ## 🔔 Toasts and Notifications
 
+The selected notification mode applies to every logger alert and system/UI message.
+
+System/UI feedback—including settings, Debug, Hide/Unhide, validation, migration, backup recovery, and no-save merging—keeps expiring while hovered. Left- or right-click anywhere on its card dismisses it immediately; explicit action buttons still work.
+
+Saved-message event alerts keep their action and hover behavior:
+
 For custom toasts:
 
 - Left-click: run the first available action. Saved events open the relevant logger tab; sent-message alerts jump directly to the live message.
