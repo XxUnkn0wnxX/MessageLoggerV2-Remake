@@ -687,7 +687,7 @@ test('canonical migration atomically rewrites only the primary and reports succe
   assert.equal(fs.readFileSync(backupPath, 'utf8'), '{"data":{"keep":"legacy recovery point"}}');
   assert.equal(plugin._dataNeedsCanonicalRewrite, false);
   assert.equal(notifications.at(-1)[2], 'success');
-  assert.match(notifications.at(-1)[1], /migrated successfully/i);
+  assert.equal(notifications.at(-1)[1], 'Logger data was updated to the current schema successfully.');
 });
 
 test('backup recovery rebuilds the primary and reports recovery-specific success', async t => {

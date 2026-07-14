@@ -1878,8 +1878,8 @@ module.exports = class MessageLoggerV2 {
         });
       } else {
         Logger.log(`Persisted logger data was normalized to schema ${DATA_SCHEMA_VERSION}; scheduling an atomic rewrite.`);
-        this.notifyUser('Legacy or mixed-fork logger data detected. Migration to the current schema is in progress.', {
-          title: 'Message Logger Data Migration',
+        this.notifyUser('Logger data requires a schema update. Updating it to the current schema.', {
+          title: 'Message Logger Data Update',
           type: 'info',
           timeout: 5000
         });
@@ -4607,9 +4607,9 @@ module.exports = class MessageLoggerV2 {
       this.notifyUser(
         rebuildingFromBackup
           ? 'The backup was loaded, but the main data file could not be rebuilt. View the console log for more details.'
-          : 'The normalized data could not be saved. View the console log for more details.',
+          : 'Logger data could not be updated to the current schema. View the console log for more details.',
         {
-          title: rebuildingFromBackup ? 'Message Logger Data Recovery Error' : 'Message Logger Data Migration Error',
+          title: rebuildingFromBackup ? 'Message Logger Data Recovery Error' : 'Message Logger Data Update Error',
           type: 'error',
           timeout: 0
         }
@@ -4628,8 +4628,8 @@ module.exports = class MessageLoggerV2 {
       });
     } else {
       Logger.log(`Legacy/mixed-fork logger data migration to schema ${DATA_SCHEMA_VERSION} completed successfully.`);
-      this.notifyUser('Legacy or mixed-fork logger data was migrated successfully.', {
-        title: 'Message Logger Data Migration',
+      this.notifyUser('Logger data was updated to the current schema successfully.', {
+        title: 'Message Logger Data Update',
         type: 'success',
         timeout: 5000
       });

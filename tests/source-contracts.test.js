@@ -626,13 +626,14 @@ test('no-save recovery remains guarded and ordered before backup persistence', (
   assert.ok(recovery.indexOf("this.getName() + 'Data'") < recovery.indexOf("this.getName() + 'DataBackup'"));
 });
 
-test('legacy data migration uses canonical whole-file output and routed notifications', () => {
+test('schema updates use canonical whole-file output and routed notifications', () => {
   assert.match(source, /const DATA_SCHEMA_VERSION = 1;/);
   assert.match(source, /mlv2RemakeSchemaVersion: DATA_SCHEMA_VERSION,[\s\S]*messageRecord: this\.messageRecord/);
-  assert.match(source, /Legacy or mixed-fork logger data detected\. Migration to the current schema is in progress\./);
-  assert.match(source, /this\.notifyUser\('Legacy or mixed-fork logger data detected\. Migration to the current schema is in progress\.'/);
+  assert.match(source, /Logger data requires a schema update\. Updating it to the current schema\./);
+  assert.match(source, /this\.notifyUser\('Logger data requires a schema update\. Updating it to the current schema\.'/);
   assert.match(source, /rewriteCanonicalDataPayload\(\)[\s\S]*writeDataPayloadAtomic\([\s\S]*this\.getName\(\) \+ 'Data'/);
-  assert.match(source, /this\.notifyUser\([\s\S]*The normalized data could not be saved\. View the console log for more details\.[\s\S]*Message Logger Data Migration Error/);
+  assert.match(source, /this\.notifyUser\('Logger data was updated to the current schema successfully\.'[\s\S]*title: 'Message Logger Data Update'/);
+  assert.match(source, /this\.notifyUser\([\s\S]*Logger data could not be updated to the current schema\. View the console log for more details\.[\s\S]*Message Logger Data Update Error/);
 });
 
 test('backup restoration reports the main-file rebuild through the notification router', () => {
