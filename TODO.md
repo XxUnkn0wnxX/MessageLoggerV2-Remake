@@ -23,7 +23,7 @@ Without a merge, re-enabling saving could overwrite that older disk-backed histo
 - [x] Preserve eligible records captured during the no-save session.
 - [x] Merge both sets when saving is re-enabled after a reload.
 - [x] Keep duplicate message IDs out of every category index.
-- [x] Preserve deleted, edited, purged, hidden, forum/thread, and suppressed-root state.
+- [x] Preserve deleted, edited, purged, nuked, hidden, forum/thread, and suppressed-root state.
 - [x] Apply normal saved-message caps after merging.
 - [x] Keep the existing behavior when the setting is toggled without a reload.
 
@@ -31,7 +31,7 @@ Without a merge, re-enabling saving could overwrite that older disk-backed histo
 
 - [x] Add a helper that loads and validates the persisted data payload.
 - [x] Merge `messageRecord` by message ID using a documented deterministic conflict rule.
-- [x] Union and de-duplicate deleted, edited, and purged channel indexes.
+- [x] Union and de-duplicate deleted, edited, purged, and nuked channel indexes.
 - [x] Union suppressed forum/thread IDs.
 - [x] Rebuild corresponding in-memory sets and sorted caches.
 - [x] Save the merged primary payload and backup only after the merge completes.
@@ -42,20 +42,20 @@ Without a merge, re-enabling saving could overwrite that older disk-backed histo
 
 - [x] Create a known saved record while normal saving is enabled.
 - [x] Enable **Disable saving data**, then reload Discord or the plugin.
-- [x] Create deleted, edited, purged, and forum/thread test records.
+- [x] Create deleted, edited, purged, nuked, and forum/thread test records.
 - [x] Re-enable saving.
 - [x] Confirm original and temporary records remain in their correct tabs after another reload.
 - [x] Confirm hidden state and forum/thread root-child relationships survive the merge.
-- [x] Confirm **Remove From Log** still removes the correct merged records.
+- [x] Confirm **Delete** still removes the correct merged records.
 
 ## ✅ Completed: Cross-Fork Data Normalization
 
-Status: Implemented; live validation pending
+Status: Implemented and live validated
 
 - [x] Accept legacy `deletedata` and `editHistory` aliases alongside canonical fields.
 - [x] Preserve surviving forum/thread, saved-location, hidden, Anti-Nuke, and cache metadata.
 - [x] Fill missing optional enhanced fields with safe empty values.
-- [x] Rebuild missing or misplaced deleted, edited, and purged channel indexes from canonical records.
+- [x] Rebuild missing or misplaced deleted, edited, purged, and nuked channel indexes from canonical records.
 - [x] Keep de-duplication scoped to message IDs, individual category indexes, edit entries, and attachment identities.
 - [x] Keep canonical output stable when DM, deleted-channel, or referenced-message channels are absent from Discord's live store.
 - [x] Keep Discord renderer mutations isolated from canonical saved message and user objects.

@@ -68,7 +68,7 @@ npm run test:runtime-contracts
 | AT-27 | No-save state | Disabling reports the memory-only state, no-reload re-enabling reports queued in-memory changes, and reload recovery reports its merge path while preserving hidden, forum/thread, suppression, cap, and backup ordering contracts. |
 | AT-28 | Cross-fork normalization | Legacy aliases, mixed enhanced fields, missing derived maps, scoped de-duplication, canonical defaults on newly captured records, idempotent output across changing Discord channel-store availability, canonical output shape, whole-file atomic migration, routed migration and backup-rebuild status, missing-primary backup restoration, opaque fork extensions, newer-schema fail-closed behavior, and legacy round trips remain covered. |
 | AT-29 | Backup diagnostics | Console and routed-toast debug controls remain independent and off by default; backup events use the warning type, follow the selected native-notification or custom-toast route, expire without hover pause, and dismiss from the whole card. |
-| AT-30 | Global system feedback | Every settings callback runs once. Settings, Debug, Hide/Unhide, validation, action results, startup, migration, no-save merge, backup recovery, and errors use the selected native/custom route without direct toast bypasses. System/UI alerts expire without hover pause and dismiss immediately on native-card or custom-toast left/right clicks; same-setting alerts replace stale ones, enabled uses info, disabled uses a theme-neutral presentation, Debug remains warning, and errors remain red. Actual saved-message events retain View/Jump and hover-aware behavior. |
+| AT-30 | Global system feedback | Every settings callback runs once. Settings, Debug, Hide/Unhide, validation, action results, startup, migration, no-save merge, backup recovery, and errors use the selected native/custom route without direct toast bypasses. System/UI alerts expire without hover pause and dismiss immediately on native-card or custom-toast left/right clicks; same-setting alerts replace stale ones, pre-initialization native alerts receive unique IDs, enabled uses info, disabled uses a theme-neutral presentation, Debug remains warning, and errors remain red. Actual saved-message events retain View/Jump and hover-aware behavior. |
 | AT-31 | Settings config recovery | Valid legacy strict JSON initializes missing current settings without corruption classification or a corrupt backup, while preserving custom and fork-specific values. Extra, trailing, and missing commas, missing/extra/mismatched brackets, isolated invalid values, missing outer structure, and severe mixed corruption preserve recoverable owned and fork-specific settings, default only unrecoverable owned keys, atomically rewrite the config, retain the exact corrupt source, and never classify an existing config as a first install. |
 | AT-32 | Logger keybinds | Native keybind arrays normalize safely across the all-log, selected-channel, and selected-server shortcuts; missing, unsafe, conflicting, or invalid config values receive safe defaults; empty arrays remain disabled; exact order-independent matches ignore repeats and extra held keys; recorder changes and modifier release clear stale chords. Every shortcut compares the requested filter with the actual logger state regardless of how it opened: matching states close, differing/custom/stale states close and reopen correctly, rapid transitions cancel stale callbacks, missing-channel/server attempts leave the current view untouched, DMs and group DMs cannot activate the server scope, native media viewers close first regardless of where they opened, and stacked MessageLogger-owned panels and user popouts close top-down without dismissing any other Discord modal. |
 | AT-33 | Restored-item Trash | Native Trash is consumed only for exact indexed saved deletions and returns a completed async delete contract so native confirmation dismisses; live, edit-only, and unindexed records stay on Discord's original path; mismatched indexed metadata fails closed. The permission-independent restored-toolbar fallback retains no native callback, resolves direct/default and unambiguous single-function icon exports used by current Discord builds, mounts in the shared native action row, rebuilds an early outer fallback without moving its React root, and is visible only while the Shift root marker is active. Logger-owned hosts, SVGs, and Trash paths use Discord's current `--text-feedback-critical` destructive foreground with `--status-danger` fallback. When permissions omit native context Delete, an exact indexed saved deletion gains one top-level red local-only Delete; native Delete is never duplicated. Nested action mutations find their closest toolbar so native and fallback Trash controls cannot remain together, clone clicks stop parent navigation, every permanent record action is labeled and styled as destructive Delete, direct right-click Delete confirms, Shift-click and the injected logger submenu Delete remove immediately without starting text selection, ordinary presses retain focus behavior, lifecycle cleanup does not abandon or prematurely unmount React roots, and every removal uses the complete local record/UI cleanup flow. |
@@ -117,17 +117,15 @@ Run the relevant targeted manual check after a Discord UI update or related plug
 
 ## 🗂️ Test Layout
 
-```text
-tests/
-  helpers/plugin-harness.js
-  anti-nuke.test.js
-  keybinds.test.js
-  media.test.js
-  no-save-merge.test.js
-  persistence.test.js
-  policy.test.js
-  records.test.js
-  source-contracts.test.js
-```
+- [`tests/helpers/plugin-harness.js`](../tests/helpers/plugin-harness.js)
+- [`tests/anti-nuke.test.js`](../tests/anti-nuke.test.js)
+- [`tests/keybinds.test.js`](../tests/keybinds.test.js)
+- [`tests/media.test.js`](../tests/media.test.js)
+- [`tests/no-save-merge.test.js`](../tests/no-save-merge.test.js)
+- [`tests/persistence.test.js`](../tests/persistence.test.js)
+- [`tests/policy.test.js`](../tests/policy.test.js)
+- [`tests/records.test.js`](../tests/records.test.js)
+- [`tests/settings-recovery.test.js`](../tests/settings-recovery.test.js)
+- [`tests/source-contracts.test.js`](../tests/source-contracts.test.js)
 
 The helper exposes only the BetterDiscord APIs needed to load the exported class. Add narrow mocks to each plugin instance instead of turning the helper into a fake Discord client.

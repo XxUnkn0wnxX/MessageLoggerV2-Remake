@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.1.4
+ * @version 2.8.2
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -419,12 +419,27 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Nuked log separation',
+        title: 'Nuked recovery',
         type: 'added',
         items: [
-          'Anti-Nuke channel snapshots now use a dedicated Nuked tab instead of Purged.',
-          'Disabling Anti Nuke hides its tab without deleting visible or hidden Nuked records.',
-          'An optional nuke-detection toast reports captured channel nukes.'
+          'Anti-Nuke captures now use a dedicated Nuked tab with preserved hidden records and an optional detection alert.',
+          'Related saved records move into Nuked when their parent channel is removed.'
+        ]
+      },
+      {
+        title: 'Forum and thread fixes',
+        type: 'fixed',
+        items: [
+          'Forum posts and channel threads keep the correct title, starter content, media, category, and oldest saved-message fallback.',
+          'Restored previews, tints, mentions, and Delete actions update safely without crashing live views.'
+        ]
+      },
+      {
+        title: 'Cleaner logging',
+        type: 'improved',
+        items: [
+          'Records keep one visible category with stable Hidden, Nuked, Ghost Pings, Purged, Deleted, and Edited precedence.',
+          'Purged and Nuked batches keep message order, while plugin feedback follows the selected notification mode with safer startup alerts.'
         ]
       }
     ];
@@ -5716,7 +5731,10 @@ module.exports = class MessageLoggerV2 {
       // initialize() cannot orphan an early queued card when it resets runtime state.
       if (!this._notificationRouterReady) {
         const { replaceKey: _replaceKey, pauseOnHover: _pauseOnHover, instantDismiss: _instantDismiss, ...displayNotification } = notification;
-        return UI.showNotification(displayNotification);
+        return UI.showNotification({
+          ...displayNotification,
+          id: this._createNativeNotificationId()
+        });
       }
       this._enqueueNativeNotification(notification);
     } else {
@@ -5731,11 +5749,14 @@ module.exports = class MessageLoggerV2 {
       });
     }
   }
+  _createNativeNotificationId() {
+    if (!Number.isSafeInteger(this._nativeNotificationSequence)) this._nativeNotificationSequence = 0;
+    return `MessageLoggerV2-${Date.now()}-${++this._nativeNotificationSequence}`;
+  }
   _enqueueNativeNotification(notification) {
     if (this._nativeNotificationQueueStopped) return;
     if (!this._nativeNotificationQueue) this._nativeNotificationQueue = [];
-    if (!Number.isSafeInteger(this._nativeNotificationSequence)) this._nativeNotificationSequence = 0;
-    const id = `MessageLoggerV2-${Date.now()}-${++this._nativeNotificationSequence}`;
+    const id = this._createNativeNotificationId();
     this._nativeNotificationQueue.push({ ...notification, id });
     this._drainNativeNotificationQueue();
     this._scheduleNativeNotificationYield();

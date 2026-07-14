@@ -9,6 +9,7 @@ const {
   UI,
   createPlugin,
   loggerEvents,
+  notificationEvents,
   resetHarness
 } = require('./helpers/plugin-harness');
 
@@ -210,6 +211,23 @@ test('system and UI feedback defaults to wall-clock expiry and whole-card dismis
       routeOverride: null
     }
   ]]);
+});
+
+test('pre-initialization native alerts receive unique BetterDiscord notification IDs', t => {
+  const originalNow = Date.now;
+  t.after(() => { Date.now = originalNow; });
+  Date.now = () => 12345;
+  const plugin = createPlugin({
+    settings: { useNotificationsInstead: true }
+  });
+
+  plugin.notifyUser('First startup failure', { type: 'error' });
+  plugin.notifyUser('Second startup failure', { type: 'error' });
+
+  assert.deepEqual(
+    notificationEvents.map(notification => notification.id),
+    ['MessageLoggerV2-12345-1', 'MessageLoggerV2-12345-2']
+  );
 });
 
 test('BetterDiscord settings invoke each plugin callback exactly once', t => {
