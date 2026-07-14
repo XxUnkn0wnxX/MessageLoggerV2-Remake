@@ -740,6 +740,48 @@ test('full root deletion keeps a Purged starter in Purged while reply-only purge
   assert.deepEqual(replyOnlyPlugin.purgedMessageRecord, { [replyOnlyRootId]: [replyOnlyId] });
 });
 
+test('full forum or thread roots highlight only the root location title, never a reply', () => {
+  const rootId = '680';
+  const replyId = '681';
+  const plugin = createPlugin({
+    messageRecord: {
+      [rootId]: {
+        message: { id: rootId, channel_id: rootId, content: 'starter body' },
+        delete_data: { forum_thread_delete: true }
+      },
+      [replyId]: {
+        message: { id: replyId, channel_id: rootId, content: 'reply' },
+        delete_data: {
+          forum_thread_message_delete: true,
+          location: { channelId: rootId, channelType: 11 },
+          // Legacy/runtime metadata may incorrectly point at the reply itself. A saved full root
+          // is authoritative and prevents this child from receiving the root-title highlight.
+          forum_metadata: { starterMessageId: replyId }
+        }
+      }
+    },
+    forumThreadMetadataCache: new Map(),
+    tools: { getChannel: () => null }
+  });
+
+  assert.equal(
+    plugin.isThreadStarterLogMessage(plugin.messageRecord[rootId], plugin.messageRecord[rootId].message),
+    true
+  );
+  assert.equal(
+    plugin.isThreadStarterLogMessage(plugin.messageRecord[replyId], plugin.messageRecord[replyId].message),
+    false
+  );
+
+  delete plugin.messageRecord[rootId];
+  plugin.messageRecord[replyId].delete_data.forum_metadata.starterMessageId = replyId;
+  assert.equal(
+    plugin.isThreadStarterLogMessage(plugin.messageRecord[replyId], plugin.messageRecord[replyId].message),
+    true,
+    'a distinct starter may still highlight before a structural root has been saved'
+  );
+});
+
 test('starter edits replace cached thread content before deletion capture', () => {
   const original = {
     id: '201',

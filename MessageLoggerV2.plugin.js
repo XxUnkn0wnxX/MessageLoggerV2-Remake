@@ -7676,6 +7676,12 @@ module.exports = class MessageLoggerV2 {
     if (![10, 11, 12].includes(channelType)) return false;
     const threadId = liveChannel?.id || location.channelId || message.channel_id;
     const threadRecord = this.messageRecord?.[threadId];
+    // Once the structural root is saved, channel-thread starters are folded into that root and
+    // forum starters are already self-keyed. Child metadata can be incomplete or can carry an old
+    // starter hint, but it must never make a reply highlight the deleted root title in the logger.
+    if (threadRecord?.delete_data?.forum_thread_delete) {
+      return String(message.id) === String(threadRecord.message?.id || threadId);
+    }
     const starterMessageId = record?.delete_data?.forum_metadata?.starterMessageId
       || threadRecord?.delete_data?.forum_metadata?.starterMessageId
       || this.forumThreadMetadataCache?.get(threadId)?.starterMessageId;
@@ -9493,6 +9499,10 @@ module.exports = class MessageLoggerV2 {
     }
     const tintClassFor = () => this.settings.useAlternativeDeletedStyle ? this.style.deletedAlt : this.style.deleted;
     const shouldTintMessage = (channelId, messageId) => {
+      const record = this.messageRecord?.[messageId];
+      // Hidden records remain indexed for persistence and later unhiding, but must have no
+      // presentation on surviving Discord mounts until the user explicitly restores them.
+      if (!record?.delete_data || record.delete_data.hidden) return false;
       const shouldShowDeleted = this.settings.showDeletedMessages && this.deletedMessageSet.get(channelId)?.has(messageId);
       const shouldShowPurged = this.settings.showPurgedMessages && this.purgedMessageSet.get(channelId)?.has(messageId);
       if (!shouldShowDeleted && !shouldShowPurged) return false;
@@ -9747,11 +9757,26 @@ module.exports = class MessageLoggerV2 {
       return addTintClass(card);
     };
     const isForumListChannel = (channel) => channel?.type === 15 || channel?.type === 16;
-    const getDeletedForumRecordsForChannel = (parentChannel) => {
+    // Restored roots are presentation for a structurally deleted post/thread, regardless of
+    // whether its starter was deleted singly or by a bulk purge. Build one de-duplicated root
+    // set from only the categories the user currently has enabled.
+    const getVisibleRestorableThreadRootIds = () => {
+      const rootIds = new Set();
+      const collect = recordIndex => {
+        for (const [threadId, ids] of Object.entries(recordIndex || {})) {
+          if (Array.isArray(ids) && ids.some(id => String(id) === String(threadId))) rootIds.add(threadId);
+        }
+      };
+      if (this.settings.showDeletedMessages) collect(this.deletedMessageRecord);
+      if (this.settings.showPurgedMessages) collect(this.purgedMessageRecord);
+      return rootIds;
+    };
+    const canRestoreVisibleThreadRoots = () => this.settings.restoreDeletedMessages
+      && (this.settings.showDeletedMessages || this.settings.showPurgedMessages);
+    const getRestorableForumRecordsForChannel = (parentChannel) => {
       if (!isForumListChannel(parentChannel) || !parentChannel?.id || !parentChannel.guild_id) return [];
       const out = [];
-      for (const [threadId, ids] of Object.entries(this.deletedMessageRecord || {})) {
-        if (!Array.isArray(ids) || !ids.includes(threadId)) continue;
+      for (const threadId of getVisibleRestorableThreadRootIds()) {
         const record = this.messageRecord[threadId];
         const message = record?.message;
         if (!record?.delete_data?.forum_thread_delete || record.delete_data.hidden || !message) continue;
@@ -9768,12 +9793,11 @@ module.exports = class MessageLoggerV2 {
       out.sort((a, b) => Number(b.message.id) - Number(a.message.id));
       return out;
     };
-    const getDeletedCompactThreadRecords = (parentChannel) => {
+    const getRestorableCompactThreadRecords = (parentChannel) => {
       if (!parentChannel?.id || !parentChannel.guild_id) return [];
       const forumParent = isForumListChannel(parentChannel);
       const out = [];
-      for (const [threadId, ids] of Object.entries(this.deletedMessageRecord || {})) {
-        if (!Array.isArray(ids) || !ids.includes(threadId)) continue;
+      for (const threadId of getVisibleRestorableThreadRootIds()) {
         const record = this.messageRecord[threadId];
         const message = record?.message;
         const metadata = record?.delete_data?.forum_metadata || {};
@@ -9995,7 +10019,7 @@ module.exports = class MessageLoggerV2 {
       }
     };
     const applyRestoredThreadTint = (threadId) => {
-      const shouldTint = !this.noTintIds.has(threadId);
+      const shouldTint = !this.messageRecord?.[threadId]?.delete_data?.hidden && !this.noTintIds.has(threadId);
       document.querySelectorAll(
         `[data-ml2-restored-thread-entry="${threadId}"], [data-ml2-restored-thread-browser-card="${threadId}"]`
       ).forEach(node => node.classList.toggle(this.style.deleted, shouldTint));
@@ -10258,7 +10282,7 @@ module.exports = class MessageLoggerV2 {
     };
     const restoreDeletedForumCards = () => {
       const parentChannel = this.selectedChannel || this.getSelectedTextChannel?.();
-      if (!this.settings.showDeletedMessages || !this.settings.restoreDeletedMessages) {
+      if (!canRestoreVisibleThreadRoots()) {
         if (parentChannel?.id) removeRestoredForumCardsForChannel(parentChannel.id);
         else document.querySelectorAll('[data-ml2-restored-forum-thread]').forEach(node => node.remove());
         return;
@@ -10275,10 +10299,19 @@ module.exports = class MessageLoggerV2 {
         const restoredLi = focus.closest?.(`[data-ml2-restored-forum-thread]`);
         if (restoredLi && !list.contains(restoredLi)) restoredLi.remove();
       });
+      const records = getRestorableForumRecordsForChannel(parentChannel);
+      const desiredIds = new Set(records.map(record => String(record.message.id)));
+      // A category toggle can hide Purged while leaving Deleted visible (or vice versa). Remove
+      // only logger-restored cards that no longer belong to either visible category.
+      list.querySelectorAll('[data-ml2-restored-forum-card]').forEach(card => {
+        const threadId = card.getAttribute('data-ml2-restored-forum-card');
+        if (desiredIds.has(String(threadId))) return;
+        const target = card.closest?.('[data-ml2-restored-forum-thread]') || card.closest?.('li') || card;
+        target.remove?.();
+      });
       const existingIds = new Set(Array.from(list.querySelectorAll('[data-item-id], [data-ml2-restored-forum-card]'))
         .map(card => card.getAttribute('data-item-id') || card.getAttribute('data-ml2-restored-forum-card'))
         .filter(Boolean));
-      const records = getDeletedForumRecordsForChannel(parentChannel);
       for (const record of records) {
         const threadId = record.message.id;
         if (existingIds.has(threadId)) {
@@ -10381,7 +10414,7 @@ module.exports = class MessageLoggerV2 {
       for (const [parentId, parent] of parents) {
         const { group, sourceLi } = findSidebarThreadSource(parentId);
         if (!group || !sourceLi) continue;
-        const records = getDeletedCompactThreadRecords(parent);
+        const records = getRestorableCompactThreadRecords(parent);
         for (const record of records) {
           const threadId = record.message.id;
           desiredIds.add(threadId);
@@ -10409,7 +10442,7 @@ module.exports = class MessageLoggerV2 {
       const selected = this.selectedChannel || this.getSelectedTextChannel?.();
       const parent = [10, 11, 12].includes(selected?.type) ? this.tools.getChannel(selected.parent_id) : selected;
       if (!parent || isForumListChannel(parent)) return;
-      const records = getDeletedCompactThreadRecords(parent);
+      const records = getRestorableCompactThreadRecords(parent);
       const desiredIds = new Set(records.map(record => record.message.id));
       content.querySelectorAll('[data-ml2-restored-thread-browser-card]').forEach(node => {
         const threadId = node.getAttribute('data-ml2-restored-thread-browser-card');
@@ -10455,7 +10488,7 @@ module.exports = class MessageLoggerV2 {
       content.style.height = `${baseHeight + deletedHeader.getBoundingClientRect().height + (visibleCards * cardHeight)}px`;
     };
     const restoreDeletedCompactThreads = () => {
-      if (!this.settings.showDeletedMessages || !this.settings.restoreDeletedMessages) {
+      if (!canRestoreVisibleThreadRoots()) {
         document.querySelectorAll(
           '[data-ml2-restored-thread-entry], [data-ml2-restored-thread-browser-card], [data-ml2-restored-thread-browser-section]'
         ).forEach(node => node.remove());

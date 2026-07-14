@@ -251,6 +251,25 @@ test('restored forum and thread previews use native parsed markup', () => {
   assert.doesNotMatch(restoredPreviews, /subtext\.textContent = `\$\{record\.message\.author/);
 });
 
+test('restored forum cards and compact threads mount from visible Deleted or Purged roots', () => {
+  const rootSelection = source.slice(
+    source.indexOf('const getVisibleRestorableThreadRootIds ='),
+    source.indexOf('const copyClass =')
+  );
+  assert.match(rootSelection, /const rootIds = new Set\(\)/);
+  assert.match(rootSelection, /showDeletedMessages\) collect\(this\.deletedMessageRecord\)/);
+  assert.match(rootSelection, /showPurgedMessages\) collect\(this\.purgedMessageRecord\)/);
+  assert.match(rootSelection, /getRestorableForumRecordsForChannel[\s\S]*getVisibleRestorableThreadRootIds\(\)/);
+  assert.match(rootSelection, /getRestorableCompactThreadRecords[\s\S]*getVisibleRestorableThreadRootIds\(\)/);
+  assert.match(rootSelection, /forum_thread_delete \|\| record\.delete_data\.hidden \|\| !message/);
+  assert.match(source, /canRestoreVisibleThreadRoots[\s\S]*restoreDeletedMessages[\s\S]*showDeletedMessages \|\| this\.settings\.showPurgedMessages/);
+  assert.match(source, /restoreDeletedForumCards[\s\S]*desiredIds[\s\S]*data-ml2-restored-forum-card[\s\S]*target\.remove\?\.\(\)/);
+  assert.match(source, /restoreDeletedSidebarThreads[\s\S]*getRestorableCompactThreadRecords\(parent\)/);
+  assert.match(source, /restoreDeletedThreadBrowserCards[\s\S]*getRestorableCompactThreadRecords\(parent\)/);
+  assert.match(source, /shouldTintMessage = \(channelId, messageId\) => \{[\s\S]*if \(!record\?\.delete_data \|\| record\.delete_data\.hidden\) return false/);
+  assert.match(source, /applyRestoredThreadTint[\s\S]*!this\.messageRecord\?\.\[threadId\]\?\.delete_data\?\.hidden/);
+});
+
 test('surviving forum and thread cards tint only their deleted preview body', () => {
   const previewTint = source.slice(
     source.indexOf('const addForumTextTint ='),
