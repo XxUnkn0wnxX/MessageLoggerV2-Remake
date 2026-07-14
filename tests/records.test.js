@@ -373,6 +373,39 @@ test('self-keyed forum starters do not fold or alter their message payload', () 
   assert.equal(root.message.content, 'forum body');
 });
 
+test('forum replies cannot replace the self-keyed starter metadata', () => {
+  const rootId = '520';
+  const reply = {
+    id: '521',
+    channel_id: rootId,
+    guild_id: 'guild',
+    content: 'later purge command',
+    timestamp: 300,
+    author: { id: 'reply-author', username: 'Reply Author' }
+  };
+  const thread = { id: rootId, parent_id: 'forum', guild_id: 'guild', name: 'Post', type: 11 };
+  const plugin = createPlugin({
+    forumThreadMetadataCache: new Map([[rootId, {
+      id: rootId,
+      isForumParent: true,
+      starterMessageId: rootId,
+      starterContent: 'original body',
+      starterTimestamp: 100
+    }]]),
+    tools: {
+      getChannel: id => id === 'forum' ? { id, type: 15, name: 'Forum', guild_id: 'guild' } : null,
+      getServer: () => ({ id: 'guild', name: 'Server' })
+    },
+    getForumCardDomMetadata: () => null
+  });
+
+  const metadata = plugin.cacheForumThreadMetadata(thread, reply);
+  assert.equal(metadata.starterMessageId, rootId);
+  assert.equal(metadata.starterContent, 'original body');
+  assert.equal(metadata.starterTimestamp, 100);
+  assert.notEqual(metadata.starterAuthor?.id, reply.author.id);
+});
+
 test('legacy Anti-Nuke channel-thread placeholders repair only a nearby initial starter', () => {
   const rootId = '550';
   const starterId = '551';
@@ -822,10 +855,10 @@ test('removing a mounted self-keyed forum starter does not cascade into its repl
   assert.equal(forumListRefreshes, 1);
 });
 
-test('a full deleted root promotes only the latest visible saved reply as its context', () => {
+test('a full deleted root promotes only the oldest visible saved reply as its context', () => {
   const rootId = '690';
-  const olderId = '691';
-  const latestId = '692';
+  const oldestId = '691';
+  const laterId = '692';
   const hiddenId = '693';
   const author = { id: 'author', username: 'Author', public_flags: 0 };
   const root = {
@@ -847,77 +880,81 @@ test('a full deleted root promotes only the latest visible saved reply as its co
     },
     saved_location: { channelId: rootId, parentId: 'parent' }
   };
-  const older = {
-    message: { id: olderId, channel_id: rootId, content: 'older reply', timestamp: 200, author },
-    delete_data: { time: 300, forum_thread_message_delete: true }
-  };
-  const latest = {
+  const oldest = {
     message: {
-      id: latestId,
+      id: oldestId,
       channel_id: rootId,
-      content: 'latest visible reply',
-      timestamp: 300,
+      content: 'oldest visible reply',
+      timestamp: 200,
       attachments: [{ id: 'media', filename: 'reply.png' }],
       author
     },
-    delete_data: { time: 400, forum_thread_message_delete: true },
+    delete_data: { time: 300, forum_thread_message_delete: true },
     edit_history: [{ content: 'before edit', time: 350 }],
     logged_attachments: ['cached-reply-media']
+  };
+  const later = {
+    message: { id: laterId, channel_id: rootId, content: 'later purge command', timestamp: 300, author },
+    delete_data: { time: 400, forum_thread_message_delete: true }
   };
   const hidden = {
     message: { id: hiddenId, channel_id: rootId, content: 'newer but hidden', timestamp: 400, author },
     delete_data: { time: 450, hidden: true, forum_thread_message_delete: true }
   };
   const plugin = createPlugin({
-    messageRecord: { [rootId]: root, [olderId]: older, [latestId]: latest, [hiddenId]: hidden },
-    messageRecordIds: new Set([rootId, olderId, latestId, hiddenId]),
-    deletedMessageRecord: { [rootId]: [rootId, olderId, latestId, hiddenId] },
-    editedMessageRecord: { [rootId]: [latestId] },
-    purgedMessageRecord: {},
+    messageRecord: { [rootId]: root, [oldestId]: oldest, [laterId]: later, [hiddenId]: hidden },
+    messageRecordIds: new Set([rootId, oldestId, laterId, hiddenId]),
+    deletedMessageRecord: { [rootId]: [rootId, laterId, hiddenId] },
+    editedMessageRecord: { [rootId]: [oldestId] },
+    purgedMessageRecord: { [rootId]: [oldestId] },
     nukedMessageRecord: {},
-    deletedMessageSet: new Map([[rootId, new Set([rootId, olderId, latestId, hiddenId])]]),
-    editedMessageSet: new Map([[rootId, new Set([latestId])]]),
-    purgedMessageSet: new Map(),
+    deletedMessageSet: new Map([[rootId, new Set([rootId, laterId, hiddenId])]]),
+    editedMessageSet: new Map([[rootId, new Set([oldestId])]]),
+    purgedMessageSet: new Map([[rootId, new Set([oldestId])]]),
     nukedMessageSet: new Map(),
     sortedDeletedMessageIds: new Map([[rootId, []]]),
     sortedPurgedMessageIds: new Map(),
     sortedNukedMessageIds: new Map(),
     suppressedForumThreadIds: new Set(),
-    noTintIds: new Set([latestId]),
-    editModifiers: { [latestId]: { editNum: 0 } },
+    noTintIds: new Set([oldestId]),
+    editModifiers: { [oldestId]: { editNum: 0 } },
     settings: { deleteCachedFilesWithRecords: false }
   });
 
-  assert.deepEqual(plugin.promoteLatestSavedThreadReplyIntoRoot(rootId), {
+  assert.deepEqual(plugin.promoteOldestSavedThreadReplyIntoRoot(rootId), {
     rootId,
-    contextMessageId: latestId
+    contextMessageId: oldestId
   });
   const promoted = plugin.messageRecord[rootId];
-  assert.equal(promoted.message.content, 'latest visible reply');
+  assert.equal(promoted.message.content, 'oldest visible reply');
   assert.equal(promoted.message.id, rootId);
   assert.equal(promoted.message.channel_id, rootId);
   assert.equal(promoted.delete_data.forum_thread_delete, true);
   assert.equal(promoted.delete_data.forum_thread_message_delete, undefined);
   assert.equal(promoted.delete_data.forum_metadata.name, 'Deleted title');
   assert.equal(promoted.delete_data.forum_metadata.starterContent, null);
-  assert.equal(promoted.delete_data.forum_metadata.rootContextMessageId, latestId);
+  assert.equal(promoted.delete_data.forum_metadata.rootContextMessageId, oldestId);
   assert.equal(promoted.delete_data.forum_metadata.rootContextWasReply, true);
   assert.deepEqual(promoted.edit_history, [{ content: 'before edit', time: 350 }]);
   assert.deepEqual(promoted.logged_attachments, ['cached-reply-media']);
-  assert.deepEqual(Object.keys(plugin.messageRecord).sort(), [rootId, olderId, hiddenId]);
-  assert.deepEqual(plugin.deletedMessageRecord, { [rootId]: [rootId, olderId, hiddenId] });
+  assert.equal(plugin.preservePurgedThreadRootCategory(rootId), true);
+  assert.deepEqual(Object.keys(plugin.messageRecord).sort(), [rootId, laterId, hiddenId]);
+  assert.deepEqual(plugin.deletedMessageRecord, { [rootId]: [laterId, hiddenId] });
+  assert.deepEqual(plugin.purgedMessageRecord, { [rootId]: [rootId] });
   assert.deepEqual(plugin.editedMessageRecord, { [rootId]: [rootId] });
-  assert.deepEqual(plugin.getRecordCacheSourceMessageIds(promoted), new Set([rootId, latestId]));
-  assert.equal(plugin.noTintIds.has(latestId), false);
-  assert.equal(plugin.editModifiers[latestId], undefined);
+  assert.deepEqual(plugin.deletedMessageSet.get(rootId), new Set([laterId, hiddenId]));
+  assert.deepEqual(plugin.purgedMessageSet.get(rootId), new Set([rootId]));
+  assert.deepEqual(plugin.getRecordCacheSourceMessageIds(promoted), new Set([rootId, oldestId]));
+  assert.equal(plugin.noTintIds.has(oldestId), false);
+  assert.equal(plugin.editModifiers[oldestId], undefined);
 
   const removed = plugin.deleteMessageFromRecords(rootId);
-  assert.deepEqual(new Set(removed), new Set([rootId, olderId, hiddenId]));
+  assert.deepEqual(new Set(removed), new Set([rootId, laterId, hiddenId]));
   assert.deepEqual(plugin.messageRecord, {}, 'only the full structural root cascades through remaining children');
 
   const emptyRoot = structuredClone(root);
   const emptyPlugin = createPlugin({ messageRecord: { [rootId]: emptyRoot } });
-  assert.equal(emptyPlugin.promoteLatestSavedThreadReplyIntoRoot(rootId), null);
+  assert.equal(emptyPlugin.promoteOldestSavedThreadReplyIntoRoot(rootId), null);
   assert.equal(
     emptyPlugin.messageRecord[rootId].message.content,
     '[no saved message or reply content found]',

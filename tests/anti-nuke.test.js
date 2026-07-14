@@ -140,7 +140,7 @@ test('Anti-Nuke folds the initial thread starter into the root without consuming
   assert.equal(context.remainingMessages, 0);
 });
 
-test('Anti-Nuke promotes the latest reply when a removed starter leaves an empty structural root', () => {
+test('Anti-Nuke promotes the oldest reply when a removed starter leaves an empty structural root', () => {
   const rootId = '450';
   const olderId = '451';
   const latestId = '452';
@@ -227,16 +227,18 @@ test('Anti-Nuke promotes the latest reply when a removed starter leaves an empty
 
   plugin.captureThreadFromDeletedChannel(thread, context, {
     root,
+    // Deliberately reverse the capture input: promotion must follow the original message
+    // timestamps, not API/cache array order or the time each deletion was observed.
     messages: [latest, older],
     metadata
   });
 
-  assert.deepEqual(Object.keys(plugin.messageRecord).sort(), [rootId, olderId]);
-  assert.equal(plugin.messageRecord[rootId].message.content, 'latest surviving reply');
+  assert.deepEqual(Object.keys(plugin.messageRecord).sort(), [rootId, latestId]);
+  assert.equal(plugin.messageRecord[rootId].message.content, 'older reply');
   assert.equal(plugin.messageRecord[rootId].delete_data.forum_thread_delete, true);
   assert.equal(plugin.messageRecord[rootId].delete_data.anti_nuke, true);
-  assert.equal(plugin.messageRecord[rootId].delete_data.forum_metadata.rootContextMessageId, latestId);
-  assert.deepEqual(plugin.nukedMessageRecord, { [rootId]: [rootId, olderId] });
+  assert.equal(plugin.messageRecord[rootId].delete_data.forum_metadata.rootContextMessageId, olderId);
+  assert.deepEqual(plugin.nukedMessageRecord, { [rootId]: [rootId, latestId] });
   assert.equal(context.captured, 2, 'the structural root and one independent reply are counted');
   assert.equal(context.capturedMessages, 1, 'the promoted reply no longer consumes a reply slot');
   assert.equal(context.remainingMessages, 4);

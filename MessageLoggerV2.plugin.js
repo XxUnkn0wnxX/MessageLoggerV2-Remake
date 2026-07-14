@@ -6481,7 +6481,7 @@ module.exports = class MessageLoggerV2 {
       reactions: [],
       guild_id: channel.guild_id || metadata.guildId,
       // Cached metadata can outlive a starter the user explicitly removed from Logger. Do not
-      // resurrect that body. A later capture promotes the newest visible saved reply into this
+      // resurrect that body. A later capture promotes the oldest visible saved reply into this
       // structural root, or keeps this explicit placeholder when no saved content remains.
       content: this.getMissingForumThreadContentPlaceholder(),
       type: 0,
@@ -6495,7 +6495,7 @@ module.exports = class MessageLoggerV2 {
       referenced_message: null
     };
   }
-  promoteLatestSavedThreadReplyIntoRoot(threadId) {
+  promoteOldestSavedThreadReplyIntoRoot(threadId) {
     const rootId = String(threadId || '');
     const rootRecord = this.messageRecord?.[rootId];
     if (!rootId
@@ -6505,7 +6505,7 @@ module.exports = class MessageLoggerV2 {
     const metadata = rootRecord.delete_data.forum_metadata || {};
     const recordedStarterId = metadata.starterMessageId && String(metadata.starterMessageId);
     // A real saved starter should be handled by the normal identity-based fold. Failing closed
-    // here prevents an unrelated newer reply from replacing it if that fold ever cannot run.
+    // here prevents an unrelated reply from replacing it if that fold ever cannot run.
     if (recordedStarterId
       && recordedStarterId !== rootId
       && this.messageRecord?.[recordedStarterId]) return null;
@@ -6531,7 +6531,10 @@ module.exports = class MessageLoggerV2 {
         return messageTime(left) - messageTime(right)
           || left[0].localeCompare(right[0], undefined, { numeric: true });
       });
-    const promoted = candidates.at(-1);
+    // Preserve conversation order: after the starter is gone, the first surviving visible
+    // reply is the most faithful replacement context. Later replies or purge commands must
+    // remain ordinary children even if they were deleted more recently.
+    const promoted = candidates.at(0);
     if (!promoted) return null;
     const [contextMessageId, contextRecord] = promoted;
 
@@ -6562,18 +6565,19 @@ module.exports = class MessageLoggerV2 {
     this.messageRecordIds?.delete(contextMessageId);
     this.messageRecordIds?.add(rootId);
 
-    const removeFromIndex = (map, setMap, sortedMap, preserveEdits = false) => {
+    const replaceContextWithRootInIndex = (map, setMap, sortedMap) => {
       for (const [channelId, ids] of Object.entries(map || {})) {
         if (!Array.isArray(ids) || !ids.some(id => String(id) === contextMessageId)) continue;
         const remaining = ids.filter(id => String(id) !== contextMessageId);
-        if (preserveEdits && !remaining.some(id => String(id) === rootId)) {
-          remaining.push(rootId);
-        }
+        // Promotion is category-agnostic. Transfer the selected oldest record's Deleted,
+        // Purged, Nuked, or Edited membership to the structural root; the existing category
+        // precedence step then resolves any temporary overlap with the root's own membership.
+        if (!remaining.some(id => String(id) === rootId)) remaining.push(rootId);
         if (remaining.length) map[channelId] = remaining;
         else delete map[channelId];
-        setMap?.get(channelId)?.delete(contextMessageId);
-        if (preserveEdits && setMap) {
+        if (setMap) {
           const idsSet = setMap.get(channelId) || new Set();
+          idsSet.delete(contextMessageId);
           idsSet.add(rootId);
           setMap.set(channelId, idsSet);
         }
@@ -6581,10 +6585,10 @@ module.exports = class MessageLoggerV2 {
         sortedMap?.delete(channelId);
       }
     };
-    removeFromIndex(this.deletedMessageRecord, this.deletedMessageSet, this.sortedDeletedMessageIds);
-    removeFromIndex(this.purgedMessageRecord, this.purgedMessageSet, this.sortedPurgedMessageIds);
-    removeFromIndex(this.nukedMessageRecord, this.nukedMessageSet, this.sortedNukedMessageIds);
-    removeFromIndex(this.editedMessageRecord, this.editedMessageSet, null, true);
+    replaceContextWithRootInIndex(this.deletedMessageRecord, this.deletedMessageSet, this.sortedDeletedMessageIds);
+    replaceContextWithRootInIndex(this.purgedMessageRecord, this.purgedMessageSet, this.sortedPurgedMessageIds);
+    replaceContextWithRootInIndex(this.nukedMessageRecord, this.nukedMessageSet, this.sortedNukedMessageIds);
+    replaceContextWithRootInIndex(this.editedMessageRecord, this.editedMessageSet, null);
     this.noTintIds?.delete(contextMessageId);
     if (this.editModifiers) delete this.editModifiers[contextMessageId];
     return { rootId, contextMessageId };
@@ -6693,11 +6697,19 @@ module.exports = class MessageLoggerV2 {
       };
     }) : [];
     const existing = this.forumThreadMetadataCache.get(threadId) || {};
-    const guild = channel?.guild_id || starterMessage?.guild_id || existing.guildId ? this.tools.getServer(channel?.guild_id || starterMessage?.guild_id || existing.guildId) : null;
+    const isForumParent = parent?.type === 15 || parent?.type === 16 || existing.isForumParent || false;
+    // Forum posts are self-keyed: only the message whose ID equals the post/thread ID may
+    // update starter identity or content. An ordinary reply passed through annotation must
+    // never let a later purge command masquerade as the original forum starter.
+    const forumStarterMessage = isForumParent
+      && String(starterMessage?.id || '') !== String(threadId)
+      ? null
+      : starterMessage;
+    const guild = channel?.guild_id || forumStarterMessage?.guild_id || existing.guildId ? this.tools.getServer(channel?.guild_id || forumStarterMessage?.guild_id || existing.guildId) : null;
     const guildName = guild?.name || existing.guildName || null;
     const parentName = parent?.name || existing.parentName || null;
     const threadName = channel?.name || existing.name || starterMessage?.thread?.name || null;
-    const starterAuthor = starterMessage?.author ? this.cleanupUserObject(starterMessage.author) : existing.starterAuthor || null;
+    const starterAuthor = forumStarterMessage?.author ? this.cleanupUserObject(forumStarterMessage.author) : existing.starterAuthor || null;
     const parentPath = guildName && parentName ? `${guildName}, #${parentName}` : existing.parentPath || null;
     const path = parentPath && threadName ? `${parentPath} > ${threadName}` : existing.path || parentPath;
     const metadata = {
@@ -6706,16 +6718,16 @@ module.exports = class MessageLoggerV2 {
       parentId: channel?.parent_id || existing.parentId || null,
       parentType: parent?.type ?? existing.parentType ?? null,
       threadType: channel?.type ?? existing.threadType ?? null,
-      isForumParent: parent?.type === 15 || parent?.type === 16 || existing.isForumParent || false,
-      guildId: channel?.guild_id || starterMessage?.guild_id || existing.guildId || null,
+      isForumParent,
+      guildId: channel?.guild_id || forumStarterMessage?.guild_id || existing.guildId || null,
       guildName,
       name: threadName,
       topic: channel?.topic || existing.topic || null,
-      ownerId: channel?.owner_id || channel?.ownerId || existing.ownerId || starterMessage?.author?.id || null,
-      starterMessageId: starterMessage?.id || existing.starterMessageId || null,
-      starterContent: starterMessage?.content || existing.starterContent || null,
+      ownerId: channel?.owner_id || channel?.ownerId || existing.ownerId || forumStarterMessage?.author?.id || null,
+      starterMessageId: forumStarterMessage?.id || existing.starterMessageId || null,
+      starterContent: forumStarterMessage?.content || existing.starterContent || null,
       starterAuthor,
-      starterTimestamp: starterMessage?.timestamp || existing.starterTimestamp || null,
+      starterTimestamp: forumStarterMessage?.timestamp || existing.starterTimestamp || null,
       appliedTags,
       tags: tags.length ? tags : existing.tags || [],
       parentName,
@@ -7139,7 +7151,7 @@ module.exports = class MessageLoggerV2 {
       rootRecord.delete_data.forum_name = metadata.name || channel.name || null;
     }
     this.foldSavedThreadStarterIntoRoot(channel.id);
-    const promotion = this.promoteLatestSavedThreadReplyIntoRoot(channel.id);
+    const promotion = this.promoteOldestSavedThreadReplyIntoRoot(channel.id);
     if (promotion) {
       // Root and reply were counted separately before the reply became the root payload. Keep
       // Anti-Nuke counters and the shared reply cap aligned with the final de-duplicated records.
@@ -7272,7 +7284,7 @@ module.exports = class MessageLoggerV2 {
       savedRecord.delete_data.forum_name = metadata?.name || channel.name || null;
     }
     this.foldSavedThreadStarterIntoRoot(threadId);
-    this.promoteLatestSavedThreadReplyIntoRoot(threadId);
+    this.promoteOldestSavedThreadReplyIntoRoot(threadId);
     this.preservePurgedThreadRootCategory(threadId);
     if (!savedThreadMessageCount && !savedRecord?.delete_data) return callDefault(...args);
     if (this.settings.showDeletedCount) {

@@ -321,8 +321,10 @@ test('ordinary and Anti-Nuke roots share the de-duplicated missing-starter fallb
 
   assert.match(fallback, /content: this\.getMissingForumThreadContentPlaceholder\(\)/);
   assert.doesNotMatch(fallback, /content: metadata\.starterContent|content: metadata\.card\?\.preview/);
-  assert.match(ordinaryDelete, /promoteLatestSavedThreadReplyIntoRoot\(threadId\)/);
-  assert.match(antiNukeCapture, /promoteLatestSavedThreadReplyIntoRoot\(channel\.id\)/);
+  assert.match(source, /const forumStarterMessage = isForumParent[\s\S]*starterMessage\?\.id[\s\S]*threadId[\s\S]*starterMessageId: forumStarterMessage\?\.id/);
+  assert.match(ordinaryDelete, /promoteOldestSavedThreadReplyIntoRoot\(threadId\)/);
+  assert.match(antiNukeCapture, /promoteOldestSavedThreadReplyIntoRoot\(channel\.id\)/);
+  assert.match(fallback, /replaceContextWithRootInIndex[\s\S]*remaining\.push\(rootId\)[\s\S]*purgedMessageRecord/);
   assert.match(localRemoval, /cachedMessagesMap\?\.delete\?\.\(id\)/);
 });
 
