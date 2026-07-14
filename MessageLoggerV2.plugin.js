@@ -6269,6 +6269,44 @@ module.exports = class MessageLoggerV2 {
     if (saved) return saved;
     return this.getCachedMessage(threadId, threadId) || this.createForumThreadDeleteFallbackMessage(channel);
   }
+  getMissingForumThreadContentPlaceholder() {
+    return '[no saved message or reply content found]';
+  }
+  isMissingForumThreadContentPlaceholder(content) {
+    // Keep recognizing the old placeholder so legacy and hot-loaded records receive the same
+    // reply-promotion behavior without requiring a separate destructive migration.
+    return content === this.getMissingForumThreadContentPlaceholder()
+      || content === '[starter message unavailable]';
+  }
+  getSavedForumThreadMetadata(threadId) {
+    if (!threadId) return null;
+    const direct = this.messageRecord?.[threadId]?.delete_data?.forum_metadata;
+    if (direct) return direct;
+    for (const record of Object.values(this.messageRecord || {})) {
+      if (String(record?.message?.channel_id || '') !== String(threadId)) continue;
+      if (record.delete_data?.forum_metadata) return record.delete_data.forum_metadata;
+    }
+    return null;
+  }
+  getCachedForumThreadStarterCandidate(channel, messages = [], metadata = null) {
+    const threadId = String(channel?.id || '');
+    if (!threadId) return null;
+    const savedMetadata = metadata || this.getSavedForumThreadMetadata(threadId)
+      || this.forumThreadMetadataCache?.get(threadId) || null;
+    const parent = channel?.parent_id ? this.tools.getChannel(channel.parent_id) : null;
+    const isForumPost = savedMetadata?.isForumParent === true || parent?.type === 15 || parent?.type === 16;
+    const expectedStarterId = savedMetadata?.starterMessageId && String(savedMetadata.starterMessageId);
+
+    // Forum post IDs are self-keyed. Never let an ordinary reply overwrite starter metadata
+    // merely because the real starter was already deleted and removed from the local logger.
+    if (isForumPost) return messages.find(message => String(message?.id || '') === threadId) || null;
+    if (expectedStarterId && expectedStarterId !== threadId) {
+      return messages.find(message => String(message?.id || '') === expectedStarterId) || null;
+    }
+    // With no durable starter ID, the oldest cached channel-thread message remains the best
+    // available initial-body candidate. Callers pass this collection oldest-first.
+    return messages[0] || null;
+  }
   getCachedForumThreadMessages(threadId, options = {}) {
     if (!threadId) return [];
     const messages = new Map();
@@ -6441,9 +6479,10 @@ module.exports = class MessageLoggerV2 {
       channel_id: threadId,
       reactions: [],
       guild_id: channel.guild_id || metadata.guildId,
-      // The title is structural metadata. The message field mirrors a forum post by carrying only
-      // the starter body (or an explicit placeholder when Discord supplied no starter payload).
-      content: metadata.starterContent || metadata.card?.preview || '[starter message unavailable]',
+      // Cached metadata can outlive a starter the user explicitly removed from Logger. Do not
+      // resurrect that body. A later capture promotes the newest visible saved reply into this
+      // structural root, or keeps this explicit placeholder when no saved content remains.
+      content: this.getMissingForumThreadContentPlaceholder(),
       type: 0,
       embeds: [],
       author: fallbackAuthor,
@@ -6454,6 +6493,100 @@ module.exports = class MessageLoggerV2 {
       timestamp: metadata.starterTimestamp || threadMetadata.createTimestamp || threadMetadata.archiveTimestamp || Date.now(),
       referenced_message: null
     };
+  }
+  promoteLatestSavedThreadReplyIntoRoot(threadId) {
+    const rootId = String(threadId || '');
+    const rootRecord = this.messageRecord?.[rootId];
+    if (!rootId
+      || !rootRecord?.delete_data?.forum_thread_delete
+      || !this.isMissingForumThreadContentPlaceholder(rootRecord.message?.content)) return null;
+
+    const metadata = rootRecord.delete_data.forum_metadata || {};
+    const recordedStarterId = metadata.starterMessageId && String(metadata.starterMessageId);
+    // A real saved starter should be handled by the normal identity-based fold. Failing closed
+    // here prevents an unrelated newer reply from replacing it if that fold ever cannot run.
+    if (recordedStarterId
+      && recordedStarterId !== rootId
+      && this.messageRecord?.[recordedStarterId]) return null;
+
+    const candidates = Object.entries(this.messageRecord || {})
+      .filter(([messageId, record]) => messageId !== rootId
+        && String(record?.message?.channel_id || '') === rootId
+        && !!record.delete_data
+        && !record.delete_data.hidden
+        && !record.delete_data.forum_thread_delete)
+      .sort((left, right) => {
+        const messageTime = ([messageId, record]) => {
+          const numeric = Number(record?.message?.timestamp);
+          if (Number.isFinite(numeric) && numeric > 0) return numeric;
+          const parsed = Date.parse(record?.message?.timestamp);
+          if (Number.isFinite(parsed)) return parsed;
+          try {
+            return Number(BigInt(messageId) >> 22n) + DISCORD_EPOCH;
+          } catch (_) {
+            return Number(record?.delete_data?.time) || 0;
+          }
+        };
+        return messageTime(left) - messageTime(right)
+          || left[0].localeCompare(right[0], undefined, { numeric: true });
+      });
+    const promoted = candidates.at(-1);
+    if (!promoted) return null;
+    const [contextMessageId, contextRecord] = promoted;
+
+    const mergedRecord = this.mergeSavedRecords(contextRecord, rootRecord);
+    mergedRecord.message = {
+      ...this.cloneDataValue(contextRecord.message),
+      id: rootId,
+      channel_id: rootId
+    };
+    mergedRecord.delete_data = this.mergePlainDataObjects(
+      contextRecord.delete_data || {},
+      rootRecord.delete_data || {}
+    );
+    mergedRecord.delete_data.forum_thread_delete = true;
+    delete mergedRecord.delete_data.forum_thread_message_delete;
+    mergedRecord.delete_data.forum_metadata = {
+      ...this.cloneDataValue(metadata),
+      starterContent: null,
+      rootContextMessageId: contextMessageId,
+      rootContextWasReply: true
+    };
+    // The deleted post/thread location belongs to the structural root, not the promoted reply.
+    mergedRecord.saved_location = rootRecord.saved_location
+      ? this.cloneDataValue(rootRecord.saved_location)
+      : this.cloneDataValue(contextRecord.saved_location || null);
+    this.messageRecord[rootId] = mergedRecord;
+    delete this.messageRecord[contextMessageId];
+    this.messageRecordIds?.delete(contextMessageId);
+    this.messageRecordIds?.add(rootId);
+
+    const removeFromIndex = (map, setMap, sortedMap, preserveEdits = false) => {
+      for (const [channelId, ids] of Object.entries(map || {})) {
+        if (!Array.isArray(ids) || !ids.some(id => String(id) === contextMessageId)) continue;
+        const remaining = ids.filter(id => String(id) !== contextMessageId);
+        if (preserveEdits && !remaining.some(id => String(id) === rootId)) {
+          remaining.push(rootId);
+        }
+        if (remaining.length) map[channelId] = remaining;
+        else delete map[channelId];
+        setMap?.get(channelId)?.delete(contextMessageId);
+        if (preserveEdits && setMap) {
+          const idsSet = setMap.get(channelId) || new Set();
+          idsSet.add(rootId);
+          setMap.set(channelId, idsSet);
+        }
+        if (!setMap?.get(channelId)?.size) setMap?.delete(channelId);
+        sortedMap?.delete(channelId);
+      }
+    };
+    removeFromIndex(this.deletedMessageRecord, this.deletedMessageSet, this.sortedDeletedMessageIds);
+    removeFromIndex(this.purgedMessageRecord, this.purgedMessageSet, this.sortedPurgedMessageIds);
+    removeFromIndex(this.nukedMessageRecord, this.nukedMessageSet, this.sortedNukedMessageIds);
+    removeFromIndex(this.editedMessageRecord, this.editedMessageSet, null, true);
+    this.noTintIds?.delete(contextMessageId);
+    if (this.editModifiers) delete this.editModifiers[contextMessageId];
+    return { rootId, contextMessageId };
   }
   scheduleForumListRefresh() {
     if (this._forumListRefreshPending) return;
@@ -6856,8 +6989,13 @@ module.exports = class MessageLoggerV2 {
     return this.consumeDeletedChannelMessageCaptureSlot(context);
   }
   getDeletedChannelThreadMetadata(channel, context, starterMessage = null) {
+    const savedMetadata = this.getSavedForumThreadMetadata(channel?.id);
+    if (savedMetadata && !this.forumThreadMetadataCache?.has(channel.id)) {
+      this.forumThreadMetadataCache?.set(channel.id, this.cloneDataValue(savedMetadata));
+    }
     const existing = this.cacheForumThreadMetadata(channel, starterMessage)
       || this.forumThreadMetadataCache?.get(channel.id)
+      || savedMetadata
       || {};
     const parent = context.channel;
     const guild = context.guild;
@@ -6885,11 +7023,17 @@ module.exports = class MessageLoggerV2 {
     this.forumThreadMetadataCache?.set(channel.id, metadata);
     return metadata;
   }
-  getDeletedChannelThreadStarterCandidate(channel, context, root, messages = []) {
+  getDeletedChannelThreadStarterCandidate(channel, context, root, messages = [], metadata = null) {
     const parentType = context?.channel?.type;
-    // Forum post IDs are their starter-message IDs, so preserve the working self-keyed path.
-    if (parentType === 15 || parentType === 16) return root || messages.at(-1) || null;
-    const cachedStarterId = this.forumThreadMetadataCache?.get(channel?.id)?.starterMessageId;
+    const savedMetadata = metadata || this.getSavedForumThreadMetadata(channel?.id)
+      || this.forumThreadMetadataCache?.get(channel?.id) || null;
+    // Forum post IDs are their starter-message IDs. A synthetic placeholder is structural only;
+    // it must not be mistaken for deleted starter content or replaced by an arbitrary reply.
+    if (parentType === 15 || parentType === 16) {
+      if (root && !this.isMissingForumThreadContentPlaceholder(root.content)) return root;
+      return messages.find(message => String(message?.id || '') === String(channel?.id || '')) || null;
+    }
+    const cachedStarterId = savedMetadata?.starterMessageId;
     if (cachedStarterId && String(cachedStarterId) !== String(channel?.id)) {
       // Keep known metadata only when the exact starter is still in the deleted-channel cache.
       // Returning null preserves that known ID if its payload is no longer available.
@@ -6927,7 +7071,13 @@ module.exports = class MessageLoggerV2 {
     // starter. Correct only regular channel threads before any message is saved or counted.
     if (metadata.isForumParent === false
       && (!metadata.starterMessageId || String(metadata.starterMessageId) === String(channel.id))) {
-      const starterCandidate = this.getDeletedChannelThreadStarterCandidate(channel, context, root, messages);
+      const starterCandidate = this.getDeletedChannelThreadStarterCandidate(
+        channel,
+        context,
+        root,
+        messages,
+        metadata
+      );
       if (starterCandidate && String(starterCandidate.id) !== String(channel.id)) {
         metadata = this.getDeletedChannelThreadMetadata(channel, context, starterCandidate);
       }
@@ -6969,14 +7119,16 @@ module.exports = class MessageLoggerV2 {
         threadStarterForRoot: true
       });
     }
+    const capturedReplyIds = new Set();
     for (const message of eligibleMessages) {
       if (starterMessage && message === starterMessage) continue;
       if (!this.hasDeletedChannelMessageCaptureSlot(context)) break;
-      this.saveDeletedChannelCaptureMessage(message, this.nukedMessageRecord, context, {
+      const captured = this.saveDeletedChannelCaptureMessage(message, this.nukedMessageRecord, context, {
         channel,
         location,
         threadMetadata: metadata
       });
+      if (captured) capturedReplyIds.add(String(message.id));
     }
     const rootRecord = this.messageRecord[channel.id];
     if (rootRecord?.delete_data) {
@@ -6986,6 +7138,16 @@ module.exports = class MessageLoggerV2 {
       rootRecord.delete_data.forum_name = metadata.name || channel.name || null;
     }
     this.foldSavedThreadStarterIntoRoot(channel.id);
+    const promotion = this.promoteLatestSavedThreadReplyIntoRoot(channel.id);
+    if (promotion) {
+      // Root and reply were counted separately before the reply became the root payload. Keep
+      // Anti-Nuke counters and the shared reply cap aligned with the final de-duplicated records.
+      context.captured = Math.max(0, context.captured - 1);
+      if (capturedReplyIds.has(promotion.contextMessageId)) {
+        context.capturedMessages = Math.max(0, context.capturedMessages - 1);
+        if (context.remainingMessages !== Infinity) context.remainingMessages++;
+      }
+    }
     return context.captured - before;
   }
   captureQueuedThreadsFromDeletedChannel(context) {
@@ -7075,7 +7237,16 @@ module.exports = class MessageLoggerV2 {
     if (this.isSuppressedForumThreadId(threadId)) return callDefault(...args);
     if (this.settings.ignoreLocalDeletes && this.localDeletes.includes(threadId)) return callDefault(...args);
     const cachedThreadMessages = this.getCachedForumThreadMessages(threadId);
-    const metadata = this.cacheForumThreadMetadata(channel, cachedThreadMessages[0] || null);
+    const savedMetadata = this.getSavedForumThreadMetadata(threadId)
+      || this.forumThreadMetadataCache?.get(threadId) || null;
+    const cachedStarter = this.getCachedForumThreadStarterCandidate(
+      channel,
+      cachedThreadMessages,
+      savedMetadata
+    );
+    const metadata = this.cacheForumThreadMetadata(channel, cachedStarter)
+      || savedMetadata
+      || this.forumThreadMetadataCache?.get(threadId);
     const deleted = this.getForumThreadDeleteMessage(channel);
     if (!deleted && !cachedThreadMessages.length) {
       this.cacheChannelMessages(threadId, threadId);
@@ -7100,6 +7271,7 @@ module.exports = class MessageLoggerV2 {
       savedRecord.delete_data.forum_name = metadata?.name || channel.name || null;
     }
     this.foldSavedThreadStarterIntoRoot(threadId);
+    this.promoteLatestSavedThreadReplyIntoRoot(threadId);
     this.preservePurgedThreadRootCategory(threadId);
     if (!savedThreadMessageCount && !savedRecord?.delete_data) return callDefault(...args);
     if (this.settings.showDeletedCount) {
@@ -7667,35 +7839,6 @@ module.exports = class MessageLoggerV2 {
     }
     return location.path || null;
   }
-  isThreadStarterLogMessage(record, message, channel = null) {
-    if (!message?.id) return false;
-    if (message.id === message.channel_id) return true;
-    const location = record?.delete_data?.location || record?.saved_location || {};
-    const liveChannel = channel || (message.channel_id ? this.tools.getChannel(message.channel_id) : null);
-    const channelType = liveChannel?.type ?? location.channelType;
-    if (![10, 11, 12].includes(channelType)) return false;
-    const threadId = liveChannel?.id || location.channelId || message.channel_id;
-    const threadRecord = this.messageRecord?.[threadId];
-    const metadata = record?.delete_data?.forum_metadata || {};
-    const liveParent = liveChannel?.parent_id ? this.tools.getChannel(liveChannel.parent_id) : null;
-    const parentType = liveParent?.type ?? metadata.parentType ?? location.parentType;
-    // Forum starters are self-keyed: the post/thread ID is the starter-message ID. This remains
-    // authoritative while the native post is still mounted, even if an independently deleted or
-    // purged reply carries stale metadata that incorrectly names itself as the starter.
-    if (metadata.isForumParent || parentType === 15 || parentType === 16) {
-      return String(message.id) === String(threadId);
-    }
-    // Once the structural root is saved, channel-thread starters are folded into that root and
-    // forum starters are already self-keyed. Child metadata can be incomplete or can carry an old
-    // starter hint, but it must never make a reply highlight the deleted root title in the logger.
-    if (threadRecord?.delete_data?.forum_thread_delete) {
-      return String(message.id) === String(threadRecord.message?.id || threadId);
-    }
-    const starterMessageId = metadata.starterMessageId
-      || threadRecord?.delete_data?.forum_metadata?.starterMessageId
-      || this.forumThreadMetadataCache?.get(threadId)?.starterMessageId;
-    return !!starterMessageId && starterMessageId === message.id;
-  }
   getForumThreadDeleteLocationName(record, message) {
     const threadRecord = message?.channel_id ? this.messageRecord?.[message.channel_id] : null;
     const threadChannel = message?.channel_id ? this.tools.getChannel(message.channel_id) : null;
@@ -8111,6 +8254,9 @@ module.exports = class MessageLoggerV2 {
     const metadata = record.delete_data?.forum_metadata;
     if (metadata?.starterFoldedIntoRoot && metadata.starterMessageId) {
       ids.add(String(metadata.starterMessageId));
+    }
+    if (metadata?.rootContextWasReply && metadata.rootContextMessageId) {
+      ids.add(String(metadata.rootContextMessageId));
     }
     return ids;
   }
@@ -8777,6 +8923,14 @@ module.exports = class MessageLoggerV2 {
     this.deleteMessageFromRecords(id);
     this.noTintIds?.delete?.(id);
     if (this.editModifiers) delete this.editModifiers[id];
+    // A user-requested local removal is also a cache tombstone for this running session. Without
+    // this cleanup, a later post/thread deletion could rediscover the stale deleted starter in
+    // Logger's aggressive cache and silently recreate content the user had already removed.
+    if (Array.isArray(this.cachedMessageRecord)) {
+      this.cachedMessageRecord = this.cachedMessageRecord.filter(message => String(message?.id || '') !== id);
+    }
+    this.cachedMessageIds?.delete?.(id);
+    this.cachedMessagesMap?.delete?.(id);
     if (removesThreadRoot) this.removeForumCardFromDom(id);
     if (shouldRefreshChannelCache) this.cacheChannelMessages(savedChannelId);
 
@@ -10874,10 +11028,9 @@ module.exports = class MessageLoggerV2 {
     const detailPrefix = `${details} `;
     const detailSuffix = ` at ${this.createTimeStamp(timestamp, true)}`;
     const forumLocationParts = splitForumLogLocation(locationName);
-    const highlightThreadPath = !!(forumLocationParts && (
-      record?.delete_data?.forum_thread_delete
-      || this.isThreadStarterLogMessage(record, message, channel)
-    ));
+    // The warning-colored title means Discord removed the whole post/thread and Logger restored
+    // its structural root. A deleted starter body in an otherwise live mount keeps this neutral.
+    const highlightThreadPath = !!(forumLocationParts && record?.delete_data?.forum_thread_delete);
     details = escapeHTML(`${detailPrefix}${locationName}${detailSuffix}`);
     if (!this.createMessageGroup.classes) {
       this.createMessageGroup.classes = {

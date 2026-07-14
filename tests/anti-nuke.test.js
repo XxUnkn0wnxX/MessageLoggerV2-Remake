@@ -140,6 +140,121 @@ test('Anti-Nuke folds the initial thread starter into the root without consuming
   assert.equal(context.remainingMessages, 0);
 });
 
+test('Anti-Nuke promotes the latest reply when a removed starter leaves an empty structural root', () => {
+  const rootId = '450';
+  const olderId = '451';
+  const latestId = '452';
+  const author = { id: 'author', username: 'Author', public_flags: 0 };
+  const plugin = createPlugin({
+    settings: {
+      antiNukeEnabled: true,
+      antiNukeThreadCap: 1,
+      antiNukeMessageCap: 5,
+      antiNukeAttachmentCap: 5
+    },
+    messageRecord: {},
+    messageRecordIds: new Set(),
+    deletedMessageRecord: {},
+    editedMessageRecord: {},
+    purgedMessageRecord: {},
+    nukedMessageRecord: {},
+    deletedMessageSet: new Map(),
+    editedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
+    sortedDeletedMessageIds: new Map(),
+    sortedPurgedMessageIds: new Map(),
+    sortedNukedMessageIds: new Map(),
+    suppressedForumThreadIds: new Set(),
+    noTintIds: new Set(),
+    editModifiers: {},
+    forumThreadMetadataCache: new Map(),
+    getCachedMessagesForDeletedChannel: () => [],
+    saveDeletedMessage(message, targetMap) {
+      this.messageRecord[message.id] = {
+        message: structuredClone(message),
+        delete_data: { time: 2000 }
+      };
+      (targetMap[message.channel_id] ||= []).push(message.id);
+      const targetSet = targetMap === this.nukedMessageRecord
+        ? this.nukedMessageSet
+        : this.deletedMessageSet;
+      if (!targetSet.has(message.channel_id)) targetSet.set(message.channel_id, new Set());
+      targetSet.get(message.channel_id).add(message.id);
+      this.messageRecordIds.add(message.id);
+    }
+  });
+  const context = plugin.createDeletedChannelCaptureContext(
+    { id: 'parent', guild_id: 'guild', name: 'general', type: 0 },
+    { id: 'guild', name: 'Server' }
+  );
+  const thread = { id: rootId, parent_id: 'parent', guild_id: 'guild', name: 'Thread title', type: 11 };
+  const root = {
+    id: rootId,
+    channel_id: rootId,
+    content: '[no saved message or reply content found]',
+    timestamp: 100,
+    type: 0,
+    attachments: [],
+    author
+  };
+  const older = {
+    id: olderId,
+    channel_id: rootId,
+    content: 'older reply',
+    timestamp: 200,
+    type: 0,
+    attachments: [],
+    author
+  };
+  const latest = {
+    id: latestId,
+    channel_id: rootId,
+    content: 'latest surviving reply',
+    timestamp: 300,
+    type: 0,
+    attachments: [],
+    author
+  };
+  const metadata = {
+    id: rootId,
+    parentId: 'parent',
+    parentType: 0,
+    isForumParent: false,
+    name: 'Thread title',
+    starterMessageId: 'removed-starter'
+  };
+
+  plugin.captureThreadFromDeletedChannel(thread, context, {
+    root,
+    messages: [latest, older],
+    metadata
+  });
+
+  assert.deepEqual(Object.keys(plugin.messageRecord).sort(), [rootId, olderId]);
+  assert.equal(plugin.messageRecord[rootId].message.content, 'latest surviving reply');
+  assert.equal(plugin.messageRecord[rootId].delete_data.forum_thread_delete, true);
+  assert.equal(plugin.messageRecord[rootId].delete_data.anti_nuke, true);
+  assert.equal(plugin.messageRecord[rootId].delete_data.forum_metadata.rootContextMessageId, latestId);
+  assert.deepEqual(plugin.nukedMessageRecord, { [rootId]: [rootId, olderId] });
+  assert.equal(context.captured, 2, 'the structural root and one independent reply are counted');
+  assert.equal(context.capturedMessages, 1, 'the promoted reply no longer consumes a reply slot');
+  assert.equal(context.remainingMessages, 4);
+
+  const forumPlaceholder = { ...root, content: '[no saved message or reply content found]' };
+  assert.equal(
+    plugin.getDeletedChannelThreadStarterCandidate(
+      { id: rootId },
+      { channel: { type: 15 } },
+      forumPlaceholder,
+      [latest, older],
+      { ...metadata, isForumParent: true, starterMessageId: rootId }
+    ),
+    null,
+    'Anti-Nuke forum capture also leaves a missing starter for reply promotion'
+  );
+});
+
 test('Anti-Nuke channel threads capture the same root metadata and starter payload as normal thread deletes', () => {
   const rootId = '500';
   const starterId = '501';

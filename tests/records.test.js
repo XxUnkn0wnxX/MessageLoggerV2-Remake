@@ -210,7 +210,7 @@ test('forum and channel-thread context labels remain distinct', () => {
   assert.equal(plugin.getSavedThreadVisibilityLabel(thread, false), 'Unhide Thread');
 });
 
-test('synthetic thread and forum fallbacks keep the starter body out of title metadata', () => {
+test('synthetic thread and forum fallbacks never resurrect stale starter content', () => {
   const author = { id: 'author', username: 'Author', discriminator: '0', public_flags: 0 };
   for (const { label, parentType, threadId } of [
     { label: 'channel thread', parentType: 0, threadId: '200' },
@@ -244,8 +244,19 @@ test('synthetic thread and forum fallbacks keep the starter body out of title me
 
     assert.equal(root.id, threadId, `${label} root keeps the thread ID`);
     assert.equal(root.channel_id, threadId, `${label} root remains self-keyed`);
-    assert.equal(root.content, 'old starter content', `${label} fallback uses the cached starter body`);
+    assert.equal(root.content, '[no saved message or reply content found]', `${label} uses an explicit empty-root placeholder`);
+    assert.notEqual(root.content, 'old starter content', `${label} does not resurrect removed cached starter content`);
     assert.notEqual(root.content, 'test', `${label} fallback does not duplicate the title as content`);
+    assert.equal(plugin.isMissingForumThreadContentPlaceholder(root.content), true);
+    assert.equal(
+      plugin.getCachedForumThreadStarterCandidate(
+        { id: threadId, parent_id: 'parent' },
+        [{ id: `${threadId}2`, channel_id: threadId, content: 'ordinary reply' }],
+        plugin.forumThreadMetadataCache.get(threadId)
+      ),
+      null,
+      `${label} does not relabel an ordinary reply as the missing starter`
+    );
   }
 });
 
@@ -740,83 +751,156 @@ test('full root deletion keeps a Purged starter in Purged while reply-only purge
   assert.deepEqual(replyOnlyPlugin.purgedMessageRecord, { [replyOnlyRootId]: [replyOnlyId] });
 });
 
-test('forum and thread location titles highlight only the actual starter or folded root', () => {
-  const rootId = '680';
+test('removing a mounted self-keyed forum starter does not cascade into its replies', () => {
+  const starterId = '680';
   const replyId = '681';
+  const starter = {
+    message: { id: starterId, channel_id: starterId, content: 'mounted starter body' },
+    delete_data: {
+      forum_thread_message_delete: true,
+      forum_metadata: { isForumParent: true, parentType: 15, starterMessageId: starterId }
+    }
+  };
+  const reply = {
+    message: { id: replyId, channel_id: starterId, content: 'saved reply' },
+    delete_data: { forum_thread_message_delete: true }
+  };
   const plugin = createPlugin({
-    messageRecord: {
-      [rootId]: {
-        message: { id: rootId, channel_id: rootId, content: 'starter body' },
-        delete_data: { forum_thread_delete: true }
-      },
-      [replyId]: {
-        message: { id: replyId, channel_id: rootId, content: 'reply' },
-        delete_data: {
-          forum_thread_message_delete: true,
-          location: { channelId: rootId, channelType: 11 },
-          // Legacy/runtime metadata may incorrectly point at the reply itself. A saved full root
-          // is authoritative and prevents this child from receiving the root-title highlight.
-          forum_metadata: { starterMessageId: replyId }
-        }
-      }
-    },
-    forumThreadMetadataCache: new Map(),
-    tools: { getChannel: () => null }
+    messageRecord: { [starterId]: starter, [replyId]: reply },
+    messageRecordIds: new Set([starterId, replyId]),
+    deletedMessageRecord: { [starterId]: [starterId, replyId] },
+    editedMessageRecord: {},
+    purgedMessageRecord: {},
+    nukedMessageRecord: {},
+    deletedMessageSet: new Map([[starterId, new Set([starterId, replyId])]]),
+    editedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
+    suppressedForumThreadIds: new Set(),
+    noTintIds: new Set(),
+    editModifiers: {},
+    cachedMessageRecord: [starter.message, reply.message],
+    cachedMessageIds: new Set([starterId, replyId]),
+    cachedMessagesMap: new Map([[starterId, starter.message], [replyId, reply.message]]),
+    channelMessages: {},
+    settings: { deleteCachedFilesWithRecords: false },
+    dispatcher: { dispatch() {} },
+    scheduleLoggerMenuRefresh() {},
+    refreshForumThreadLogModal() {},
+    saveData() {}
   });
 
-  assert.equal(
-    plugin.isThreadStarterLogMessage(plugin.messageRecord[rootId], plugin.messageRecord[rootId].message),
-    true
-  );
-  assert.equal(
-    plugin.isThreadStarterLogMessage(plugin.messageRecord[replyId], plugin.messageRecord[replyId].message),
-    false
-  );
+  assert.equal(plugin.removeSavedDeletedRecordFromLog(starterId, starterId), true);
+  assert.equal(plugin.messageRecord[starterId], undefined);
+  assert.equal(plugin.messageRecord[replyId], reply);
+  assert.deepEqual(plugin.deletedMessageRecord, { [starterId]: [replyId] });
+  assert.deepEqual(plugin.deletedMessageSet.get(starterId), new Set([replyId]));
+  assert.equal(plugin.suppressedForumThreadIds.has(starterId), false);
+  assert.deepEqual(plugin.cachedMessageRecord, [reply.message]);
+  assert.equal(plugin.cachedMessageIds.has(starterId), false);
+  assert.equal(plugin.cachedMessagesMap.has(starterId), false);
+});
 
-  const partialForumId = '690';
-  const partialReplyId = '691';
-  plugin.messageRecord[partialForumId] = {
-    message: { id: partialForumId, channel_id: partialForumId, content: 'mounted forum starter' },
+test('a full deleted root promotes only the latest visible saved reply as its context', () => {
+  const rootId = '690';
+  const olderId = '691';
+  const latestId = '692';
+  const hiddenId = '693';
+  const author = { id: 'author', username: 'Author', public_flags: 0 };
+  const root = {
+    message: {
+      id: rootId,
+      channel_id: rootId,
+      content: '[no saved message or reply content found]',
+      timestamp: 100,
+      author
+    },
     delete_data: {
-      forum_thread_message_delete: true,
-      location: { channelId: partialForumId, channelType: 11, parentType: 15 },
-      forum_metadata: { starterMessageId: partialForumId, isForumParent: true, parentType: 15 }
-    }
-  };
-  plugin.messageRecord[partialReplyId] = {
-    message: { id: partialReplyId, channel_id: partialForumId, content: 'mounted forum reply' },
-    delete_data: {
-      forum_thread_message_delete: true,
-      location: { channelId: partialForumId, channelType: 11, parentType: 15 },
+      time: 500,
+      forum_thread_delete: true,
       forum_metadata: {
-        starterMessageId: partialReplyId,
-        isForumParent: true,
-        parentType: 15
+        name: 'Deleted title',
+        starterMessageId: 'removed-starter',
+        starterContent: 'must not return'
       }
-    }
+    },
+    saved_location: { channelId: rootId, parentId: 'parent' }
   };
-  assert.equal(
-    plugin.isThreadStarterLogMessage(
-      plugin.messageRecord[partialForumId],
-      plugin.messageRecord[partialForumId].message
-    ),
-    true
-  );
-  assert.equal(
-    plugin.isThreadStarterLogMessage(
-      plugin.messageRecord[partialReplyId],
-      plugin.messageRecord[partialReplyId].message
-    ),
-    false,
-    'a mounted forum reply cannot claim the shared post title through stale self-referencing metadata'
-  );
+  const older = {
+    message: { id: olderId, channel_id: rootId, content: 'older reply', timestamp: 200, author },
+    delete_data: { time: 300, forum_thread_message_delete: true }
+  };
+  const latest = {
+    message: {
+      id: latestId,
+      channel_id: rootId,
+      content: 'latest visible reply',
+      timestamp: 300,
+      attachments: [{ id: 'media', filename: 'reply.png' }],
+      author
+    },
+    delete_data: { time: 400, forum_thread_message_delete: true },
+    edit_history: [{ content: 'before edit', time: 350 }],
+    logged_attachments: ['cached-reply-media']
+  };
+  const hidden = {
+    message: { id: hiddenId, channel_id: rootId, content: 'newer but hidden', timestamp: 400, author },
+    delete_data: { time: 450, hidden: true, forum_thread_message_delete: true }
+  };
+  const plugin = createPlugin({
+    messageRecord: { [rootId]: root, [olderId]: older, [latestId]: latest, [hiddenId]: hidden },
+    messageRecordIds: new Set([rootId, olderId, latestId, hiddenId]),
+    deletedMessageRecord: { [rootId]: [rootId, olderId, latestId, hiddenId] },
+    editedMessageRecord: { [rootId]: [latestId] },
+    purgedMessageRecord: {},
+    nukedMessageRecord: {},
+    deletedMessageSet: new Map([[rootId, new Set([rootId, olderId, latestId, hiddenId])]]),
+    editedMessageSet: new Map([[rootId, new Set([latestId])]]),
+    purgedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
+    sortedDeletedMessageIds: new Map([[rootId, []]]),
+    sortedPurgedMessageIds: new Map(),
+    sortedNukedMessageIds: new Map(),
+    suppressedForumThreadIds: new Set(),
+    noTintIds: new Set([latestId]),
+    editModifiers: { [latestId]: { editNum: 0 } },
+    settings: { deleteCachedFilesWithRecords: false }
+  });
 
-  delete plugin.messageRecord[rootId];
-  plugin.messageRecord[replyId].delete_data.forum_metadata.starterMessageId = replyId;
+  assert.deepEqual(plugin.promoteLatestSavedThreadReplyIntoRoot(rootId), {
+    rootId,
+    contextMessageId: latestId
+  });
+  const promoted = plugin.messageRecord[rootId];
+  assert.equal(promoted.message.content, 'latest visible reply');
+  assert.equal(promoted.message.id, rootId);
+  assert.equal(promoted.message.channel_id, rootId);
+  assert.equal(promoted.delete_data.forum_thread_delete, true);
+  assert.equal(promoted.delete_data.forum_thread_message_delete, undefined);
+  assert.equal(promoted.delete_data.forum_metadata.name, 'Deleted title');
+  assert.equal(promoted.delete_data.forum_metadata.starterContent, null);
+  assert.equal(promoted.delete_data.forum_metadata.rootContextMessageId, latestId);
+  assert.equal(promoted.delete_data.forum_metadata.rootContextWasReply, true);
+  assert.deepEqual(promoted.edit_history, [{ content: 'before edit', time: 350 }]);
+  assert.deepEqual(promoted.logged_attachments, ['cached-reply-media']);
+  assert.deepEqual(Object.keys(plugin.messageRecord).sort(), [rootId, olderId, hiddenId]);
+  assert.deepEqual(plugin.deletedMessageRecord, { [rootId]: [rootId, olderId, hiddenId] });
+  assert.deepEqual(plugin.editedMessageRecord, { [rootId]: [rootId] });
+  assert.deepEqual(plugin.getRecordCacheSourceMessageIds(promoted), new Set([rootId, latestId]));
+  assert.equal(plugin.noTintIds.has(latestId), false);
+  assert.equal(plugin.editModifiers[latestId], undefined);
+
+  const removed = plugin.deleteMessageFromRecords(rootId);
+  assert.deepEqual(new Set(removed), new Set([rootId, olderId, hiddenId]));
+  assert.deepEqual(plugin.messageRecord, {}, 'only the full structural root cascades through remaining children');
+
+  const emptyRoot = structuredClone(root);
+  const emptyPlugin = createPlugin({ messageRecord: { [rootId]: emptyRoot } });
+  assert.equal(emptyPlugin.promoteLatestSavedThreadReplyIntoRoot(rootId), null);
   assert.equal(
-    plugin.isThreadStarterLogMessage(plugin.messageRecord[replyId], plugin.messageRecord[replyId].message),
-    true,
-    'a distinct starter may still highlight before a structural root has been saved'
+    emptyPlugin.messageRecord[rootId].message.content,
+    '[no saved message or reply content found]',
+    'a full root with no visible saved replies keeps the explicit placeholder'
   );
 });
 

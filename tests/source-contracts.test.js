@@ -286,6 +286,40 @@ test('surviving forum and thread cards tint only their deleted preview body', ()
   assert.match(source, /createRestoredThreadBrowserCard[\s\S]*card\.classList\.add\(this\.style\.deleted\)/);
 });
 
+test('logger location titles reserve warning color for structurally deleted roots', () => {
+  const createGroup = source.slice(
+    source.indexOf('createMessageGroup(message, isStart)'),
+    source.indexOf('const messageContext = e =>')
+  );
+  assert.match(createGroup, /highlightThreadPath = !!\(forumLocationParts && record\?\.delete_data\?\.forum_thread_delete\)/);
+  assert.doesNotMatch(createGroup, /starterMessageId|isThreadStarterLogMessage/);
+});
+
+test('ordinary and Anti-Nuke roots share the de-duplicated missing-starter fallback', () => {
+  const fallback = source.slice(
+    source.indexOf('createForumThreadDeleteFallbackMessage(channel)'),
+    source.indexOf('scheduleForumListRefresh()')
+  );
+  const ordinaryDelete = source.slice(
+    source.indexOf('handleForumThreadDelete(channel, guild, callDefault, args)'),
+    source.indexOf('_testUrlPattern(url, regex)')
+  );
+  const antiNukeCapture = source.slice(
+    source.indexOf('captureThreadFromDeletedChannel(channel, context, snapshot = null)'),
+    source.indexOf('captureQueuedThreadsFromDeletedChannel(context)')
+  );
+  const localRemoval = source.slice(
+    source.indexOf('\n  removeSavedDeletedRecordFromLog(channelId, messageId, options = {})'),
+    source.indexOf('\n  handleNativeSavedRecordDelete(channelId, messageId)')
+  );
+
+  assert.match(fallback, /content: this\.getMissingForumThreadContentPlaceholder\(\)/);
+  assert.doesNotMatch(fallback, /content: metadata\.starterContent|content: metadata\.card\?\.preview/);
+  assert.match(ordinaryDelete, /promoteLatestSavedThreadReplyIntoRoot\(threadId\)/);
+  assert.match(antiNukeCapture, /promoteLatestSavedThreadReplyIntoRoot\(channel\.id\)/);
+  assert.match(localRemoval, /cachedMessagesMap\?\.delete\?\.\(id\)/);
+});
+
 test('logger jump-availability tint stays scoped to the logger window', () => {
   assert.match(source, /style\.jumpAvailableAuthor = this\.obfuscatedClass\('ml2-jump-available-author'\)/);
   assert.match(source, /#app-mount \.\$\{this\.style\.menuRoot\} \.\$\{this\.style\.jumpAvailableAuthor\}[\s\S]*color: var\(--text-warning, var\(--status-warning\)\) !important/);
