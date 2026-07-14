@@ -311,6 +311,10 @@ module.exports = class MessageLoggerV2 {
         clearTimeout(context.cleanupTimer);
       }
       this._destructiveChannelDeleteContexts?.clear?.();
+      for (const timeout of this._liveThreadRecordRefreshTimers?.values?.() || []) {
+        clearTimeout(timeout);
+      }
+      this._liveThreadRecordRefreshTimers?.clear?.();
       this._clearNativeNotificationQueue();
       if (this.menu?.filterSetTimeout) clearTimeout(this.menu.filterSetTimeout);
       if (this.keydownListener) {
@@ -8899,6 +8903,25 @@ module.exports = class MessageLoggerV2 {
     this.rememberLocalDeleteId(messageId);
     return original(...args);
   }
+  scheduleLiveThreadRecordCacheRefresh(channelId, messageId) {
+    const savedChannelId = String(channelId ?? '');
+    const id = String(messageId ?? '');
+    if (!savedChannelId || !id || !this.channelMessages?.[savedChannelId]) return;
+    this._liveThreadRecordRefreshTimers ||= new Map();
+    const key = `${savedChannelId}:${id}`;
+    clearTimeout(this._liveThreadRecordRefreshTimers.get(key));
+    // Discord owns the live forum/thread tree. Let its native Delete confirmation and current
+    // React commit finish before a network cache refresh removes Logger's injected message.
+    // An immediate MESSAGE_DELETE here races that commit and can make React remove/insert a DOM
+    // child whose native forum preview was already replaced.
+    const timeout = setTimeout(() => {
+      this._liveThreadRecordRefreshTimers?.delete?.(key);
+      if (this.messageRecord?.[id]?.delete_data || !this.channelMessages?.[savedChannelId]) return;
+      this.invalidateChannelCache(savedChannelId);
+      this.cacheChannelMessages(savedChannelId);
+    }, 500);
+    this._liveThreadRecordRefreshTimers.set(key, timeout);
+  }
   removeSavedDeletedRecordFromLog(channelId, messageId, options = {}) {
     const requestedChannelId = String(channelId ?? '');
     const id = String(messageId ?? '');
@@ -8914,7 +8937,13 @@ module.exports = class MessageLoggerV2 {
     // cleanup, suppression, and modal state stay consistent with other logger Delete actions.
     const removesThreadRoot = !!record.delete_data.forum_thread_delete;
     const wasMounted = !record.delete_data.hidden;
+    const liveSavedChannel = !removesThreadRoot
+      ? this.tools?.getChannel?.(savedChannelId)
+      : null;
+    const keepsDiscordOwnedThreadMount = wasMounted
+      && [10, 11, 12].includes(Number(liveSavedChannel?.type));
     const shouldRefreshChannelCache = !removesThreadRoot
+      && !keepsDiscordOwnedThreadMount
       && wasMounted
       && !!this.channelMessages?.[savedChannelId];
     if (shouldRefreshChannelCache) this.invalidateChannelCache(savedChannelId);
@@ -8934,14 +8963,20 @@ module.exports = class MessageLoggerV2 {
     if (removesThreadRoot) this.removeForumCardFromDom(id);
     if (shouldRefreshChannelCache) this.cacheChannelMessages(savedChannelId);
 
-    // ML2 marks the synthetic UI cleanup so the dispatch interceptor never logs it as a new
-    // remote deletion. Custom logger windows and forum/thread clones are refreshed separately.
-    this.dispatcher?.dispatch?.({
-      type: 'MESSAGE_DELETE',
-      id,
-      channelId: savedChannelId,
-      ML2: true
-    });
+    // ML2 marks ordinary synthetic UI cleanup so the dispatch interceptor never logs it as a
+    // new remote deletion. A still-live forum/thread must not receive that immediate Discord
+    // deletion event: refresh its cache after native React reconciliation instead.
+    if (keepsDiscordOwnedThreadMount) {
+      this.scheduleLiveThreadRecordCacheRefresh(savedChannelId, id);
+      this.scheduleForumListRefresh?.();
+    } else {
+      this.dispatcher?.dispatch?.({
+        type: 'MESSAGE_DELETE',
+        id,
+        channelId: savedChannelId,
+        ML2: true
+      });
+    }
     this.scheduleLoggerMenuRefresh?.();
     this.refreshForumThreadLogModal?.(savedChannelId);
     if (removesThreadRoot) {
