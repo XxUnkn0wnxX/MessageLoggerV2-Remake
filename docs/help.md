@@ -80,12 +80,16 @@ Hold `Delete` and left-click:
 
 Right-click a timestamp for group-level actions.
 
+### Visual cues
+
+- A warning-orange username means the saved record has a valid Jump destination or forum/thread mount anchor. Normal theme text means no valid destination remains; a cached channel alone is not enough.
+- A bold red forum/thread title marks the saved structural root. Deleting that root also deletes its saved replies and child records, while deleting an ordinary reply affects only that reply.
+
 ### Message actions
 
 Double-click a saved row to jump when a destination remains available.
 
 - Blank space beside an attachment also jumps without selecting the row.
-- A warning-orange username marks an available destination; the normal username color means no destination remains.
 - Links, avatars, media, and Delete controls retain their own actions. Clicking an image still opens Discord's media viewer.
 - Deleted-channel Anti-Nuke records and records with no live channel or saved forum/thread parent do nothing.
 
