@@ -324,14 +324,35 @@ test('ordinary and Anti-Nuke roots share the de-duplicated missing-starter fallb
   assert.match(source, /const forumStarterMessage = isForumParent[\s\S]*starterMessage\?\.id[\s\S]*threadId[\s\S]*starterMessageId: forumStarterMessage\?\.id/);
   assert.match(ordinaryDelete, /promoteOldestSavedThreadReplyIntoRoot\(threadId\)/);
   assert.match(antiNukeCapture, /promoteOldestSavedThreadReplyIntoRoot\(channel\.id\)/);
+  assert.match(fallback, /record\.delete_data \|\| record\.edit_history \|\| record\.ghost_pinged/);
+  assert.doesNotMatch(fallback, /!record\.delete_data\.hidden/);
   assert.match(fallback, /replaceContextWithRootInIndex[\s\S]*remaining\.push\(rootId\)[\s\S]*purgedMessageRecord/);
   assert.match(localRemoval, /cachedMessagesMap\?\.delete\?\.\(id\)/);
+});
+
+test('Anti-Nuke remains an orchestration wrapper around canonical logging helpers', () => {
+  const captureWrapper = source.slice(
+    source.indexOf('saveDeletedChannelCaptureMessage(message, targetMap, context, options = {})'),
+    source.indexOf('captureThreadFromDeletedChannel(channel, context, snapshot = null)')
+  );
+  const threadCapture = source.slice(
+    source.indexOf('captureThreadFromDeletedChannel(channel, context, snapshot = null)'),
+    source.indexOf('captureQueuedThreadsFromDeletedChannel(context)')
+  );
+
+  assert.match(captureWrapper, /this\.saveDeletedMessage\(capturedMessage, targetMap\)/);
+  assert.doesNotMatch(captureWrapper, /this\.createMiniFormattedData\(/);
+  assert.match(threadCapture, /this\.foldSavedThreadStarterIntoRoot\(channel\.id\)/);
+  assert.match(threadCapture, /this\.promoteOldestSavedThreadReplyIntoRoot\(channel\.id\)/);
 });
 
 test('logger jump-availability tint stays scoped to the logger window', () => {
   assert.match(source, /style\.jumpAvailableAuthor = this\.obfuscatedClass\('ml2-jump-available-author'\)/);
   assert.match(source, /#app-mount \.\$\{this\.style\.menuRoot\} \.\$\{this\.style\.jumpAvailableAuthor\}[\s\S]*color: var\(--text-warning, var\(--status-warning\)\) !important/);
   assert.doesNotMatch(source, /#app-mount \.\$\{this\.style\.jumpAvailableAuthor\}\s*\{/);
+  assert.match(source, /canJumpToSavedRecord\(record\)[\s\S]*this\.isSavedRecordHidden\(record\)/);
+  assert.match(source, /forum_thread_delete\) return this\.hasSavedForumThreadMountPoint\(record, true\)/);
+  assert.match(source, /A structurally deleted post\/thread can leave a stale ChannelStore entry behind/);
 });
 
 test('logger submenus prefer visible Copy ID rows and retain action fallbacks', () => {

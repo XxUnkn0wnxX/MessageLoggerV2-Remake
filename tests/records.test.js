@@ -143,6 +143,67 @@ test('logger viewer marks only jumpable saved-message authors', () => {
   assert.deepEqual(added, ['jump-available']);
 });
 
+test('hidden records and unanchored deleted forum or thread roots have no jump mount point', t => {
+  const previousDocument = global.document;
+  t.after(() => { global.document = previousDocument; });
+
+  const parentId = '500';
+  const forumRootId = '501';
+  const threadRootId = '502';
+  const channels = {
+    [parentId]: { id: parentId, type: 15, guild_id: 'guild' },
+    [forumRootId]: { id: forumRootId, type: 11, parent_id: parentId, guild_id: 'guild' },
+    [threadRootId]: { id: threadRootId, type: 11, parent_id: '600', guild_id: 'guild' },
+    600: { id: '600', type: 0, guild_id: 'guild' }
+  };
+  const plugin = createPlugin({
+    tools: { getChannel: id => channels[id] || null }
+  });
+  const forumRoot = {
+    message: { id: forumRootId, channel_id: forumRootId, guild_id: 'guild' },
+    delete_data: {
+      forum_thread_delete: true,
+      forum_parent_id: parentId,
+      forum_metadata: { parentId, parentType: 15, isForumParent: true }
+    }
+  };
+  const threadRoot = {
+    message: { id: threadRootId, channel_id: threadRootId, guild_id: 'guild' },
+    delete_data: {
+      forum_thread_delete: true,
+      forum_parent_id: '600',
+      forum_metadata: { parentId: '600', parentType: 0, isForumParent: false }
+    }
+  };
+
+  global.document = {
+    querySelector: () => null,
+    querySelectorAll: () => []
+  };
+  assert.equal(plugin.canJumpToSavedRecord(forumRoot), false, 'a cached deleted post without a native card anchor is not jumpable');
+  assert.equal(plugin.canJumpToSavedRecord(threadRoot), false, 'a cached deleted thread without a native thread anchor is not jumpable');
+
+  const sourceCard = { hasAttribute: () => false };
+  global.document.querySelectorAll = selector => selector.includes(`forum-channel-list-${parentId}___`)
+    ? [{ closest: () => sourceCard }]
+    : [];
+  assert.equal(plugin.canJumpToSavedRecord(forumRoot), true, 'a native forum card can anchor restoration');
+
+  global.document.querySelector = selector => selector.includes(`data-ml2-restored-thread-entry=\"${threadRootId}\"`)
+    ? {}
+    : null;
+  assert.equal(plugin.canJumpToSavedRecord(threadRoot), true, 'an exact restored thread entry is a valid mount point');
+
+  forumRoot.delete_data.hidden = true;
+  assert.equal(plugin.canJumpToSavedRecord(forumRoot), false, 'Hidden overrides even a valid forum anchor');
+  forumRoot.delete_data.hidden = false;
+  forumRoot.edits_hidden = true;
+  assert.equal(plugin.canJumpToSavedRecord(forumRoot), false, 'hidden edits also place the shared record in the unmounted Hidden view');
+  forumRoot.edits_hidden = false;
+  forumRoot.delete_data.anti_nuke = true;
+  assert.equal(plugin.canJumpToSavedRecord(forumRoot), false, 'Nuked records never expose a live jump mount point');
+});
+
 test('hiding and unhiding a forum or thread root cascades to its children', () => {
   const { plugin, root, child, rootId, dispatches } = createRecordPlugin();
 
@@ -855,7 +916,7 @@ test('removing a mounted self-keyed forum starter does not cascade into its repl
   assert.equal(forumListRefreshes, 1);
 });
 
-test('a full deleted root promotes only the oldest visible saved reply as its context', () => {
+test('a full deleted root promotes the absolute oldest saved context regardless of category or visibility', () => {
   const rootId = '690';
   const oldestId = '691';
   const laterId = '692';
@@ -884,72 +945,81 @@ test('a full deleted root promotes only the oldest visible saved reply as its co
     message: {
       id: oldestId,
       channel_id: rootId,
-      content: 'oldest visible reply',
+      content: 'older visible purged reply',
       timestamp: 200,
-      attachments: [{ id: 'media', filename: 'reply.png' }],
       author
     },
-    delete_data: { time: 300, forum_thread_message_delete: true },
-    edit_history: [{ content: 'before edit', time: 350 }],
-    logged_attachments: ['cached-reply-media']
+    delete_data: { time: 300, forum_thread_message_delete: true }
   };
   const later = {
     message: { id: laterId, channel_id: rootId, content: 'later purge command', timestamp: 300, author },
     delete_data: { time: 400, forum_thread_message_delete: true }
   };
   const hidden = {
-    message: { id: hiddenId, channel_id: rootId, content: 'newer but hidden', timestamp: 400, author },
-    delete_data: { time: 450, hidden: true, forum_thread_message_delete: true }
+    message: {
+      id: hiddenId,
+      channel_id: rootId,
+      content: 'absolute oldest hidden ghost ping',
+      timestamp: 150,
+      attachments: [{ id: 'media', filename: 'reply.png' }],
+      author
+    },
+    delete_data: { time: 450, hidden: true, forum_thread_message_delete: true },
+    edit_history: [{ content: 'before hidden edit', time: 350 }],
+    ghost_pinged: true,
+    logged_attachments: ['cached-hidden-media']
   };
   const plugin = createPlugin({
     messageRecord: { [rootId]: root, [oldestId]: oldest, [laterId]: later, [hiddenId]: hidden },
     messageRecordIds: new Set([rootId, oldestId, laterId, hiddenId]),
     deletedMessageRecord: { [rootId]: [rootId, laterId, hiddenId] },
-    editedMessageRecord: { [rootId]: [oldestId] },
+    editedMessageRecord: { [rootId]: [hiddenId] },
     purgedMessageRecord: { [rootId]: [oldestId] },
     nukedMessageRecord: {},
     deletedMessageSet: new Map([[rootId, new Set([rootId, laterId, hiddenId])]]),
-    editedMessageSet: new Map([[rootId, new Set([oldestId])]]),
+    editedMessageSet: new Map([[rootId, new Set([hiddenId])]]),
     purgedMessageSet: new Map([[rootId, new Set([oldestId])]]),
     nukedMessageSet: new Map(),
     sortedDeletedMessageIds: new Map([[rootId, []]]),
     sortedPurgedMessageIds: new Map(),
     sortedNukedMessageIds: new Map(),
     suppressedForumThreadIds: new Set(),
-    noTintIds: new Set([oldestId]),
-    editModifiers: { [oldestId]: { editNum: 0 } },
+    noTintIds: new Set([hiddenId]),
+    editModifiers: { [hiddenId]: { editNum: 0 } },
     settings: { deleteCachedFilesWithRecords: false }
   });
 
   assert.deepEqual(plugin.promoteOldestSavedThreadReplyIntoRoot(rootId), {
     rootId,
-    contextMessageId: oldestId
+    contextMessageId: hiddenId
   });
   const promoted = plugin.messageRecord[rootId];
-  assert.equal(promoted.message.content, 'oldest visible reply');
+  assert.equal(promoted.message.content, 'absolute oldest hidden ghost ping');
   assert.equal(promoted.message.id, rootId);
   assert.equal(promoted.message.channel_id, rootId);
   assert.equal(promoted.delete_data.forum_thread_delete, true);
   assert.equal(promoted.delete_data.forum_thread_message_delete, undefined);
   assert.equal(promoted.delete_data.forum_metadata.name, 'Deleted title');
   assert.equal(promoted.delete_data.forum_metadata.starterContent, null);
-  assert.equal(promoted.delete_data.forum_metadata.rootContextMessageId, oldestId);
+  assert.equal(promoted.delete_data.forum_metadata.rootContextMessageId, hiddenId);
   assert.equal(promoted.delete_data.forum_metadata.rootContextWasReply, true);
-  assert.deepEqual(promoted.edit_history, [{ content: 'before edit', time: 350 }]);
-  assert.deepEqual(promoted.logged_attachments, ['cached-reply-media']);
-  assert.equal(plugin.preservePurgedThreadRootCategory(rootId), true);
-  assert.deepEqual(Object.keys(plugin.messageRecord).sort(), [rootId, laterId, hiddenId]);
-  assert.deepEqual(plugin.deletedMessageRecord, { [rootId]: [laterId, hiddenId] });
-  assert.deepEqual(plugin.purgedMessageRecord, { [rootId]: [rootId] });
+  assert.equal(promoted.delete_data.hidden, true, 'promotion must not unhide the timestamp winner');
+  assert.equal(promoted.ghost_pinged, true, 'ghost-ping state follows the timestamp winner');
+  assert.deepEqual(promoted.edit_history, [{ content: 'before hidden edit', time: 350 }]);
+  assert.deepEqual(promoted.logged_attachments, ['cached-hidden-media']);
+  assert.equal(plugin.preservePurgedThreadRootCategory(rootId), false);
+  assert.deepEqual(Object.keys(plugin.messageRecord).sort(), [rootId, oldestId, laterId]);
+  assert.deepEqual(plugin.deletedMessageRecord, { [rootId]: [rootId, laterId] });
+  assert.deepEqual(plugin.purgedMessageRecord, { [rootId]: [oldestId] });
   assert.deepEqual(plugin.editedMessageRecord, { [rootId]: [rootId] });
-  assert.deepEqual(plugin.deletedMessageSet.get(rootId), new Set([laterId, hiddenId]));
-  assert.deepEqual(plugin.purgedMessageSet.get(rootId), new Set([rootId]));
-  assert.deepEqual(plugin.getRecordCacheSourceMessageIds(promoted), new Set([rootId, oldestId]));
-  assert.equal(plugin.noTintIds.has(oldestId), false);
-  assert.equal(plugin.editModifiers[oldestId], undefined);
+  assert.deepEqual(plugin.deletedMessageSet.get(rootId), new Set([rootId, laterId]));
+  assert.deepEqual(plugin.purgedMessageSet.get(rootId), new Set([oldestId]));
+  assert.deepEqual(plugin.getRecordCacheSourceMessageIds(promoted), new Set([rootId, hiddenId]));
+  assert.equal(plugin.noTintIds.has(hiddenId), false);
+  assert.equal(plugin.editModifiers[hiddenId], undefined);
 
   const removed = plugin.deleteMessageFromRecords(rootId);
-  assert.deepEqual(new Set(removed), new Set([rootId, laterId, hiddenId]));
+  assert.deepEqual(new Set(removed), new Set([rootId, oldestId, laterId]));
   assert.deepEqual(plugin.messageRecord, {}, 'only the full structural root cascades through remaining children');
 
   const emptyRoot = structuredClone(root);
@@ -958,8 +1028,130 @@ test('a full deleted root promotes only the oldest visible saved reply as its co
   assert.equal(
     emptyPlugin.messageRecord[rootId].message.content,
     '[no saved message or reply content found]',
-    'a full root with no visible saved replies keeps the explicit placeholder'
+    'a full root with no saved thread context keeps the explicit placeholder'
   );
+});
+
+test('an older edit-only ghost ping beats newer Deleted and Purged context', () => {
+  const rootId = '695';
+  const ghostId = '696';
+  const deletedId = '697';
+  const purgedId = '698';
+  const author = { id: 'author', username: 'Author' };
+  const root = {
+    message: { id: rootId, channel_id: rootId, content: '[starter message unavailable]', timestamp: 100, author },
+    delete_data: { time: 500, forum_thread_delete: true, forum_metadata: { name: 'Thread' } }
+  };
+  const ghost = {
+    message: { id: ghostId, channel_id: rootId, content: 'oldest ghost context', timestamp: 150, author },
+    edit_history: [{ content: '@local user', time: 160 }],
+    ghost_pinged: true,
+    local_mentioned: true
+  };
+  const deleted = {
+    message: { id: deletedId, channel_id: rootId, content: 'newer deleted context', timestamp: 200, author },
+    delete_data: { time: 300, forum_thread_message_delete: true }
+  };
+  const purged = {
+    message: { id: purgedId, channel_id: rootId, content: 'newest purged context', timestamp: 250, author },
+    delete_data: { time: 280, forum_thread_message_delete: true }
+  };
+  const plugin = createPlugin({
+    messageRecord: { [rootId]: root, [ghostId]: ghost, [deletedId]: deleted, [purgedId]: purged },
+    messageRecordIds: new Set([rootId, ghostId, deletedId, purgedId]),
+    deletedMessageRecord: { [rootId]: [rootId, deletedId] },
+    editedMessageRecord: { [rootId]: [ghostId] },
+    purgedMessageRecord: { [rootId]: [purgedId] },
+    nukedMessageRecord: {},
+    deletedMessageSet: new Map([[rootId, new Set([rootId, deletedId])]]),
+    editedMessageSet: new Map([[rootId, new Set([ghostId])]]),
+    purgedMessageSet: new Map([[rootId, new Set([purgedId])]]),
+    nukedMessageSet: new Map(),
+    sortedDeletedMessageIds: new Map(),
+    sortedPurgedMessageIds: new Map(),
+    sortedNukedMessageIds: new Map(),
+    noTintIds: new Set(),
+    editModifiers: {}
+  });
+
+  assert.deepEqual(plugin.promoteOldestSavedThreadReplyIntoRoot(rootId), {
+    rootId,
+    contextMessageId: ghostId
+  });
+  assert.equal(plugin.messageRecord[rootId].message.content, 'oldest ghost context');
+  assert.equal(plugin.messageRecord[rootId].ghost_pinged, true);
+  assert.equal(plugin.messageRecord[rootId].local_mentioned, true);
+  assert.deepEqual(plugin.deletedMessageRecord, { [rootId]: [rootId, deletedId] });
+  assert.deepEqual(plugin.editedMessageRecord, { [rootId]: [rootId] });
+  assert.deepEqual(plugin.purgedMessageRecord, { [rootId]: [purgedId] });
+
+  plugin.menu = { selectedTab: 'ghostpings', filter: '' };
+  plugin.settings = { reverseOrder: false };
+  plugin.getSavedMessage = id => plugin.messageRecord[id];
+  assert.deepEqual(plugin.getFilteredMessages(), [rootId], 'the shared Edited/Deleted ghost root renders once');
+});
+
+test('shared deletion capture merges Anti-Nuke state into an existing edit and ghost record', () => {
+  const messageId = '699';
+  const channelId = '690';
+  const existing = {
+    message: {
+      id: messageId,
+      channel_id: channelId,
+      content: 'edited ghost context',
+      timestamp: 100,
+      attachments: [],
+      embeds: []
+    },
+    edit_history: [{ content: '@local before edit', time: 110 }],
+    edits_hidden: true,
+    ghost_pinged: true,
+    local_mentioned: true,
+    logged_attachments: ['cached-before-delete']
+  };
+  const captured = {
+    id: messageId,
+    channel_id: channelId,
+    content: 'final deleted context',
+    timestamp: 120,
+    attachments: [],
+    embeds: []
+  };
+  const plugin = createPlugin({
+    messageRecord: { [messageId]: structuredClone(existing) },
+    messageRecordIds: new Set([messageId]),
+    deletedMessageRecord: {},
+    purgedMessageRecord: {},
+    nukedMessageRecord: {},
+    deletedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
+    sortedDeletedMessageIds: new Map(),
+    sortedPurgedMessageIds: new Map(),
+    sortedNukedMessageIds: new Map(),
+    settings: { cacheAllImages: false },
+    createMiniFormattedData: message => ({
+      message: structuredClone(message),
+      saved_location: { channelId },
+      local_mentioned: false,
+      ghost_pinged: false,
+      logged_attachments: []
+    }),
+    getMessageLocationSnapshot: () => ({ channelId })
+  });
+
+  plugin.saveDeletedMessage(captured, plugin.nukedMessageRecord);
+
+  const merged = plugin.messageRecord[messageId];
+  assert.equal(merged.message.content, 'final deleted context');
+  assert.ok(merged.delete_data, 'the shared helper adds deletion state');
+  assert.deepEqual(merged.edit_history, existing.edit_history);
+  assert.equal(merged.edits_hidden, true, 'an existing hidden edit stays hidden');
+  assert.equal(merged.ghost_pinged, true);
+  assert.equal(merged.local_mentioned, true);
+  assert.deepEqual(merged.logged_attachments, existing.logged_attachments);
+  assert.deepEqual(plugin.nukedMessageRecord, { [channelId]: [messageId] });
+  assert.deepEqual(plugin.nukedMessageSet.get(channelId), new Set([messageId]));
 });
 
 test('starter edits replace cached thread content before deletion capture', () => {

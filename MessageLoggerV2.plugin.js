@@ -6109,11 +6109,77 @@ module.exports = class MessageLoggerV2 {
       historyModule.getHistory().push(path);
     }
   }
+  isSavedRecordHidden(record) {
+    // Hidden is a fully unmounted holding area. Either hidden flag removes the shared record
+    // from every live category, jump cue, context Jump action, and double-click destination.
+    return !!(record?.delete_data?.hidden || record?.edits_hidden);
+  }
+  hasSavedForumThreadMountPoint(record, allowRestoreAnchor = false) {
+    const message = record?.message;
+    const deleteData = record?.delete_data || {};
+    const metadata = deleteData.forum_metadata || {};
+    const location = deleteData.location || record?.saved_location || {};
+    const threadId = String(deleteData.forum_thread_delete ? message?.id : message?.channel_id || '');
+    const parentId = String(deleteData.forum_parent_id || metadata.parentId || location.parentId || '');
+    if (!threadId || typeof document === 'undefined' || typeof document.querySelector !== 'function') return false;
+
+    // An exact native or logger-restored target is already a real mount point regardless of
+    // whether Discord still exposes a reusable card/thread template elsewhere in the list.
+    const exactTarget = document.querySelector([
+      `[data-item-id="${threadId}"]`,
+      `[data-list-item-id="channels___${threadId}"]`,
+      parentId ? `[data-list-item-id="forum-channel-list-${parentId}___${threadId}"]` : '',
+      `[data-ml2-restored-forum-card="${threadId}"]`,
+      `[data-ml2-restored-thread-entry="${threadId}"]`,
+      `[data-ml2-restored-thread-browser-card="${threadId}"]`
+    ].filter(Boolean).join(', '));
+    if (exactTarget) return true;
+    if (!allowRestoreAnchor || !parentId || !this.tools.getChannel(parentId)) return false;
+
+    const parent = this.tools.getChannel(parentId);
+    const parentType = metadata.parentType ?? location.parentType ?? parent?.type;
+    const forumParent = !!metadata.isForumParent || parentType === 15 || parentType === 16;
+    if (forumParent && typeof document.querySelectorAll === 'function') {
+      const focusNodes = Array.from(document.querySelectorAll(
+        `[data-list-item-id^="forum-channel-list-${parentId}___"]`
+      ));
+      const sourceCardExists = focusNodes.some(focus => {
+        const card = focus?.closest?.('[data-item-id]');
+        return !!(card && !card.hasAttribute?.('data-ml2-restored-forum-card'));
+      });
+      if (sourceCardExists) return true;
+    }
+
+    if (!forumParent) {
+      // Channel-thread restoration can clone either a native sidebar thread or a native card
+      // in Discord's Threads browser. Without one of those anchors, no restored target exists.
+      const parentFocus = document.querySelector(`[data-list-item-id="channels___${parentId}"]`);
+      const parentLi = parentFocus?.closest?.('li');
+      const group = parentLi?.nextElementSibling?.querySelector?.('ul[role="group"]');
+      const sidebarSourceExists = Array.from(group?.querySelectorAll?.(':scope > li[role="listitem"]') || [])
+        .some(node => !node.hasAttribute?.('data-ml2-restored-thread-entry')
+          && !!node.querySelector?.('[data-list-item-id^="channels___"]'));
+      if (sidebarSourceExists) return true;
+
+      const browserInput = document.querySelector('input[placeholder="Search for Thread Name"]');
+      const browser = browserInput?.closest?.('[role="dialog"]');
+      const browserSourceExists = Array.from(browser?.querySelectorAll?.('div[role="button"]') || [])
+        .some(node => !node.hasAttribute?.('data-ml2-restored-thread-browser-card')
+          && !!node.querySelector?.('h2 [class*="threadName_"]')
+          && !!node.querySelector?.('[id^="message-content-"]'));
+      if (browserSourceExists) return true;
+    }
+    return false;
+  }
   canJumpToSavedRecord(record) {
     const message = record?.message;
-    if (!message?.channel_id || record?.delete_data?.anti_nuke) return false;
-    if (this.tools.getChannel(message.channel_id)) return true;
+    if (!message?.channel_id || record?.delete_data?.anti_nuke || this.isSavedRecordHidden(record)) return false;
     const deleteData = record?.delete_data || {};
+    // A structurally deleted post/thread can leave a stale ChannelStore entry behind. Require
+    // an exact mounted target or a real Discord anchor that Logger can clone before advertising
+    // Jump; a parent channel by itself is not a mount point.
+    if (deleteData.forum_thread_delete) return this.hasSavedForumThreadMountPoint(record, true);
+    if (this.tools.getChannel(message.channel_id)) return true;
     const metadata = deleteData.forum_metadata || {};
     const location = deleteData.location || record?.saved_location || {};
     const isThreadRecord = !!(
@@ -6124,7 +6190,7 @@ module.exports = class MessageLoggerV2 {
     );
     if (!isThreadRecord) return false;
     const parentId = deleteData.forum_parent_id || metadata.parentId || location.parentId;
-    return !!(parentId && this.tools.getChannel(parentId));
+    return !!(parentId && this.tools.getChannel(parentId) && this.hasSavedForumThreadMountPoint(record));
   }
   jumpToDeletedForumPost(record) {
     const message = record?.message;
@@ -6481,7 +6547,7 @@ module.exports = class MessageLoggerV2 {
       reactions: [],
       guild_id: channel.guild_id || metadata.guildId,
       // Cached metadata can outlive a starter the user explicitly removed from Logger. Do not
-      // resurrect that body. A later capture promotes the oldest visible saved reply into this
+      // resurrect that body. A later capture promotes the oldest saved thread record into this
       // structural root, or keeps this explicit placeholder when no saved content remains.
       content: this.getMissingForumThreadContentPlaceholder(),
       type: 0,
@@ -6503,19 +6569,15 @@ module.exports = class MessageLoggerV2 {
       || !this.isMissingForumThreadContentPlaceholder(rootRecord.message?.content)) return null;
 
     const metadata = rootRecord.delete_data.forum_metadata || {};
-    const recordedStarterId = metadata.starterMessageId && String(metadata.starterMessageId);
-    // A real saved starter should be handled by the normal identity-based fold. Failing closed
-    // here prevents an unrelated reply from replacing it if that fold ever cannot run.
-    if (recordedStarterId
-      && recordedStarterId !== rootId
-      && this.messageRecord?.[recordedStarterId]) return null;
 
     const candidates = Object.entries(this.messageRecord || {})
       .filter(([messageId, record]) => messageId !== rootId
         && String(record?.message?.channel_id || '') === rootId
-        && !!record.delete_data
-        && !record.delete_data.hidden
-        && !record.delete_data.forum_thread_delete)
+        // Category and visibility never choose the replacement context. A hidden deletion,
+        // edit-only ghost ping, Purged message, or ordinary Deleted message all compete by the
+        // original message timestamp; their state is preserved after the winner becomes root.
+        && !!(record.delete_data || record.edit_history || record.ghost_pinged)
+        && !record.delete_data?.forum_thread_delete)
       .sort((left, right) => {
         const messageTime = ([messageId, record]) => {
           const numeric = Number(record?.message?.timestamp);
@@ -6531,9 +6593,9 @@ module.exports = class MessageLoggerV2 {
         return messageTime(left) - messageTime(right)
           || left[0].localeCompare(right[0], undefined, { numeric: true });
       });
-    // Preserve conversation order: after the starter is gone, the first surviving visible
-    // reply is the most faithful replacement context. Later replies or purge commands must
-    // remain ordinary children even if they were deleted more recently.
+    // Preserve conversation order: after the starter is gone, the oldest saved thread record
+    // is the most faithful replacement context. Later replies or purge commands remain ordinary
+    // children even when the oldest record is Hidden or appears only in Edited/Ghost Pings.
     const promoted = candidates.at(0);
     if (!promoted) return null;
     const [contextMessageId, contextRecord] = promoted;
@@ -6548,6 +6610,12 @@ module.exports = class MessageLoggerV2 {
       contextRecord.delete_data || {},
       rootRecord.delete_data || {}
     );
+    // The structural fallback is created visible, but it must not unhide the historical record
+    // selected by timestamp. `edits_hidden` and ghost-ping state are already unioned by
+    // mergeSavedRecords; explicitly restore deletion-hidden state after the root overlay.
+    if (contextRecord.delete_data?.hidden || rootRecord.delete_data?.hidden) {
+      mergedRecord.delete_data.hidden = true;
+    }
     mergedRecord.delete_data.forum_thread_delete = true;
     delete mergedRecord.delete_data.forum_thread_message_delete;
     mergedRecord.delete_data.forum_metadata = {
@@ -6955,6 +7023,9 @@ module.exports = class MessageLoggerV2 {
     return true;
   }
   saveDeletedChannelCaptureMessage(message, targetMap, context, options = {}) {
+    // Anti-Nuke only orchestrates capture limits and deleted-parent metadata. The canonical
+    // logger helper below remains responsible for creating or merging the saved record so
+    // ordinary deletes, purges, and channel nukes cannot drift into separate implementations.
     if (!context?.captureEnabled) return false;
     const consumesMessageSlot = !options.threadRoot && !options.threadStarterForRoot;
     if (consumesMessageSlot && !this.hasDeletedChannelMessageCaptureSlot(context)) return false;
@@ -7886,9 +7957,11 @@ module.exports = class MessageLoggerV2 {
     result.ghost_pinged = result.local_mentioned;
     if (!Array.isArray(targetMessageRecord[channelId])) targetMessageRecord[channelId] = [];
     if (this.messageRecord[id]) {
-      const record = this.messageRecord[id];
-      record.delete_data = result.delete_data;
-      record.ghost_pinged = result.ghost_pinged;
+      // Deletion is another state on the same canonical record, not a replacement record.
+      // Reuse the normal merge helper so a prior Hidden edit or ghost ping keeps its history,
+      // visibility, mention state, enhanced metadata, and media when normal logging or the
+      // Anti-Nuke wrapper adds deletion data.
+      this.messageRecord[id] = this.mergeSavedRecords(this.messageRecord[id], result);
     } else {
       this.messageRecord[id] = result;
       this.messageRecordIds.add(id);
@@ -12031,7 +12104,7 @@ module.exports = class MessageLoggerV2 {
   }
   getFilteredMessages() {
     let messages = [];
-    const isHiddenRecord = record => !!(record?.delete_data?.hidden || record?.edits_hidden);
+    const isHiddenRecord = record => this.isSavedRecordHidden(record);
     const pushIdsIntoMessages = (map, includeRecord = record => !isHiddenRecord(record)) => {
       for (let channel in map) {
         for (let messageIdIDX in map[channel]) {
@@ -12049,7 +12122,9 @@ module.exports = class MessageLoggerV2 {
           if (!record) continue;
           if (isHiddenRecord(record)) continue;
           if (record.ghost_pinged) {
-            messages.push(messageId);
+            // Edited-and-deleted ghost pings share one canonical record but can be referenced by
+            // several category indexes. The Ghost Pings tab renders that record exactly once.
+            if (!messages.some(id => String(id) === String(messageId))) messages.push(messageId);
           }
         }
       }

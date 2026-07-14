@@ -257,6 +257,71 @@ test('Anti-Nuke promotes the oldest reply when a removed starter leaves an empty
   );
 });
 
+test('Anti-Nuke promotes an older hidden saved record before newer Nuked context', () => {
+  const rootId = '460';
+  const hiddenId = '461';
+  const newerId = '462';
+  const author = { id: 'author', username: 'Author' };
+  const plugin = createPlugin({
+    messageRecord: {
+      [rootId]: {
+        message: { id: rootId, channel_id: rootId, content: '[starter message unavailable]', timestamp: 100, author },
+        delete_data: {
+          time: 500,
+          anti_nuke: true,
+          anti_nuke_parent_id: 'parent',
+          forum_thread_delete: true,
+          forum_metadata: { parentId: 'parent', name: 'Thread' }
+        }
+      },
+      [hiddenId]: {
+        message: { id: hiddenId, channel_id: rootId, content: 'oldest hidden record', timestamp: 150, author },
+        delete_data: {
+          time: 450,
+          hidden: true,
+          anti_nuke: true,
+          anti_nuke_parent_id: 'parent',
+          forum_thread_message_delete: true
+        },
+        ghost_pinged: true
+      },
+      [newerId]: {
+        message: { id: newerId, channel_id: rootId, content: 'newer Nuked reply', timestamp: 200, author },
+        delete_data: {
+          time: 300,
+          anti_nuke: true,
+          anti_nuke_parent_id: 'parent',
+          forum_thread_message_delete: true
+        }
+      }
+    },
+    messageRecordIds: new Set([rootId, hiddenId, newerId]),
+    deletedMessageRecord: {},
+    editedMessageRecord: {},
+    purgedMessageRecord: {},
+    nukedMessageRecord: { [rootId]: [rootId, hiddenId, newerId] },
+    deletedMessageSet: new Map(),
+    editedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    nukedMessageSet: new Map([[rootId, new Set([rootId, hiddenId, newerId])]]),
+    sortedDeletedMessageIds: new Map(),
+    sortedPurgedMessageIds: new Map(),
+    sortedNukedMessageIds: new Map([[rootId, []]]),
+    noTintIds: new Set(),
+    editModifiers: {}
+  });
+
+  assert.deepEqual(plugin.promoteOldestSavedThreadReplyIntoRoot(rootId), {
+    rootId,
+    contextMessageId: hiddenId
+  });
+  assert.equal(plugin.messageRecord[rootId].message.content, 'oldest hidden record');
+  assert.equal(plugin.messageRecord[rootId].delete_data.hidden, true);
+  assert.equal(plugin.messageRecord[rootId].delete_data.anti_nuke, true);
+  assert.equal(plugin.messageRecord[rootId].ghost_pinged, true);
+  assert.deepEqual(plugin.nukedMessageRecord, { [rootId]: [rootId, newerId] });
+});
+
 test('Anti-Nuke channel threads capture the same root metadata and starter payload as normal thread deletes', () => {
   const rootId = '500';
   const starterId = '501';
