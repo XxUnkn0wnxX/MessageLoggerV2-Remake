@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2
+ * @version 2.8.2.1
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -630,7 +630,7 @@ module.exports = class MessageLoggerV2 {
       messageCacheCap: 1000,
       savedMessagesCap: 1000,
       antiNukeEnabled: true,
-      antiNukeToasts: false,
+      antiNukeToasts: true,
       antiNukeThreadCap: 15,
       antiNukeMessageCap: 45,
       antiNukeAttachmentCap: 15,

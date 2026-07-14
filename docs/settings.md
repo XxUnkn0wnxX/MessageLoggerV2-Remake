@@ -154,7 +154,7 @@ The notification whitelist and blacklist are managed from the same server, chann
 | Setting | Default | Behavior |
 | --- | --- | --- |
 | Enable Anti Nuke | On | Captures a bounded snapshot under **Nuked** when a parent forum or text channel is deleted. Turning it off stops new captures and hides the Nuked tab without deleting existing records. |
-| Show nuke detection toasts | Off | Reports only deleted channels that captured Anti-Nuke records, avoiding empty/uncached false positives. Uses the destructive deleted/purged event color and selected native/custom mode; ordinary logging and alert scope do not suppress it. |
+| Show nuke detection toasts | On | Reports only deleted channels that captured Anti-Nuke records, avoiding empty/uncached false positives. Uses the destructive deleted/purged event color and selected native/custom mode; ordinary logging and alert scope do not suppress it. |
 | Thread and forum post cap | `15` | Limits structural thread/forum-post roots captured per deleted parent channel. Blank or `0` is unlimited. |
 | Total message cap | `45` | One shared allowance for replies across captured threads/forum posts plus ordinary parent-channel messages. Root payloads, including a distinct starter folded into a channel-thread root, do not consume this cap. Blank or `0` is unlimited. |
 | Total attachment cap | `15` | One total shared allowance for Discord file attachments across the deleted channel. A single message can consume the entire cap. Blank or `0` is unlimited. |

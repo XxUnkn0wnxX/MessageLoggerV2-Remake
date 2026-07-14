@@ -45,7 +45,7 @@ test('all fresh-install settings defaults remain stable', () => {
     messageCacheCap: 1000,
     savedMessagesCap: 1000,
     antiNukeEnabled: true,
-    antiNukeToasts: false,
+    antiNukeToasts: true,
     antiNukeThreadCap: 15,
     antiNukeMessageCap: 45,
     antiNukeAttachmentCap: 15,
