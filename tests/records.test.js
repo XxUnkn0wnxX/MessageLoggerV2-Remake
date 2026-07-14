@@ -1164,6 +1164,95 @@ test('shared deletion capture merges Anti-Nuke state into an existing edit and g
   assert.deepEqual(plugin.nukedMessageSet.get(channelId), new Set([messageId]));
 });
 
+test('marked purge and nuke batches sort by posting time without merging nearby events', () => {
+  const channelId = 'batch-channel';
+  const records = {
+    '101': {
+      message: { id: '101', channel_id: channelId, timestamp: 100 },
+      delete_data: { time: 2002, capture_batch_id: '2000:1:purge:batch-channel', capture_batch_time: 2000 }
+    },
+    '102': {
+      message: { id: '102', channel_id: channelId, timestamp: 200 },
+      delete_data: { time: 2001, capture_batch_id: '2000:1:purge:batch-channel', capture_batch_time: 2000 }
+    },
+    '201': {
+      message: { id: '201', channel_id: channelId, timestamp: 50 },
+      delete_data: { time: 2004, capture_batch_id: '2000:2:purge:batch-channel', capture_batch_time: 2000 }
+    },
+    '202': {
+      message: { id: '202', channel_id: channelId, timestamp: 150 },
+      delete_data: { time: 2003, capture_batch_id: '2000:2:purge:batch-channel', capture_batch_time: 2000 }
+    },
+    '301': {
+      message: { id: '301', channel_id: channelId, timestamp: 9999 },
+      delete_data: { time: 1700 }
+    },
+    '302': {
+      message: { id: '302', channel_id: channelId, timestamp: 1 },
+      delete_data: { time: 1800 }
+    }
+  };
+  const ids = Object.keys(records);
+  const createBatchPlugin = category => {
+    const categoryRecords = structuredClone(records);
+    if (category === 'nuked') {
+      for (const record of Object.values(categoryRecords)) record.delete_data.anti_nuke = true;
+    }
+    const plugin = createPlugin();
+    plugin.installDataPayload({
+      messageRecord: categoryRecords,
+      deletedMessageRecord: {},
+      editedMessageRecord: {},
+      purgedMessageRecord: category === 'purged' ? { [channelId]: ids } : {},
+      nukedMessageRecord: category === 'nuked' ? { [channelId]: ids } : {},
+      suppressedForumThreadIds: []
+    });
+    plugin.settings = { reverseOrder: false, antiNukeEnabled: true };
+    plugin.menu = { selectedTab: category, filter: '' };
+    return plugin;
+  };
+  const newestFirst = ['202', '201', '102', '101', '302', '301'];
+  const purgedPlugin = createBatchPlugin('purged');
+  assert.deepEqual(purgedPlugin.getFilteredMessages(), newestFirst);
+  const nukedPlugin = createBatchPlugin('nuked');
+  assert.deepEqual(nukedPlugin.getFilteredMessages(), newestFirst, 'Nuked uses the same marked-batch ordering');
+
+  purgedPlugin.settings.reverseOrder = true;
+  assert.deepEqual(purgedPlugin.getFilteredMessages(), newestFirst.toReversed(), 'oldest-first reverses batches and their contents');
+
+  const ordinaryOrder = ids.slice();
+  purgedPlugin.sortMessagesByAge(ordinaryOrder, false);
+  assert.deepEqual(
+    ordinaryOrder,
+    ['201', '202', '101', '102', '302', '301'],
+    'unmarked sorting keeps the existing per-record deletion-time order'
+  );
+});
+
+test('saved event markers are unique within one millisecond and do not replace delete time', t => {
+  const originalNow = Date.now;
+  t.after(() => { Date.now = originalNow; });
+  Date.now = () => 5000;
+  const plugin = createPlugin();
+  const first = plugin.createSavedEventBatch('purge', 'channel');
+  const second = plugin.createSavedEventBatch('purge', 'channel');
+  const deleteData = { time: 1234 };
+
+  assert.equal(first.time, 5000);
+  assert.equal(second.time, 5000);
+  assert.notEqual(first.id, second.id);
+  assert.equal(plugin.applySavedEventBatch(deleteData, second), true);
+  assert.equal(deleteData.time, 1234, 'existing logger deletion time stays untouched');
+  assert.equal(deleteData.capture_batch_id, second.id);
+  assert.equal(deleteData.capture_batch_time, 5000);
+
+  const persisted = { message: { id: '1', channel_id: 'channel', timestamp: 100 }, delete_data: { ...deleteData } };
+  const legacyRewrite = { message: { ...persisted.message }, delete_data: { time: 1234 } };
+  const roundTrip = plugin.mergeSavedRecords(persisted, legacyRewrite);
+  assert.equal(roundTrip.delete_data.capture_batch_id, second.id, 'an unaware fork round trip retains the additive marker');
+  assert.equal(roundTrip.delete_data.capture_batch_time, 5000);
+});
+
 test('display precedence stays Hidden then Nuked then Ghost Pings then Purged then Deleted then Edited', () => {
   const channelId = 'category-channel';
   const ids = {

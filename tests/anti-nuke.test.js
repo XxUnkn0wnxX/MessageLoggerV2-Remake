@@ -170,11 +170,12 @@ test('Anti-Nuke promotes the oldest reply when a removed starter leaves an empty
     editModifiers: {},
     forumThreadMetadataCache: new Map(),
     getCachedMessagesForDeletedChannel: () => [],
-    saveDeletedMessage(message, targetMap) {
+    saveDeletedMessage(message, targetMap, options = {}) {
       this.messageRecord[message.id] = {
         message: structuredClone(message),
         delete_data: { time: 2000 }
       };
+      this.applySavedEventBatch(this.messageRecord[message.id].delete_data, options.captureBatch);
       (targetMap[message.channel_id] ||= []).push(message.id);
       const targetSet = targetMap === this.nukedMessageRecord
         ? this.nukedMessageSet
@@ -237,7 +238,10 @@ test('Anti-Nuke promotes the oldest reply when a removed starter leaves an empty
   assert.equal(plugin.messageRecord[rootId].message.content, 'older reply');
   assert.equal(plugin.messageRecord[rootId].delete_data.forum_thread_delete, true);
   assert.equal(plugin.messageRecord[rootId].delete_data.anti_nuke, true);
+  assert.equal(plugin.messageRecord[rootId].delete_data.capture_batch_id, context.captureBatch.id);
+  assert.equal(plugin.messageRecord[rootId].delete_data.capture_batch_time, context.captureBatch.time);
   assert.equal(plugin.messageRecord[rootId].delete_data.forum_metadata.rootContextMessageId, olderId);
+  assert.equal(plugin.messageRecord[latestId].delete_data.capture_batch_id, context.captureBatch.id);
   assert.deepEqual(plugin.nukedMessageRecord, { [rootId]: [rootId, latestId] });
   assert.equal(context.captured, 2, 'the structural root and one independent reply are counted');
   assert.equal(context.capturedMessages, 1, 'the promoted reply no longer consumes a reply slot');
@@ -398,13 +402,14 @@ test('Anti-Nuke channel threads capture the same root metadata and starter paylo
     noTintIds: new Set(),
     editModifiers: {},
     forumThreadMetadataCache: new Map([[rootId, structuredClone(initialMetadata)]]),
-    saveDeletedMessage(message, targetMap) {
+    saveDeletedMessage(message, targetMap, options = {}) {
       this.messageRecord[message.id] = {
         message: structuredClone(message),
         delete_data: { time: 2000 },
         edit_history: message.id === starterId ? [{ content: 'Initial body before edit', time: 900 }] : null,
         logged_attachments: message.id === starterId ? ['cached-starter-media'] : []
       };
+      this.applySavedEventBatch(this.messageRecord[message.id].delete_data, options.captureBatch);
       (targetMap[message.channel_id] ||= []).push(message.id);
       const targetSet = targetMap === this.deletedMessageRecord
         ? this.deletedMessageSet
@@ -463,7 +468,10 @@ test('Anti-Nuke channel threads capture the same root metadata and starter paylo
   assert.equal(savedRoot.delete_data.forum_thread_message_delete, undefined);
   assert.equal(savedRoot.delete_data.anti_nuke, true);
   assert.equal(savedRoot.delete_data.anti_nuke_parent_id, 'parent');
+  assert.equal(savedRoot.delete_data.capture_batch_id, context.captureBatch.id);
+  assert.equal(savedRoot.delete_data.capture_batch_time, context.captureBatch.time);
   assert.equal(plugin.messageRecord[replyId].message.content, 'Reply B');
+  assert.equal(plugin.messageRecord[replyId].delete_data.capture_batch_id, context.captureBatch.id);
   assert.deepEqual(plugin.purgedMessageRecord, {});
   assert.deepEqual(plugin.nukedMessageRecord, { [rootId]: [rootId, replyId] });
   assert.equal(context.capturedMessages, 1, 'only the independent reply consumes the message cap');
@@ -573,7 +581,8 @@ test('deleted-channel capture adopts visible and hidden Deleted/Purged records i
     }
   });
 
-  assert.equal(plugin.adoptSavedRecordsForDeletedChannel({ id: parentId }), 6);
+  const captureBatch = { id: 'nuke:500:5000:1', time: 5000 };
+  assert.equal(plugin.adoptSavedRecordsForDeletedChannel({ id: parentId }, captureBatch), 6);
   assert.deepEqual(plugin.deletedMessageRecord, { 'unrelated-channel': [unrelatedId] });
   assert.deepEqual(plugin.purgedMessageRecord, {});
   assert.deepEqual(plugin.nukedMessageRecord, {
@@ -592,6 +601,8 @@ test('deleted-channel capture adopts visible and hidden Deleted/Purged records i
   ]) {
     assert.equal(records[id].delete_data.anti_nuke, true);
     assert.equal(records[id].delete_data.anti_nuke_parent_id, parentId);
+    assert.equal(records[id].delete_data.capture_batch_id, captureBatch.id);
+    assert.equal(records[id].delete_data.capture_batch_time, captureBatch.time);
   }
   assert.equal(records[directDeletedId].delete_data.hidden, true);
   assert.equal(records[threadRootId].delete_data.hidden, true);

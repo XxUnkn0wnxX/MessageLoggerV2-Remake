@@ -340,10 +340,17 @@ test('Anti-Nuke remains an orchestration wrapper around canonical logging helper
     source.indexOf('captureQueuedThreadsFromDeletedChannel(context)')
   );
 
-  assert.match(captureWrapper, /this\.saveDeletedMessage\(capturedMessage, targetMap\)/);
+  assert.match(captureWrapper, /this\.saveDeletedMessage\(capturedMessage, targetMap, \{ captureBatch: context\.captureBatch \}\)/);
   assert.doesNotMatch(captureWrapper, /this\.createMiniFormattedData\(/);
   assert.match(threadCapture, /this\.foldSavedThreadStarterIntoRoot\(channel\.id\)/);
   assert.match(threadCapture, /this\.promoteOldestSavedThreadReplyIntoRoot\(channel\.id\)/);
+  assert.match(source, /createDeletedChannelCaptureContext\(channel, guild\)[\s\S]*captureBatch: this\.createSavedEventBatch\('nuke', channel\.id\)/);
+  const bulkDelete = source.slice(
+    source.indexOf("dispatch.type == 'MESSAGE_DELETE_BULK'"),
+    source.indexOf("dispatch.type == 'MESSAGE_UPDATE'", source.indexOf("dispatch.type == 'MESSAGE_DELETE_BULK'"))
+  );
+  assert.match(bulkDelete, /const captureBatch = this\.createSavedEventBatch\('purge', channel\.id\)/);
+  assert.match(bulkDelete, /this\.saveDeletedMessage\(purged, this\.purgedMessageRecord, \{ captureBatch \}\)/);
 });
 
 test('logger jump-availability tint stays scoped to the logger window', () => {

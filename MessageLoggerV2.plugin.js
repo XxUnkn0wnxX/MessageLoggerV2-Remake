@@ -7150,7 +7150,7 @@ module.exports = class MessageLoggerV2 {
     return [10, 11, 12].includes(Number(liveChannel?.type))
       && String(liveChannel?.parent_id || '') === parentId;
   }
-  adoptSavedRecordsForDeletedChannel(channel) {
+  adoptSavedRecordsForDeletedChannel(channel, captureBatch = null) {
     if (!this.settings.antiNukeEnabled || !channel?.id) return 0;
     this.nukedMessageRecord ||= {};
     this.nukedMessageSet ||= new Map();
@@ -7190,6 +7190,7 @@ module.exports = class MessageLoggerV2 {
       }
       record.delete_data.anti_nuke = true;
       record.delete_data.anti_nuke_parent_id = String(channel.id);
+      this.applySavedEventBatch(record.delete_data, captureBatch);
       this.moveSavedRecordToCategoryIndex(messageId, this.nukedMessageRecord);
       adopted++;
     }
@@ -7224,6 +7225,10 @@ module.exports = class MessageLoggerV2 {
     return {
       channel,
       guild,
+      // Every record recovered from this CHANNEL_DELETE shares one durable marker. This lets
+      // Nuked order the contents by their original posting time without guessing from the few
+      // milliseconds consumed while the individual records are saved.
+      captureBatch: this.createSavedEventBatch('nuke', channel.id),
       threadCap,
       messageCap,
       attachmentCap,
@@ -7300,7 +7305,7 @@ module.exports = class MessageLoggerV2 {
     if (this.messageRecord[message.id]?.message) {
       this.messageRecord[message.id].message.attachments = attachments;
     }
-    this.saveDeletedMessage(capturedMessage, targetMap);
+    this.saveDeletedMessage(capturedMessage, targetMap, { captureBatch: context.captureBatch });
     const record = this.messageRecord[message.id];
     if (!record) return false;
     if (record.delete_data) {
@@ -7528,7 +7533,7 @@ module.exports = class MessageLoggerV2 {
     const context = this.createDeletedChannelCaptureContext(channel, guild);
     // Reclassify existing Deleted/Purged records before Discord unmounts the channel. This
     // includes hidden records and prevents the cache snapshot from overwriting their state.
-    context.adopted = this.adoptSavedRecordsForDeletedChannel(channel);
+    context.adopted = this.adoptSavedRecordsForDeletedChannel(channel, context.captureBatch);
     context.captured += context.adopted;
     this._destructiveChannelDeleteContexts.set(channel.id, context);
     const result = callDefault(...args);
@@ -8204,13 +8209,30 @@ module.exports = class MessageLoggerV2 {
     const parentName = metadata.parentName || (parentId ? `unknown-channel (${parentId})` : 'unknown-channel');
     return guildId ? `${guildName}, #${parentName}` : `#${parentName}`;
   }
-  saveDeletedMessage(message, targetMessageRecord) {
+  createSavedEventBatch(kind, scopeId) {
+    const time = Date.now();
+    const sequence = (this._savedEventBatchSequence = (this._savedEventBatchSequence || 0) + 1);
+    return {
+      // Scope and sequence keep two dispatches distinct even when Date.now() returns the same
+      // millisecond. The marker is additive metadata, so legacy logger forks can ignore it.
+      id: `${time}:${sequence}:${kind}:${String(scopeId || 'unknown')}`,
+      time
+    };
+  }
+  applySavedEventBatch(deleteData, captureBatch) {
+    if (!deleteData || !captureBatch?.id || !Number.isFinite(Number(captureBatch.time))) return false;
+    deleteData.capture_batch_id = String(captureBatch.id);
+    deleteData.capture_batch_time = Number(captureBatch.time);
+    return true;
+  }
+  saveDeletedMessage(message, targetMessageRecord, options = {}) {
     const result = this.createMiniFormattedData(message);
     result.delete_data = {};
     const id = message.id;
     const channelId = message.channel_id;
     result.delete_data.time = Date.now();
     result.delete_data.location = result.saved_location || this.getMessageLocationSnapshot(message);
+    this.applySavedEventBatch(result.delete_data, options.captureBatch);
     result.ghost_pinged = result.local_mentioned;
     if (this.messageRecord[id]) {
       // Deletion is another state on the same canonical record, not a replacement record.
@@ -9719,6 +9741,9 @@ module.exports = class MessageLoggerV2 {
         let failedMessage = false;
         let savedDeleteCount = 0;
         const isLocalBulkDelete = this.isLocalDeleteEvent(dispatch.ids);
+        // Discord defines the purge boundary for us: one MESSAGE_DELETE_BULK dispatch is one
+        // batch. No time-window heuristic is used, and a second dispatch always gets a new ID.
+        const captureBatch = this.createSavedEventBatch('purge', channel.id);
         for (const dispatchId of dispatch.ids) {
           const purged = this.getCachedMessage(dispatchId, channel.id);
           if (!purged) {
@@ -9729,7 +9754,7 @@ module.exports = class MessageLoggerV2 {
           if (this.shouldIgnoreMessageAuthor(purged)) continue;
           if (this.shouldIgnoreSelfMessage(purged)) continue;
           savedDeleteCount++;
-          this.saveDeletedMessage(purged, this.purgedMessageRecord);
+          this.saveDeletedMessage(purged, this.purgedMessageRecord, { captureBatch });
           this.annotateSavedForumThreadMessage(purged, channel);
           if (this.settings.showPurgedMessages) this.refreshCacheOnlyMessage(purged);
           this._scheduleTintForMessage?.(dispatch.channelId, purged.id);
@@ -12347,18 +12372,61 @@ module.exports = class MessageLoggerV2 {
       parent.appendChild(strong);
     }
   }
-  sortMessagesByAge(map) {
+  sortMessagesByAge(map, useCaptureBatchOrder = false) {
+    const activityTime = record => {
+      let time = new Date(record?.message?.timestamp).getTime();
+      if (record?.edit_history && typeof record.edit_history[record.edit_history.length - 1].time !== 'string') {
+        time = record.edit_history[record.edit_history.length - 1].time;
+      }
+      if (record?.delete_data?.time) time = record.delete_data.time;
+      return Number.parseInt(time) || 0;
+    };
+    const originalMessageTime = record => {
+      const numeric = Number(record?.message?.timestamp);
+      if (Number.isFinite(numeric)) return numeric;
+      const parsed = Date.parse(record?.message?.timestamp);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const batchId = record => {
+      const value = record?.delete_data?.capture_batch_id;
+      return typeof value === 'string' && value ? value : null;
+    };
+    const batchTimes = new Map();
+    if (useCaptureBatchOrder) {
+      for (const messageId of map) {
+        const record = this.messageRecord[messageId];
+        const id = batchId(record);
+        if (!id) continue;
+        const explicitTime = Number(record?.delete_data?.capture_batch_time);
+        const time = Number.isFinite(explicitTime) ? explicitTime : activityTime(record);
+        batchTimes.set(id, Math.max(batchTimes.get(id) || 0, time));
+      }
+    }
     map.sort((a, b) => {
       const recordA = this.messageRecord[a];
       const recordB = this.messageRecord[b];
       if (!recordA || !recordB) return 0;
-      let timeA = new Date(recordA.message.timestamp).getTime();
-      let timeB = new Date(recordB.message.timestamp).getTime();
-      if (recordA.edit_history && typeof recordA.edit_history[recordA.edit_history.length - 1].time !== 'string') timeA = recordA.edit_history[recordA.edit_history.length - 1].time;
-      if (recordB.edit_history && typeof recordB.edit_history[recordB.edit_history.length - 1].time !== 'string') timeB = recordB.edit_history[recordB.edit_history.length - 1].time;
-      if (recordA.delete_data?.time) timeA = recordA.delete_data.time;
-      if (recordB.delete_data?.time) timeB = recordB.delete_data.time;
-      return Number.parseInt(timeB) - Number.parseInt(timeA);
+      const batchA = useCaptureBatchOrder ? batchId(recordA) : null;
+      const batchB = useCaptureBatchOrder ? batchId(recordB) : null;
+      if (batchA && batchA === batchB) {
+        // Within one explicit purge/nuke event, posting chronology is the stable truth. The
+        // per-record deletion times are intentionally retained for compatibility and display.
+        const originalDifference = originalMessageTime(recordB) - originalMessageTime(recordA);
+        if (originalDifference) return originalDifference;
+        return String(b).localeCompare(String(a), undefined, { numeric: true });
+      }
+      const timeA = batchA ? batchTimes.get(batchA) : activityTime(recordA);
+      const timeB = batchB ? batchTimes.get(batchB) : activityTime(recordB);
+      const timeDifference = Number(timeB) - Number(timeA);
+      if (timeDifference) return timeDifference;
+      // If two explicitly marked events occurred in the same millisecond, their unique IDs
+      // keep the groups separate and deterministic. Two legacy unmarked ties stay unchanged.
+      if (batchA || batchB) {
+        const unitA = batchA || `record:${String(a)}`;
+        const unitB = batchB || `record:${String(b)}`;
+        return unitB.localeCompare(unitA, undefined, { numeric: true });
+      }
+      return 0;
     });
   }
   getFilteredMessages() {
@@ -12469,7 +12537,7 @@ module.exports = class MessageLoggerV2 {
       }
     }
     if (this.menu.selectedTab != 'sent') {
-      this.sortMessagesByAge(messages);
+      this.sortMessagesByAge(messages, this.menu.selectedTab === 'purged' || this.menu.selectedTab === 'nuked');
       if (this.settings.reverseOrder) messages.reverse();
     } else if (!this.settings.reverseOrder) messages.reverse();
     return messages;
