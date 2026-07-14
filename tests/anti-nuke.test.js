@@ -298,3 +298,144 @@ test('Anti-Nuke channel threads capture the same root metadata and starter paylo
     'forum posts retain their existing self-keyed root selection'
   );
 });
+
+test('deleted-channel capture adopts visible and hidden Deleted/Purged records into Nuked', () => {
+  const parentId = '500';
+  const threadId = '510';
+  const directDeletedId = '501';
+  const directPurgedId = '502';
+  const threadRootId = threadId;
+  const threadReplyId = '511';
+  const purgedRootThreadId = '512';
+  const purgedRootReplyId = '513';
+  const unrelatedId = '520';
+  const records = {
+    [directDeletedId]: {
+      message: { id: directDeletedId, channel_id: parentId },
+      delete_data: { hidden: true, time: 1 },
+      edit_history: [{ content: 'older edit' }]
+    },
+    [directPurgedId]: {
+      message: { id: directPurgedId, channel_id: parentId },
+      delete_data: { hidden: false, time: 2 }
+    },
+    [threadRootId]: {
+      message: { id: threadRootId, channel_id: threadId },
+      delete_data: {
+        hidden: true,
+        forum_thread_delete: true,
+        forum_parent_id: parentId,
+        forum_metadata: { parentId, threadType: 11 }
+      }
+    },
+    [threadReplyId]: {
+      message: { id: threadReplyId, channel_id: threadId },
+      delete_data: { hidden: true, location: { channelType: 11, parentId } }
+    },
+    [purgedRootThreadId]: {
+      message: { id: purgedRootThreadId, channel_id: purgedRootThreadId },
+      delete_data: {
+        hidden: false,
+        forum_thread_delete: true,
+        forum_parent_id: parentId,
+        forum_metadata: { parentId, threadType: 11 }
+      }
+    },
+    [purgedRootReplyId]: {
+      message: { id: purgedRootReplyId, channel_id: purgedRootThreadId },
+      delete_data: { hidden: false, location: { channelType: 11, parentId } }
+    },
+    [unrelatedId]: {
+      message: { id: unrelatedId, channel_id: 'unrelated-channel' },
+      delete_data: { hidden: true },
+      // A normal channel may share the deleted category as its parent without being deleted.
+      saved_location: { channelType: 0, parentId }
+    }
+  };
+  const plugin = createPlugin({
+    settings: { antiNukeEnabled: true },
+    messageRecord: records,
+    deletedMessageRecord: {
+      [parentId]: [directDeletedId],
+      [threadId]: [threadRootId],
+      'unrelated-channel': [unrelatedId]
+    },
+    purgedMessageRecord: {
+      [parentId]: [directPurgedId],
+      [threadId]: [threadReplyId],
+      [purgedRootThreadId]: [purgedRootThreadId, purgedRootReplyId]
+    },
+    nukedMessageRecord: {},
+    editedMessageRecord: { [parentId]: [directDeletedId] },
+    deletedMessageSet: new Map([
+      [parentId, new Set([directDeletedId])],
+      [threadId, new Set([threadRootId])],
+      ['unrelated-channel', new Set([unrelatedId])]
+    ]),
+    purgedMessageSet: new Map([
+      [parentId, new Set([directPurgedId])],
+      [threadId, new Set([threadReplyId])],
+      [purgedRootThreadId, new Set([purgedRootThreadId, purgedRootReplyId])]
+    ]),
+    nukedMessageSet: new Map(),
+    editedMessageSet: new Map([[parentId, new Set([directDeletedId])]]),
+    sortedDeletedMessageIds: new Map([[parentId, []], [threadId, []]]),
+    sortedPurgedMessageIds: new Map([[parentId, []], [threadId, []], [purgedRootThreadId, []]]),
+    sortedNukedMessageIds: new Map(),
+    tools: {
+      getChannel(id) {
+        if (id === threadId) return { id, type: 11, parent_id: parentId };
+        if (id === purgedRootThreadId) return { id, type: 11, parent_id: parentId };
+        return null;
+      }
+    }
+  });
+
+  assert.equal(plugin.adoptSavedRecordsForDeletedChannel({ id: parentId }), 6);
+  assert.deepEqual(plugin.deletedMessageRecord, { 'unrelated-channel': [unrelatedId] });
+  assert.deepEqual(plugin.purgedMessageRecord, {});
+  assert.deepEqual(plugin.nukedMessageRecord, {
+    [parentId]: [directDeletedId, directPurgedId],
+    [threadId]: [threadRootId, threadReplyId],
+    [purgedRootThreadId]: [purgedRootThreadId, purgedRootReplyId]
+  });
+  assert.deepEqual(plugin.editedMessageRecord, { [parentId]: [directDeletedId] });
+  for (const id of [
+    directDeletedId,
+    directPurgedId,
+    threadRootId,
+    threadReplyId,
+    purgedRootThreadId,
+    purgedRootReplyId
+  ]) {
+    assert.equal(records[id].delete_data.anti_nuke, true);
+    assert.equal(records[id].delete_data.anti_nuke_parent_id, parentId);
+  }
+  assert.equal(records[directDeletedId].delete_data.hidden, true);
+  assert.equal(records[threadRootId].delete_data.hidden, true);
+  assert.equal(records[threadReplyId].delete_data.hidden, true);
+  assert.deepEqual(records[directDeletedId].edit_history, [{ content: 'older edit' }]);
+  assert.equal(records[unrelatedId].delete_data.anti_nuke, undefined);
+  assert.equal(plugin.nukedMessageSet.get(parentId).has(directDeletedId), true);
+  assert.equal(plugin.nukedMessageSet.get(threadId).has(threadReplyId), true);
+  assert.equal(plugin.nukedMessageSet.get(purgedRootThreadId).has(purgedRootThreadId), true);
+  assert.equal(plugin.nukedMessageSet.get(purgedRootThreadId).has(purgedRootReplyId), true);
+
+  plugin.dispatcher = { dispatch() {} };
+  plugin._invalidateAndRecache = () => {};
+  plugin.saveData = () => {};
+  plugin.scheduleLoggerMenuRefresh = () => {};
+  plugin.refreshForumThreadLogModal = () => {};
+  plugin.showToast = () => {};
+  assert.equal(plugin.unhideSavedDeletedRecord(records[directDeletedId]), true);
+  assert.equal(records[directDeletedId].delete_data.hidden, false);
+  assert.equal(plugin.nukedMessageSet.get(parentId).has(directDeletedId), true);
+  assert.equal(plugin.deletedMessageSet.get(parentId)?.has(directDeletedId) || false, false);
+
+  assert.equal(plugin.unhideSavedDeletedRecord(records[threadRootId]), true);
+  assert.equal(records[threadRootId].delete_data.hidden, false);
+  assert.equal(records[threadReplyId].delete_data.hidden, false);
+  assert.equal(plugin.nukedMessageSet.get(threadId).has(threadRootId), true);
+  assert.equal(plugin.nukedMessageSet.get(threadId).has(threadReplyId), true);
+  assert.equal(plugin.deletedMessageSet.get(threadId)?.size || 0, 0);
+});

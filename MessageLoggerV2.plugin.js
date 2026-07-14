@@ -6306,7 +6306,10 @@ module.exports = class MessageLoggerV2 {
     const forumMetadata = metadata || (channel ? this.cacheForumThreadMetadata(channel) : null);
     let savedCount = 0;
     for (const message of messages) {
-      if (this.deletedMessageSet.get(threadId)?.has(message.id)) continue;
+      // A prior single delete or bulk purge already owns this historical message event. Do not
+      // copy it into Deleted again when the containing post/thread is removed later.
+      if (this.deletedMessageSet.get(threadId)?.has(message.id)
+        || this.purgedMessageSet.get(threadId)?.has(message.id)) continue;
       const existing = this.messageRecord[message.id];
       if (existing?.delete_data?.hidden) continue;
       this.saveDeletedMessage(message, this.deletedMessageRecord);
@@ -6320,6 +6323,39 @@ module.exports = class MessageLoggerV2 {
       savedCount++;
     }
     return savedCount;
+  }
+  preservePurgedThreadRootCategory(threadId) {
+    const record = this.messageRecord?.[threadId];
+    if (!record?.delete_data?.forum_thread_delete || !record.message?.channel_id) return false;
+    const channelId = String(record.message.channel_id);
+    const starterWasPurged = Object.values(this.purgedMessageRecord || {})
+      .some(ids => Array.isArray(ids) && ids.some(id => String(id) === String(threadId)));
+    if (!starterWasPurged) return false;
+    let changed = false;
+
+    // A forum root is its starter ID, while a channel-thread starter is folded onto the root ID
+    // immediately before this check. Therefore root membership in Purged proves that the original
+    // starter itself was bulk-purged. Keep that root historical category even after the containing
+    // post/thread disappears; a merely Purged reply must not influence the root category.
+    for (const [indexedChannelId, ids] of Object.entries(this.deletedMessageRecord || {})) {
+      if (!Array.isArray(ids) || !ids.some(id => String(id) === String(threadId))) continue;
+      const remaining = ids.filter(id => String(id) !== String(threadId));
+      if (remaining.length) this.deletedMessageRecord[indexedChannelId] = remaining;
+      else delete this.deletedMessageRecord[indexedChannelId];
+      this.deletedMessageSet.get(indexedChannelId)?.delete(String(threadId));
+      if (!this.deletedMessageSet.get(indexedChannelId)?.size) this.deletedMessageSet.delete(indexedChannelId);
+      this.sortedDeletedMessageIds?.delete(indexedChannelId);
+      changed = true;
+    }
+
+    const purgedIds = this.purgedMessageRecord[channelId] ||= [];
+    if (!purgedIds.some(id => String(id) === String(threadId))) {
+      purgedIds.push(String(threadId));
+      changed = true;
+    }
+    this._addToChannelSet(this.purgedMessageSet, channelId, String(threadId));
+    this.sortedPurgedMessageIds?.delete(channelId);
+    return changed;
   }
   foldSavedThreadStarterIntoRoot(threadId) {
     if (!threadId) return false;
@@ -6606,6 +6642,88 @@ module.exports = class MessageLoggerV2 {
       }
     });
   }
+  isSavedRecordOwnedByDeletedChannel(record, deletedChannel) {
+    const message = record?.message;
+    const parentId = String(deletedChannel?.id || '');
+    if (!message?.id || !message.channel_id || !parentId) return false;
+    if (String(message.channel_id) === parentId) return true;
+
+    const deleteData = record.delete_data || {};
+    const metadata = deleteData.forum_metadata || {};
+    // Forum posts and channel threads store their parent explicitly. Prefer these durable
+    // snapshots because hidden records are intentionally absent from Discord's mounted DOM.
+    const explicitParentIds = [
+      deleteData.anti_nuke_parent_id,
+      deleteData.forum_parent_id,
+      metadata.parentId
+    ].filter(Boolean).map(String);
+    if (explicitParentIds.includes(parentId)) return true;
+
+    const locations = [deleteData.location, record.saved_location].filter(Boolean);
+    if (locations.some(location => [10, 11, 12].includes(Number(location.channelType))
+      && String(location.parentId || '') === parentId)) return true;
+
+    // During CHANNEL_DELETE this lookup runs before Discord removes child threads from its
+    // channel store, providing a final safe fallback for older records without metadata.
+    const liveChannel = this.tools.getChannel(message.channel_id);
+    return [10, 11, 12].includes(Number(liveChannel?.type))
+      && String(liveChannel?.parent_id || '') === parentId;
+  }
+  adoptSavedRecordsForDeletedChannel(channel) {
+    if (!this.settings.antiNukeEnabled || !channel?.id) return 0;
+    this.nukedMessageRecord ||= {};
+    this.nukedMessageSet ||= new Map();
+    const sourceCategories = [
+      {
+        records: this.deletedMessageRecord,
+        sets: this.deletedMessageSet,
+        sorted: this.sortedDeletedMessageIds
+      },
+      {
+        records: this.purgedMessageRecord,
+        sets: this.purgedMessageSet,
+        sorted: this.sortedPurgedMessageIds
+      }
+    ];
+    const candidateIds = new Set();
+    for (const category of sourceCategories) {
+      for (const ids of Object.values(category.records || {})) {
+        if (!Array.isArray(ids)) continue;
+        ids.forEach(id => candidateIds.add(String(id)));
+      }
+    }
+
+    let adopted = 0;
+    for (const messageId of candidateIds) {
+      const record = this.messageRecord?.[messageId];
+      if (!record?.delete_data || !this.isSavedRecordOwnedByDeletedChannel(record, channel)) continue;
+      const targetChannelId = String(record.message.channel_id);
+
+      // A visible deletion belongs to exactly one deletion category. Remove every old
+      // Deleted/Purged index entry while retaining Edited independently and preserving the
+      // record itself, including hidden state, edits, enhanced metadata, and cached media.
+      for (const category of sourceCategories) {
+        for (const [indexedChannelId, ids] of Object.entries(category.records || {})) {
+          if (!Array.isArray(ids) || !ids.some(id => String(id) === messageId)) continue;
+          const remaining = ids.filter(id => String(id) !== messageId);
+          if (remaining.length) category.records[indexedChannelId] = remaining;
+          else delete category.records[indexedChannelId];
+          category.sets?.get(indexedChannelId)?.delete(messageId);
+          if (!category.sets?.get(indexedChannelId)?.size) category.sets?.delete(indexedChannelId);
+          category.sorted?.delete(indexedChannelId);
+        }
+      }
+
+      const nukedIds = this.nukedMessageRecord[targetChannelId] ||= [];
+      if (!nukedIds.some(id => String(id) === messageId)) nukedIds.push(messageId);
+      this._addToChannelSet(this.nukedMessageSet, targetChannelId, messageId);
+      this.sortedNukedMessageIds?.delete(targetChannelId);
+      record.delete_data.anti_nuke = true;
+      record.delete_data.anti_nuke_parent_id = String(channel.id);
+      adopted++;
+    }
+    return adopted;
+  }
   createDeletedChannelCaptureContext(channel, guild) {
     const configuredThreadCap = Number(this.settings.antiNukeThreadCap);
     const configuredMessageCap = Number(this.settings.antiNukeMessageCap);
@@ -6645,6 +6763,7 @@ module.exports = class MessageLoggerV2 {
       capturedThreads: 0,
       capturedMessages: 0,
       capturedAttachments: 0,
+      adopted: 0,
       threadIds: new Set(),
       pendingThreads: new Map(),
       parentMessages,
@@ -6904,6 +7023,10 @@ module.exports = class MessageLoggerV2 {
     }
     const guild = this.tools.getServer(channel.guild_id);
     const context = this.createDeletedChannelCaptureContext(channel, guild);
+    // Reclassify existing Deleted/Purged records before Discord unmounts the channel. This
+    // includes hidden records and prevents the cache snapshot from overwriting their state.
+    context.adopted = this.adoptSavedRecordsForDeletedChannel(channel);
+    context.captured += context.adopted;
     this._destructiveChannelDeleteContexts.set(channel.id, context);
     const result = callDefault(...args);
     this.captureQueuedThreadsFromDeletedChannel(context);
@@ -6931,6 +7054,9 @@ module.exports = class MessageLoggerV2 {
         + ` and ${context.capturedMessages} message${context.capturedMessages === 1 ? '' : 's'}`
         + ` with ${context.capturedAttachments} attachment${context.capturedAttachments === 1 ? '' : 's'}`
         + ` from deleted channel ${channel.id}`
+        + (context.adopted
+          ? `; adopted ${context.adopted} existing Deleted/Purged record${context.adopted === 1 ? '' : 's'} into Nuked`
+          : '')
         + ` with caps ${context.threadCap || 'unlimited'}/${context.messageCap || 'unlimited'}/${context.attachmentCap || 'unlimited'}.`
       );
     }
@@ -6958,7 +7084,8 @@ module.exports = class MessageLoggerV2 {
     const isLocalDelete = this.isLocalDeleteEvent(threadId);
     const ignoredLocalStarter = !!deleted && this.shouldIgnoreSelfMessage(deleted);
     const shouldSaveStarter = deleted && !this.shouldIgnoreMessageAuthor(deleted) && !ignoredLocalStarter;
-    const alreadySavedStarterDelete = this.deletedMessageSet.get(threadId)?.has(threadId);
+    const alreadySavedStarterDelete = this.deletedMessageSet.get(threadId)?.has(threadId)
+      || this.purgedMessageSet.get(threadId)?.has(threadId);
     let savedThreadMessageCount = 0;
     if (shouldSaveStarter && !alreadySavedStarterDelete) {
       this.saveDeletedMessage(deleted, this.deletedMessageRecord);
@@ -6973,6 +7100,7 @@ module.exports = class MessageLoggerV2 {
       savedRecord.delete_data.forum_name = metadata?.name || channel.name || null;
     }
     this.foldSavedThreadStarterIntoRoot(threadId);
+    this.preservePurgedThreadRootCategory(threadId);
     if (!savedThreadMessageCount && !savedRecord?.delete_data) return callDefault(...args);
     if (this.settings.showDeletedCount) {
       if (!this.deletedChatMessagesCount[threadId]) this.deletedChatMessagesCount[threadId] = 0;

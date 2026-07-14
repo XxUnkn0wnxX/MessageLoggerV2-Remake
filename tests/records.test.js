@@ -644,6 +644,102 @@ test('live thread capture folding rebuilds de-duplicated indexes without touchin
   assert.equal(plugin.editModifiers[starterId], undefined);
 });
 
+test('full root deletion keeps a Purged starter in Purged while reply-only purges do not move the root', () => {
+  const rootId = '650';
+  const starterId = '651';
+  const replyId = '652';
+  const root = {
+    message: { id: rootId, channel_id: rootId, content: 'thread title', timestamp: 100 },
+    delete_data: {
+      time: 300,
+      forum_thread_delete: true,
+      forum_metadata: { name: 'thread title', starterMessageId: starterId }
+    }
+  };
+  const starter = {
+    message: { id: starterId, channel_id: rootId, content: 'initial body', timestamp: 101 },
+    delete_data: { time: 200, forum_thread_message_delete: true }
+  };
+  const reply = {
+    message: { id: replyId, channel_id: rootId, content: 'purged reply', timestamp: 102 },
+    delete_data: { time: 201, forum_thread_message_delete: true }
+  };
+  const plugin = createPlugin({
+    messageRecord: { [rootId]: root, [starterId]: starter, [replyId]: reply },
+    messageRecordIds: new Set([rootId, starterId, replyId]),
+    deletedMessageRecord: { [rootId]: [rootId] },
+    editedMessageRecord: {},
+    purgedMessageRecord: { [rootId]: [starterId, replyId] },
+    nukedMessageRecord: {},
+    deletedMessageSet: new Map([[rootId, new Set([rootId])]]),
+    editedMessageSet: new Map(),
+    purgedMessageSet: new Map([[rootId, new Set([starterId, replyId])]]),
+    nukedMessageSet: new Map(),
+    suppressedForumThreadIds: new Set(),
+    noTintIds: new Set(),
+    editModifiers: {},
+    getCachedForumThreadMessages: () => [starter.message, reply.message],
+    saveDeletedMessage() {
+      assert.fail('already Purged thread messages must not be copied into Deleted');
+    }
+  });
+
+  assert.equal(plugin.saveCachedForumThreadMessagesForDelete(rootId), 0);
+  assert.equal(plugin.foldSavedThreadStarterIntoRoot(rootId), true);
+  assert.equal(plugin.preservePurgedThreadRootCategory(rootId), true);
+  assert.deepEqual(Object.keys(plugin.messageRecord).sort(), [rootId, replyId]);
+  assert.equal(plugin.messageRecord[rootId].message.content, 'initial body');
+  assert.deepEqual(plugin.deletedMessageRecord, {});
+  assert.deepEqual(plugin.purgedMessageRecord, { [rootId]: [rootId, replyId] });
+  assert.equal(plugin.deletedMessageSet.has(rootId), false);
+  assert.deepEqual(plugin.purgedMessageSet.get(rootId), new Set([rootId, replyId]));
+
+  const forumId = '660';
+  const forumRecord = {
+    message: { id: forumId, channel_id: forumId, content: 'forum body', timestamp: 100 },
+    delete_data: {
+      time: 200,
+      forum_thread_delete: true,
+      forum_metadata: { name: 'forum title', starterMessageId: forumId, isForumParent: true }
+    }
+  };
+  const forumPlugin = createPlugin({
+    messageRecord: { [forumId]: forumRecord },
+    deletedMessageRecord: {},
+    purgedMessageRecord: { [forumId]: [forumId] },
+    deletedMessageSet: new Map(),
+    purgedMessageSet: new Map([[forumId, new Set([forumId])]]),
+    sortedDeletedMessageIds: new Map(),
+    sortedPurgedMessageIds: new Map()
+  });
+  assert.equal(forumPlugin.preservePurgedThreadRootCategory(forumId), false);
+  assert.deepEqual(forumPlugin.deletedMessageRecord, {});
+  assert.deepEqual(forumPlugin.purgedMessageRecord, { [forumId]: [forumId] });
+  assert.equal(forumPlugin.messageRecord[forumId], forumRecord, 'self-keyed forum body is not duplicated or replaced');
+
+  const replyOnlyRootId = '670';
+  const replyOnlyId = '671';
+  const replyOnlyPlugin = createPlugin({
+    messageRecord: {
+      [replyOnlyRootId]: {
+        message: { id: replyOnlyRootId, channel_id: replyOnlyRootId, content: 'unpurged starter' },
+        delete_data: { forum_thread_delete: true }
+      },
+      [replyOnlyId]: {
+        message: { id: replyOnlyId, channel_id: replyOnlyRootId, content: 'purged reply' },
+        delete_data: { forum_thread_message_delete: true }
+      }
+    },
+    deletedMessageRecord: { [replyOnlyRootId]: [replyOnlyRootId] },
+    purgedMessageRecord: { [replyOnlyRootId]: [replyOnlyId] },
+    deletedMessageSet: new Map([[replyOnlyRootId, new Set([replyOnlyRootId])]]),
+    purgedMessageSet: new Map([[replyOnlyRootId, new Set([replyOnlyId])]])
+  });
+  assert.equal(replyOnlyPlugin.preservePurgedThreadRootCategory(replyOnlyRootId), false);
+  assert.deepEqual(replyOnlyPlugin.deletedMessageRecord, { [replyOnlyRootId]: [replyOnlyRootId] });
+  assert.deepEqual(replyOnlyPlugin.purgedMessageRecord, { [replyOnlyRootId]: [replyOnlyId] });
+});
+
 test('starter edits replace cached thread content before deletion capture', () => {
   const original = {
     id: '201',

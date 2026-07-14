@@ -210,3 +210,61 @@ test('Anti-Nuke detection toggle bypasses ordinary alert scope and requires both
   plugin.handleDeletedGuildChannel({ channel }, () => 'handled', []);
   assert.equal(notifications.length, 1, 'the toast toggle cannot alert while Anti Nuke is disabled');
 });
+
+test('a channel deletion adopts hidden records and reports them as secured Nuked content', () => {
+  const notifications = [];
+  const channel = { id: 'deleted-channel', guild_id: 'guild', name: 'lost', type: 0 };
+  const guild = { id: 'guild', name: 'Server' };
+  const hiddenId = 'hidden-message';
+  const hiddenRecord = {
+    message: { id: hiddenId, channel_id: channel.id },
+    delete_data: { hidden: true, time: 1 }
+  };
+  let saved = 0;
+  const plugin = createPlugin({
+    settings: { antiNukeEnabled: true, antiNukeToasts: true },
+    messageRecord: { [hiddenId]: hiddenRecord },
+    deletedMessageRecord: { [channel.id]: [hiddenId] },
+    purgedMessageRecord: {},
+    nukedMessageRecord: {},
+    deletedMessageSet: new Map([[channel.id, new Set([hiddenId])]]),
+    purgedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
+    sortedDeletedMessageIds: new Map(),
+    sortedPurgedMessageIds: new Map(),
+    sortedNukedMessageIds: new Map(),
+    _destructiveChannelDeleteContexts: new Map(),
+    tools: { getServer: () => guild, getChannel: () => null },
+    createDeletedChannelCaptureContext() {
+      return {
+        channel,
+        guild,
+        captured: 0,
+        capturedThreads: 0,
+        capturedMessages: 0,
+        capturedAttachments: 0,
+        adopted: 0,
+        captureEnabled: true,
+        threadCap: 15,
+        messageCap: 45,
+        attachmentCap: 15,
+        cleanupTimer: null
+      };
+    },
+    captureQueuedThreadsFromDeletedChannel() {},
+    captureMessagesFromDeletedChannel() {},
+    _notifyEvent(...args) { notifications.push(args); },
+    saveData() { saved++; },
+    scheduleLoggerMenuRefresh() {}
+  });
+
+  assert.equal(plugin.handleDeletedGuildChannel({ channel }, () => 'handled', []), 'handled');
+  assert.equal(hiddenRecord.delete_data.hidden, true);
+  assert.equal(hiddenRecord.delete_data.anti_nuke, true);
+  assert.deepEqual(plugin.deletedMessageRecord, {});
+  assert.deepEqual(plugin.nukedMessageRecord, { [channel.id]: [hiddenId] });
+  assert.equal(saved, 1);
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0][0], 'nukeDetected');
+  assert.equal(notifications[0][4].count, 1);
+});
