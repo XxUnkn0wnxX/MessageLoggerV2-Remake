@@ -103,7 +103,7 @@ test('disk and no-save session payloads merge without duplicate indexes', () => 
 
   assert.deepEqual(Object.keys(merged.messageRecord).sort(), ['100', '200']);
   assert.deepEqual(merged.deletedMessageRecord.channel, ['100', '200']);
-  assert.deepEqual(merged.editedMessageRecord.channel, ['100']);
+  assert.deepEqual(merged.editedMessageRecord, {});
   assert.deepEqual(merged.suppressedForumThreadIds, ['900', '901']);
   assert.equal(merged.messageRecord['100'].message.content, 'new');
   assert.equal(merged.messageRecord['100'].delete_data.hidden, true);
@@ -196,7 +196,7 @@ test('mixed legacy and enhanced fields normalize without discarding surviving me
   assert.equal(normalizedRecord.deletedata, undefined);
   assert.equal(normalizedRecord.editHistory, undefined);
   assert.deepEqual(normalized.deletedMessageRecord, { 'channel-a': ['100'] });
-  assert.deepEqual(normalized.editedMessageRecord, { 'channel-a': ['100'] });
+  assert.deepEqual(normalized.editedMessageRecord, {});
   assert.deepEqual(normalized.purgedMessageRecord, {});
   assert.deepEqual(normalized.nukedMessageRecord, {});
   assert.deepEqual(normalized.suppressedForumThreadIds, []);
@@ -247,7 +247,7 @@ test('data rewritten by a legacy fork can round-trip back into the enhanced sche
     ['first edit', 'edit written by legacy fork']
   );
   assert.deepEqual(normalized.deletedMessageRecord, { 'channel-a': ['100'] });
-  assert.deepEqual(normalized.editedMessageRecord, { 'channel-a': ['100'] });
+  assert.deepEqual(normalized.editedMessageRecord, {});
   assert.deepEqual(normalized.purgedMessageRecord, {});
   assert.deepEqual(normalized.nukedMessageRecord, {});
   assert.deepEqual(normalized.suppressedForumThreadIds, []);
@@ -349,7 +349,7 @@ test('canonical normalization stays stable as Discord channel availability chang
   assert.equal(JSON.stringify(normalizedAfterStoreChange), JSON.stringify(normalizedWhileMissing));
 });
 
-test('normalization scopes de-duplication to message IDs and independent category indexes', () => {
+test('normalization de-duplicates IDs and applies exclusive base-category precedence', () => {
   const plugin = createNormalizationPlugin();
   const sameAuthor = { id: 'user-1', username: 'same-user' };
   const mixed = payload({
@@ -370,9 +370,10 @@ test('normalization scopes de-duplication to message IDs and independent categor
   const normalized = plugin.normalizePersistedDataPayload(mixed);
 
   assert.deepEqual(Object.keys(normalized.messageRecord).sort(), ['100', '200']);
-  assert.deepEqual(normalized.deletedMessageRecord, { 'channel-a': ['100'], 'channel-b': ['200'] });
-  assert.deepEqual(normalized.editedMessageRecord, { 'channel-b': ['200'] });
+  assert.deepEqual(normalized.deletedMessageRecord, { 'channel-a': ['100'] });
+  assert.deepEqual(normalized.editedMessageRecord, {});
   assert.deepEqual(normalized.purgedMessageRecord, { 'channel-b': ['200'] });
+  assert.deepEqual(normalized.messageRecord['200'].edit_history, [{ time: 190, content: 'edit' }]);
 });
 
 test('normalization rejects payloads missing the core message record map', () => {
@@ -520,8 +521,9 @@ test('message re-keying translates every category index before canonicalization'
 
   assert.deepEqual(Object.keys(normalized.messageRecord), ['200']);
   assert.deepEqual(normalized.deletedMessageRecord, {});
-  assert.deepEqual(normalized.editedMessageRecord, { 'channel-b': ['200'] });
+  assert.deepEqual(normalized.editedMessageRecord, {});
   assert.deepEqual(normalized.purgedMessageRecord, { 'channel-b': ['200'] });
+  assert.ok(normalized.messageRecord['200'].delete_data, 'category cleanup retains the canonical record payload');
 });
 
 test('the newer persisted snapshot wins while merge-only state is still unioned', () => {

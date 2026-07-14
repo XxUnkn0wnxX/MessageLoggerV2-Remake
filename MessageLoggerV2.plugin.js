@@ -3927,9 +3927,9 @@ module.exports = class MessageLoggerV2 {
       if (record?.delete_data?.anti_nuke) nukedIds.add(messageId);
     }
 
-    // A deletion belongs to one visible deletion category. Edit history remains independent,
-    // so edited-and-nuked records keep their Edited membership while leaving Deleted/Purged.
-    for (const key of ['deletedMessageRecord', 'purgedMessageRecord']) {
+    // Nuked is the permanent base category. Edit history remains on the canonical record, but
+    // the record itself leaves every lower-priority category index.
+    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord']) {
       for (const [channelId, ids] of Object.entries(data[key] || {})) {
         if (!Array.isArray(ids)) continue;
         data[key][channelId] = ids.filter(id => !nukedIds.has(String(id)));
@@ -4072,8 +4072,8 @@ module.exports = class MessageLoggerV2 {
     this.foldSeparateThreadStarterRecords(data);
     this.migrateAntiNukeCategoryRecords(data);
     data = this.sanitizeDataPayload(data);
-    // Rebuild missing indexes from canonical records. Existing category membership is
-    // retained independently so edited-and-deleted or purged records are not collapsed.
+    // Rebuild any missing base index from canonical record fields. The final sanitizer applies
+    // the exclusive Nuked > Purged > Deleted > Edited precedence without removing edit stacks.
     const isIndexed = (key, id) => Object.values(data[key]).some(ids => ids.includes(id));
     for (const [messageId, record] of Object.entries(data.messageRecord)) {
       const channelId = record.message.channel_id;
@@ -4113,8 +4113,66 @@ module.exports = class MessageLoggerV2 {
       }
       data[key] = canonicalMap;
     }
+    this.canonicalizeExclusiveCategoryIndexes(data);
     data.suppressedForumThreadIds = Array.from(new Set((data.suppressedForumThreadIds || [])
       .filter(id => typeof id === 'string' && /^\d+$/.test(id))));
+    return data;
+  }
+  getCanonicalSavedBaseCategory(record, membership = {}) {
+    // One record may retain edits, deletion metadata, ghost state, and hidden state together,
+    // but it has exactly one persisted base category. Visibility overlays are resolved later.
+    if (record?.delete_data?.anti_nuke || membership.nuked) return 'nuked';
+    if (membership.purged) return 'purged';
+    if (membership.deleted || record?.delete_data) return 'deleted';
+    if (membership.edited || record?.edit_history?.length) return 'edited';
+    return null;
+  }
+  canonicalizeExclusiveCategoryIndexes(data) {
+    const categoryKeys = {
+      deleted: 'deletedMessageRecord',
+      edited: 'editedMessageRecord',
+      purged: 'purgedMessageRecord',
+      nuked: 'nukedMessageRecord'
+    };
+    const memberships = Object.fromEntries(Object.keys(categoryKeys).map(category => [category, new Set()]));
+    const orderedIds = [];
+    const seenOrder = new Set();
+    // Preserve current category order where possible; the logger applies its configured time
+    // sort when rendering, while this stable order keeps canonical rewrites deterministic.
+    for (const category of ['nuked', 'purged', 'deleted', 'edited']) {
+      for (const ids of Object.values(data[categoryKeys[category]] || {})) {
+        if (!Array.isArray(ids)) continue;
+        for (const id of ids) {
+          const messageId = String(id);
+          memberships[category].add(messageId);
+          if (!seenOrder.has(messageId)) {
+            seenOrder.add(messageId);
+            orderedIds.push(messageId);
+          }
+        }
+      }
+    }
+    for (const messageId of Object.keys(data.messageRecord || {})) {
+      if (seenOrder.has(messageId)) continue;
+      seenOrder.add(messageId);
+      orderedIds.push(messageId);
+    }
+
+    const canonical = Object.fromEntries(Object.values(categoryKeys).map(key => [key, {}]));
+    for (const messageId of orderedIds) {
+      const record = data.messageRecord?.[messageId];
+      const channelId = record?.message?.channel_id;
+      if (!record || !channelId) continue;
+      const category = this.getCanonicalSavedBaseCategory(record, {
+        nuked: memberships.nuked.has(messageId),
+        purged: memberships.purged.has(messageId),
+        deleted: memberships.deleted.has(messageId),
+        edited: memberships.edited.has(messageId)
+      });
+      if (!category) continue;
+      (canonical[categoryKeys[category]][channelId] ||= []).push(messageId);
+    }
+    for (const key of Object.values(categoryKeys)) data[key] = canonical[key];
     return data;
   }
   getDataPayloadExtensions(data) {
@@ -4201,7 +4259,14 @@ module.exports = class MessageLoggerV2 {
         return difference || String(a?.content || '').localeCompare(String(b?.content || ''));
       });
     } else merged.edit_history = null;
-    if (persisted.edits_hidden || session.edits_hidden) merged.edits_hidden = true;
+    const hidden = !!(
+      persisted.delete_data?.hidden
+      || session.delete_data?.hidden
+      || persisted.edits_hidden
+      || session.edits_hidden
+    );
+    if (hidden && merged.delete_data) merged.delete_data.hidden = true;
+    if (hidden && merged.edit_history?.length) merged.edits_hidden = true;
     merged.ghost_pinged = !!(persisted.ghost_pinged || session.ghost_pinged);
     merged.local_mentioned = !!(persisted.local_mentioned || session.local_mentioned);
     const loggedAttachments = Array.from(new Set([
@@ -4227,8 +4292,8 @@ module.exports = class MessageLoggerV2 {
     return merged;
   }
   mergeDataPayloads(persistedData, sessionData) {
-    // Category maps are merged independently because one message may legitimately be both
-    // edited and deleted. Each individual channel index is still de-duplicated and validated.
+    // Merge category evidence first, then canonicalize each message into one base category.
+    // Independent edit, ghost, hidden, metadata, and media state remains on the shared record.
     const persisted = this.sanitizeDataPayload(
       this.prepareDataPayloadForNormalization(this.cloneDataValue(persistedData))
     );
@@ -5824,6 +5889,12 @@ module.exports = class MessageLoggerV2 {
     // Confirmation copy still explains that saved logger data—not a live server message—is deleted.
     return this.getNativeDeleteLabel();
   }
+  setSavedRecordHiddenState(record, hidden) {
+    if (!record?.message) return false;
+    if (record.delete_data) record.delete_data.hidden = hidden;
+    if (record.edit_history?.length) record.edits_hidden = hidden;
+    return true;
+  }
   setSavedThreadHidden(record, hidden) {
     const message = record?.message;
     if (!record?.delete_data?.forum_thread_delete || !message?.id) return false;
@@ -5832,8 +5903,7 @@ module.exports = class MessageLoggerV2 {
     for (const id of recordIds) {
       const saved = this.messageRecord[id];
       if (!saved?.message) continue;
-      if (saved.delete_data) saved.delete_data.hidden = hidden;
-      if (saved.edit_history) saved.edits_hidden = hidden;
+      this.setSavedRecordHiddenState(saved, hidden);
       if (hidden && saved.delete_data) {
         this.dispatcher.dispatch({
           type: 'MESSAGE_DELETE',
@@ -5863,7 +5933,7 @@ module.exports = class MessageLoggerV2 {
     const message = record?.message;
     if (!record?.delete_data || !message?.id || record.delete_data.hidden) return false;
     if (record.delete_data.forum_thread_delete) return this.setSavedThreadHidden(record, true);
-    record.delete_data.hidden = true;
+    this.setSavedRecordHiddenState(record, true);
     this.dispatcher.dispatch({
       type: 'MESSAGE_DELETE',
       id: message.id,
@@ -5880,7 +5950,7 @@ module.exports = class MessageLoggerV2 {
     const message = record?.message;
     if (!record?.delete_data || !message?.id || !record.delete_data.hidden) return false;
     if (record.delete_data.forum_thread_delete) return this.setSavedThreadHidden(record, false);
-    record.delete_data.hidden = false;
+    this.setSavedRecordHiddenState(record, false);
     this._invalidateAndRecache(message.channel_id);
     this.saveData();
     this.scheduleLoggerMenuRefresh();
@@ -5891,12 +5961,23 @@ module.exports = class MessageLoggerV2 {
   hideSavedEdits(record) {
     const message = record?.message;
     if (!record?.edit_history || !message?.id || record.edits_hidden) return false;
-    record.edits_hidden = true;
+    this.setSavedRecordHiddenState(record, true);
     this.saveData();
     this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: message.id });
     this.scheduleLoggerMenuRefresh();
     this.refreshForumThreadLogModal(message.channel_id);
     this.showToast('Hidden!', { type: 'success' });
+    return true;
+  }
+  unhideSavedEdits(record) {
+    const message = record?.message;
+    if (!record?.edit_history || !message?.id || !this.isSavedRecordHidden(record)) return false;
+    this.setSavedRecordHiddenState(record, false);
+    this.saveData();
+    this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: message.id });
+    this.scheduleLoggerMenuRefresh();
+    this.refreshForumThreadLogModal(message.channel_id);
+    this.showToast('Unhidden!', { type: 'success' });
     return true;
   }
   _openUserContextMenu(event, user, channel) {
@@ -5950,6 +6031,102 @@ module.exports = class MessageLoggerV2 {
   _addToChannelSet(setMap, channelId, id) {
     if (!setMap.has(channelId)) setMap.set(channelId, new Set());
     setMap.get(channelId).add(id);
+  }
+  getRuntimeSavedCategoryDescriptors() {
+    // Hot-swaps from pre-Nuked builds can briefly lack the fork-specific collections.
+    this.nukedMessageRecord ||= {};
+    this.nukedMessageSet ||= new Map();
+    return {
+      deleted: {
+        records: this.deletedMessageRecord,
+        sets: this.deletedMessageSet,
+        sorted: this.sortedDeletedMessageIds
+      },
+      edited: {
+        records: this.editedMessageRecord,
+        sets: this.editedMessageSet,
+        sorted: null
+      },
+      purged: {
+        records: this.purgedMessageRecord,
+        sets: this.purgedMessageSet,
+        sorted: this.sortedPurgedMessageIds
+      },
+      nuked: {
+        records: this.nukedMessageRecord,
+        sets: this.nukedMessageSet,
+        sorted: this.sortedNukedMessageIds
+      }
+    };
+  }
+  moveSavedRecordToCategoryIndex(messageId, targetMap) {
+    const id = String(messageId || '');
+    const record = this.messageRecord?.[id];
+    const channelId = record?.message?.channel_id;
+    if (!id || !record || !channelId) return false;
+    const descriptors = this.getRuntimeSavedCategoryDescriptors();
+    const target = Object.values(descriptors).find(category => category.records === targetMap);
+    if (!target) return false;
+    const existingTargetIndex = (target.records[channelId] || [])
+      .findIndex(candidate => String(candidate) === id);
+
+    // Category changes never delete record fields. Only index membership moves, so edit stacks,
+    // ghost state, hidden state, enhanced metadata, and cached-media references remain intact.
+    for (const category of Object.values(descriptors)) {
+      for (const [indexedChannelId, ids] of Object.entries(category.records || {})) {
+        if (!Array.isArray(ids) || !ids.some(candidate => String(candidate) === id)) continue;
+        const remaining = ids.filter(candidate => String(candidate) !== id);
+        if (remaining.length) category.records[indexedChannelId] = remaining;
+        else delete category.records[indexedChannelId];
+        category.sets?.get(indexedChannelId)?.delete(id);
+        if (!category.sets?.get(indexedChannelId)?.size) category.sets?.delete(indexedChannelId);
+        category.sorted?.delete(indexedChannelId);
+      }
+    }
+    const targetIds = target.records[channelId] ||= [];
+    if (existingTargetIndex >= 0) targetIds.splice(Math.min(existingTargetIndex, targetIds.length), 0, id);
+    else targetIds.push(id);
+    this._addToChannelSet(target.sets, channelId, id);
+    target.sorted?.delete(channelId);
+    return true;
+  }
+  canonicalizeRuntimeSavedRecordCategory(messageId) {
+    const id = String(messageId || '');
+    const record = this.messageRecord?.[id];
+    if (!record) return null;
+    const descriptors = this.getRuntimeSavedCategoryDescriptors();
+    const channelId = record.message?.channel_id;
+    const has = category => descriptors[category].sets?.get(channelId)?.has(id)
+      || descriptors[category].records?.[channelId]?.some(candidate => String(candidate) === id);
+    const category = this.getCanonicalSavedBaseCategory(record, {
+      nuked: has('nuked'),
+      purged: has('purged'),
+      deleted: has('deleted'),
+      edited: has('edited')
+    });
+    if (!category) return null;
+    this.moveSavedRecordToCategoryIndex(id, descriptors[category].records);
+    return category;
+  }
+  getSavedRecordDisplayCategory(record, messageId = record?.message?.id) {
+    if (!record) return null;
+    if (this.isSavedRecordHidden(record)) return 'hidden';
+    const id = String(messageId || '');
+    const descriptors = this.getRuntimeSavedCategoryDescriptors();
+    const channelId = record.message?.channel_id;
+    const has = category => descriptors[category].sets?.get(channelId)?.has(id)
+      || descriptors[category].records?.[channelId]?.some(candidate => String(candidate) === id);
+    const baseCategory = this.getCanonicalSavedBaseCategory(record, {
+      nuked: has('nuked'),
+      purged: has('purged'),
+      deleted: has('deleted'),
+      edited: has('edited')
+    });
+    // Nuked is permanent and wins over Ghost Pings. Otherwise a ghost ping remains in its own
+    // view regardless of whether its base event was an edit, single delete, or bulk purge.
+    if (baseCategory === 'nuked') return 'nuked';
+    if (record.ghost_pinged) return 'ghostpings';
+    return baseCategory;
   }
   _getDataPayload() {
     return {
@@ -6432,34 +6609,21 @@ module.exports = class MessageLoggerV2 {
   preservePurgedThreadRootCategory(threadId) {
     const record = this.messageRecord?.[threadId];
     if (!record?.delete_data?.forum_thread_delete || !record.message?.channel_id) return false;
-    const channelId = String(record.message.channel_id);
     const starterWasPurged = Object.values(this.purgedMessageRecord || {})
       .some(ids => Array.isArray(ids) && ids.some(id => String(id) === String(threadId)));
     if (!starterWasPurged) return false;
-    let changed = false;
 
     // A forum root is its starter ID, while a channel-thread starter is folded onto the root ID
     // immediately before this check. Therefore root membership in Purged proves that the original
     // starter itself was bulk-purged. Keep that root historical category even after the containing
     // post/thread disappears; a merely Purged reply must not influence the root category.
-    for (const [indexedChannelId, ids] of Object.entries(this.deletedMessageRecord || {})) {
-      if (!Array.isArray(ids) || !ids.some(id => String(id) === String(threadId))) continue;
-      const remaining = ids.filter(id => String(id) !== String(threadId));
-      if (remaining.length) this.deletedMessageRecord[indexedChannelId] = remaining;
-      else delete this.deletedMessageRecord[indexedChannelId];
-      this.deletedMessageSet.get(indexedChannelId)?.delete(String(threadId));
-      if (!this.deletedMessageSet.get(indexedChannelId)?.size) this.deletedMessageSet.delete(indexedChannelId);
-      this.sortedDeletedMessageIds?.delete(indexedChannelId);
-      changed = true;
-    }
-
-    const purgedIds = this.purgedMessageRecord[channelId] ||= [];
-    if (!purgedIds.some(id => String(id) === String(threadId))) {
-      purgedIds.push(String(threadId));
-      changed = true;
-    }
-    this._addToChannelSet(this.purgedMessageSet, channelId, String(threadId));
-    this.sortedPurgedMessageIds?.delete(channelId);
+    const descriptors = this.getRuntimeSavedCategoryDescriptors();
+    const id = String(threadId);
+    const channelId = String(record.message.channel_id);
+    const has = category => descriptors[category].sets?.get(channelId)?.has(id)
+      || descriptors[category].records?.[channelId]?.some(candidate => String(candidate) === id);
+    const changed = !has('purged') || ['deleted', 'edited', 'nuked'].some(has);
+    this.moveSavedRecordToCategoryIndex(id, this.purgedMessageRecord);
     return changed;
   }
   foldSavedThreadStarterIntoRoot(threadId) {
@@ -6657,6 +6821,9 @@ module.exports = class MessageLoggerV2 {
     replaceContextWithRootInIndex(this.purgedMessageRecord, this.purgedMessageSet, this.sortedPurgedMessageIds);
     replaceContextWithRootInIndex(this.nukedMessageRecord, this.nukedMessageSet, this.sortedNukedMessageIds);
     replaceContextWithRootInIndex(this.editedMessageRecord, this.editedMessageSet, null);
+    // Promotion re-keys every state onto the root before resolving its one visible base
+    // category. Edit history and ghost/hidden overlays remain on the promoted record.
+    this.canonicalizeRuntimeSavedRecordCategory(rootId);
     this.noTintIds?.delete(contextMessageId);
     if (this.editModifiers) delete this.editModifiers[contextMessageId];
     return { rootId, contextMessageId };
@@ -6889,14 +7056,13 @@ module.exports = class MessageLoggerV2 {
     this.nukedMessageSet ||= new Map();
     const sourceCategories = [
       {
-        records: this.deletedMessageRecord,
-        sets: this.deletedMessageSet,
-        sorted: this.sortedDeletedMessageIds
+        records: this.deletedMessageRecord
       },
       {
-        records: this.purgedMessageRecord,
-        sets: this.purgedMessageSet,
-        sorted: this.sortedPurgedMessageIds
+        records: this.editedMessageRecord
+      },
+      {
+        records: this.purgedMessageRecord
       }
     ];
     const candidateIds = new Set();
@@ -6910,30 +7076,21 @@ module.exports = class MessageLoggerV2 {
     let adopted = 0;
     for (const messageId of candidateIds) {
       const record = this.messageRecord?.[messageId];
-      if (!record?.delete_data || !this.isSavedRecordOwnedByDeletedChannel(record, channel)) continue;
-      const targetChannelId = String(record.message.channel_id);
-
-      // A visible deletion belongs to exactly one deletion category. Remove every old
-      // Deleted/Purged index entry while retaining Edited independently and preserving the
-      // record itself, including hidden state, edits, enhanced metadata, and cached media.
-      for (const category of sourceCategories) {
-        for (const [indexedChannelId, ids] of Object.entries(category.records || {})) {
-          if (!Array.isArray(ids) || !ids.some(id => String(id) === messageId)) continue;
-          const remaining = ids.filter(id => String(id) !== messageId);
-          if (remaining.length) category.records[indexedChannelId] = remaining;
-          else delete category.records[indexedChannelId];
-          category.sets?.get(indexedChannelId)?.delete(messageId);
-          if (!category.sets?.get(indexedChannelId)?.size) category.sets?.delete(indexedChannelId);
-          category.sorted?.delete(indexedChannelId);
-        }
+      if (!record || !this.isSavedRecordOwnedByDeletedChannel(record, channel)) continue;
+      const hidden = this.isSavedRecordHidden(record);
+      if (!record.delete_data || typeof record.delete_data !== 'object' || Array.isArray(record.delete_data)) {
+        record.delete_data = {
+          time: Date.now(),
+          location: record.saved_location || this.getMessageLocationSnapshot(record.message)
+        };
       }
-
-      const nukedIds = this.nukedMessageRecord[targetChannelId] ||= [];
-      if (!nukedIds.some(id => String(id) === messageId)) nukedIds.push(messageId);
-      this._addToChannelSet(this.nukedMessageSet, targetChannelId, messageId);
-      this.sortedNukedMessageIds?.delete(targetChannelId);
+      if (hidden) {
+        record.delete_data.hidden = true;
+        if (record.edit_history?.length) record.edits_hidden = true;
+      }
       record.delete_data.anti_nuke = true;
       record.delete_data.anti_nuke_parent_id = String(channel.id);
+      this.moveSavedRecordToCategoryIndex(messageId, this.nukedMessageRecord);
       adopted++;
     }
     return adopted;
@@ -7955,7 +8112,6 @@ module.exports = class MessageLoggerV2 {
     result.delete_data.time = Date.now();
     result.delete_data.location = result.saved_location || this.getMessageLocationSnapshot(message);
     result.ghost_pinged = result.local_mentioned;
-    if (!Array.isArray(targetMessageRecord[channelId])) targetMessageRecord[channelId] = [];
     if (this.messageRecord[id]) {
       // Deletion is another state on the same canonical record, not a replacement record.
       // Reuse the normal merge helper so a prior Hidden edit or ghost ping keeps its history,
@@ -7965,6 +8121,12 @@ module.exports = class MessageLoggerV2 {
     } else {
       this.messageRecord[id] = result;
       this.messageRecordIds.add(id);
+    }
+    // Hidden is global display state. When a previously hidden edit becomes a deletion, keep
+    // both representations aligned so one Unhide action restores the complete shared record.
+    if (this.isSavedRecordHidden(this.messageRecord[id])) {
+      this.messageRecord[id].delete_data.hidden = true;
+      if (this.messageRecord[id].edit_history?.length) this.messageRecord[id].edits_hidden = true;
     }
     if (this.messageRecord[id].message.attachments) {
       const attachments = this.messageRecord[id].message.attachments;
@@ -7980,19 +8142,7 @@ module.exports = class MessageLoggerV2 {
       }
     }
     if (this.settings.cacheAllImages) this.cacheMessageImages(this.messageRecord[id].message);
-    targetMessageRecord[channelId].push(id);
-    const sortedCache = targetMessageRecord === this.deletedMessageRecord
-      ? this.sortedDeletedMessageIds
-      : targetMessageRecord === this.nukedMessageRecord
-        ? this.sortedNukedMessageIds
-        : this.sortedPurgedMessageIds;
-    sortedCache.delete(channelId);
-    const targetSet = targetMessageRecord === this.deletedMessageRecord
-      ? this.deletedMessageSet
-      : targetMessageRecord === this.nukedMessageRecord
-        ? this.nukedMessageSet
-        : this.purgedMessageSet;
-    this._addToChannelSet(targetSet, channelId, id);
+    this.moveSavedRecordToCategoryIndex(id, targetMessageRecord);
   }
   createButton(label, callback) {
     const classes = this.createButton.classes;
@@ -11573,28 +11723,29 @@ module.exports = class MessageLoggerV2 {
                 }
               });
             }
-            if (record.edits_hidden) {
-              menuItems.push({
-                type: 'item',
-                label: 'Unhide Edits',
-                action: () => {
-                  ContextMenu.close();
-                  record.edits_hidden = false;
-                  this.saveData();
-                  this.scheduleLoggerMenuRefresh();
-                  this.refreshForumThreadLogModal(record.message.channel_id);
-                  this.showToast('Unhidden!', { type: 'success' });
-                }
-              });
-            } else {
-              menuItems.push({
-                type: 'item',
-                label: 'Hide Edits',
-                action: () => {
-                  ContextMenu.close();
-                  this.hideSavedEdits(record);
-                }
-              });
+            // Once a record has deletion state, its one global Hide/Unhide control is provided
+            // by that active base category. Edit history remains manageable but is not a second
+            // independently visible category.
+            if (!record.delete_data) {
+              if (record.edits_hidden) {
+                menuItems.push({
+                  type: 'item',
+                  label: 'Unhide Edits',
+                  action: () => {
+                    ContextMenu.close();
+                    this.unhideSavedEdits(record);
+                  }
+                });
+              } else {
+                menuItems.push({
+                  type: 'item',
+                  label: 'Hide Edits',
+                  action: () => {
+                    ContextMenu.close();
+                    this.hideSavedEdits(record);
+                  }
+                });
+              }
             }
           }
           menuItems.push(
@@ -12104,28 +12255,16 @@ module.exports = class MessageLoggerV2 {
   }
   getFilteredMessages() {
     let messages = [];
-    const isHiddenRecord = record => this.isSavedRecordHidden(record);
-    const pushIdsIntoMessages = (map, includeRecord = record => !isHiddenRecord(record)) => {
+    const seen = new Set();
+    const pushIdsIntoMessages = (map, category) => {
       for (let channel in map) {
         for (let messageIdIDX in map[channel]) {
           const messageId = map[channel][messageIdIDX];
-          if (!includeRecord(this.getSavedMessage(messageId))) continue;
+          const normalizedId = String(messageId);
+          if (seen.has(normalizedId)) continue;
+          if (this.getSavedRecordDisplayCategory(this.getSavedMessage(messageId), messageId) !== category) continue;
+          seen.add(normalizedId);
           messages.push(messageId);
-        }
-      }
-    };
-    const checkIsMentioned = map => {
-      for (let channel in map) {
-        for (let messageIdIDX in map[channel]) {
-          const messageId = map[channel][messageIdIDX];
-          const record = this.getSavedMessage(messageId);
-          if (!record) continue;
-          if (isHiddenRecord(record)) continue;
-          if (record.ghost_pinged) {
-            // Edited-and-deleted ghost pings share one canonical record but can be referenced by
-            // several category indexes. The Ghost Pings tab renders that record exactly once.
-            if (!messages.some(id => String(id) === String(messageId))) messages.push(messageId);
-          }
         }
       }
     };
@@ -12134,22 +12273,21 @@ module.exports = class MessageLoggerV2 {
         messages.push(i.id);
       }
     }
-    if (this.menu.selectedTab == 'edited') pushIdsIntoMessages(this.editedMessageRecord);
-    if (this.menu.selectedTab == 'deleted') pushIdsIntoMessages(this.deletedMessageRecord);
-    if (this.menu.selectedTab == 'purged') pushIdsIntoMessages(this.purgedMessageRecord);
+    if (this.menu.selectedTab == 'edited') pushIdsIntoMessages(this.editedMessageRecord, 'edited');
+    if (this.menu.selectedTab == 'deleted') pushIdsIntoMessages(this.deletedMessageRecord, 'deleted');
+    if (this.menu.selectedTab == 'purged') pushIdsIntoMessages(this.purgedMessageRecord, 'purged');
     if (this.menu.selectedTab == 'nuked' && this.settings.antiNukeEnabled) {
-      pushIdsIntoMessages(this.nukedMessageRecord);
+      pushIdsIntoMessages(this.nukedMessageRecord, 'nuked');
     }
     if (this.menu.selectedTab == 'hidden') {
       messages = Object.entries(this.messageRecord)
-        .filter(([, record]) => isHiddenRecord(record))
+        .filter(([messageId, record]) => this.getSavedRecordDisplayCategory(record, messageId) === 'hidden')
         .map(([messageId]) => messageId);
     }
     if (this.menu.selectedTab == 'ghostpings') {
-      checkIsMentioned(this.deletedMessageRecord);
-      checkIsMentioned(this.editedMessageRecord);
-      checkIsMentioned(this.purgedMessageRecord);
-      checkIsMentioned(this.nukedMessageRecord);
+      messages = Object.entries(this.messageRecord)
+        .filter(([messageId, record]) => this.getSavedRecordDisplayCategory(record, messageId) === 'ghostpings')
+        .map(([messageId]) => messageId);
     }
     const filters = this.menu.filter.split(',');
     for (const filterItem of filters) {
@@ -12637,15 +12775,11 @@ module.exports = class MessageLoggerV2 {
             }
           );
         }
-        if (record.edit_history && options.editTarget) {
+        if (record.edit_history && options.editTarget && !record.delete_data) {
           if (record.edits_hidden) {
             addElement(
               'Unhide Edits',
-              () => {
-                record.edits_hidden = false;
-                this.saveData();
-                this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
-              }
+              () => this.unhideSavedEdits(record)
             );
           } else {
             let target = options.editTarget;

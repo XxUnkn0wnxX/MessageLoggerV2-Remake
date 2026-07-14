@@ -407,7 +407,8 @@ test('distinct thread starters fold into one root while replies remain separate 
   assert.equal(root.delete_data.forum_thread_message_delete, undefined);
   assert.equal(normalized.messageRecord[replyId].message.content, 'message B');
   assert.deepEqual(normalized.deletedMessageRecord, { [rootId]: [rootId, replyId] });
-  assert.deepEqual(normalized.editedMessageRecord, { [rootId]: [rootId] });
+  assert.deepEqual(normalized.editedMessageRecord, {});
+  assert.deepEqual(root.edit_history, [{ content: 'starter before edit', time: 200 }]);
   assert.equal(JSON.stringify(plugin.normalizePersistedDataPayload(normalized)), JSON.stringify(normalized));
 });
 
@@ -698,7 +699,7 @@ test('normalization migrates Anti-Nuke records out of Purged into the fork-speci
 
   assert.deepEqual(normalized.purgedMessageRecord, { 'live-channel': [ordinaryPurgedId] });
   assert.deepEqual(normalized.nukedMessageRecord, { 'deleted-channel': [antiNukeId] });
-  assert.deepEqual(normalized.editedMessageRecord, { 'deleted-channel': [antiNukeId] });
+  assert.deepEqual(normalized.editedMessageRecord, {});
   assert.equal(normalized.messageRecord[antiNukeId].delete_data.anti_nuke, true);
   assert.equal(JSON.stringify(plugin.normalizePersistedDataPayload(normalized)), JSON.stringify(normalized));
 });
@@ -791,7 +792,7 @@ test('full root deletion keeps a Purged starter in Purged while reply-only purge
 
   assert.equal(plugin.saveCachedForumThreadMessagesForDelete(rootId), 0);
   assert.equal(plugin.foldSavedThreadStarterIntoRoot(rootId), true);
-  assert.equal(plugin.preservePurgedThreadRootCategory(rootId), true);
+  assert.equal(plugin.preservePurgedThreadRootCategory(rootId), false, 'folding already canonicalized the Purged root');
   assert.deepEqual(Object.keys(plugin.messageRecord).sort(), [rootId, replyId]);
   assert.equal(plugin.messageRecord[rootId].message.content, 'initial body');
   assert.deepEqual(plugin.deletedMessageRecord, {});
@@ -1011,7 +1012,7 @@ test('a full deleted root promotes the absolute oldest saved context regardless 
   assert.deepEqual(Object.keys(plugin.messageRecord).sort(), [rootId, oldestId, laterId]);
   assert.deepEqual(plugin.deletedMessageRecord, { [rootId]: [rootId, laterId] });
   assert.deepEqual(plugin.purgedMessageRecord, { [rootId]: [oldestId] });
-  assert.deepEqual(plugin.editedMessageRecord, { [rootId]: [rootId] });
+  assert.deepEqual(plugin.editedMessageRecord, {});
   assert.deepEqual(plugin.deletedMessageSet.get(rootId), new Set([rootId, laterId]));
   assert.deepEqual(plugin.purgedMessageSet.get(rootId), new Set([oldestId]));
   assert.deepEqual(plugin.getRecordCacheSourceMessageIds(promoted), new Set([rootId, hiddenId]));
@@ -1082,7 +1083,7 @@ test('an older edit-only ghost ping beats newer Deleted and Purged context', () 
   assert.equal(plugin.messageRecord[rootId].ghost_pinged, true);
   assert.equal(plugin.messageRecord[rootId].local_mentioned, true);
   assert.deepEqual(plugin.deletedMessageRecord, { [rootId]: [rootId, deletedId] });
-  assert.deepEqual(plugin.editedMessageRecord, { [rootId]: [rootId] });
+  assert.deepEqual(plugin.editedMessageRecord, {});
   assert.deepEqual(plugin.purgedMessageRecord, { [rootId]: [purgedId] });
 
   plugin.menu = { selectedTab: 'ghostpings', filter: '' };
@@ -1152,6 +1153,120 @@ test('shared deletion capture merges Anti-Nuke state into an existing edit and g
   assert.deepEqual(merged.logged_attachments, existing.logged_attachments);
   assert.deepEqual(plugin.nukedMessageRecord, { [channelId]: [messageId] });
   assert.deepEqual(plugin.nukedMessageSet.get(channelId), new Set([messageId]));
+});
+
+test('display precedence stays Hidden then Nuked then Ghost Pings then Purged then Deleted then Edited', () => {
+  const channelId = 'category-channel';
+  const ids = {
+    edited: '701',
+    deleted: '702',
+    purged: '703',
+    ghostEdited: '704',
+    ghostDeleted: '705',
+    ghostPurged: '706',
+    ghostNuked: '707',
+    hiddenNuked: '708',
+    hiddenEdited: '709'
+  };
+  const saved = (id, options = {}) => ({
+    message: {
+      id,
+      channel_id: channelId,
+      content: `message-${id}`,
+      timestamp: Number(id),
+      attachments: [],
+      embeds: []
+    },
+    delete_data: options.deleted
+      ? {
+          time: Number(id),
+          ...(options.nuked ? { anti_nuke: true } : {}),
+          ...(options.hidden ? { hidden: true } : {})
+        }
+      : null,
+    edit_history: options.edited
+      ? [{ content: `first-${id}`, time: Number(id) - 2 }, { content: `second-${id}`, time: Number(id) - 1 }]
+      : null,
+    edits_hidden: !!(options.hidden && options.edited),
+    ghost_pinged: !!options.ghost,
+    logged_attachments: []
+  });
+  const records = {
+    [ids.edited]: saved(ids.edited, { edited: true }),
+    [ids.deleted]: saved(ids.deleted, { edited: true, deleted: true }),
+    [ids.purged]: saved(ids.purged, { edited: true, deleted: true }),
+    [ids.ghostEdited]: saved(ids.ghostEdited, { edited: true, ghost: true }),
+    [ids.ghostDeleted]: saved(ids.ghostDeleted, { edited: true, deleted: true, ghost: true }),
+    [ids.ghostPurged]: saved(ids.ghostPurged, { edited: true, deleted: true, ghost: true }),
+    [ids.ghostNuked]: saved(ids.ghostNuked, { edited: true, deleted: true, ghost: true, nuked: true }),
+    [ids.hiddenNuked]: saved(ids.hiddenNuked, { edited: true, deleted: true, ghost: true, nuked: true, hidden: true }),
+    [ids.hiddenEdited]: saved(ids.hiddenEdited, { edited: true, ghost: true, hidden: true })
+  };
+  const plugin = createPlugin();
+  plugin.installDataPayload({
+    messageRecord: records,
+    deletedMessageRecord: {
+      [channelId]: [ids.deleted, ids.purged, ids.ghostDeleted, ids.ghostPurged, ids.ghostNuked, ids.hiddenNuked]
+    },
+    editedMessageRecord: { [channelId]: Object.values(ids) },
+    purgedMessageRecord: { [channelId]: [ids.purged, ids.ghostPurged, ids.ghostNuked, ids.hiddenNuked] },
+    nukedMessageRecord: { [channelId]: [ids.ghostNuked, ids.hiddenNuked] },
+    suppressedForumThreadIds: []
+  });
+  plugin.settings = { antiNukeEnabled: true, reverseOrder: false, cacheAllImages: false };
+  plugin.menu = { selectedTab: 'edited', filter: '' };
+
+  assert.deepEqual(plugin.editedMessageRecord, {
+    [channelId]: [ids.edited, ids.ghostEdited, ids.hiddenEdited]
+  });
+  assert.deepEqual(plugin.deletedMessageRecord, { [channelId]: [ids.deleted, ids.ghostDeleted] });
+  assert.deepEqual(plugin.purgedMessageRecord, { [channelId]: [ids.purged, ids.ghostPurged] });
+  assert.deepEqual(plugin.nukedMessageRecord, { [channelId]: [ids.ghostNuked, ids.hiddenNuked] });
+
+  const expectedTabs = {
+    edited: [ids.edited],
+    deleted: [ids.deleted],
+    purged: [ids.purged],
+    ghostpings: [ids.ghostEdited, ids.ghostDeleted, ids.ghostPurged],
+    nuked: [ids.ghostNuked],
+    hidden: [ids.hiddenNuked, ids.hiddenEdited]
+  };
+  for (const [tab, expected] of Object.entries(expectedTabs)) {
+    plugin.menu.selectedTab = tab;
+    assert.deepEqual(new Set(plugin.getFilteredMessages()), new Set(expected), `${tab} follows exclusive display precedence`);
+  }
+  for (const id of Object.values(ids)) {
+    assert.equal(plugin.messageRecord[id].edit_history?.length, 2, `${id} retains its full edit stack`);
+  }
+
+  // Exercise the live transition path as well as startup normalization: Edited -> Deleted ->
+  // Purged -> Nuked changes only the base index and never strips the edit stack.
+  plugin.createMiniFormattedData = message => ({
+    message: structuredClone(message),
+    saved_location: { channelId },
+    local_mentioned: false,
+    ghost_pinged: false,
+    logged_attachments: []
+  });
+  let transitioning = plugin.messageRecord[ids.edited];
+  const originalEdits = structuredClone(transitioning.edit_history);
+  plugin.saveDeletedMessage(transitioning.message, plugin.deletedMessageRecord);
+  transitioning = plugin.messageRecord[ids.edited];
+  assert.equal(plugin.getSavedRecordDisplayCategory(transitioning, ids.edited), 'deleted');
+  plugin.saveDeletedMessage(transitioning.message, plugin.purgedMessageRecord);
+  transitioning = plugin.messageRecord[ids.edited];
+  assert.equal(plugin.getSavedRecordDisplayCategory(transitioning, ids.edited), 'purged');
+  transitioning.ghost_pinged = true;
+  assert.equal(plugin.getSavedRecordDisplayCategory(transitioning, ids.edited), 'ghostpings');
+  plugin.saveDeletedMessage(transitioning.message, plugin.nukedMessageRecord);
+  transitioning = plugin.messageRecord[ids.edited];
+  transitioning.delete_data.anti_nuke = true;
+  assert.equal(plugin.getSavedRecordDisplayCategory(transitioning, ids.edited), 'nuked');
+  assert.deepEqual(transitioning.edit_history, originalEdits);
+  assert.equal(plugin.editedMessageSet.get(channelId)?.has(ids.edited) || false, false);
+  assert.equal(plugin.deletedMessageSet.get(channelId)?.has(ids.edited) || false, false);
+  assert.equal(plugin.purgedMessageSet.get(channelId)?.has(ids.edited) || false, false);
+  assert.equal(plugin.nukedMessageSet.get(channelId)?.has(ids.edited), true);
 });
 
 test('starter edits replace cached thread content before deletion capture', () => {

@@ -561,11 +561,12 @@ test('high-impact setting changes use routed theme-aware state feedback', () => 
 
 test('Nuked uses a fork-specific persisted index and migrates old Anti-Nuke records out of Purged', () => {
   assert.match(source, /isNukedRecord\(record\)[\s\S]*delete_data\?\.anti_nuke/);
-  assert.match(source, /migrateAntiNukeCategoryRecords\(data\)[\s\S]*\['deletedMessageRecord', 'purgedMessageRecord'\][\s\S]*data\.nukedMessageRecord = canonicalNuked/);
+  assert.match(source, /migrateAntiNukeCategoryRecords\(data\)[\s\S]*\['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord'\][\s\S]*data\.nukedMessageRecord = canonicalNuked/);
   assert.match(source, /record\.delete_data\.anti_nuke \? data\.nukedMessageRecord : data\.deletedMessageRecord/);
   assert.match(source, /saveDeletedChannelCaptureMessage\(root, this\.nukedMessageRecord/);
-  assert.match(source, /selectedTab == 'purged'[\s\S]*pushIdsIntoMessages\(this\.purgedMessageRecord\)/);
-  assert.match(source, /selectedTab == 'nuked'[\s\S]*this\.settings\.antiNukeEnabled[\s\S]*pushIdsIntoMessages\(this\.nukedMessageRecord\)/);
+  assert.match(source, /selectedTab == 'purged'[\s\S]*pushIdsIntoMessages\(this\.purgedMessageRecord, 'purged'\)/);
+  assert.match(source, /selectedTab == 'nuked'[\s\S]*this\.settings\.antiNukeEnabled[\s\S]*pushIdsIntoMessages\(this\.nukedMessageRecord, 'nuked'\)/);
+  assert.match(source, /getSavedRecordDisplayCategory\(record,[\s\S]*isSavedRecordHidden\(record\)[\s\S]*return 'hidden';[\s\S]*if \(baseCategory === 'nuked'\) return 'nuked';[\s\S]*if \(record\.ghost_pinged\) return 'ghostpings';[\s\S]*return baseCategory/);
   assert.match(source, /if \(this\.settings\.antiNukeEnabled\) tabs\.appendChild\(createTab\('Nuked', 'nuked'\)\)/);
   assert.match(source, /isLoggerTabAvailable\(tab\)[\s\S]*tab === 'hidden'[\s\S]*showHiddenTab[\s\S]*tab === 'nuked'[\s\S]*antiNukeEnabled/);
   assert.match(source, /nukedMessageRecord: \{\}/);

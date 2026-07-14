@@ -33,7 +33,8 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 ## 🗃️ Record Model and Indexes
 
 - `messageRecord` is the source of truth keyed by Discord message ID.
-- `deletedMessageRecord`, `editedMessageRecord`, `purgedMessageRecord`, and fork-specific `nukedMessageRecord` are channel-to-ID indexes. A record may also retain independent Edited membership, but each deletion belongs to only Deleted, Purged, or Nuked.
+- `deletedMessageRecord`, `editedMessageRecord`, `purgedMessageRecord`, and fork-specific `nukedMessageRecord` are mutually exclusive channel-to-ID base indexes. Edit stacks, ghost-ping state, hidden state, metadata, and media remain on the shared canonical record.
+- Display precedence is `Hidden > Nuked > Ghost Pings > Purged > Deleted > Edited`. Hidden and Ghost Pings are visibility overlays; Nuked permanently overrides Ghost Pings.
 - Matching `*MessageSet` maps mirror those indexes for fast membership checks.
 - `suppressedForumThreadIds` prevents intentionally hidden or removed restored roots from reappearing.
 - `_getDataPayload`, `installDataPayload`, and `sanitizeDataPayload` define the persisted/runtime boundary and rebuild derived sets and sorted caches.

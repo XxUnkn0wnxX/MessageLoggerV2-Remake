@@ -581,7 +581,7 @@ test('deleted-channel capture adopts visible and hidden Deleted/Purged records i
     [threadId]: [threadRootId, threadReplyId],
     [purgedRootThreadId]: [purgedRootThreadId, purgedRootReplyId]
   });
-  assert.deepEqual(plugin.editedMessageRecord, { [parentId]: [directDeletedId] });
+  assert.deepEqual(plugin.editedMessageRecord, {});
   for (const id of [
     directDeletedId,
     directPurgedId,
