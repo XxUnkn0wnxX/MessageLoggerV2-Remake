@@ -311,10 +311,7 @@ module.exports = class MessageLoggerV2 {
         clearTimeout(context.cleanupTimer);
       }
       this._destructiveChannelDeleteContexts?.clear?.();
-      for (const timeout of this._liveThreadRecordRefreshTimers?.values?.() || []) {
-        clearTimeout(timeout);
-      }
-      this._liveThreadRecordRefreshTimers?.clear?.();
+      this._nativeDeletedForumPreviewText?.clear?.();
       this._clearNativeNotificationQueue();
       if (this.menu?.filterSetTimeout) clearTimeout(this.menu.filterSetTimeout);
       if (this.keydownListener) {
@@ -8903,25 +8900,6 @@ module.exports = class MessageLoggerV2 {
     this.rememberLocalDeleteId(messageId);
     return original(...args);
   }
-  scheduleLiveThreadRecordCacheRefresh(channelId, messageId) {
-    const savedChannelId = String(channelId ?? '');
-    const id = String(messageId ?? '');
-    if (!savedChannelId || !id || !this.channelMessages?.[savedChannelId]) return;
-    this._liveThreadRecordRefreshTimers ||= new Map();
-    const key = `${savedChannelId}:${id}`;
-    clearTimeout(this._liveThreadRecordRefreshTimers.get(key));
-    // Discord owns the live forum/thread tree. Let its native Delete confirmation and current
-    // React commit finish before a network cache refresh removes Logger's injected message.
-    // An immediate MESSAGE_DELETE here races that commit and can make React remove/insert a DOM
-    // child whose native forum preview was already replaced.
-    const timeout = setTimeout(() => {
-      this._liveThreadRecordRefreshTimers?.delete?.(key);
-      if (this.messageRecord?.[id]?.delete_data || !this.channelMessages?.[savedChannelId]) return;
-      this.invalidateChannelCache(savedChannelId);
-      this.cacheChannelMessages(savedChannelId);
-    }, 500);
-    this._liveThreadRecordRefreshTimers.set(key, timeout);
-  }
   removeSavedDeletedRecordFromLog(channelId, messageId, options = {}) {
     const requestedChannelId = String(channelId ?? '');
     const id = String(messageId ?? '');
@@ -8942,6 +8920,19 @@ module.exports = class MessageLoggerV2 {
       : null;
     const keepsDiscordOwnedThreadMount = wasMounted
       && [10, 11, 12].includes(Number(liveSavedChannel?.type));
+    const preservesNativeForumStarterPreview = keepsDiscordOwnedThreadMount
+      && id === savedChannelId
+      && this.isForumThreadChannel?.(liveSavedChannel);
+    if (preservesNativeForumStarterPreview) {
+      const mountedPreview = this.getForumCardDomMetadata?.(savedChannelId)?.preview;
+      const preview = String(mountedPreview || record.message?.content || '').trim();
+      if (preview) {
+        this._nativeDeletedForumPreviewText ||= new Map();
+        this._nativeDeletedForumPreviewText.set(savedChannelId, preview);
+      }
+    }
+    const shouldRefreshLiveThreadCache = keepsDiscordOwnedThreadMount
+      && !!this.channelMessages?.[savedChannelId];
     const shouldRefreshChannelCache = !removesThreadRoot
       && !keepsDiscordOwnedThreadMount
       && wasMounted
@@ -8965,9 +8956,17 @@ module.exports = class MessageLoggerV2 {
 
     // ML2 marks ordinary synthetic UI cleanup so the dispatch interceptor never logs it as a
     // new remote deletion. A still-live forum/thread must not receive that immediate Discord
-    // deletion event: refresh its cache after native React reconciliation instead.
+    // deletion event because it races the native card's React tree. Refetching its message cache
+    // is safe: the original crash occurred before that asynchronous response was applied.
     if (keepsDiscordOwnedThreadMount) {
-      this.scheduleLiveThreadRecordCacheRefresh(savedChannelId, id);
+      if (shouldRefreshLiveThreadCache) {
+        this.invalidateChannelCache(savedChannelId);
+        this.cacheChannelMessages(savedChannelId);
+      }
+      // Apply the preview-only tint in the same turn as the local removal. The scheduled
+      // reconciliation below still catches Discord replacing or remounting the card later,
+      // including its post-reload "Original message was deleted" placeholder.
+      this._tintSweep?.();
       this.scheduleForumListRefresh?.();
     } else {
       this.dispatcher?.dispatch?.({
@@ -9740,12 +9739,28 @@ module.exports = class MessageLoggerV2 {
       });
       return changed;
     };
+    const getForumPreviewTextTarget = (card) => card?.querySelector?.(
+      '[class*="messageFocusBlock_"] [class*="messageContent_"], [class*="message_"] [class*="messageContent_"], [class*="messageContent_"]'
+    ) || null;
+    const getNativeDeletedForumPlaceholder = (card) => {
+      if (!card || card.hasAttribute?.('data-ml2-restored-forum-card')) return null;
+      const target = getForumPreviewTextTarget(card);
+      return target?.textContent?.trim?.() === 'Original message was deleted' ? target : null;
+    };
+    const getRememberedDeletedForumPreview = (card, threadId) => {
+      if (!card || !threadId || card.hasAttribute?.('data-ml2-restored-forum-card')) return null;
+      const expected = this._nativeDeletedForumPreviewText?.get?.(threadId);
+      if (!expected) return null;
+      const target = getForumPreviewTextTarget(card);
+      const normalize = value => String(value || '').trim().replace(/\s+/g, ' ');
+      return target && normalize(target.textContent) === normalize(expected) ? target : null;
+    };
     const addForumTextTint = (card, messageId) => {
       if (!card || card.nodeType !== 1 || this.noTintIds.has(messageId)) return false;
       // A surviving forum post or channel thread is not itself deleted. Tint only the
       // exact saved preview body; its native title and card background must stay intact.
       const target = card.querySelector(`[id="message-content-${messageId}"]`)
-        || card.querySelector('[class*="messageFocusBlock_"] [class*="messageContent_"], [class*="message_"] [class*="messageContent_"], [class*="messageContent_"]');
+        || getForumPreviewTextTarget(card);
       if (!target) return false;
       if (!target.classList.contains(this.style.deletedForumText)) target.classList.add(this.style.deletedForumText);
       return true;
@@ -9795,6 +9810,48 @@ module.exports = class MessageLoggerV2 {
       contents.push(...root.querySelectorAll('[id^="message-content-"]'));
       let found = false;
       for (const content of contents) found = tintNativeThreadBrowserPreviewContent(content) || found;
+      return found;
+    };
+    const getNativeDeletedThreadHeaderPlaceholder = (container) => {
+      const match = container?.id?.match?.(/^chat-messages-(\d+)-(\d+)$/);
+      if (!match || match[1] !== match[2]) return null;
+      const thread = this.tools?.getChannel?.(match[1]);
+      if (thread && ![10, 11, 12].includes(Number(thread.type))) return null;
+      // Discord renders the missing starter as a self-keyed system row, separate from the
+      // forum-list card and ordinary messages. Require the exact native leaf text so a user
+      // message, thread title, or reply containing the same words cannot be recolored.
+      return Array.from(container.querySelectorAll?.('span, div, p') || [])
+        .find(node => node.children.length === 0
+          && node.textContent?.trim?.() === 'Original message was deleted') || null;
+    };
+    const tintNativeDeletedThreadHeaderPlaceholders = (root = document) => {
+      if (!root?.querySelectorAll) return false;
+      const containers = new Set();
+      const closest = root.nodeType === 1
+        ? root.matches?.('[id^="chat-messages-"]')
+          ? root
+          : root.closest?.('[id^="chat-messages-"]')
+        : null;
+      if (closest) containers.add(closest);
+      root.querySelectorAll('[id^="chat-messages-"]').forEach(node => containers.add(node));
+      let found = false;
+      for (const container of containers) {
+        const match = container.id?.match?.(/^chat-messages-(\d+)-(\d+)$/);
+        if (!match || match[1] !== match[2]) continue;
+        const threadId = match[1];
+        const placeholder = getNativeDeletedThreadHeaderPlaceholder(container);
+        const shouldTint = !!placeholder
+          && this.settings.showDeletedMessages
+          && !this.noTintIds.has(threadId);
+        container.querySelectorAll?.(`.${this.style.deletedForumText}`).forEach(target => {
+          if (!shouldTint || target !== placeholder) target.classList.remove(this.style.deletedForumText);
+        });
+        if (!shouldTint) continue;
+        if (!placeholder.classList.contains(this.style.deletedForumText)) {
+          placeholder.classList.add(this.style.deletedForumText);
+        }
+        found = true;
+      }
       return found;
     };
     const addTintClass = (target) => {
@@ -9923,6 +9980,24 @@ module.exports = class MessageLoggerV2 {
       if (!threadId) return false;
       if (!shouldTintMessage(threadId, threadId) || this.noTintIds.has(threadId)) {
         clearTintClassesFromNodes(forumTintTargets);
+        const nativeDeletedPlaceholder = getNativeDeletedForumPlaceholder(card);
+        if (nativeDeletedPlaceholder) this._nativeDeletedForumPreviewText?.delete?.(threadId);
+        const nativeDeletedPreview = this.settings.showDeletedMessages
+          ? nativeDeletedPlaceholder || getRememberedDeletedForumPreview(card, threadId)
+          : null;
+        if (nativeDeletedPreview && !this.noTintIds.has(threadId)) {
+          // Discord replaces a missing forum starter with this native placeholder only after
+          // its own forum snapshot refreshes (commonly on reload). Until then, the exact native
+          // snapshot captured during local removal stays red as well. Neither state has a Logger
+          // record or message ID, so tint only the preview without styling the title.
+          card.querySelectorAll?.(`.${this.style.deletedForumText}`).forEach(target => {
+            if (target !== nativeDeletedPreview) target.classList.remove(this.style.deletedForumText);
+          });
+          if (!nativeDeletedPreview.classList.contains(this.style.deletedForumText)) {
+            nativeDeletedPreview.classList.add(this.style.deletedForumText);
+          }
+          return true;
+        }
         clearForumTextTint(card);
         return false;
       }
@@ -9953,6 +10028,22 @@ module.exports = class MessageLoggerV2 {
       }
       clearTintClassesFromNodes(forumTintTargets.filter(node => node !== card));
       return addTintClass(card);
+    };
+    const tintNativeDeletedForumPlaceholders = (root = document) => {
+      if (!root?.querySelectorAll) return false;
+      const cards = [];
+      if (root.matches?.('[data-item-id]')) cards.push(root);
+      cards.push(...root.querySelectorAll('[data-item-id]'));
+      let found = false;
+      for (const card of cards) {
+        const threadId = card.getAttribute?.('data-item-id');
+        if (!threadId || !/^\d+$/.test(threadId)) continue;
+        if (!getNativeDeletedForumPlaceholder(card)
+          && !getRememberedDeletedForumPreview(card, threadId)
+          && !card.querySelector?.(`.${this.style.deletedForumText}`)) continue;
+        found = tintForumCardByThreadId(threadId) || found;
+      }
+      return found;
     };
     const isForumListChannel = (channel) => channel?.type === 15 || channel?.type === 16;
     // Restored roots are presentation for a structurally deleted post/thread, regardless of
@@ -10791,6 +10882,12 @@ module.exports = class MessageLoggerV2 {
       // This scan also removes preview-only tint when its record or visibility setting no
       // longer qualifies, without changing Discord's native thread title/background.
       tintNativeThreadBrowserPreviews(document);
+      // Native forum placeholders are not backed by a message record. Scan the mounted cards
+      // explicitly so startup/reload can apply or clear their preview-only deleted tint.
+      tintNativeDeletedForumPlaceholders(document);
+      // The open forum/thread view uses a second self-keyed system row for the same native
+      // placeholder. Tint only that exact leaf; ordinary reply messages remain independent.
+      tintNativeDeletedThreadHeaderPlaceholders(document);
       if (!this.settings.showDeletedMessages && !this.settings.showPurgedMessages) return;
       removeSuppressedForumCards();
       document.querySelectorAll('[id^="chat-messages-"]').forEach(tintMessageNode);
@@ -10812,6 +10909,7 @@ module.exports = class MessageLoggerV2 {
           const targetMessageNode = getMessageNodeFromAnyNode(m.target);
           if (targetMessageNode) tintMessageNode(targetMessageNode);
           tintNativeThreadBrowserPreviews(m.target);
+          tintNativeDeletedThreadHeaderPlaceholders(m.target);
           this.captureNativeDeleteButtonPresentation(m.target);
           wireNativeRestoredMessageDeleteControls(m.target);
           const targetThreadId = getForumThreadIdFromAnyNode(m.target);
@@ -10826,6 +10924,7 @@ module.exports = class MessageLoggerV2 {
             const messageNode = getMessageNodeFromAnyNode(node);
             if (messageNode) tintMessageNode(messageNode);
             tintNativeThreadBrowserPreviews(node);
+            tintNativeDeletedThreadHeaderPlaceholders(node);
             const threadId = getForumThreadIdFromAnyNode(node);
             if (threadId && !removedSuppressed) tintForumCardByThreadId(threadId);
             if (!node.querySelectorAll) continue;
@@ -10845,6 +10944,7 @@ module.exports = class MessageLoggerV2 {
           const messageNode = getMessageNodeFromAnyNode(t);
           if (messageNode) tintMessageNode(messageNode);
           tintNativeThreadBrowserPreviews(t);
+          tintNativeDeletedThreadHeaderPlaceholders(t);
           const threadId = getForumThreadIdFromAnyNode(t);
           if (threadId) tintForumCardByThreadId(threadId);
         }

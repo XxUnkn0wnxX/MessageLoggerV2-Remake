@@ -272,7 +272,7 @@ test('restored forum cards and compact threads mount from visible Deleted or Pur
 
 test('surviving forum and thread cards tint only their deleted preview body', () => {
   const previewTint = source.slice(
-    source.indexOf('const addForumTextTint ='),
+    source.indexOf('const getForumPreviewTextTarget ='),
     source.indexOf('const addTintClass =')
   );
   assert.match(previewTint, /message-content-\$\{messageId\}/);
@@ -282,7 +282,13 @@ test('surviving forum and thread cards tint only their deleted preview body', ()
   assert.match(previewTint, /closest\?\.\('div\[role="button"\]'\)[\s\S]*h2 \[class\*="threadName_"\]/);
   assert.match(previewTint, /input\[placeholder="Search for Thread Name"\]/);
   assert.match(previewTint, /clearTintClasses\(card\);[\s\S]*shouldTintPreview[\s\S]*clearForumTextTint\(card\);[\s\S]*target !== content[\s\S]*addForumTextTint\(card, messageId\)/);
+  assert.match(previewTint, /Original message was deleted/);
+  assert.match(previewTint, /_nativeDeletedForumPreviewText/);
+  assert.match(previewTint, /tintNativeDeletedThreadHeaderPlaceholders[\s\S]*\^chat-messages-\(\\d\+\)-\(\\d\+\)\$/);
+  assert.match(previewTint, /match\[1\] !== match\[2\][\s\S]*node\.children\.length === 0/);
   assert.match(source, /scheduleTintForMessage[\s\S]*tintNativeThreadBrowserPreviewByMessageId\(messageId\)/);
+  assert.match(source, /tintNativeDeletedForumPlaceholders\(document\)/);
+  assert.match(source, /tintNativeDeletedThreadHeaderPlaceholders\(document\)/);
   assert.match(source, /createRestoredThreadBrowserCard[\s\S]*card\.classList\.add\(this\.style\.deleted\)/);
 });
 

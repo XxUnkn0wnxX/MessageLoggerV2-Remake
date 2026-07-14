@@ -768,8 +768,8 @@ test('removing a mounted self-keyed forum starter does not cascade into its repl
   const dispatches = [];
   const invalidations = [];
   const cacheRefreshes = [];
-  const deferredThreadRefreshes = [];
   let forumListRefreshes = 0;
+  let tintSweeps = 0;
   const plugin = createPlugin({
     messageRecord: { [starterId]: starter, [replyId]: reply },
     messageRecordIds: new Set([starterId, replyId]),
@@ -788,14 +788,17 @@ test('removing a mounted self-keyed forum starter does not cascade into its repl
     cachedMessageIds: new Set([starterId, replyId]),
     cachedMessagesMap: new Map([[starterId, starter.message], [replyId, reply.message]]),
     channelMessages: { [starterId]: { ready: true } },
-    tools: { getChannel: id => id === starterId ? { id, type: 11 } : null },
+    tools: {
+      getChannel: id => id === starterId
+        ? { id, type: 11, parent_id: 'forum-parent' }
+        : id === 'forum-parent' ? { id, type: 15 } : null
+    },
+    getForumCardDomMetadata: () => ({ preview: 'mounted starter body' }),
     settings: { deleteCachedFilesWithRecords: false },
     dispatcher: { dispatch: event => dispatches.push(event) },
     invalidateChannelCache: id => invalidations.push(id),
     cacheChannelMessages: id => cacheRefreshes.push(id),
-    scheduleLiveThreadRecordCacheRefresh: (channelId, messageId) => {
-      deferredThreadRefreshes.push([channelId, messageId]);
-    },
+    _tintSweep: () => { tintSweeps++; },
     scheduleForumListRefresh: () => { forumListRefreshes++; },
     scheduleLoggerMenuRefresh() {},
     refreshForumThreadLogModal() {},
@@ -812,46 +815,11 @@ test('removing a mounted self-keyed forum starter does not cascade into its repl
   assert.equal(plugin.cachedMessageIds.has(starterId), false);
   assert.equal(plugin.cachedMessagesMap.has(starterId), false);
   assert.deepEqual(dispatches, [], 'a live native thread must not receive a synthetic MESSAGE_DELETE');
-  assert.deepEqual(invalidations, [], 'a live native thread cache must not refresh synchronously');
-  assert.deepEqual(cacheRefreshes, [], 'a live native thread fetch must wait for React reconciliation');
-  assert.deepEqual(deferredThreadRefreshes, [[starterId, starterId]]);
+  assert.deepEqual(invalidations, [starterId], 'the live thread cache should invalidate immediately');
+  assert.deepEqual(cacheRefreshes, [starterId], 'the live thread should refetch without a synthetic delete');
+  assert.equal(plugin._nativeDeletedForumPreviewText.get(starterId), 'mounted starter body');
+  assert.equal(tintSweeps, 1, 'the remembered native preview should tint in the same turn as removal');
   assert.equal(forumListRefreshes, 1);
-});
-
-test('live thread cache cleanup waits until native React reconciliation has settled', () => {
-  const previousSetTimeout = global.setTimeout;
-  const previousClearTimeout = global.clearTimeout;
-  let pending = null;
-  let delay = null;
-  const invalidations = [];
-  const refreshes = [];
-  global.setTimeout = (callback, milliseconds) => {
-    pending = callback;
-    delay = milliseconds;
-    return 42;
-  };
-  global.clearTimeout = () => {};
-  try {
-    const plugin = createPlugin({
-      messageRecord: {},
-      channelMessages: { thread: { ready: true } },
-      invalidateChannelCache: id => invalidations.push(id),
-      cacheChannelMessages: id => refreshes.push(id)
-    });
-
-    plugin.scheduleLiveThreadRecordCacheRefresh('thread', 'starter');
-    assert.equal(delay, 500);
-    assert.deepEqual(invalidations, []);
-    assert.deepEqual(refreshes, []);
-
-    pending();
-    assert.deepEqual(invalidations, ['thread']);
-    assert.deepEqual(refreshes, ['thread']);
-    assert.equal(plugin._liveThreadRecordRefreshTimers.size, 0);
-  } finally {
-    global.setTimeout = previousSetTimeout;
-    global.clearTimeout = previousClearTimeout;
-  }
 });
 
 test('a full deleted root promotes only the latest visible saved reply as its context', () => {
