@@ -167,8 +167,8 @@ test('live restored-message settings present the master switch before category c
   assert.ok(masterIndex >= 0);
   assert.ok(masterIndex < deletedIndex);
   assert.ok(deletedIndex < purgedIndex);
-  assert.match(displaySettings, /Display saved messages in chat'[\s\S]*Master switch for live mounting enabled Deleted and Purged records[\s\S]*id: 'restoreDeletedMessages'/);
-  assert.match(displaySettings, /name: 'Include Deleted messages'[\s\S]*Live mounts messages captured from individual deletions when Display saved messages in chat is enabled\.[\s\S]*id: 'showDeletedMessages'/);
+  assert.match(displaySettings, /Display saved messages in chat'[\s\S]*'Master switch for live mounting enabled '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Deleted'[\s\S]*' and '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Purged'[\s\S]*' records in chat, forum, and thread views\.[\s\S]*id: 'restoreDeletedMessages'/);
+  assert.match(displaySettings, /name: 'Include Deleted messages'[\s\S]*'Live mounts messages captured from individual deletions when '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Display saved messages in chat is enabled'[\s\S]*'\.'[\s\S]*id: 'showDeletedMessages'/);
   assert.match(displaySettings, /name: 'Include Purged messages'[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Display saved messages in chat must be enabled first\.[\s\S]*id: 'showPurgedMessages'/);
 });
 

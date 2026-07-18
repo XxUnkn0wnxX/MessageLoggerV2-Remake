@@ -44,8 +44,8 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Setting | Default | Behavior |
 | --- | --- | --- |
 | Display dates with timestamps | On | Shows the date as well as the time in logger timestamps. |
-| Display saved messages in chat | On | Master switch for live mounting enabled Deleted and Purged records in chat, forum, and thread views. Turning it off hides mounted records without deleting saved logs. |
-| Include Deleted messages | On | Live-mounts messages captured from individual deletions when **Display saved messages in chat** is enabled. |
+| Display saved messages in chat | On | Master switch for live mounting enabled **Deleted** and **Purged** records in chat, forum, and thread views; only those two category names are warning-colored. Turning it off hides mounted records without deleting saved logs. |
+| Include Deleted messages | On | Live-mounts messages captured from individual deletions when the warning-colored phrase **Display saved messages in chat is enabled** applies. |
 | Include Purged messages | On | Live-mounts messages captured from bulk deletions. **Display saved messages in chat must be enabled first.** |
 | Display edited messages in chat | On | Shows saved edit history with messages. |
 | Max number of shown edits | `0` | Limits visible edits; `0` means no configured limit. |

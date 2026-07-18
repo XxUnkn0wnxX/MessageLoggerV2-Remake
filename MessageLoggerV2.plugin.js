@@ -3082,14 +3082,40 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Display saved messages in chat',
-            note: 'Master switch for live mounting enabled Deleted and Purged records in chat, forum, and thread views. Turning it off hides mounted records without deleting saved logs.',
+            note: React.createElement(
+              'span',
+              null,
+              'Master switch for live mounting enabled ',
+              React.createElement(
+                'span',
+                { style: { color: 'var(--text-warning, var(--status-warning))' } },
+                'Deleted'
+              ),
+              ' and ',
+              React.createElement(
+                'span',
+                { style: { color: 'var(--text-warning, var(--status-warning))' } },
+                'Purged'
+              ),
+              ' records in chat, forum, and thread views. Turning it off hides mounted records without deleting saved logs.'
+            ),
             id: 'restoreDeletedMessages',
             type: 'switch',
             action: 'refreshCache'
           },
           {
             name: 'Include Deleted messages',
-            note: 'Live mounts messages captured from individual deletions when Display saved messages in chat is enabled.',
+            note: React.createElement(
+              'span',
+              null,
+              'Live mounts messages captured from individual deletions when ',
+              React.createElement(
+                'span',
+                { style: { color: 'var(--text-warning, var(--status-warning))' } },
+                'Display saved messages in chat is enabled'
+              ),
+              '.'
+            ),
             id: 'showDeletedMessages',
             type: 'switch',
             action: 'refreshCache'
