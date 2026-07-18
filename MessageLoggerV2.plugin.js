@@ -3063,8 +3063,27 @@ module.exports = class MessageLoggerV2 {
             action: 'refreshCache'
           },
           {
+            name: 'Live mount saved messages in chat',
+            note: 'Mounts or unmounts enabled Deleted and Purged records whenever chat, forum, or thread views refresh. This does not delete saved logs.',
+            id: 'restoreDeletedMessages',
+            type: 'switch',
+            action: 'refreshCache'
+          },
+          {
             name: 'Display deleted messages in chat',
+            note: 'Live mounts or unmounts Deleted messages whenever chat, forum, or thread views refresh. This does not delete saved logs.',
             id: 'showDeletedMessages',
+            type: 'switch',
+            action: 'refreshCache'
+          },
+          {
+            name: 'Display purged messages in chat',
+            note: React.createElement(
+              'span',
+              { style: { color: 'var(--text-warning, var(--status-warning))' } },
+              'Display deleted messages must be enabled first.'
+            ),
+            id: 'showPurgedMessages',
             type: 'switch',
             action: 'refreshCache'
           },
@@ -3094,19 +3113,6 @@ module.exports = class MessageLoggerV2 {
             id: 'useAlternativeDeletedStyle',
             type: 'switch',
             action: 'forceUpdateMessage'
-          },
-          {
-            name: 'Display purged messages in chat',
-            id: 'showPurgedMessages',
-            type: 'switch',
-            action: 'refreshCache'
-          },
-          {
-            name: 'Restore deleted messages after reload',
-            note: 'Requires deleted messages to be displayed in chat.',
-            id: 'restoreDeletedMessages',
-            type: 'switch',
-            action: 'refreshCache'
           },
           { name: 'Show amount of new deleted messages when entering a channel', id: 'showDeletedCount', type: 'switch' },
           { name: 'Show amount of new edited messages when entering a channel', id: 'showEditedCount', type: 'switch' },

@@ -151,6 +151,23 @@ test('all fresh-install settings defaults remain stable', () => {
   assert.deepEqual(customized, before);
 });
 
+test('live restored-message settings present the master switch before category controls', () => {
+  const displaySettings = source.slice(
+    source.indexOf("name: 'Display settings'"),
+    source.indexOf("name: 'Menu settings'")
+  );
+  const masterIndex = displaySettings.indexOf("name: 'Live mount saved messages in chat'");
+  const deletedIndex = displaySettings.indexOf("id: 'showDeletedMessages'");
+  const purgedIndex = displaySettings.indexOf("id: 'showPurgedMessages'");
+
+  assert.ok(masterIndex >= 0);
+  assert.ok(masterIndex < deletedIndex);
+  assert.ok(deletedIndex < purgedIndex);
+  assert.match(displaySettings, /Live mount saved messages in chat'[\s\S]*Mounts or unmounts enabled Deleted and Purged records[\s\S]*id: 'restoreDeletedMessages'/);
+  assert.match(displaySettings, /name: 'Display deleted messages in chat'[\s\S]*Live mounts or unmounts Deleted messages[\s\S]*This does not delete saved logs\.[\s\S]*id: 'showDeletedMessages'/);
+  assert.match(displaySettings, /name: 'Display purged messages in chat'[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Display deleted messages must be enabled first\.[\s\S]*id: 'showPurgedMessages'/);
+});
+
 test('native BetterDiscord keybind recorders drive capture-phase logger shortcuts', () => {
   assert.match(source, /name: 'Toggle all logs keybind'[\s\S]*?id: 'openLogsKeybind'[\s\S]*?type: 'keybind'[\s\S]*?validator: 'loggerKeybind'[\s\S]*?max: 4[\s\S]*?clearable: true/);
   assert.match(source, /name: 'Toggle selected channel logs keybind'[\s\S]*?id: 'openFilteredLogsKeybind'[\s\S]*?type: 'keybind'[\s\S]*?validator: 'loggerKeybind'[\s\S]*?max: 4[\s\S]*?clearable: true/);

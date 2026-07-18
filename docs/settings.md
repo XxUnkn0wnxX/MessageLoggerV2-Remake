@@ -44,13 +44,13 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Setting | Default | Behavior |
 | --- | --- | --- |
 | Display dates with timestamps | On | Shows the date as well as the time in logger timestamps. |
-| Display deleted messages in chat | On | Restores and displays logged deletions in channel views. |
+| Live mount saved messages in chat | On | Live-mounts or unmounts enabled Deleted and Purged records whenever chat, forum, or thread views refresh. Turning it off does not delete saved logs. |
+| Display deleted messages in chat | On | Live-mounts or unmounts Deleted messages whenever chat, forum, or thread views refresh. Turning it off does not delete saved logs. |
+| Display purged messages in chat | On | Restores messages captured from bulk deletes. **Display deleted messages must be enabled first.** |
 | Display edited messages in chat | On | Shows saved edit history with messages. |
 | Max number of shown edits | `0` | Limits visible edits; `0` means no configured limit. |
 | Show oldest edit instead of newest | On | When the edit limit is exceeded, keeps older edits visible instead of newer ones. |
 | Use background instead of text tint | Off | Uses the configured deleted-message color as a background tint. |
-| Display purged messages in chat | On | Restores messages captured from bulk deletes. |
-| Restore deleted messages after reload | On | Re-adds saved messages when Discord reloads channel history. |
 | Show amount of new deleted messages | On | Displays the unseen deleted-message count when entering a channel. |
 | Show amount of new edited messages | On | Displays the unseen edited-message count when entering a channel. |
 | Show Hidden tab in logger | Off | Adds the **Hidden** tab. Hidden records remain stored when the tab is disabled. |
