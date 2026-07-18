@@ -617,6 +617,7 @@ test('edit-spam blocking is opt-in and uses a per-author sixty-second cooldown',
     source.indexOf('_notifyEvent(eventType, channel, guild, messageId, options = {})')
   );
   assert.match(spamHelpers, /configuredThreshold >= 1[\s\S]*DEFAULT_EDIT_SPAM_THRESHOLD/);
+  assert.match(spamHelpers, /_getEditNotificationSpamSettingsKey\(\)[\s\S]*\? `true:\$\{this\._getEditNotificationSpamThreshold\(\)\}`[\s\S]*: 'false'/);
   assert.match(spamHelpers, /_isActiveEditNotificationSpamState\(state, now = Date\.now\(\)\)[\s\S]*blockedUntil\) > now[\s\S]*now - time < 60 \* 1000/);
   assert.match(spamHelpers, /_scheduleEditSpamCooldownReset\(authorId, state, now = Date\.now\(\)\)[\s\S]*started\. Resetting in 60 seconds[\s\S]*will reset in 10 seconds[\s\S]*reset after 60 seconds/);
   assert.match(spamHelpers, /_resetEditNotificationSpamState\(showNotice = false, reason = 'the settings changed'\)[\s\S]*this\._clearEditSpamCooldownTimers\(\)[\s\S]*this\.editHistoryAntiSpam = \{\}/);
@@ -631,8 +632,10 @@ test('edit-spam blocking is opt-in and uses a per-author sixty-second cooldown',
   assert.match(source, /this\._editSpamCooldownTimers = new Map\(\)/);
 
   assert.match(source, /name: 'Block spam edit notifications \(if enabled\)'[\s\S]*id: 'blockSpamEdit'[\s\S]*action: 'toggleEditSpamState'[\s\S]*name: 'Edit spam threshold'[\s\S]*id: 'editSpamThreshold'[\s\S]*min: 1,[\s\S]*resetInvalidTo: DEFAULT_EDIT_SPAM_THRESHOLD,[\s\S]*inlineValidation: true,[\s\S]*action: 'resetEditSpamState'/);
-  assert.match(source, /resetEditSpamState: \(\) => this\._resetEditNotificationSpamState\(true, 'the threshold changed'\)/);
-  assert.match(source, /toggleEditSpamState: \(enabled\) => this\._resetEditNotificationSpamState\([\s\S]*!enabled,[\s\S]*enabled \? 'blocking was enabled' : 'blocking was disabled'/);
+  assert.match(source, /resetEditSpamState: \(\) => this\._handleEditSpamThresholdChange\(\)/);
+  assert.match(source, /toggleEditSpamState: \(enabled\) => this\._handleEditSpamToggle\(enabled\)/);
+  assert.match(spamHelpers, /_handleEditSpamThresholdChange\(\)[\s\S]*if \(!this\.settings\?\.blockSpamEdit\) return false;[\s\S]*_resetEditNotificationSpamState\(true, 'the threshold changed'\)/);
+  assert.match(spamHelpers, /_handleEditSpamToggle\(enabled\)[\s\S]*!enabled,[\s\S]*enabled \? 'blocking was enabled' : 'blocking was disabled'/);
   assert.match(source, /editSpamThreshold: \{ fallback: DEFAULT_EDIT_SPAM_THRESHOLD, min: 1 \}/);
   assert.match(source, /const value = event\.currentTarget\.value;[\s\S]*setDraft\(value\);[\s\S]*if \(config\.resetInvalidTo !== undefined\)[\s\S]*onValid\(resetValue\.value\)/);
   const validationPlugin = createPlugin();

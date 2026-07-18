@@ -3550,11 +3550,8 @@ module.exports = class MessageLoggerV2 {
       reportMediaCaching: (val) => this.reportMajorSettingChange('cacheAllImages', val),
       reportAntiNuke: (val) => this.reportMajorSettingChange('antiNukeEnabled', val),
       reportCachedFileDeletion: (val) => this.reportMajorSettingChange('deleteCachedFilesWithRecords', val),
-      resetEditSpamState: () => this._resetEditNotificationSpamState(true, 'the threshold changed'),
-      toggleEditSpamState: (enabled) => this._resetEditNotificationSpamState(
-        !enabled,
-        enabled ? 'blocking was enabled' : 'blocking was disabled'
-      ),
+      resetEditSpamState: () => this._handleEditSpamThresholdChange(),
+      toggleEditSpamState: (enabled) => this._handleEditSpamToggle(enabled),
       rescheduleBackup: () => this.handleAutoBackupIntervalChange(),
       toggleLogsButton: (val) => {
         if (val) return this.addOpenLogsButton();
@@ -6376,6 +6373,11 @@ module.exports = class MessageLoggerV2 {
       ? configuredThreshold
       : DEFAULT_EDIT_SPAM_THRESHOLD;
   }
+  _getEditNotificationSpamSettingsKey() {
+    return this.settings?.blockSpamEdit
+      ? `true:${this._getEditNotificationSpamThreshold()}`
+      : 'false';
+  }
   _getEditNotificationSpamUsername(state) {
     const username = typeof state?.username === 'string' ? state.username.trim() : '';
     return username || 'Unknown user';
@@ -6444,7 +6446,7 @@ module.exports = class MessageLoggerV2 {
     }
     this._clearEditSpamCooldownTimers();
     this.editHistoryAntiSpam = {};
-    this._editNotificationSpamSettingsKey = `${Boolean(this.settings?.blockSpamEdit)}:${this._getEditNotificationSpamThreshold()}`;
+    this._editNotificationSpamSettingsKey = this._getEditNotificationSpamSettingsKey();
     if (showNotice && hadActiveState) {
       this.reportSettingState(
         'Edit Spam Timers Reset',
@@ -6456,9 +6458,20 @@ module.exports = class MessageLoggerV2 {
       );
     }
   }
+  _handleEditSpamThresholdChange() {
+    if (!this.settings?.blockSpamEdit) return false;
+    this._resetEditNotificationSpamState(true, 'the threshold changed');
+    return true;
+  }
+  _handleEditSpamToggle(enabled) {
+    this._resetEditNotificationSpamState(
+      !enabled,
+      enabled ? 'blocking was enabled' : 'blocking was disabled'
+    );
+  }
   _getEditNotificationSpamDecision(authorId, now = Date.now(), username = null) {
     const threshold = this._getEditNotificationSpamThreshold();
-    const settingsKey = `${Boolean(this.settings?.blockSpamEdit)}:${threshold}`;
+    const settingsKey = this._getEditNotificationSpamSettingsKey();
     if (this._editNotificationSpamSettingsKey !== settingsKey) {
       this._resetEditNotificationSpamState(false, 'the settings changed outside the panel');
     }

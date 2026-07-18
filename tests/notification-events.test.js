@@ -205,6 +205,49 @@ test('edit-spam setting resets clear every author and report only active state',
   assert.equal(plugin.editHistoryAntiSpam.stale, undefined, 'runtime setting changes clear all stale authors');
 });
 
+test('edit-spam reset notices require enabled blocking and cannot report one reset twice', () => {
+  const now = Date.now();
+  const reports = [];
+  const plugin = createPlugin({
+    settings: { blockSpamEdit: false, editSpamThreshold: 3 },
+    editHistoryAntiSpam: {
+      stale: { blockedUntil: now + 60_000, times: [], lastActivity: now, username: 'Alice' }
+    },
+    reportDebugEvent() {},
+    reportSettingState(...args) { reports.push(args); }
+  });
+
+  plugin._handleEditSpamThresholdChange();
+  assert.ok(plugin.editHistoryAntiSpam.stale, 'threshold changes cannot clear state while blocking is disabled');
+  assert.equal(reports.length, 0, 'threshold changes cannot notify while blocking is disabled');
+
+  plugin.settings.blockSpamEdit = true;
+  plugin._handleEditSpamToggle(true);
+  assert.deepEqual(plugin.editHistoryAntiSpam, {}, 'enabling owns the silent reset of disabled state');
+  plugin.editHistoryAntiSpam.active = {
+    blockedUntil: now + 60_000,
+    times: [],
+    lastActivity: now,
+    username: 'Bob'
+  };
+  plugin._handleEditSpamThresholdChange();
+  assert.equal(reports.length, 1, 'enabled threshold changes report the active reset once');
+  assert.deepEqual(plugin.editHistoryAntiSpam, {});
+
+  plugin.settings.blockSpamEdit = false;
+  plugin._handleEditSpamToggle(false);
+  assert.equal(reports.length, 1, 'disabling cannot re-report state cleared by the threshold change');
+
+  plugin.editHistoryAntiSpam.active = {
+    blockedUntil: now + 60_000,
+    times: [],
+    lastActivity: now,
+    username: 'Carol'
+  };
+  plugin._handleEditSpamToggle(false);
+  assert.equal(reports.length, 2, 'disabling still reports state that it actually clears');
+});
+
 test('edit-spam debug reports username counters and the full cooldown lifecycle', t => {
   const originalSetTimeout = global.setTimeout;
   const originalClearTimeout = global.clearTimeout;
