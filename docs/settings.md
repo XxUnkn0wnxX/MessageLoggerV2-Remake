@@ -124,6 +124,18 @@ Disabling a display option does not delete stored records. Use the red **Delete*
 
 Guilds and DMs have separate notification controls. These affect alerts, not whether records are saved. BetterDiscord notifications from every location share one memory-only FIFO queue; custom toasts continue to stack. During one plugin session, delete-family and sent-message alerts remember their message IDs so repeated Discord events cannot alert twice.
 
+**Settings that control alert output and their states:**
+
+| Setting | On | Off |
+| --- | --- | --- |
+| **Message sent**, **Message edited**, **Message deleted**, and **Ghost pings** under Guilds | Allows that guild alert when its other author, location, and scope gates pass. | Suppresses that guild alert without changing logging. |
+| **Message sent**, **Message edited**, **Message deleted**, and **Ghost pings** under DMs | Allows that DM alert when its other author and scope gates pass. | Suppresses that DM alert without changing logging. |
+| **Disable toasts for local user** | Suppresses eligible guild alerts for actions initiated by this Discord client. | Allows those local-action guild alerts when their event toggle and other gates pass. |
+| **Show nuke detection toasts** | Alerts only after Anti Nuke actually captures records from a deleted parent channel. | Anti Nuke can keep capturing silently. |
+| **Show debug messages as toasts** | Sends eligible Debug events through the selected BetterDiscord-notification or custom-toast route. | Suppresses only Debug toasts; **Enable debug logging** remains independent. |
+| **Use BdApi basic notifications instead of custom toasts** | Routes enabled alerts through BetterDiscord notifications. | Routes enabled alerts through plugin custom toasts; it does not disable them. |
+| **Block spam edit notifications** | Rate-limits eligible edit alerts per author after the configured threshold. | Applies no edit-spam rate limit; the guild/DM **Message edited** toggle still decides whether edit alerts are enabled. |
+
 ### Guilds
 
 | Setting | Default |
@@ -221,17 +233,27 @@ Debug output does not change backup timing, persistence, counter behavior, edit 
 
 ## 📣 High-Impact Setting Feedback
 
-The plugin reports only settings with broad logging, persistence, media, update, or destructive effects; ordinary display and filter toggles remain quiet.
+Settings can also produce their own state-change notification. This is separate from the event-alert controls above.
 
-- **Only log whitelist**
-- **Auto backup data**
-- **Cache media locally**
-- **Enable Anti Nuke**
-- **Automatic updates**
-- **Only render locally cached attachments**
-- **Delete cached files with log records**
+**Settings that produce state-change notifications and the states that trigger them:**
 
-Each change writes one explicit `enabled` or `disabled` console message and follows the selected notification mode.
+| Setting | Notification states |
+| --- | --- |
+| **Only log whitelist** | Both states: enabled uses info; disabled uses neutral. |
+| **Disable saving data** | Both states: enabled reports memory-only saving as neutral; disabled reports normal saving or recovery resuming as info. |
+| **Auto backup data** | Both states: enabled reports active or saving-paused backup behavior as info; disabled reports shutdown and any pending cancellation as neutral. |
+| **Cache media locally** | Both states: enabled uses info; disabled uses neutral. |
+| **Enable Anti Nuke** | Both states: enabled uses info; disabled uses neutral and explains that existing Nuked records remain saved. |
+| **Automatic updates** | Both states: enabled uses info; disabled uses neutral. |
+| **Only render locally cached attachments** | Both states: enabled uses info; disabled uses neutral. |
+| **Delete cached files with log records** | Both states: enabled uses a longer info warning; disabled uses neutral. |
+| **Use BdApi basic notifications instead of custom toasts** | Both states: shows an info preview through the newly selected route. |
+| **Block spam edit notifications** | Disable-only, and only when active author counts or pauses were actually cleared. Enabling is silent. |
+| **Edit spam threshold** | Change-only, and only when blocking is enabled and active author counts or pauses were actually cleared. |
+| **Show amount of new deleted messages when entering a channel** | Disable-only, and only when at least one pending Deleted count was reset to `0`. Enabling and empty disables are silent. |
+| **Show amount of new edited messages when entering a channel** | Disable-only, and only when at least one pending Edited count was reset to `0`. Enabling and empty disables are silent. |
+
+The always-reported high-impact changes write one explicit `enabled` or `disabled` console message and follow the selected notification mode. Conditional reset notices report only state they actually cleared.
 
 - Enabled: Discord info/brand color.
 - Disabled: a theme-neutral grey custom toast; native BetterDiscord cards use a neutral icon because the API has no grey type.
