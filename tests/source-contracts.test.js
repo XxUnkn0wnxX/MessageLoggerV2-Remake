@@ -478,6 +478,12 @@ test('first-install help matches the current logging-scope onboarding', () => {
   assert.doesNotMatch(source, /font-size: 40px/);
 });
 
+test('logging override notes match their supported thread and ghost-ping scope', () => {
+  assert.match(source, /Selecting a parent channel also covers its child threads\./);
+  assert.match(source, /ghost pings from edits or individual deletes; bulk purges are not covered\./);
+  assert.doesNotMatch(source, /Selected threads also cover their parent channel\./);
+});
+
 test('shared logger help lists every current default shortcut', () => {
   const startupBlock = source.match(/const firstTimeIntroduction = initial([\s\S]*?): '';/);
   assert.ok(startupBlock, 'startup help block was not found');

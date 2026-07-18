@@ -170,9 +170,9 @@ Notification settings affect alerts only. Logging scope is controlled separately
 
 ### Overrides
 
-- **Always log selected channel** bypasses normal scope checks for the selected channel or thread parent.
+- **Always log selected channel** bypasses normal scope checks for the selected channel. Selecting a parent channel also covers its child threads.
 - **Always log DMs** bypasses normal scope checks for DMs.
-- **Always log ghost pings** can monitor ignored locations, but only persists the message if a ghost ping occurs.
+- **Always log ghost pings** can monitor ignored locations for edits and individual deletes, but only persists the message if a ghost ping occurs. Bulk purges are not covered.
 
 ## 🧵 Forum Posts and Channel Threads
 

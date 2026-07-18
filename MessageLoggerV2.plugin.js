@@ -3055,14 +3055,14 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Always log selected channel, regardless of whitelist/blacklist',
-            note: 'Selected threads also cover their parent channel.',
+            note: 'Selecting a parent channel also covers its child threads.',
             id: 'alwaysLogSelected',
             type: 'switch'
           },
           { name: 'Always log DMs, regardless of whitelist/blacklist', id: 'alwaysLogDM', type: 'switch' },
           {
             name: 'Always log ghost pings, regardless of whitelist/blacklist',
-            note: 'Watches ignored locations only for ghost pings.',
+            note: 'Watches ignored locations for ghost pings from edits or individual deletes; bulk purges are not covered.',
             id: 'alwaysLogGhostPings',
             type: 'switch'
           }

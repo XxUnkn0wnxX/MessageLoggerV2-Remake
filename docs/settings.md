@@ -28,9 +28,9 @@ The whitelist and blacklist are managed from the **Message Logger** submenu in s
 | Ignore blocked users | On | Skips messages from blocked users, excluding the local user. |
 | Ignore NSFW channels | Off | Skips unwhitelisted NSFW channels when enabled. |
 | Only log whitelist | On | Requires servers or channels to be whitelisted unless an override applies. |
-| Always log selected channel | On | Logs the selected channel or a selected thread's parent regardless of normal scope rules. |
+| Always log selected channel | On | Logs the selected channel regardless of normal scope rules. Selecting a parent channel also covers its child threads. |
 | Always log DMs | On | Logs DMs regardless of normal scope rules. |
-| Always log ghost pings | Off | Watches ignored locations for mentions and only persists the message if it becomes a ghost ping. |
+| Always log ghost pings | Off | Watches ignored locations for ghost pings from edits or individual deletes and only persists the message if it becomes a ghost ping. Bulk purges are not covered. |
 
 `Ignore messages posted by you` and `Ignore message deletes from you` answer different questions: the first checks who authored each message; the second checks whether the deletion was initiated locally.
 
