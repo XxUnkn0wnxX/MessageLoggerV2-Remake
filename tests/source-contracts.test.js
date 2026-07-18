@@ -160,16 +160,16 @@ test('live restored-message settings present the master switch before category c
     source.indexOf("name: 'Display settings'"),
     source.indexOf("name: 'Menu settings'")
   );
-  const masterIndex = displaySettings.indexOf("name: 'Live mount saved messages in chat'");
+  const masterIndex = displaySettings.indexOf("name: 'Display saved messages in chat'");
   const deletedIndex = displaySettings.indexOf("id: 'showDeletedMessages'");
   const purgedIndex = displaySettings.indexOf("id: 'showPurgedMessages'");
 
   assert.ok(masterIndex >= 0);
   assert.ok(masterIndex < deletedIndex);
   assert.ok(deletedIndex < purgedIndex);
-  assert.match(displaySettings, /Live mount saved messages in chat'[\s\S]*Mounts or unmounts enabled Deleted and Purged records[\s\S]*id: 'restoreDeletedMessages'/);
-  assert.match(displaySettings, /name: 'Display deleted messages in chat'[\s\S]*Live mounts or unmounts Deleted messages[\s\S]*This does not delete saved logs\.[\s\S]*id: 'showDeletedMessages'/);
-  assert.match(displaySettings, /name: 'Display purged messages in chat'[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Display deleted messages must be enabled first\.[\s\S]*id: 'showPurgedMessages'/);
+  assert.match(displaySettings, /Display saved messages in chat'[\s\S]*Master switch for live mounting enabled Deleted and Purged records[\s\S]*id: 'restoreDeletedMessages'/);
+  assert.match(displaySettings, /name: 'Include Deleted messages'[\s\S]*Live mounts messages captured from individual deletions when Display saved messages in chat is enabled\.[\s\S]*id: 'showDeletedMessages'/);
+  assert.match(displaySettings, /name: 'Include Purged messages'[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Display saved messages in chat must be enabled first\.[\s\S]*id: 'showPurgedMessages'/);
 });
 
 test('native BetterDiscord keybind recorders drive capture-phase logger shortcuts', () => {

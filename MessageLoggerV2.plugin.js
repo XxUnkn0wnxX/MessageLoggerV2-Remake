@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.3
+ * @version 2.8.2.4
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -3081,25 +3081,25 @@ module.exports = class MessageLoggerV2 {
             action: 'refreshCache'
           },
           {
-            name: 'Live mount saved messages in chat',
-            note: 'Mounts or unmounts enabled Deleted and Purged records whenever chat, forum, or thread views refresh. This does not delete saved logs.',
+            name: 'Display saved messages in chat',
+            note: 'Master switch for live mounting enabled Deleted and Purged records in chat, forum, and thread views. Turning it off hides mounted records without deleting saved logs.',
             id: 'restoreDeletedMessages',
             type: 'switch',
             action: 'refreshCache'
           },
           {
-            name: 'Display deleted messages in chat',
-            note: 'Live mounts or unmounts Deleted messages whenever chat, forum, or thread views refresh. This does not delete saved logs.',
+            name: 'Include Deleted messages',
+            note: 'Live mounts messages captured from individual deletions when Display saved messages in chat is enabled.',
             id: 'showDeletedMessages',
             type: 'switch',
             action: 'refreshCache'
           },
           {
-            name: 'Display purged messages in chat',
+            name: 'Include Purged messages',
             note: React.createElement(
               'span',
               { style: { color: 'var(--text-warning, var(--status-warning))' } },
-              'Display deleted messages must be enabled first.'
+              'Display saved messages in chat must be enabled first.'
             ),
             id: 'showPurgedMessages',
             type: 'switch',
