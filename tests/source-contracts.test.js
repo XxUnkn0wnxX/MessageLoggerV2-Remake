@@ -18,7 +18,7 @@ function readDefaultSettings() {
 }
 
 test('plugin metadata and updater remain pointed at the maintained main branch', () => {
-  assert.match(source, /@version 2\.8\.2\.6/);
+  assert.match(source, /@version 2\.8\.2\.7/);
   assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /title: 'Notification hardening'[\s\S]*title: 'Minor notification updates'[\s\S]*title: 'Date formatting and deletion tooltips'/);
@@ -223,9 +223,13 @@ test('date order applies to optional timestamps and forced logger dates', () => 
     source.indexOf('const DeletedContentTooltip'),
     source.indexOf("DeletedContentTooltip.displayName = 'DeletedContentTooltip'")
   );
+  assert.match(deletedTooltip, /block = false[\s\S]*React\.createElement\('div',[\s\S]*width: '100%'/);
   assert.match(deletedTooltip, /React\.createElement\('span', tooltipProps, children\)/);
   assert.doesNotMatch(deletedTooltip, /display:\s*['"]contents['"]/);
-  assert.match(source, /const deletedChildren = ret\.props\.children\.slice\(\);[\s\S]*const contentIndex = Array\.isArray\(deletedChildren\[0\]\) \? 0 : 1;[\s\S]*ret\.props\.children = deletedChildren/);
+  assert.match(source, /text: 'Edited: ' \+ plugin\.createTimeStamp\(edit\.time\)[\s\S]*const currentContent = currentRecord\.delete_data\?\.time[\s\S]*deletedAt: currentRecord\.delete_data\.time,[\s\S]*block: true/);
+  assert.doesNotMatch(source, /text: record\.delete_data \? null : 'Edited: '/);
+  assert.match(source, /if \(showEditHistory\)[\s\S]*ret\.props\.children = React\.createElement\(EditHistoryContent,[\s\S]*return;[\s\S]*if \(record\?\.delete_data\?\.time\)[\s\S]*return React\.createElement\(DeletedContentTooltip,[\s\S]*}, ret\)/);
+  assert.doesNotMatch(source, /const deletedChildren = ret\.props\.children\.slice\(\)/);
 });
 
 test('native preferred system languages are normalized before date defaults initialize', async () => {

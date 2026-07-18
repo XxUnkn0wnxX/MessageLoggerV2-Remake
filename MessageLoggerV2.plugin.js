@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.6
+ * @version 2.8.2.7
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -10502,16 +10502,21 @@ module.exports = class MessageLoggerV2 {
     const SuffixEdited = React.memo(e => React.createElement(this.Tooltip, { text: e.timestamp ? this.createTimeStamp(e.timestamp.get()._i) : null }, tt => React.createElement('time', { dateTime: e.timestamp.toISOString(), className: this.getEditedTimestampClasses(), role: 'note', ...tt }, ` (${i18n.Messages.MESSAGE_EDITED})`)));
     SuffixEdited.displayName = 'SuffixEdited';
     let MessageContent = DiscordModules.MessageContentComponent;
-    const DeletedContentTooltip = ({ plugin, deletedAt, children }) => React.createElement(
+    const DeletedContentTooltip = ({ plugin, deletedAt, block = false, children }) => React.createElement(
       plugin.Tooltip,
       {
         text: `Deleted: ${plugin.createTimeStamp(deletedAt)}`,
         position: 'left',
         hideOnClick: true
       },
-      tooltipProps => React.isValidElement(children)
-        ? React.cloneElement(children, tooltipProps)
-        : React.createElement('span', tooltipProps, children)
+      tooltipProps => block
+        ? React.createElement('div', {
+          ...tooltipProps,
+          style: { ...tooltipProps.style, width: '100%' }
+        }, children)
+        : React.isValidElement(children)
+          ? React.cloneElement(children, tooltipProps)
+          : React.createElement('span', tooltipProps, children)
     );
     DeletedContentTooltip.displayName = 'DeletedContentTooltip';
     const EditHistoryContent = ({ plugin, messageId, record, originalChildren, compact }) => {
@@ -10532,7 +10537,7 @@ module.exports = class MessageLoggerV2 {
           plugin.Tooltip,
           {
             key: `edit-${editNum}`,
-            text: record.delete_data ? null : 'Edited: ' + plugin.createTimeStamp(edit.time),
+            text: 'Edited: ' + plugin.createTimeStamp(edit.time),
             position: 'left',
             hideOnClick: true
           },
@@ -10563,7 +10568,8 @@ module.exports = class MessageLoggerV2 {
       const currentContent = currentRecord.delete_data?.time
         ? React.createElement(DeletedContentTooltip, {
           plugin,
-          deletedAt: currentRecord.delete_data.time
+          deletedAt: currentRecord.delete_data.time,
+          block: true
         }, oContent)
         : oContent;
       const edits = [];
@@ -10612,19 +10618,6 @@ module.exports = class MessageLoggerV2 {
             return;
           }
           if (record?.delete_data?.time) {
-            if (Array.isArray(ret.props.children)) {
-              const deletedChildren = ret.props.children.slice();
-              const contentIndex = Array.isArray(deletedChildren[0]) ? 0 : 1;
-              if (deletedChildren[contentIndex] !== undefined) {
-                deletedChildren[contentIndex] = React.createElement(DeletedContentTooltip, {
-                  key: 'ml2-deleted-content-tooltip',
-                  plugin: this,
-                  deletedAt: record.delete_data.time
-                }, deletedChildren[contentIndex]);
-                ret.props.children = deletedChildren;
-                return;
-              }
-            }
             return React.createElement(DeletedContentTooltip, {
               plugin: this,
               deletedAt: record.delete_data.time
