@@ -12,13 +12,16 @@ function readDefaultSettings() {
   assert.ok(match, 'defaultSettings object was not found');
   const expression = match[1]
     .replaceAll('this.pluginDir', JSON.stringify('/plugins'))
-    .replaceAll('DEFAULT_EDIT_SPAM_THRESHOLD', '10');
+    .replaceAll('DEFAULT_EDIT_SPAM_THRESHOLD', '10')
+    .replaceAll('defaultDateFormat', JSON.stringify('M/D/YYYY'));
   return JSON.parse(JSON.stringify(vm.runInNewContext(`(${expression})`)));
 }
 
 test('plugin metadata and updater remain pointed at the maintained main branch', () => {
+  assert.match(source, /@version 2\.8\.2\.6/);
   assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
+  assert.match(source, /title: 'Notification hardening'[\s\S]*title: 'Minor notification updates'[\s\S]*title: 'Date formatting and deletion tooltips'/);
 });
 
 test('all fresh-install settings defaults remain stable', () => {
@@ -86,6 +89,7 @@ test('all fresh-install settings defaults remain stable', () => {
     maxShownEdits: 0,
     hideNewerEditsFirst: true,
     displayDates: true,
+    dateFormat: 'M/D/YYYY',
     deletedMessageColor: '',
     useAlternativeDeletedStyle: false,
     showEditedMessages: true,
@@ -170,6 +174,52 @@ test('live restored-message settings present the master switch before category c
   assert.match(displaySettings, /Display saved messages in chat'[\s\S]*'Master switch for live mounting enabled '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Deleted'[\s\S]*' and '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Purged'[\s\S]*' records in chat, forum, and thread views\.[\s\S]*id: 'restoreDeletedMessages'/);
   assert.match(displaySettings, /name: 'Include Deleted messages'[\s\S]*'Live mounts messages captured from individual deletions when '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Display saved messages in chat is enabled'[\s\S]*'\.'[\s\S]*id: 'showDeletedMessages'/);
   assert.match(displaySettings, /name: 'Include Purged messages'[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Display saved messages in chat must be enabled first\.[\s\S]*id: 'showPurgedMessages'/);
+});
+
+test('date order applies to optional timestamps and forced logger dates', () => {
+  const date = new Date(2026, 2, 4, 15, 43, 15);
+  const time = date.toLocaleTimeString();
+  const plugin = createPlugin({ settings: { displayDates: true, dateFormat: 'D/M/YYYY' } });
+
+  assert.equal(plugin.createTimeStamp(date), `${time} - 4/3/2026`);
+  plugin.settings.dateFormat = 'DD/MM/YY';
+  assert.equal(plugin.createTimeStamp(date), `${time} - 04/03/26`);
+  plugin.settings.dateFormat = 'YYYY/MM/DD';
+  assert.equal(plugin.createTimeStamp(date), `${time} - 2026/03/04`);
+
+  plugin.settings.displayDates = false;
+  assert.equal(plugin.createTimeStamp(date), time);
+  assert.equal(plugin.createTimeStamp(date, true), `${time} - 2026/03/04`);
+
+  const defaults = readDefaultSettings();
+  for (const invalidValue of ['', 'invalid', null, 123, 'dd/MM/yyyy', 'DD-MM-YYYY', 'D/D/YYYY', 'D/M/Y']) {
+    const invalid = { ...defaults, dateFormat: invalidValue };
+    assert.equal(plugin.normalizeSettingsAgainstDefaults(invalid, defaults), true);
+    assert.equal(invalid.dateFormat, 'M/D/YYYY');
+  }
+  assert.equal(plugin.normalizeDateFormatSetting('locale', 'DD/MM/YYYY'), 'DD/MM/YYYY');
+  assert.equal(plugin.normalizeDateFormatSetting('DMY'), 'D/M/YYYY');
+  assert.equal(plugin.normalizeDateFormatSetting('MDY'), 'M/D/YYYY');
+  assert.equal(plugin.normalizeDateFormatSetting('YMD'), 'YYYY/M/D');
+  for (const validValue of ['D/M/YY', 'DD/MM/YYYY', 'M/DD/YYYY', 'YYYY/MM/DD', 'YY/M/D']) {
+    assert.deepEqual(plugin.validateDateFormatValue(validValue), { valid: true, value: validValue });
+  }
+
+  const displaySettings = source.slice(
+    source.indexOf("name: 'Display settings'"),
+    source.indexOf("name: 'Menu settings'")
+  );
+  assert.match(displaySettings, /name: 'Display dates with timestamps'[\s\S]*name: 'Date format'[\s\S]*type: 'textbox'[\s\S]*validator: 'dateFormat'[\s\S]*inlineValidation: true/);
+  assert.match(source, /createInlineValidatedDateFormatInput\(config, onValid\)[\s\S]*Preview:[\s\S]*placeholder: defaultFormat[\s\S]*aria-invalid[\s\S]*var\(--status-danger\)/);
+  assert.match(source, /const detailSuffix = ` - \$\{this\.createTimeStamp\(timestamp, true\)\}`/);
+  assert.match(source, /DeletedContentTooltip[\s\S]*`Deleted: \$\{plugin\.createTimeStamp\(deletedAt\)\}`/);
+  const deletedTooltip = source.slice(
+    source.indexOf('const DeletedContentTooltip'),
+    source.indexOf("DeletedContentTooltip.displayName = 'DeletedContentTooltip'")
+  );
+  assert.match(deletedTooltip, /React\.createElement\('span', tooltipProps, children\)/);
+  assert.doesNotMatch(deletedTooltip, /display:\s*['"]contents['"]/);
+  assert.match(source, /const deletedChildren = ret\.props\.children\.slice\(\);[\s\S]*const contentIndex = Array\.isArray\(deletedChildren\[0\]\) \? 0 : 1;[\s\S]*ret\.props\.children = deletedChildren/);
 });
 
 test('channel-entry count toggles clear pending state through category-owned actions', () => {

@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.5
+ * @version 2.8.2.6
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -21,6 +21,12 @@ const MAX_AUTO_BACKUP_INTERVAL_SECONDS = 86400;
 const DEFAULT_EDIT_SPAM_THRESHOLD = 10;
 const EDIT_SPAM_COOLDOWN_MS = 60 * 1000;
 const EDIT_SPAM_DEBUG_WARNING_MS = 10 * 1000;
+const FALLBACK_DATE_FORMAT = 'M/D/YYYY';
+const LEGACY_DATE_FORMATS = Object.freeze({
+  DMY: 'D/M/YYYY',
+  MDY: 'M/D/YYYY',
+  YMD: 'YYYY/M/D'
+});
 // BetterDiscord's native keybind recorder persists KeyboardEvent.key values as an array.
 // Keep the advertised shortcuts as defaults while allowing every binding to be
 // customized—or cleared to disable it—without introducing a fork-only settings component.
@@ -446,6 +452,14 @@ module.exports = class MessageLoggerV2 {
           'Edit Spam Blocked warnings now keep expiring while hovered and dismiss from a left- or right-click anywhere on the card.',
           'The edit-spam threshold is configurable per author, defaults to 10, and resets invalid values to 10.'
         ]
+      },
+      {
+        title: 'Date formatting and deletion tooltips',
+        type: 'improved',
+        items: [
+          'A validated slash-based date field now supports padded or unpadded day and month tokens plus two- or four-digit years.',
+          'Logger timestamps use clearer dash separators, and live deleted content exposes its deletion time without replacing edit or sent-time tooltips.'
+        ]
       }
     ];
   }
@@ -610,6 +624,7 @@ module.exports = class MessageLoggerV2 {
         timeout: 10000
       });
     }
+    const defaultDateFormat = this.getLocaleDateFormatPattern();
     const defaultSettings = {
       obfuscateCSSClasses: true,
       autoBackup: false,
@@ -674,6 +689,7 @@ module.exports = class MessageLoggerV2 {
       maxShownEdits: 0,
       hideNewerEditsFirst: true,
       displayDates: true,
+      dateFormat: defaultDateFormat,
       deletedMessageColor: '',
       useAlternativeDeletedStyle: false,
       showEditedMessages: true,
@@ -2772,7 +2788,56 @@ module.exports = class MessageLoggerV2 {
       settings[key] = normalized;
       changed = true;
     }
+    const normalizedDateFormat = this.normalizeDateFormatSetting(settings.dateFormat, defaults.dateFormat);
+    if (settings.dateFormat !== normalizedDateFormat) {
+      settings.dateFormat = normalizedDateFormat;
+      changed = true;
+    }
     return changed;
+  }
+  getLocaleDateFormatPattern() {
+    try {
+      const sample = new Date(2006, 2, 4);
+      const tokens = new Intl.DateTimeFormat().formatToParts(sample)
+        .filter(part => part.type === 'day' || part.type === 'month' || part.type === 'year')
+        .map(part => {
+          const width = Array.from(part.value).length;
+          if (part.type === 'day') return width > 1 ? 'DD' : 'D';
+          if (part.type === 'month') return width > 1 ? 'MM' : 'M';
+          return width <= 2 ? 'YY' : 'YYYY';
+        });
+      const candidate = tokens.join('/');
+      if (this.validateDateFormatValue(candidate).valid) return candidate;
+    } catch (error) {
+      Logger.warn('Failed to derive the locale date format; using the fallback.', error);
+    }
+    return FALLBACK_DATE_FORMAT;
+  }
+  validateDateFormatValue(value) {
+    if (typeof value !== 'string') {
+      return { valid: false, message: 'Use D, DD, M, MM, YY, and YYYY tokens separated by /.' };
+    }
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.split('/').length !== 3) {
+      return { valid: false, message: 'Use exactly three date tokens separated by / (example: DD/MM/YYYY).' };
+    }
+    const tokens = trimmed.split('/');
+    if (!tokens.every(token => /^(?:D{1,2}|M{1,2}|YY|YYYY)$/.test(token))) {
+      return { valid: false, message: 'Use only D, DD, M, MM, YY, or YYYY with the / separator.' };
+    }
+    const tokenTypes = tokens.map(token => token[0]);
+    if (new Set(tokenTypes).size !== 3 || !['D', 'M', 'Y'].every(type => tokenTypes.includes(type))) {
+      return { valid: false, message: 'Include day, month, and year exactly once.' };
+    }
+    return { valid: true, value: trimmed };
+  }
+  normalizeDateFormatSetting(value, fallback = FALLBACK_DATE_FORMAT) {
+    const fallbackValidation = this.validateDateFormatValue(fallback);
+    const safeFallback = fallbackValidation.valid ? fallbackValidation.value : FALLBACK_DATE_FORMAT;
+    if (value === 'locale') return safeFallback;
+    const migrated = LEGACY_DATE_FORMATS[value] || value;
+    const validation = this.validateDateFormatValue(migrated);
+    return validation.valid ? validation.value : safeFallback;
   }
   validateNumericSettingValue(value, config = {}) {
     const trimmed = String(value ?? '').trim();
@@ -2851,6 +2916,57 @@ module.exports = class MessageLoggerV2 {
       );
     }
     return React.createElement(InlineValidatedNumberInput);
+  }
+  createInlineValidatedDateFormatInput(config, onValid) {
+    const plugin = this;
+    function InlineValidatedDateFormatInput() {
+      const [draft, setDraft] = React.useState(String(plugin.settings[config.id] ?? ''));
+      const validation = plugin.validateDateFormatValue(draft);
+      const defaultFormat = plugin.normalizeDateFormatSetting(config.resetInvalidTo);
+      const onChange = event => {
+        const value = event.currentTarget.value;
+        setDraft(value);
+        const nextValidation = plugin.validateDateFormatValue(value);
+        onValid(nextValidation.valid ? nextValidation.value : defaultFormat);
+      };
+      const helperText = validation.valid
+        ? `Preview: ${plugin.formatDateStamp(new Date(2026, 2, 4), validation.value)}`
+        : validation.message;
+      return React.createElement(
+        'div',
+        { style: { display: 'flex', flexDirection: 'column', alignItems: 'stretch', minWidth: '250px' } },
+        React.createElement('input', {
+          className: 'bd-text-input',
+          type: 'text',
+          value: draft,
+          maxLength: 10,
+          spellCheck: false,
+          autoCapitalize: 'characters',
+          placeholder: defaultFormat,
+          onChange,
+          'aria-invalid': !validation.valid,
+          'aria-describedby': `${config.id}-format-help`,
+          style: validation.valid ? undefined : {
+            borderColor: 'var(--status-danger)',
+            boxShadow: '0 0 0 1px var(--status-danger)'
+          }
+        }),
+        React.createElement(
+          'div',
+          {
+            id: `${config.id}-format-help`,
+            role: validation.valid ? undefined : 'alert',
+            style: {
+              color: validation.valid ? 'var(--text-muted)' : 'var(--status-danger)',
+              fontSize: '12px',
+              marginTop: '4px'
+            }
+          },
+          helperText
+        )
+      );
+    }
+    return React.createElement(InlineValidatedDateFormatInput);
   }
   createValidatedLoggerKeybindRecorder(config) {
     const plugin = this;
@@ -3078,7 +3194,17 @@ module.exports = class MessageLoggerV2 {
             name: 'Display dates with timestamps',
             id: 'displayDates',
             type: 'switch',
-            action: 'refreshCache'
+            action: 'refreshDateFormatting'
+          },
+          {
+            name: 'Date format',
+            note: 'Use / between D or DD, M or MM, and YY or YYYY. Invalid input stays red while the saved value resets to your Discord locale pattern. Logger headers always use this format.',
+            id: 'dateFormat',
+            type: 'textbox',
+            validator: 'dateFormat',
+            resetInvalidTo: this.getLocaleDateFormatPattern(),
+            inlineValidation: true,
+            action: 'refreshDateFormatting'
           },
           {
             name: 'Display saved messages in chat',
@@ -3569,6 +3695,12 @@ module.exports = class MessageLoggerV2 {
         this.invalidateAllChannelCache();
         if (this.selectedChannel) this.cacheChannelMessages(this.selectedChannel.id);
       },
+      refreshDateFormatting: () => {
+        this.invalidateAllChannelCache();
+        if (this.selectedChannel) this.cacheChannelMessages(this.selectedChannel.id);
+        this.dispatcher?.dispatch?.({ type: 'MLV2_FORCE_UPDATE_MESSAGE' });
+        this.scheduleLoggerMenuRefresh?.();
+      },
       refreshAttachmentRendering: (val) => {
         this.refreshAttachmentRendering();
         this.reportMajorSettingChange('onlyRenderCachedAttachments', val);
@@ -3648,6 +3780,15 @@ module.exports = class MessageLoggerV2 {
           });
         };
       }
+      else if (config.validator === 'dateFormat') {
+        setting.onChange = val => {
+          const nextValue = this.normalizeDateFormatSetting(val, config.resetInvalidTo);
+          if (this.settings[config.id] === nextValue) return;
+          this.settings[config.id] = nextValue;
+          if (config.action && actions[config.action]) actions[config.action](nextValue);
+          this.saveSettings();
+        };
+      }
       else if (config.validator === 'cachePath') {
         setting.onChange = val => {
           const trimmed = String(val ?? '').trim();
@@ -3687,6 +3828,11 @@ module.exports = class MessageLoggerV2 {
         const onValid = setting.onChange;
         setting.type = 'custom';
         setting.children = this.createInlineValidatedNumberInput(config, onValid);
+      }
+      else if (config.inlineValidation && config.validator === 'dateFormat') {
+        const onValid = setting.onChange;
+        setting.type = 'custom';
+        setting.children = this.createInlineValidatedDateFormatInput(config, onValid);
       }
       return setting;
     };
@@ -5168,12 +5314,26 @@ module.exports = class MessageLoggerV2 {
     }
     return selector;
   }
+  formatDateStamp(date, value = this.settings.dateFormat) {
+    const validation = this.validateDateFormatValue(value);
+    const format = validation.valid ? validation.value : FALLBACK_DATE_FORMAT;
+    const year = String(date.getFullYear()).padStart(4, '0');
+    const replacements = {
+      D: String(date.getDate()),
+      DD: String(date.getDate()).padStart(2, '0'),
+      M: String(date.getMonth() + 1),
+      MM: String(date.getMonth() + 1).padStart(2, '0'),
+      YY: year.slice(-2),
+      YYYY: year
+    };
+    return format.split('/').map(token => replacements[token]).join('/');
+  }
   createTimeStamp(from = undefined, forcedDate = false) {
     let date;
     if (from) date = new Date(from);
     else date = new Date();
     if ((this.settings.displayDates || forcedDate) && forcedDate != -1) {
-      return `${date.toLocaleTimeString()}, ${date.toLocaleDateString()}`;
+      return `${date.toLocaleTimeString()} - ${this.formatDateStamp(date)}`;
     }
     if (forcedDate == -1) {
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -10269,14 +10429,6 @@ module.exports = class MessageLoggerV2 {
       };
       this.dispatcher.subscribe('MLV2_FORCE_UPDATE_MESSAGE_CONTENT', this._globalUpdateCallbackContent);
     }
-    let options = {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    };
     const i18module = DiscordModules.I18nModule;
     const i18n = {
       Messages: {
@@ -10284,9 +10436,21 @@ module.exports = class MessageLoggerV2 {
       }
     };
     this.translatedEdited = i18n.Messages.MESSAGE_EDITED;
-    const SuffixEdited = React.memo(e => React.createElement(this.Tooltip, { text: e.timestamp ? new Intl.DateTimeFormat(navigator.language, options).format(e.timestamp.get()._i) : null }, tt => React.createElement('time', { dateTime: e.timestamp.toISOString(), className: this.getEditedTimestampClasses(), role: 'note', ...tt }, ` (${i18n.Messages.MESSAGE_EDITED})`)));
+    const SuffixEdited = React.memo(e => React.createElement(this.Tooltip, { text: e.timestamp ? this.createTimeStamp(e.timestamp.get()._i) : null }, tt => React.createElement('time', { dateTime: e.timestamp.toISOString(), className: this.getEditedTimestampClasses(), role: 'note', ...tt }, ` (${i18n.Messages.MESSAGE_EDITED})`)));
     SuffixEdited.displayName = 'SuffixEdited';
     let MessageContent = DiscordModules.MessageContentComponent;
+    const DeletedContentTooltip = ({ plugin, deletedAt, children }) => React.createElement(
+      plugin.Tooltip,
+      {
+        text: `Deleted: ${plugin.createTimeStamp(deletedAt)}`,
+        position: 'left',
+        hideOnClick: true
+      },
+      tooltipProps => React.isValidElement(children)
+        ? React.cloneElement(children, tooltipProps)
+        : React.createElement('span', tooltipProps, children)
+    );
+    DeletedContentTooltip.displayName = 'DeletedContentTooltip';
     const EditHistoryContent = ({ plugin, messageId, record, originalChildren, compact }) => {
       const [, forceUpdate] = Hooks.useForceUpdate();
       React.useEffect(() => {
@@ -10333,6 +10497,12 @@ module.exports = class MessageLoggerV2 {
         return createEditedMessage(record.edit_history[modifier.editNum], modifier.editNum, true, modifier.noSuffix);
       }
       const oContent = Array.isArray(originalChildren[0]) ? originalChildren[0] : originalChildren[1];
+      const currentContent = currentRecord.delete_data?.time
+        ? React.createElement(DeletedContentTooltip, {
+          plugin,
+          deletedAt: currentRecord.delete_data.time
+        }, oContent)
+        : oContent;
       const edits = [];
       let i = 0;
       let max = record.edit_history.length;
@@ -10350,7 +10520,7 @@ module.exports = class MessageLoggerV2 {
         if (!edit) continue;
         edits.push(createEditedMessage(edit, i));
       }
-      return React.createElement(React.Fragment, {}, edits, oContent);
+      return React.createElement(React.Fragment, {}, edits, currentContent);
     };
     EditHistoryContent.displayName = 'EditHistoryContent';
     this.installEditHistoryPatch = (mcc) => {
@@ -10358,20 +10528,45 @@ module.exports = class MessageLoggerV2 {
       if (!mcc) return false;
       this.unpatches.push(
         Patcher.after(mcc, 'type', (_, [props], ret) => {
-          if (!this.settings.showEditedMessages || (typeof props.className === 'string' && props.className.includes('repliedTextContent'))) return;
+          if (typeof props.className === 'string' && props.className.includes('repliedTextContent')) return;
           if (!this.messageRecordIds.has(props.message.id)) return;
           const record = this.messageRecord[props.message.id];
-          if (!record?.edit_history || record.edits_hidden || !Array.isArray(ret.props.children)) return;
-          const newClassName = [ret.props.className, this.style.edited].filter(Boolean).join(' ');
-          const originalChildren = ret.props.children;
-          ret.props.className = newClassName;
-          ret.props.children = React.createElement(EditHistoryContent, {
-            plugin: this,
-            messageId: props.message.id,
-            record: record,
-            originalChildren: originalChildren,
-            compact: props.compact
-          });
+          const showEditHistory = this.settings.showEditedMessages
+            && record?.edit_history
+            && !record.edits_hidden
+            && Array.isArray(ret.props.children);
+          if (showEditHistory) {
+            const newClassName = [ret.props.className, this.style.edited].filter(Boolean).join(' ');
+            const originalChildren = ret.props.children;
+            ret.props.className = newClassName;
+            ret.props.children = React.createElement(EditHistoryContent, {
+              plugin: this,
+              messageId: props.message.id,
+              record: record,
+              originalChildren: originalChildren,
+              compact: props.compact
+            });
+            return;
+          }
+          if (record?.delete_data?.time) {
+            if (Array.isArray(ret.props.children)) {
+              const deletedChildren = ret.props.children.slice();
+              const contentIndex = Array.isArray(deletedChildren[0]) ? 0 : 1;
+              if (deletedChildren[contentIndex] !== undefined) {
+                deletedChildren[contentIndex] = React.createElement(DeletedContentTooltip, {
+                  key: 'ml2-deleted-content-tooltip',
+                  plugin: this,
+                  deletedAt: record.delete_data.time
+                }, deletedChildren[contentIndex]);
+                ret.props.children = deletedChildren;
+                return;
+              }
+            }
+            return React.createElement(DeletedContentTooltip, {
+              plugin: this,
+              deletedAt: record.delete_data.time
+            }, ret);
+          }
         })
       );
       return true;
@@ -11859,7 +12054,7 @@ module.exports = class MessageLoggerV2 {
       };
     };
     const detailPrefix = `${details} `;
-    const detailSuffix = ` at ${this.createTimeStamp(timestamp, true)}`;
+    const detailSuffix = ` - ${this.createTimeStamp(timestamp, true)}`;
     const forumLocationParts = splitForumLogLocation(locationName);
     // The warning-colored title means Discord removed the whole post/thread and Logger restored
     // its structural root. A deleted starter body in an otherwise live mount keeps this neutral.
