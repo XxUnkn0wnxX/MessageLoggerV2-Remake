@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.1
+ * @version 2.8.2.2
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -420,27 +420,19 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Nuked recovery',
-        type: 'added',
-        items: [
-          'Anti-Nuke captures now use a dedicated Nuked tab with preserved hidden records and an optional detection alert.',
-          'Related saved records move into Nuked when their parent channel is removed.'
-        ]
-      },
-      {
-        title: 'Forum and thread fixes',
+        title: 'Notification hardening',
         type: 'fixed',
         items: [
-          'Forum posts and channel threads keep the correct title, starter content, media, category, and oldest saved-message fallback.',
-          'Restored previews, tints, mentions, and Delete actions update safely without crashing live views.'
+          'Delete, purge, thread, forum, and sent-message alerts now reject repeated IDs across BetterDiscord notifications and custom toasts.',
+          'Edit-spam blocking now uses a per-author threshold and cooldown without suppressing saved edits or Ghost Ping alerts.'
         ]
       },
       {
-        title: 'Cleaner logging',
+        title: 'Clearer display settings',
         type: 'improved',
         items: [
-          'Records keep one visible category with stable Hidden, Nuked, Ghost Pings, Purged, Deleted, and Edited precedence.',
-          'Purged and Nuked batches keep message order, while plugin feedback follows the selected notification mode with safer startup alerts.'
+          'The restored-message master switch now describes live mounting and unmounting instead of requiring a reload.',
+          'Deleted and Purged display controls are grouped beneath it with clearer labels and dependency notes.'
         ]
       }
     ];
