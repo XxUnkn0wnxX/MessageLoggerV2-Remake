@@ -2935,9 +2935,9 @@ module.exports = class MessageLoggerV2 {
     return `${seconds} second${seconds === 1 ? '' : 's'}`;
   }
   reportDebugEvent(message, timeout = 4000) {
-    // Debug output is intentionally opt-in for automatic-backup and edit-spam timer
-    // lifecycle events. The two settings are independent so developers can use either the
-    // console, the selected notification/toast route, or both without affecting errors.
+    // Debug output is intentionally opt-in for automatic-backup, edit-spam timer, and
+    // channel-entry counter events. The two settings are independent so developers can use
+    // either the console, the selected notification/toast route, or both without affecting errors.
     // All debug notifications deliberately use the warning type so they share the same
     // attention color as the Debug category in both light and dark Discord themes.
     if (this.settings?.debugLogging) Logger.log(`[Debug] ${message}`);
@@ -4624,6 +4624,38 @@ module.exports = class MessageLoggerV2 {
       config.replaceKey
     );
     return true;
+  }
+  _incrementMessageCount(counterType, channel, guild, amount = 1) {
+    const configs = {
+      deleted: {
+        mapName: 'deletedChatMessagesCount',
+        settingId: 'showDeletedCount',
+        label: 'Deleted'
+      },
+      edited: {
+        mapName: 'editedChatMessagesCount',
+        settingId: 'showEditedCount',
+        label: 'Edited'
+      }
+    };
+    const config = configs[counterType];
+    const increment = Number(amount);
+    if (!config
+      || !this.settings?.[config.settingId]
+      || !channel?.id
+      || !Number.isInteger(increment)
+      || increment <= 0) return 0;
+    const counters = this[config.mapName] ||= {};
+    const current = Number(counters[channel.id]);
+    const total = (Number.isFinite(current) && current > 0 ? current : 0) + increment;
+    counters[channel.id] = total;
+    const location = guild?.name
+      ? `${guild.name}, #${channel.name || 'unknown-channel'}`
+      : this.getLiteralName(channel.guild_id, channel.id);
+    this.reportDebugEvent(
+      `${config.label} channel-entry counter increased to ${total} (+${increment}) for ${location}.`
+    );
+    return total;
   }
   reportDataSavingResume(requiresRecoveryMerge) {
     // Re-enabling saving has two intentionally different paths. Avoid calling session data
@@ -7928,10 +7960,7 @@ module.exports = class MessageLoggerV2 {
     this.promoteOldestSavedThreadReplyIntoRoot(threadId);
     this.preservePurgedThreadRootCategory(threadId);
     if (!savedThreadMessageCount && !savedRecord?.delete_data) return callDefault(...args);
-    if (this.settings.showDeletedCount) {
-      if (!this.deletedChatMessagesCount[threadId]) this.deletedChatMessagesCount[threadId] = 0;
-      this.deletedChatMessagesCount[threadId]++;
-    }
+    this._incrementMessageCount('deleted', channel, guild);
     if (!ignoredLocalStarter && this._shouldShowToast(channel, guild, 'deleted', isLocalDelete)) {
       this._notifyEventOnce('deleted', 'delete', [threadId], channel, guild, threadId);
     }
@@ -10029,9 +10058,8 @@ module.exports = class MessageLoggerV2 {
         }
         if (deleted.type !== 0 && deleted.type !== 19 && (deleted.type !== 20 || (deleted.flags & 64) === 64)) return callDefault(...args);
         if (deleted.flags == 64) return callDefault(...args);
-        if (this.settings.showDeletedCount) {
-          if (!this.deletedChatMessagesCount[channel.id]) this.deletedChatMessagesCount[channel.id] = 0;
-          if (!this.selectedChannel || this.selectedChannel.id != channel.id) this.deletedChatMessagesCount[channel.id]++;
+        if (!this.selectedChannel || this.selectedChannel.id != channel.id) {
+          this._incrementMessageCount('deleted', channel, guild);
         }
         const isLocalDelete = this.isLocalDeleteEvent(dispatch.id);
         if (this._shouldShowToast(channel, guild, 'deleted', isLocalDelete)) {
@@ -10073,9 +10101,8 @@ module.exports = class MessageLoggerV2 {
           this._scheduleTintForMessage?.(dispatch.channelId, purged.id);
           if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: purged.id });
         }
-        if (this.settings.showDeletedCount && savedDeleteCount > 0) {
-          if (!this.deletedChatMessagesCount[channel.id]) this.deletedChatMessagesCount[channel.id] = 0;
-          if (!this.selectedChannel || this.selectedChannel.id != channel.id) this.deletedChatMessagesCount[channel.id] += savedDeleteCount;
+        if (savedDeleteCount > 0 && (!this.selectedChannel || this.selectedChannel.id != channel.id)) {
+          this._incrementMessageCount('deleted', channel, guild, savedDeleteCount);
         }
         if (failedMessage) this.cacheChannelMessages(channel.id);
         else this._ensureChannelCached(channel.id);
@@ -10143,9 +10170,8 @@ module.exports = class MessageLoggerV2 {
             loggedAttachmentsToAdd = logged_attachments;
           }
         }
-        if (this.settings.showEditedCount) {
-          if (!this.editedChatMessagesCount[channel.id]) this.editedChatMessagesCount[channel.id] = 0;
-          if (!this.selectedChannel || this.selectedChannel.id != channel.id) this.editedChatMessagesCount[channel.id]++;
+        if (!this.selectedChannel || this.selectedChannel.id != channel.id) {
+          this._incrementMessageCount('edited', channel, guild);
         }
         if (lastEditedSaved) {
           lastEditedSaved.edit_history.push({

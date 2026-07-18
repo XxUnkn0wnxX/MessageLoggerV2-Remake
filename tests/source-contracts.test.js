@@ -178,6 +178,9 @@ test('channel-entry count toggles clear pending state through category-owned act
   assert.match(source, /toggleDeletedCount: \(enabled\) => this\._handleMessageCountToggle\('deleted', enabled\)/);
   assert.match(source, /toggleEditedCount: \(enabled\) => this\._handleMessageCountToggle\('edited', enabled\)/);
   assert.match(source, /_handleMessageCountToggle\(counterType, enabled\)[\s\S]*if \(enabled\) return false;[\s\S]*Object\.values\(counters\)\.some\(count => Number\(count\) > 0\)[\s\S]*this\[config\.mapName\] = \{\};[\s\S]*if \(!hadPendingCounts\) return false;/);
+  assert.match(source, /_incrementMessageCount\(counterType, channel, guild, amount = 1\)[\s\S]*channel-entry counter increased to \$\{total\} \(\+\$\{increment\}\) for \$\{location\}/);
+  assert.match(source, /_incrementMessageCount\('deleted', channel, guild, savedDeleteCount\)/);
+  assert.match(source, /_incrementMessageCount\('edited', channel, guild\)/);
 });
 
 test('native BetterDiscord keybind recorders drive capture-phase logger shortcuts', () => {

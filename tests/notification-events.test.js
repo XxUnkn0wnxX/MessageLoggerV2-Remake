@@ -379,3 +379,29 @@ test('channel-entry count toggles clear only their own pending queue and report 
   assert.deepEqual(plugin.editedChatMessagesCount, {});
   assert.equal(reports.length, 2, 'zero-only queues are cleared silently');
 });
+
+test('channel-entry counter debug reports totals, deltas, server, and channel', () => {
+  const debugEvents = [];
+  const channel = { id: 'channel', name: 'general', guild_id: 'guild' };
+  const guild = { id: 'guild', name: 'PortalCentric' };
+  const plugin = createPlugin({
+    settings: { showDeletedCount: true, showEditedCount: true },
+    deletedChatMessagesCount: {},
+    editedChatMessagesCount: {},
+    reportDebugEvent(message) { debugEvents.push(message); }
+  });
+
+  assert.equal(plugin._incrementMessageCount('deleted', channel, guild), 1);
+  assert.equal(plugin._incrementMessageCount('deleted', channel, guild, 5), 6);
+  assert.equal(plugin._incrementMessageCount('edited', channel, guild), 1);
+  assert.deepEqual(debugEvents, [
+    'Deleted channel-entry counter increased to 1 (+1) for PortalCentric, #general.',
+    'Deleted channel-entry counter increased to 6 (+5) for PortalCentric, #general.',
+    'Edited channel-entry counter increased to 1 (+1) for PortalCentric, #general.'
+  ]);
+
+  plugin.settings.showEditedCount = false;
+  assert.equal(plugin._incrementMessageCount('edited', channel, guild), 0);
+  assert.equal(plugin.editedChatMessagesCount[channel.id], 1);
+  assert.equal(debugEvents.length, 3, 'disabled counters cannot increase or emit debug output');
+});
