@@ -181,6 +181,11 @@ test('date order applies to optional timestamps and forced logger dates', () => 
   const time = date.toLocaleTimeString();
   const plugin = createPlugin({ settings: { displayDates: true, dateFormat: 'D/M/YYYY' } });
 
+  assert.equal(plugin.getLocaleDateFormatPattern('en-AU'), 'DD/MM/YYYY');
+  assert.equal(plugin.getLocaleDateFormatPattern('en-US'), 'M/D/YYYY');
+  assert.equal(plugin.getLocaleDateFormatPattern('ja-JP'), 'YYYY/M/D');
+  assert.equal(plugin.normalizeDateLocaleCandidate('en_AU.UTF-8'), 'en-AU');
+  assert.equal(plugin.normalizeDateLocaleCandidate('not-a-locale'), null);
   assert.equal(plugin.createTimeStamp(date), `${time} - 4/3/2026`);
   plugin.settings.dateFormat = 'DD/MM/YY';
   assert.equal(plugin.createTimeStamp(date), `${time} - 04/03/26`);
@@ -210,6 +215,7 @@ test('date order applies to optional timestamps and forced logger dates', () => 
     source.indexOf("name: 'Menu settings'")
   );
   assert.match(displaySettings, /name: 'Display dates with timestamps'[\s\S]*name: 'Date format'[\s\S]*type: 'textbox'[\s\S]*validator: 'dateFormat'[\s\S]*inlineValidation: true/);
+  assert.match(source, /loadPreferredSystemDateLocales\(\)[\s\S]*DiscordNative\?\.app\?\.getPreferredSystemLanguages[\s\S]*getSystemDateLocale\(\)[\s\S]*DiscordModules\.SystemLocaleUtils[\s\S]*DiscordModules\.LocaleStore\?\.locale[\s\S]*navigator\.languages/);
   assert.match(source, /createInlineValidatedDateFormatInput\(config, onValid\)[\s\S]*Preview:[\s\S]*placeholder: defaultFormat[\s\S]*aria-invalid[\s\S]*var\(--status-danger\)/);
   assert.match(source, /const detailSuffix = ` - \$\{this\.createTimeStamp\(timestamp, true\)\}`/);
   assert.match(source, /DeletedContentTooltip[\s\S]*`Deleted: \$\{plugin\.createTimeStamp\(deletedAt\)\}`/);
@@ -220,6 +226,27 @@ test('date order applies to optional timestamps and forced logger dates', () => 
   assert.match(deletedTooltip, /React\.createElement\('span', tooltipProps, children\)/);
   assert.doesNotMatch(deletedTooltip, /display:\s*['"]contents['"]/);
   assert.match(source, /const deletedChildren = ret\.props\.children\.slice\(\);[\s\S]*const contentIndex = Array\.isArray\(deletedChildren\[0\]\) \? 0 : 1;[\s\S]*ret\.props\.children = deletedChildren/);
+});
+
+test('native preferred system languages are normalized before date defaults initialize', async () => {
+  const originalDiscordNative = globalThis.DiscordNative;
+  globalThis.DiscordNative = {
+    app: {
+      async getPreferredSystemLanguages() {
+        return ['en_AU.UTF-8', 'en-AU', 'ja-JP'];
+      }
+    }
+  };
+  try {
+    const plugin = createPlugin();
+    assert.deepEqual(await plugin.loadPreferredSystemDateLocales(), ['en-AU', 'ja-JP']);
+    assert.equal(plugin.getSystemDateLocale(), 'en-AU');
+    assert.equal(plugin.getLocaleDateFormatPattern(), 'DD/MM/YYYY');
+  } finally {
+    if (originalDiscordNative === undefined) delete globalThis.DiscordNative;
+    else globalThis.DiscordNative = originalDiscordNative;
+  }
+  assert.match(source, /start\(\)[\s\S]*_startupPending[\s\S]*await this\.loadPreferredSystemDateLocales\(\)[\s\S]*_startupGeneration !== startupGeneration/);
 });
 
 test('channel-entry count toggles clear pending state through category-owned actions', () => {

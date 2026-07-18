@@ -61,6 +61,7 @@ const DiscordModules = (() => {
     ChannelStore: lazyGet('ChannelStore', () => Webpack.Stores.ChannelStore ?? Webpack.getByKeys('getChannel', 'getDMFromUserId')),
     SelectedChannelStore: lazyGet('SelectedChannelStore', () => Webpack.Stores.SelectedChannelStore),
     SelectedGuildStore: lazyGet('SelectedGuildStore', () => Webpack.Stores.SelectedGuildStore),
+    LocaleStore: lazyGet('LocaleStore', () => Webpack.Stores?.LocaleStore ?? Webpack.getStore?.('LocaleStore')),
     GuildStore: lazyGet('GuildStore', () => Webpack.Stores.GuildStore),
     GuildMemberStore: lazyGet('GuildMemberStore', () => Webpack.Stores.GuildMemberStore),
     RelationshipStore: lazyGet('RelationshipStore', () => Webpack.Stores.RelationshipStore ?? Webpack.getByKeys('isBlocked')),
@@ -125,6 +126,7 @@ const DiscordModules = (() => {
     })),
     MessageContentComponent: lazyGet('MessageContentComponent', () => Webpack.getModule(e => e?.type?.toString()?.includes('.isCommandType()') && !e?.type?.toString()?.includes('.isFirstMessageInForumPost'))),
     I18nModule: lazyGet('I18nModule', () => Webpack.getModule(m => Object.values(m).some(x => x != null && Object.getPrototypeOf(x)?.withFormatters != null))),
+    SystemLocaleUtils: lazyGet('SystemLocaleUtils', () => Webpack.getByKeys?.('getSystemLocale', { searchExports: true })),
     TextModule: lazyGet('TextModule', () => Webpack.getBySource('case"always-white"', { searchExports: true })),
     GetSrcModule: lazyGet('GetSrcModule', () => Webpack.getBySource('sourceMetadata:', 'getSrc', { searchExports: true })),
     UserContextMenuModule: lazyGet('UserContextMenuModule', () => Webpack.getBySource('isGroupDM', 'moderationAlertId', { searchExports: true })),
@@ -285,18 +287,26 @@ module.exports = class MessageLoggerV2 {
     return this.meta.version;
   }
   start() {
-    if (this.__started) return;
+    if (this.__started || this._startupPending) return;
+    const startupGeneration = (this._startupGeneration || 0) + 1;
+    this._startupGeneration = startupGeneration;
+    this._startupPending = true;
     if (this.updateTimeout) clearTimeout(this.updateTimeout);
-    const onLoaded = () => {
+    const onLoaded = async () => {
+      if (this._startupGeneration !== startupGeneration) return;
       try {
         this.UserStore = DiscordModules.UserStore;
         this.localUser = this.UserStore.getCurrentUser();
         if (!this.UserStore || !this.localUser) {
           setTimeout(onLoaded, 1000);
         } else {
+          await this.loadPreferredSystemDateLocales();
+          if (this._startupGeneration !== startupGeneration) return;
+          this._startupPending = false;
           this.initialize();
         }
       } catch (err) {
+        this._startupPending = false;
         Logger.error('Failed to start!', err);
         this.stop();
         this.notifyUser(`[${this.getName()}] Failed to start!`, {
@@ -310,6 +320,8 @@ module.exports = class MessageLoggerV2 {
     onLoaded();
   }
   stop() {
+    this._startupGeneration = (this._startupGeneration || 0) + 1;
+    this._startupPending = false;
     if (!this.__started) return;
     this.__started = false;
     try {
@@ -2795,10 +2807,61 @@ module.exports = class MessageLoggerV2 {
     }
     return changed;
   }
-  getLocaleDateFormatPattern() {
+  normalizeDateLocaleCandidate(value) {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim().split('.')[0].split('@')[0].replaceAll('_', '-');
+    if (!normalized) return null;
+    try {
+      return Intl.DateTimeFormat.supportedLocalesOf([normalized], { localeMatcher: 'lookup' })[0] || null;
+    } catch {
+      return null;
+    }
+  }
+  async loadPreferredSystemDateLocales() {
+    this._preferredSystemDateLocales = [];
+    const getPreferredSystemLanguages = globalThis.DiscordNative?.app?.getPreferredSystemLanguages;
+    if (typeof getPreferredSystemLanguages !== 'function') return this._preferredSystemDateLocales;
+    try {
+      const languages = await getPreferredSystemLanguages.call(globalThis.DiscordNative.app);
+      if (!Array.isArray(languages)) return this._preferredSystemDateLocales;
+      this._preferredSystemDateLocales = languages
+        .map(locale => this.normalizeDateLocaleCandidate(locale))
+        .filter((locale, index, all) => locale && all.indexOf(locale) === index);
+    } catch (error) {
+      Logger.warn('Failed to read Discord native preferred system languages; trying compatible fallbacks.', error);
+    }
+    return this._preferredSystemDateLocales;
+  }
+  getSystemDateLocale() {
+    const candidates = [...(this._preferredSystemDateLocales || [])];
+    try {
+      const systemLocaleUtils = DiscordModules.SystemLocaleUtils;
+      const getSystemLocale = typeof systemLocaleUtils === 'function'
+        ? systemLocaleUtils
+        : systemLocaleUtils?.getSystemLocale;
+      if (typeof getSystemLocale === 'function') candidates.push(getSystemLocale.call(systemLocaleUtils));
+    } catch (error) {
+      Logger.warn('Failed to read Discord system locale; trying compatible fallbacks.', error);
+    }
+    candidates.push(
+      DiscordModules.LocaleStore?.locale,
+      typeof document !== 'undefined' ? document.documentElement?.lang : null,
+      ...(typeof navigator !== 'undefined' && Array.isArray(navigator.languages) ? navigator.languages : []),
+      typeof navigator !== 'undefined' ? navigator.language : null
+    );
+    try {
+      candidates.push(new Intl.DateTimeFormat().resolvedOptions().locale);
+    } catch {}
+    for (const candidate of candidates) {
+      const locale = this.normalizeDateLocaleCandidate(candidate);
+      if (locale) return locale;
+    }
+    return null;
+  }
+  getLocaleDateFormatPattern(locale = this.getSystemDateLocale()) {
     try {
       const sample = new Date(2006, 2, 4);
-      const tokens = new Intl.DateTimeFormat().formatToParts(sample)
+      const tokens = new Intl.DateTimeFormat(locale || undefined).formatToParts(sample)
         .filter(part => part.type === 'day' || part.type === 'month' || part.type === 'year')
         .map(part => {
           const width = Array.from(part.value).length;
