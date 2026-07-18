@@ -50,7 +50,7 @@ npm run test:runtime-contracts
 | AT-09 | Author gates | Bot, blocked-user, local-author, and ignore-self decisions remain per message. |
 | AT-10 | Local delete tracking | Single-message, request-derived, and bulk local-delete IDs are recognized. |
 | AT-11 | Notification scope | Guild, DM, local-user, selected-location, whitelist, and blacklist notification gates retain their precedence. |
-| AT-12 | Notification queue | BetterDiscord notifications remain in a memory-only FIFO queue and can be cleared without persistence. |
+| AT-12 | Notification queue | BetterDiscord notifications remain in a memory-only FIFO queue and can be cleared without persistence. Runtime notification IDs prevent repeated thread/delete events, overlapping or replayed purges, purge-to-single-delete fallthrough, and sent-message replays from alerting twice. Edit-spam blocking is opt-in, per author, and uses a 10-edit/60-second threshold followed by a 60-second alert cooldown without affecting saved edits or Ghost Pings. |
 | AT-13 | Root visibility | Hiding or unhiding a forum/thread root cascades to saved child deletions and edits. |
 | AT-14 | Root removal | Removing a forum/thread root removes its child records and every affected index. |
 | AT-15 | Suppression | Suppressed restored roots accept Discord IDs, persist in payloads, and can be removed. |

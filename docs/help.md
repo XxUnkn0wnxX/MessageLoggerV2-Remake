@@ -146,6 +146,7 @@ For BetterDiscord notifications:
 - Sent-message alerts provide **Jump** only. The Sent tab itself is memory-only and clears on reload.
 - Bulk-delete summaries provide **View** only.
 - Guild and DM alerts share one memory-only FIFO queue. Persistent ghost pings yield after 4.5 seconds when another alert is waiting.
+- Repeated delete, thread/forum, purge, and sent-message IDs alert only once per plugin session. Overlapping purges report only their newly alerted IDs.
 - Hovering pauses the remaining notification timeout and queued ghost-ping yield.
 
 Notification settings affect alerts only. Logging scope is controlled separately.

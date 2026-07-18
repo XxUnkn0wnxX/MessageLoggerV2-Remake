@@ -321,6 +321,7 @@ module.exports = class MessageLoggerV2 {
       this._nativeDeletedForumPreviewText?.clear?.();
       this._notificationRouterReady = false;
       this._clearNativeNotificationQueue();
+      this._notifiedEventIds?.clear?.();
       if (this.menu?.filterSetTimeout) clearTimeout(this.menu.filterSetTimeout);
       if (this.keydownListener) {
         document.removeEventListener('keydown', this.keydownListener);
@@ -1093,6 +1094,7 @@ module.exports = class MessageLoggerV2 {
     this._globalUpdateCallbackContent = null;
     this.tempEditedMessageRecord = {};
     this.editHistoryAntiSpam = {};
+    this._notifiedEventIds = new Map();
     this.localDeletes = [];
     this.cacheDeletionMessageIds = new Set();
     this._destructiveChannelDeleteContexts = new Map();
@@ -6298,6 +6300,53 @@ module.exports = class MessageLoggerV2 {
     if (selectedChannelOrParent && !selectedOverride) return false;
     return true;
   }
+  _getUnnotifiedEventIds(group, ids) {
+    const uniqueIds = Array.from(new Set((Array.isArray(ids) ? ids : [ids])
+      .filter(id => id !== null && id !== undefined)
+      .map(String)));
+    if (!uniqueIds.length) return [];
+    const notified = this._notifiedEventIds?.get(group);
+    return notified ? uniqueIds.filter(id => !notified.has(id)) : uniqueIds;
+  }
+  _rememberNotifiedEventIds(group, ids) {
+    if (!ids?.length) return;
+    this._notifiedEventIds ||= new Map();
+    if (!this._notifiedEventIds.has(group)) this._notifiedEventIds.set(group, new Set());
+    const notified = this._notifiedEventIds.get(group);
+    ids.forEach(id => notified.add(String(id)));
+  }
+  _notifyEventOnce(eventType, group, ids, channel, guild, messageId, options = {}) {
+    const unnotifiedIds = this._getUnnotifiedEventIds(group, ids);
+    if (!unnotifiedIds.length) return [];
+    const resolvedOptions = typeof options === 'function' ? options(unnotifiedIds) : options;
+    this._notifyEvent(eventType, channel, guild, messageId, resolvedOptions);
+    this._rememberNotifiedEventIds(group, unnotifiedIds);
+    return unnotifiedIds;
+  }
+  _getEditNotificationSpamDecision(authorId, now = Date.now()) {
+    this.editHistoryAntiSpam ||= {};
+    if (!this.settings.blockSpamEdit) {
+      delete this.editHistoryAntiSpam[authorId];
+      return 'allow';
+    }
+    const state = this.editHistoryAntiSpam[authorId] ||= {
+      blockedUntil: 0,
+      times: [],
+      lastActivity: now
+    };
+    state.lastActivity = now;
+    if (state.blockedUntil > now) return 'blocked';
+    if (state.blockedUntil) {
+      state.blockedUntil = 0;
+      state.times = [];
+    }
+    state.times = state.times.filter(time => now - time < 60 * 1000);
+    state.times.push(now);
+    if (state.times.length < 10) return 'allow';
+    state.times = [];
+    state.blockedUntil = now + 60 * 1000;
+    return 'started';
+  }
   _notifyEvent(eventType, channel, guild, messageId, options = {}) {
     const configs = {
       deleted: {
@@ -7646,7 +7695,7 @@ module.exports = class MessageLoggerV2 {
       this.deletedChatMessagesCount[threadId]++;
     }
     if (!ignoredLocalStarter && this._shouldShowToast(channel, guild, 'deleted', isLocalDelete)) {
-      this._notifyEvent('deleted', channel, guild, threadId);
+      this._notifyEventOnce('deleted', 'delete', [threadId], channel, guild, threadId);
     }
     this._scheduleTintForMessage?.(threadId, threadId);
     this.saveData();
@@ -9536,7 +9585,10 @@ module.exports = class MessageLoggerV2 {
         if (map.length > this.settings.savedMessagesCap) deleteMessages(map);
       }
       if (changed) this.saveData();
-      for (let id in this.editHistoryAntiSpam) if (Date.now() - this.editHistoryAntiSpam[id].times[0] > 10 * 60 * 1000) delete this.editHistoryAntiSpam[id];
+      for (const [id, state] of Object.entries(this.editHistoryAntiSpam)) {
+        const lastActivity = Number(state?.lastActivity || state?.times?.at?.(-1) || 0);
+        if (!lastActivity || Date.now() - lastActivity > 10 * 60 * 1000) delete this.editHistoryAntiSpam[id];
+      }
     } catch (e) {
       Logger.error('Error clearing out data', e);
     }
@@ -9745,7 +9797,7 @@ module.exports = class MessageLoggerV2 {
         }
         const isLocalDelete = this.isLocalDeleteEvent(dispatch.id);
         if (this._shouldShowToast(channel, guild, 'deleted', isLocalDelete)) {
-          this._notifyEvent('deleted', channel, guild, dispatch.id);
+          this._notifyEventOnce('deleted', 'delete', [dispatch.id], channel, guild, dispatch.id);
         }
         const record = this.messageRecord[dispatch.id];
         if (this._shouldShowToast(channel, guild, 'ghostPings', isLocalDelete) && !record?.ghost_pinged && this.tools.isMentioned(deleted, this.localUser.id)) {
@@ -9761,6 +9813,7 @@ module.exports = class MessageLoggerV2 {
       } else if (dispatch.type == 'MESSAGE_DELETE_BULK') {
         let failedMessage = false;
         let savedDeleteCount = 0;
+        const savedDeleteIds = [];
         const isLocalBulkDelete = this.isLocalDeleteEvent(dispatch.ids);
         // Discord defines the purge boundary for us: one MESSAGE_DELETE_BULK dispatch is one
         // batch. No time-window heuristic is used, and a second dispatch always gets a new ID.
@@ -9775,6 +9828,7 @@ module.exports = class MessageLoggerV2 {
           if (this.shouldIgnoreMessageAuthor(purged)) continue;
           if (this.shouldIgnoreSelfMessage(purged)) continue;
           savedDeleteCount++;
+          savedDeleteIds.push(dispatchId);
           this.saveDeletedMessage(purged, this.purgedMessageRecord, { captureBatch });
           this.annotateSavedForumThreadMessage(purged, channel);
           if (this.settings.showPurgedMessages) this.refreshCacheOnlyMessage(purged);
@@ -9788,7 +9842,15 @@ module.exports = class MessageLoggerV2 {
         if (failedMessage) this.cacheChannelMessages(channel.id);
         else this._ensureChannelCached(channel.id);
         if (savedDeleteCount > 0 && this._shouldShowToast(channel, guild, 'deleted', isLocalBulkDelete)) {
-          this._notifyEvent('bulkDelete', channel, guild, undefined, { count: savedDeleteCount });
+          this._notifyEventOnce(
+            'bulkDelete',
+            'delete',
+            savedDeleteIds,
+            channel,
+            guild,
+            undefined,
+            unnotifiedIds => ({ count: unnotifiedIds.length })
+          );
         }
         if (!this.settings.showPurgedMessages) ret = callDefault(...args);
         this.saveData();
@@ -9883,27 +9945,10 @@ module.exports = class MessageLoggerV2 {
           [lastEditedSaved, currentSavedRecord]
         );
         if (this._shouldShowToast(channel, guild, 'edited', isLocalUser)) {
-          if (!this.settings.blockSpamEdit) {
-            if (this.editHistoryAntiSpam[author.id]) {
-              this.editHistoryAntiSpam[author.id].times.push(Date.now());
-            } else {
-              this.editHistoryAntiSpam[author.id] = {
-                blocked: false,
-                times: [Date.now()]
-              };
-            }
-            if (this.editHistoryAntiSpam[author.id].times.length > 10) this.editHistoryAntiSpam[author.id].times.shift();
-            if (this.editHistoryAntiSpam[author.id].times.length === 10 && Date.now() - this.editHistoryAntiSpam[author.id].times[0] < 60 * 1000) {
-              if (!this.editHistoryAntiSpam[author.id].blocked) {
-                this._notifyEvent('editSpamBlocked', channel, guild, null, { username: author.username });
-                this.editHistoryAntiSpam[author.id].blocked = true;
-              }
-            } else if (this.editHistoryAntiSpam[author.id].blocked) {
-              this.editHistoryAntiSpam[author.id].blocked = false;
-              this.editHistoryAntiSpam[author.id].times = [];
-            }
-          }
-          if (this.settings.blockSpamEdit || !this.editHistoryAntiSpam[author.id].blocked) {
+          const spamDecision = this._getEditNotificationSpamDecision(author.id);
+          if (spamDecision === 'started') {
+            this._notifyEvent('editSpamBlocked', channel, guild, null, { username: author.username });
+          } else if (spamDecision === 'allow') {
             this._notifyEvent('edited', channel, guild, dispatch.message.id);
           }
         }
@@ -9917,7 +9962,7 @@ module.exports = class MessageLoggerV2 {
         if (this.settings.cacheAllImages) this.cacheMessageImages(dispatch.message);
         this._ensureChannelCached(channel.id);
         if (this._shouldShowToast(channel, guild, 'sent', isLocalUser)) {
-          this._notifyEvent('sent', channel, guild, dispatch.message.id);
+          this._notifyEventOnce('sent', 'sent', [dispatch.message.id], channel, guild, dispatch.message.id);
         }
         return callDefault(...args);
       } else return callDefault(...args);

@@ -138,6 +138,8 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 - System/UI alerts use wall-clock expiry rather than hover pause; custom alerts dismiss through their own handlers.
 - Native system/UI alerts use a unique content marker for whole-card left/right-click dismissal and a visible progress animation after BetterDiscord mounts the card. The wall-clock timer remains the fallback.
 - Native notifications use a memory-only FIFO queue with hover-aware yielding; queue state is never persisted.
+- A separate runtime-only ID ledger gives delete-family events one shared identity across single, thread/forum, and bulk paths, and protects sent-message alerts after ordinary cache eviction. Only IDs that actually produced an alert are claimed.
+- Edit-spam blocking is opt-in and tracks each author independently; reaching 10 edits in 60 seconds replaces the tenth edit alert with one warning and starts a fixed 60-second notification cooldown without changing edit persistence or Ghost Ping detection.
 - Guild and DM event settings, local-user rules, active-location overrides, and notification lists are evaluated separately from logging eligibility.
 
 ## 🧪 Testing and Change Safety

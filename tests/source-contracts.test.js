@@ -557,6 +557,52 @@ test('system and UI feedback uses one native-or-custom router without changing e
   assert.match(source, /reportSettingState\(title,[\s\S]*this\.notifyUser\(notificationMessage/);
 });
 
+test('event notification identities cover deletes, threads, purges, and sent-message replays', () => {
+  const identityRouter = source.slice(
+    source.indexOf('_getUnnotifiedEventIds(group, ids)'),
+    source.indexOf('_notifyEvent(eventType, channel, guild, messageId, options = {})')
+  );
+  assert.match(identityRouter, /new Set\(\(Array\.isArray\(ids\) \? ids : \[ids\]\)/);
+  assert.match(identityRouter, /this\._notifyEvent\(eventType, channel, guild, messageId, resolvedOptions\)/);
+  assert.match(identityRouter, /this\._rememberNotifiedEventIds\(group, unnotifiedIds\)/);
+  assert.match(source, /this\._notifiedEventIds = new Map\(\)/);
+  assert.match(source, /this\._notifiedEventIds\?\.clear\?\.\(\)/);
+
+  const threadDelete = source.slice(
+    source.indexOf('handleForumThreadDelete(channel, guild, callDefault, args)'),
+    source.indexOf('_testUrlPattern(url, regex)')
+  );
+  assert.match(threadDelete, /_notifyEventOnce\('deleted', 'delete', \[threadId\], channel, guild, threadId\)/);
+
+  const dispatchStart = source.indexOf('\n  onDispatchEvent(args, callDefault) {');
+  const dispatchHandler = source.slice(
+    dispatchStart,
+    source.indexOf('\n  patchMessages() {', dispatchStart)
+  );
+  assert.match(dispatchHandler, /_notifyEventOnce\('deleted', 'delete', \[dispatch\.id\], channel, guild, dispatch\.id\)/);
+  assert.match(dispatchHandler, /savedDeleteIds\.push\(dispatchId\)/);
+  assert.match(dispatchHandler, /_notifyEventOnce\([\s\S]*'bulkDelete',[\s\S]*'delete',[\s\S]*savedDeleteIds[\s\S]*unnotifiedIds => \(\{ count: unnotifiedIds\.length \}\)/);
+  assert.match(dispatchHandler, /_notifyEventOnce\('sent', 'sent', \[dispatch\.message\.id\], channel, guild, dispatch\.message\.id\)/);
+});
+
+test('edit-spam blocking is opt-in and uses a per-author sixty-second cooldown', () => {
+  const spamDecision = source.slice(
+    source.indexOf('_getEditNotificationSpamDecision(authorId, now = Date.now())'),
+    source.indexOf('_notifyEvent(eventType, channel, guild, messageId, options = {})')
+  );
+  assert.match(spamDecision, /if \(!this\.settings\.blockSpamEdit\)[\s\S]*return 'allow'/);
+  assert.match(spamDecision, /state\.times\.length < 10/);
+  assert.match(spamDecision, /state\.blockedUntil = now \+ 60 \* 1000/);
+  assert.match(spamDecision, /return 'started'/);
+
+  const editedDispatch = source.slice(
+    source.indexOf('const spamDecision = this._getEditNotificationSpamDecision(author.id)'),
+    source.indexOf("dispatch.type == 'MESSAGE_CREATE'", source.indexOf('const spamDecision = this._getEditNotificationSpamDecision(author.id)'))
+  );
+  assert.match(editedDispatch, /spamDecision === 'started'[\s\S]*_notifyEvent\('editSpamBlocked'/);
+  assert.match(editedDispatch, /spamDecision === 'allow'[\s\S]*_notifyEvent\('edited'/);
+});
+
 test('settings callbacks have one BetterDiscord owner', () => {
   const buildSetting = source.slice(source.indexOf('buildSetting(data)'), source.indexOf('createSetting(data)'));
   assert.match(buildSetting, /const \{ id, onChange, \.\.\.settingData \} = data/);

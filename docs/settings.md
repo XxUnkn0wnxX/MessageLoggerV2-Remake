@@ -81,7 +81,7 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Toggle selected channel logs keybind | `Ctrl+N` | Resolves the selected channel when pressed. It closes an open logger already filtered to that exact channel; any other logger state or stacked plugin-owned panel closes and reopens with that channel filter. Native media viewers close first; all other Discord panels remain open. Clear the recorder to disable it. |
 | Toggle selected server logs keybind | `Ctrl+S` | Resolves the selected server when pressed and uses its server ID filter. It closes an open logger already filtered to that exact server; any other logger state or stacked plugin-owned panel closes and reopens with that server filter. It does nothing except show a warning in DMs and group DMs; the all-log and selected-channel shortcuts continue working there. Native media viewers close first; all other Discord panels remain open. Clear the recorder to disable it. |
 | Automatically refresh new forum posts | On | Uses Discord's native **New Post(s)** control so cards appear without leaving and reopening the forum. |
-| Block spam edit notifications | Off | Reduces repeated edit notifications from rapid edits. |
+| Block spam edit notifications | Off | When enabled, the tenth edit from one author within 60 seconds shows one warning and suppresses that author's edit alerts for 60 seconds. Edit history and Ghost Ping alerts continue normally. |
 
 ### Local files
 
@@ -121,7 +121,7 @@ Disabling a display option does not delete stored records. Use the red **Delete*
 
 ## 🔔 Toast Notifications
 
-Guilds and DMs have separate notification controls. These affect alerts, not whether records are saved. BetterDiscord notifications from every location share one memory-only FIFO queue; custom toasts continue to stack.
+Guilds and DMs have separate notification controls. These affect alerts, not whether records are saved. BetterDiscord notifications from every location share one memory-only FIFO queue; custom toasts continue to stack. During one plugin session, delete-family and sent-message alerts remember their message IDs so repeated Discord events cannot alert twice.
 
 ### Guilds
 
@@ -143,6 +143,8 @@ Guilds and DMs have separate notification controls. These affect alerts, not whe
 | Ghost pings | On |
 
 The notification whitelist and blacklist are managed from the same server, channel, DM, and thread context menus as the logging lists.
+
+Sent alerts accept only Discord's final non-optimistic message event. Guild alerts may include your own messages; DM alerts always suppress messages sent by the local user.
 
 **Disable toasts for local user** suppresses alerts for actions initiated by this Discord client.
 
