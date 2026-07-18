@@ -51,8 +51,8 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Max number of shown edits | `0` | Limits visible edits; `0` means no configured limit. |
 | Show oldest edit instead of newest | On | When the edit limit is exceeded, keeps older edits visible instead of newer ones. |
 | Use background instead of text tint | Off | Uses the configured deleted-message color as a background tint. |
-| Show amount of new deleted messages | On | Displays the unseen deleted-message count when entering a channel. |
-| Show amount of new edited messages | On | Displays the unseen edited-message count when entering a channel. |
+| Show amount of new deleted messages | On | Displays the unseen deleted-message count when entering a channel. Turning it off clears every pending deleted counter and reports the reset only when at least one pending count existed. |
+| Show amount of new edited messages | On | Displays the unseen edited-message count when entering a channel. Turning it off clears every pending edited counter and reports the reset only when at least one pending count existed. |
 | Show Hidden tab in logger | Off | Adds the **Hidden** tab. Hidden records remain stored when the tab is disabled. |
 | Display update notes | On | Shows the plugin changelog after a version change. |
 | Menu sort direction | New to old | Controls message ordering in the logger window. |

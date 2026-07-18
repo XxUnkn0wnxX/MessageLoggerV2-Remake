@@ -172,6 +172,14 @@ test('live restored-message settings present the master switch before category c
   assert.match(displaySettings, /name: 'Include Purged messages'[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Display saved messages in chat must be enabled first\.[\s\S]*id: 'showPurgedMessages'/);
 });
 
+test('channel-entry count toggles clear pending state through category-owned actions', () => {
+  assert.match(source, /name: 'Show amount of new deleted messages when entering a channel'[\s\S]*id: 'showDeletedCount'[\s\S]*action: 'toggleDeletedCount'/);
+  assert.match(source, /name: 'Show amount of new edited messages when entering a channel'[\s\S]*id: 'showEditedCount'[\s\S]*action: 'toggleEditedCount'/);
+  assert.match(source, /toggleDeletedCount: \(enabled\) => this\._handleMessageCountToggle\('deleted', enabled\)/);
+  assert.match(source, /toggleEditedCount: \(enabled\) => this\._handleMessageCountToggle\('edited', enabled\)/);
+  assert.match(source, /_handleMessageCountToggle\(counterType, enabled\)[\s\S]*if \(enabled\) return false;[\s\S]*Object\.values\(counters\)\.some\(count => Number\(count\) > 0\)[\s\S]*this\[config\.mapName\] = \{\};[\s\S]*if \(!hadPendingCounts\) return false;/);
+});
+
 test('native BetterDiscord keybind recorders drive capture-phase logger shortcuts', () => {
   assert.match(source, /name: 'Toggle all logs keybind'[\s\S]*?id: 'openLogsKeybind'[\s\S]*?type: 'keybind'[\s\S]*?validator: 'loggerKeybind'[\s\S]*?max: 4[\s\S]*?clearable: true/);
   assert.match(source, /name: 'Toggle selected channel logs keybind'[\s\S]*?id: 'openFilteredLogsKeybind'[\s\S]*?type: 'keybind'[\s\S]*?validator: 'loggerKeybind'[\s\S]*?max: 4[\s\S]*?clearable: true/);

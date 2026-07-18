@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.4
+ * @version 2.8.2.5
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -3158,8 +3158,18 @@ module.exports = class MessageLoggerV2 {
             type: 'switch',
             action: 'forceUpdateMessage'
           },
-          { name: 'Show amount of new deleted messages when entering a channel', id: 'showDeletedCount', type: 'switch' },
-          { name: 'Show amount of new edited messages when entering a channel', id: 'showEditedCount', type: 'switch' },
+          {
+            name: 'Show amount of new deleted messages when entering a channel',
+            id: 'showDeletedCount',
+            type: 'switch',
+            action: 'toggleDeletedCount'
+          },
+          {
+            name: 'Show amount of new edited messages when entering a channel',
+            id: 'showEditedCount',
+            type: 'switch',
+            action: 'toggleEditedCount'
+          },
           {
             name: 'Show Hidden tab in logger',
             note: 'Disabling this tab does not delete hidden records.',
@@ -3578,6 +3588,8 @@ module.exports = class MessageLoggerV2 {
       reportCachedFileDeletion: (val) => this.reportMajorSettingChange('deleteCachedFilesWithRecords', val),
       resetEditSpamState: () => this._handleEditSpamThresholdChange(),
       toggleEditSpamState: (enabled) => this._handleEditSpamToggle(enabled),
+      toggleDeletedCount: (enabled) => this._handleMessageCountToggle('deleted', enabled),
+      toggleEditedCount: (enabled) => this._handleMessageCountToggle('edited', enabled),
       rescheduleBackup: () => this.handleAutoBackupIntervalChange(),
       toggleLogsButton: (val) => {
         if (val) return this.addOpenLogsButton();
@@ -4580,6 +4592,38 @@ module.exports = class MessageLoggerV2 {
       timeout,
       replaceKey
     });
+  }
+  _handleMessageCountToggle(counterType, enabled) {
+    if (enabled) return false;
+    const configs = {
+      deleted: {
+        mapName: 'deletedChatMessagesCount',
+        title: 'Deleted Message Counters Reset',
+        message: 'All pending deleted-message counters were reset to 0.',
+        replaceKey: 'setting:showDeletedCount'
+      },
+      edited: {
+        mapName: 'editedChatMessagesCount',
+        title: 'Edited Message Counters Reset',
+        message: 'All pending edited-message counters were reset to 0.',
+        replaceKey: 'setting:showEditedCount'
+      }
+    };
+    const config = configs[counterType];
+    if (!config) return false;
+    const counters = this[config.mapName] || {};
+    const hadPendingCounts = Object.values(counters).some(count => Number(count) > 0);
+    this[config.mapName] = {};
+    if (!hadPendingCounts) return false;
+    this.reportSettingState(
+      config.title,
+      config.message,
+      config.message,
+      'info',
+      5000,
+      config.replaceKey
+    );
+    return true;
   }
   reportDataSavingResume(requiresRecoveryMerge) {
     // Re-enabling saving has two intentionally different paths. Avoid calling session data

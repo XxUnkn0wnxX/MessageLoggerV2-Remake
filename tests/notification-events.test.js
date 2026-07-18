@@ -335,3 +335,47 @@ test('edit-spam warnings keep expiring while hovered and dismiss from the whole 
     { pauseOnHover: false, instantDismiss: true }
   ]]);
 });
+
+test('channel-entry count toggles clear only their own pending queue and report real resets', () => {
+  const reports = [];
+  const plugin = createPlugin({
+    deletedChatMessagesCount: { first: 2, empty: 0 },
+    editedChatMessagesCount: { second: 3 },
+    reportSettingState(...args) { reports.push(args); }
+  });
+
+  assert.equal(plugin._handleMessageCountToggle('deleted', true), false);
+  assert.deepEqual(plugin.deletedChatMessagesCount, { first: 2, empty: 0 });
+  assert.equal(reports.length, 0, 'enabling cannot clear or report pending counts');
+
+  assert.equal(plugin._handleMessageCountToggle('deleted', false), true);
+  assert.deepEqual(plugin.deletedChatMessagesCount, {});
+  assert.deepEqual(plugin.editedChatMessagesCount, { second: 3 });
+  assert.deepEqual(reports, [[
+    'Deleted Message Counters Reset',
+    'All pending deleted-message counters were reset to 0.',
+    'All pending deleted-message counters were reset to 0.',
+    'info',
+    5000,
+    'setting:showDeletedCount'
+  ]]);
+
+  assert.equal(plugin._handleMessageCountToggle('deleted', false), false);
+  assert.equal(reports.length, 1, 'an already-empty queue cannot report another reset');
+
+  assert.equal(plugin._handleMessageCountToggle('edited', false), true);
+  assert.deepEqual(plugin.editedChatMessagesCount, {});
+  assert.deepEqual(reports.at(-1), [
+    'Edited Message Counters Reset',
+    'All pending edited-message counters were reset to 0.',
+    'All pending edited-message counters were reset to 0.',
+    'info',
+    5000,
+    'setting:showEditedCount'
+  ]);
+
+  plugin.editedChatMessagesCount = { empty: 0 };
+  assert.equal(plugin._handleMessageCountToggle('edited', false), false);
+  assert.deepEqual(plugin.editedChatMessagesCount, {});
+  assert.equal(reports.length, 2, 'zero-only queues are cleared silently');
+});
