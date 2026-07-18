@@ -10,7 +10,9 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'MessageLoggerV2.plugi
 function readDefaultSettings() {
   const match = source.match(/const defaultSettings = (\{[\s\S]*?\n    \});\n    const Flags =/);
   assert.ok(match, 'defaultSettings object was not found');
-  const expression = match[1].replaceAll('this.pluginDir', JSON.stringify('/plugins'));
+  const expression = match[1]
+    .replaceAll('this.pluginDir', JSON.stringify('/plugins'))
+    .replaceAll('DEFAULT_EDIT_SPAM_THRESHOLD', '10');
   return JSON.parse(JSON.stringify(vm.runInNewContext(`(${expression})`)));
 }
 
@@ -69,6 +71,7 @@ test('all fresh-install settings defaults remain stable', () => {
     },
     useNotificationsInstead: true,
     blockSpamEdit: false,
+    editSpamThreshold: 10,
     cacheAllImages: true,
     newCacheAllImagesPath: '',
     newCacheAllImages: true,
@@ -132,6 +135,7 @@ test('all fresh-install settings defaults remain stable', () => {
   Object.assign(customized, {
     autoBackup: true,
     autoBackupIntervalSeconds: 300,
+    editSpamThreshold: 25,
     messageCacheCap: 4321,
     savedMessagesCap: 9876,
     deletedMessageColor: '#12abef',
@@ -504,7 +508,7 @@ test('automatic backup interval is configurable and bounded in settings and conf
   assert.match(source, /const MAX_AUTO_BACKUP_INTERVAL_SECONDS = 86400;/);
   assert.match(source, /name: 'Auto backup interval \(seconds\)'[\s\S]*id: 'autoBackupIntervalSeconds'[\s\S]*emptyValue: DEFAULT_AUTO_BACKUP_INTERVAL_SECONDS[\s\S]*min: MIN_AUTO_BACKUP_INTERVAL_SECONDS[\s\S]*max: MAX_AUTO_BACKUP_INTERVAL_SECONDS[\s\S]*inlineValidation: true/);
   assert.match(source, /createInlineValidatedNumberInput\(config, onValid\)[\s\S]*aria-invalid[\s\S]*borderColor: 'var\(--status-danger\)'[\s\S]*boxShadow: '0 0 0 1px var\(--status-danger\)'/);
-  assert.match(source, /const nextValidation = plugin\.validateNumericSettingValue\(value, config\);[\s\S]*if \(nextValidation\.valid\) onValid\(nextValidation\.value\);/);
+  assert.match(source, /const nextValidation = plugin\.validateNumericSettingValue\(value, config\);[\s\S]*if \(nextValidation\.valid\) \{[\s\S]*onValid\(nextValidation\.value\);/);
   assert.match(source, /Invalid auto-backup interval in config; reset to/);
   assert.match(source, /this\.queueAutoBackup\(this\.getAutoBackupIntervalMilliseconds\(\), 'rescheduled after the interval changed'\)/);
 
@@ -546,7 +550,7 @@ test('backup diagnostics remain opt-in under their own warning-colored Debug cat
   assert.match(source, /if \(this\.settings\?\.debugToasts\)[\s\S]*this\.notifyUser\(message,[\s\S]*title: 'Message Logger Debug'[\s\S]*type: 'warning'/);
 });
 
-test('system and UI feedback uses one native-or-custom router without changing event alerts', () => {
+test('system and UI feedback uses one router while only spam warnings opt into system interactions', () => {
   assert.doesNotMatch(source, /UI\.showToast\(/);
   assert.doesNotMatch(source, /this\.showToast/);
   assert.equal(
@@ -567,7 +571,11 @@ test('system and UI feedback uses one native-or-custom router without changing e
     source.indexOf('_notifyEvent(eventType, channel, guild, messageId, options = {})'),
     source.indexOf('_sortMessagesById(messages)')
   );
-  assert.match(eventRouter, /this\._showNotification\(config\.title, message, config\.type, actions, timeout\)/);
+  assert.match(eventRouter, /editSpamBlocked:[\s\S]*pauseOnHover: false,[\s\S]*instantDismiss: true/);
+  assert.equal((eventRouter.match(/pauseOnHover: false/g) || []).length, 1);
+  assert.equal((eventRouter.match(/instantDismiss: true/g) || []).length, 1);
+  assert.match(eventRouter, /if \(config\.pauseOnHover !== undefined \|\| config\.instantDismiss !== undefined\)[\s\S]*return this\._showNotification\(config\.title, message, config\.type, actions, timeout, \{[\s\S]*pauseOnHover: config\.pauseOnHover,[\s\S]*instantDismiss: config\.instantDismiss/);
+  assert.match(eventRouter, /return this\._showNotification\(config\.title, message, config\.type, actions, timeout\);/);
   assert.doesNotMatch(eventRouter, /notifyUser/);
 
   assert.match(source, /setSavedThreadHidden\(record, hidden\)[\s\S]*this\.notifyUser\(hidden \? 'Hidden!' : 'Unhidden!'/);
@@ -608,9 +616,23 @@ test('edit-spam blocking is opt-in and uses a per-author sixty-second cooldown',
     source.indexOf('_notifyEvent(eventType, channel, guild, messageId, options = {})')
   );
   assert.match(spamDecision, /if \(!this\.settings\.blockSpamEdit\)[\s\S]*return 'allow'/);
-  assert.match(spamDecision, /state\.times\.length < 10/);
+  assert.match(spamDecision, /configuredThreshold >= 1[\s\S]*DEFAULT_EDIT_SPAM_THRESHOLD/);
+  assert.match(spamDecision, /state\.times\.length < threshold/);
   assert.match(spamDecision, /state\.blockedUntil = now \+ 60 \* 1000/);
   assert.match(spamDecision, /return 'started'/);
+
+  assert.match(source, /name: 'Block spam edit notifications \(if enabled\)'[\s\S]*id: 'blockSpamEdit'[\s\S]*name: 'Edit spam threshold'[\s\S]*id: 'editSpamThreshold'[\s\S]*min: 1,[\s\S]*resetInvalidTo: DEFAULT_EDIT_SPAM_THRESHOLD,[\s\S]*inlineValidation: true/);
+  assert.match(source, /editSpamThreshold: \{ fallback: DEFAULT_EDIT_SPAM_THRESHOLD, min: 1 \}/);
+  assert.match(source, /const value = event\.currentTarget\.value;[\s\S]*setDraft\(value\);[\s\S]*if \(config\.resetInvalidTo !== undefined\)[\s\S]*onValid\(resetValue\.value\)/);
+  const validationPlugin = createPlugin();
+  assert.deepEqual(validationPlugin.validateNumericSettingValue('0', { min: 1 }), {
+    valid: false,
+    message: 'Value must be at least 1!'
+  });
+  assert.deepEqual(validationPlugin.validateNumericSettingValue('1', { min: 1 }), {
+    valid: true,
+    value: 1
+  });
 
   const editedDispatch = source.slice(
     source.indexOf('const spamDecision = this._getEditNotificationSpamDecision(author.id)'),

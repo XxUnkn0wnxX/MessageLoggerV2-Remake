@@ -9,6 +9,7 @@ const { createPlugin, resetHarness } = require('./helpers/plugin-harness');
 const defaults = {
   autoBackup: false,
   autoBackupIntervalSeconds: 20,
+  editSpamThreshold: 10,
   debugLogging: false,
   debugToasts: false,
   flags: 0,
@@ -93,6 +94,7 @@ test('a valid legacy file initializes missing settings without corruption classi
   const settings = normalizeRecovered(plugin, result.settings);
   assert.equal(settings.autoBackup, true);
   assert.equal(settings.autoBackupIntervalSeconds, 20);
+  assert.equal(settings.editSpamThreshold, 10);
   assert.equal(settings.debugLogging, false);
   assert.equal(settings.debugToasts, false);
   assert.deepEqual(settings.openLogsKeybind, ['Control', 'm']);

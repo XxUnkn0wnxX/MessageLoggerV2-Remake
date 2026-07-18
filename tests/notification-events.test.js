@@ -143,4 +143,43 @@ test('edit-spam blocking follows the toggle and uses an exact per-author cooldow
   assert.equal(plugin._getEditNotificationSpamDecision('other-author', 10_000), 'allow');
   assert.equal(plugin._getEditNotificationSpamDecision('author', 68_999), 'blocked');
   assert.equal(plugin._getEditNotificationSpamDecision('author', 69_000), 'allow');
+
+  const configuredPlugin = createPlugin({
+    settings: { blockSpamEdit: true, editSpamThreshold: 3 },
+    editHistoryAntiSpam: {}
+  });
+  assert.equal(configuredPlugin._getEditNotificationSpamDecision('author', 0), 'allow');
+  assert.equal(configuredPlugin._getEditNotificationSpamDecision('author', 1_000), 'allow');
+  assert.equal(configuredPlugin._getEditNotificationSpamDecision('author', 2_000), 'started');
+
+  configuredPlugin.settings.editSpamThreshold = 0;
+  configuredPlugin.editHistoryAntiSpam = {};
+  for (let index = 0; index < 9; index++) {
+    assert.equal(configuredPlugin._getEditNotificationSpamDecision('author', index * 1000), 'allow');
+  }
+  assert.equal(configuredPlugin._getEditNotificationSpamDecision('author', 9_000), 'started');
+});
+
+test('edit-spam warnings keep expiring while hovered and dismiss from the whole card', () => {
+  const notifications = [];
+  const plugin = createPlugin({
+    _showNotification(...args) { notifications.push(args); }
+  });
+
+  plugin._notifyEvent(
+    'editSpamBlocked',
+    { id: 'channel', guild_id: 'guild' },
+    { id: 'guild' },
+    null,
+    { username: 'author', locationName: 'Test Channel' }
+  );
+
+  assert.deepEqual(notifications, [[
+    'Edit Spam Blocked',
+    'Edit notifications from author have been temporarily blocked for 1 minute.',
+    'warning',
+    [],
+    7500,
+    { pauseOnHover: false, instantDismiss: true }
+  ]]);
 });

@@ -131,6 +131,8 @@ The selected notification mode applies to every logger alert and system/UI messa
 
 System/UI feedback—including settings, Debug, Hide/Unhide, validation, migration, backup recovery, and no-save merging—keeps expiring while hovered. Left- or right-click anywhere on its card dismisses it immediately; explicit action buttons still work.
 
+The **Edit Spam Blocked** warning uses the same interaction behavior in either notification mode: hover does not pause its expiry, and a left- or right-click anywhere on the card dismisses it immediately. **Edit spam threshold** defaults to `10`; valid whole numbers start at `1`. Invalid input stays red with an inline error while the saved value resets to `10`. The rolling window and per-author pause remain fixed at 60 seconds each.
+
 Saved-message event alerts keep their action and hover behavior:
 
 For custom toasts:

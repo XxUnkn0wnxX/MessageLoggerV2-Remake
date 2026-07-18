@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.2
+ * @version 2.8.2.3
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -18,6 +18,7 @@ const DATA_SCHEMA_VERSION = 1;
 const DEFAULT_AUTO_BACKUP_INTERVAL_SECONDS = 20;
 const MIN_AUTO_BACKUP_INTERVAL_SECONDS = 10;
 const MAX_AUTO_BACKUP_INTERVAL_SECONDS = 86400;
+const DEFAULT_EDIT_SPAM_THRESHOLD = 10;
 // BetterDiscord's native keybind recorder persists KeyboardEvent.key values as an array.
 // Keep the advertised shortcuts as defaults while allowing every binding to be
 // customized—or cleared to disable it—without introducing a fork-only settings component.
@@ -434,6 +435,14 @@ module.exports = class MessageLoggerV2 {
           'The restored-message master switch now describes live mounting and unmounting instead of requiring a reload.',
           'Deleted and Purged display controls are grouped beneath it with clearer labels and dependency notes.'
         ]
+      },
+      {
+        title: 'Minor notification updates',
+        type: 'improved',
+        items: [
+          'Edit Spam Blocked warnings now keep expiring while hovered and dismiss from a left- or right-click anywhere on the card.',
+          'The edit-spam threshold is configurable per author, defaults to 10, and resets invalid values to 10.'
+        ]
       }
     ];
   }
@@ -647,6 +656,7 @@ module.exports = class MessageLoggerV2 {
       },
       useNotificationsInstead: true,
       blockSpamEdit: false,
+      editSpamThreshold: DEFAULT_EDIT_SPAM_THRESHOLD,
       cacheAllImages: true,
       newCacheAllImagesPath: '',
       newCacheAllImages: true,
@@ -776,6 +786,7 @@ module.exports = class MessageLoggerV2 {
     }
     if (this.ensureRequiredLegacySettings()) settingsChanged = true;
     const numericSettings = {
+      editSpamThreshold: { fallback: DEFAULT_EDIT_SPAM_THRESHOLD, min: 1 },
       maxShownEdits: { fallback: 0, min: 0 },
       maxCacheFileSize: { fallback: 0, min: 0 },
       messageCacheCap: { fallback: defaultSettings.messageCacheCap, min: 1 },
@@ -2795,7 +2806,17 @@ module.exports = class MessageLoggerV2 {
         const value = event.currentTarget.value;
         setDraft(value);
         const nextValidation = plugin.validateNumericSettingValue(value, config);
-        if (nextValidation.valid) onValid(nextValidation.value);
+        if (nextValidation.valid) {
+          onValid(nextValidation.value);
+          return;
+        }
+        if (config.resetInvalidTo !== undefined) {
+          const resetValue = plugin.validateNumericSettingValue(config.resetInvalidTo, config);
+          if (resetValue.valid) {
+            onValid(resetValue.value);
+            return;
+          }
+        }
       };
       return React.createElement(
         'div',
@@ -3284,7 +3305,17 @@ module.exports = class MessageLoggerV2 {
             type: 'switch',
             action: 'refreshNativeForumPosts'
           },
-          { name: 'Block spam edit notifications (if enabled)', id: 'blockSpamEdit', type: 'switch' }
+          { name: 'Block spam edit notifications (if enabled)', id: 'blockSpamEdit', type: 'switch' },
+          {
+            name: 'Edit spam threshold',
+            note: 'Eligible edits within 60 seconds before a 60-second notification pause. Invalid input stays red while the saved value resets to 10.',
+            id: 'editSpamThreshold',
+            type: 'textbox',
+            validator: 'number',
+            min: 1,
+            resetInvalidTo: DEFAULT_EDIT_SPAM_THRESHOLD,
+            inlineValidation: true
+          }
         ]
       },
       {
@@ -6340,7 +6371,13 @@ module.exports = class MessageLoggerV2 {
     }
     state.times = state.times.filter(time => now - time < 60 * 1000);
     state.times.push(now);
-    if (state.times.length < 10) return 'allow';
+    const configuredThreshold = Number(this.settings.editSpamThreshold);
+    const threshold = Number.isFinite(configuredThreshold)
+      && Number.isInteger(configuredThreshold)
+      && configuredThreshold >= 1
+      ? configuredThreshold
+      : DEFAULT_EDIT_SPAM_THRESHOLD;
+    if (state.times.length < threshold) return 'allow';
     state.times = [];
     state.blockedUntil = now + 60 * 1000;
     return 'started';
@@ -6391,7 +6428,9 @@ module.exports = class MessageLoggerV2 {
         getMessage: (_, __, username) => `Edit notifications from ${username} have been temporarily blocked for 1 minute.`,
         type: "warning",
         tab: null,
-        timeout: 7500
+        timeout: 7500,
+        pauseOnHover: false,
+        instantDismiss: true
       }
     };
     const config = configs[eventType];
@@ -6412,7 +6451,13 @@ module.exports = class MessageLoggerV2 {
         onClick: () => this.jumpToSavedRecord(jumpRecord)
       });
     }
-    this._showNotification(config.title, message, config.type, actions, timeout);
+    if (config.pauseOnHover !== undefined || config.instantDismiss !== undefined) {
+      return this._showNotification(config.title, message, config.type, actions, timeout, {
+        pauseOnHover: config.pauseOnHover,
+        instantDismiss: config.instantDismiss
+      });
+    }
+    return this._showNotification(config.title, message, config.type, actions, timeout);
   }
   _sortMessagesById(messages) {
     messages.sort((a, b) => {
