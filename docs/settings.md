@@ -204,10 +204,10 @@ The Debug category title and both setting labels use Discord's native warning co
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Enable debug logging | Off | Writes automatic-backup queue delay, reschedule, cancellation, write start, verification retry, and completion events to the console. |
-| Show debug messages as toasts | Off | Sends the same backup events through the selected BetterDiscord-notification or custom-toast mode. Debug alerts are warning-colored, expire without pausing on hover, and dismiss on a left- or right-click. This control is independent of console debug logging. |
+| Enable debug logging | Off | Writes automatic-backup lifecycle events and edit-spam diagnostics to the console. Edit-spam output shows each username's current/threshold counter, cooldown start, 10-second warning, final reset, and early settings reset without printing user IDs. |
+| Show debug messages as toasts | Off | Sends the same backup and edit-spam events through the selected BetterDiscord-notification or custom-toast mode. Debug alerts are warning-colored, expire without pausing on hover, and dismiss on a left- or right-click. This control is independent of console debug logging. |
 
-Debug output currently covers only the automatic-backup lifecycle. It does not change backup timing, persistence, or normal error reporting.
+Debug output covers the automatic-backup lifecycle and edit-spam counters/cooldowns. It does not change backup timing, persistence, or normal error reporting.
 
 ## 📣 High-Impact Setting Feedback
 

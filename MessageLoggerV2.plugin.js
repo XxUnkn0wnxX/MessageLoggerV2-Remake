@@ -19,6 +19,8 @@ const DEFAULT_AUTO_BACKUP_INTERVAL_SECONDS = 20;
 const MIN_AUTO_BACKUP_INTERVAL_SECONDS = 10;
 const MAX_AUTO_BACKUP_INTERVAL_SECONDS = 86400;
 const DEFAULT_EDIT_SPAM_THRESHOLD = 10;
+const EDIT_SPAM_COOLDOWN_MS = 60 * 1000;
+const EDIT_SPAM_DEBUG_WARNING_MS = 10 * 1000;
 // BetterDiscord's native keybind recorder persists KeyboardEvent.key values as an array.
 // Keep the advertised shortcuts as defaults while allowing every binding to be
 // customized—or cleared to disable it—without introducing a fork-only settings component.
@@ -314,6 +316,7 @@ module.exports = class MessageLoggerV2 {
       clearTimeout(this.updateTimeout);
       clearTimeout(this.saveBackupTimeout);
       clearTimeout(this.requestedDataSave);
+      this._clearEditSpamCooldownTimers?.();
       this.requestedDataSave = 0;
       for (const context of this._destructiveChannelDeleteContexts?.values?.() || []) {
         clearTimeout(context.cleanupTimer);
@@ -1096,7 +1099,9 @@ module.exports = class MessageLoggerV2 {
     this._globalUpdateCallbackMessage = null;
     this._globalUpdateCallbackContent = null;
     this.tempEditedMessageRecord = {};
+    this._clearEditSpamCooldownTimers?.();
     this.editHistoryAntiSpam = {};
+    this._editSpamCooldownTimers = new Map();
     this._notifiedEventIds = new Map();
     this.localDeletes = [];
     this.cacheDeletionMessageIds = new Set();
@@ -2930,7 +2935,7 @@ module.exports = class MessageLoggerV2 {
     return `${seconds} second${seconds === 1 ? '' : 's'}`;
   }
   reportDebugEvent(message, timeout = 4000) {
-    // Debug output is intentionally opt-in and currently limited to automatic-backup
+    // Debug output is intentionally opt-in for automatic-backup and edit-spam timer
     // lifecycle events. The two settings are independent so developers can use either the
     // console, the selected notification/toast route, or both without affecting errors.
     // All debug notifications deliberately use the warning type so they share the same
@@ -3506,7 +3511,7 @@ module.exports = class MessageLoggerV2 {
               { style: { color: 'var(--text-warning, var(--status-warning))' } },
               'Enable debug logging'
             ),
-            note: 'Log automatic-backup scheduling and writes to the console.',
+            note: 'Log automatic-backup and edit-spam timer lifecycle events to the console.',
             id: 'debugLogging',
             type: 'switch'
           },
@@ -3516,7 +3521,7 @@ module.exports = class MessageLoggerV2 {
               { style: { color: 'var(--text-warning, var(--status-warning))' } },
               'Show debug messages as toasts'
             ),
-            note: 'Show backup diagnostics through the selected alert mode.',
+            note: 'Show backup and edit-spam timer diagnostics through the selected alert mode.',
             id: 'debugToasts',
             type: 'switch'
           }
@@ -3545,8 +3550,11 @@ module.exports = class MessageLoggerV2 {
       reportMediaCaching: (val) => this.reportMajorSettingChange('cacheAllImages', val),
       reportAntiNuke: (val) => this.reportMajorSettingChange('antiNukeEnabled', val),
       reportCachedFileDeletion: (val) => this.reportMajorSettingChange('deleteCachedFilesWithRecords', val),
-      resetEditSpamState: () => this._resetEditNotificationSpamState(true),
-      toggleEditSpamState: (enabled) => this._resetEditNotificationSpamState(!enabled),
+      resetEditSpamState: () => this._resetEditNotificationSpamState(true, 'the threshold changed'),
+      toggleEditSpamState: (enabled) => this._resetEditNotificationSpamState(
+        !enabled,
+        enabled ? 'blocking was enabled' : 'blocking was disabled'
+      ),
       rescheduleBackup: () => this.handleAutoBackupIntervalChange(),
       toggleLogsButton: (val) => {
         if (val) return this.addOpenLogsButton();
@@ -6368,16 +6376,73 @@ module.exports = class MessageLoggerV2 {
       ? configuredThreshold
       : DEFAULT_EDIT_SPAM_THRESHOLD;
   }
-  _hasActiveEditNotificationSpamState(now = Date.now()) {
-    return Object.values(this.editHistoryAntiSpam || {}).some(state => {
-      if (Number(state?.blockedUntil) > now) return true;
-      return Array.isArray(state?.times) && state.times.some(time => (
-        Number.isFinite(time) && time <= now && now - time < 60 * 1000
-      ));
-    });
+  _getEditNotificationSpamUsername(state) {
+    const username = typeof state?.username === 'string' ? state.username.trim() : '';
+    return username || 'Unknown user';
   }
-  _resetEditNotificationSpamState(showNotice = false) {
-    const hadActiveState = this._hasActiveEditNotificationSpamState();
+  _isActiveEditNotificationSpamState(state, now = Date.now()) {
+    if (Number(state?.blockedUntil) > now) return true;
+    return Array.isArray(state?.times) && state.times.some(time => (
+      Number.isFinite(time) && time <= now && now - time < 60 * 1000
+    ));
+  }
+  _getActiveEditNotificationSpamEntries(now = Date.now()) {
+    return Object.entries(this.editHistoryAntiSpam || {})
+      .filter(([, state]) => this._isActiveEditNotificationSpamState(state, now));
+  }
+  _hasActiveEditNotificationSpamState(now = Date.now()) {
+    return this._getActiveEditNotificationSpamEntries(now).length > 0;
+  }
+  _cancelEditSpamCooldownTimer(authorId) {
+    const key = String(authorId);
+    const timers = this._editSpamCooldownTimers?.get(key);
+    if (!timers) return;
+    clearTimeout(timers.warningTimer);
+    clearTimeout(timers.resetTimer);
+    this._editSpamCooldownTimers.delete(key);
+  }
+  _clearEditSpamCooldownTimers() {
+    for (const timers of this._editSpamCooldownTimers?.values?.() || []) {
+      clearTimeout(timers.warningTimer);
+      clearTimeout(timers.resetTimer);
+    }
+    this._editSpamCooldownTimers?.clear?.();
+  }
+  _scheduleEditSpamCooldownReset(authorId, state, now = Date.now()) {
+    const key = String(authorId);
+    this._cancelEditSpamCooldownTimer(key);
+    this._editSpamCooldownTimers ||= new Map();
+    const blockedUntil = Number(state.blockedUntil);
+    const remaining = Math.max(0, blockedUntil - now);
+    const username = this._getEditNotificationSpamUsername(state);
+    this.reportDebugEvent(`Edit-spam cooldown for ${username} started. Resetting in 60 seconds.`);
+    const isCurrentCooldown = () => (
+      Number(this.editHistoryAntiSpam?.[key]?.blockedUntil) === blockedUntil
+    );
+    const warningTimer = setTimeout(() => {
+      if (!isCurrentCooldown()) return;
+      const currentUsername = this._getEditNotificationSpamUsername(this.editHistoryAntiSpam[key]);
+      this.reportDebugEvent(`Edit-spam cooldown for ${currentUsername} will reset in 10 seconds.`);
+    }, Math.max(0, remaining - EDIT_SPAM_DEBUG_WARNING_MS));
+    const resetTimer = setTimeout(() => {
+      if (!isCurrentCooldown()) return;
+      const currentUsername = this._getEditNotificationSpamUsername(this.editHistoryAntiSpam[key]);
+      this.reportDebugEvent(`Edit-spam cooldown for ${currentUsername} reset after 60 seconds.`);
+      delete this.editHistoryAntiSpam[key];
+      this._editSpamCooldownTimers?.delete(key);
+    }, remaining);
+    warningTimer?.unref?.();
+    resetTimer?.unref?.();
+    this._editSpamCooldownTimers.set(key, { warningTimer, resetTimer, blockedUntil });
+  }
+  _resetEditNotificationSpamState(showNotice = false, reason = 'the settings changed') {
+    const activeEntries = this._getActiveEditNotificationSpamEntries();
+    const hadActiveState = activeEntries.length > 0;
+    for (const [, state] of activeEntries) {
+      const username = this._getEditNotificationSpamUsername(state);
+      this.reportDebugEvent(`Edit-spam timer for ${username} is about to reset because ${reason}.`);
+    }
+    this._clearEditSpamCooldownTimers();
     this.editHistoryAntiSpam = {};
     this._editNotificationSpamSettingsKey = `${Boolean(this.settings?.blockSpamEdit)}:${this._getEditNotificationSpamThreshold()}`;
     if (showNotice && hadActiveState) {
@@ -6391,34 +6456,42 @@ module.exports = class MessageLoggerV2 {
       );
     }
   }
-  _getEditNotificationSpamDecision(authorId, now = Date.now()) {
+  _getEditNotificationSpamDecision(authorId, now = Date.now(), username = null) {
     const threshold = this._getEditNotificationSpamThreshold();
     const settingsKey = `${Boolean(this.settings?.blockSpamEdit)}:${threshold}`;
     if (this._editNotificationSpamSettingsKey !== settingsKey) {
-      this.editHistoryAntiSpam = {};
-      this._editNotificationSpamSettingsKey = settingsKey;
+      this._resetEditNotificationSpamState(false, 'the settings changed outside the panel');
     }
     this.editHistoryAntiSpam ||= {};
     if (!this.settings.blockSpamEdit) {
+      this._cancelEditSpamCooldownTimer(authorId);
       delete this.editHistoryAntiSpam[authorId];
       return 'allow';
     }
     const state = this.editHistoryAntiSpam[authorId] ||= {
       blockedUntil: 0,
       times: [],
-      lastActivity: now
+      lastActivity: now,
+      username: null
     };
+    if (typeof username === 'string' && username.trim()) state.username = username.trim();
     state.lastActivity = now;
     if (state.blockedUntil > now) return 'blocked';
     if (state.blockedUntil) {
+      this._cancelEditSpamCooldownTimer(authorId);
+      const currentUsername = this._getEditNotificationSpamUsername(state);
+      this.reportDebugEvent(`Edit-spam cooldown for ${currentUsername} reset after 60 seconds.`);
       state.blockedUntil = 0;
       state.times = [];
     }
     state.times = state.times.filter(time => now - time < 60 * 1000);
     state.times.push(now);
+    const currentUsername = this._getEditNotificationSpamUsername(state);
+    this.reportDebugEvent(`Edit-spam counter for ${currentUsername}: ${state.times.length}/${threshold} edits within 60 seconds.`);
     if (state.times.length < threshold) return 'allow';
     state.times = [];
-    state.blockedUntil = now + 60 * 1000;
+    state.blockedUntil = now + EDIT_SPAM_COOLDOWN_MS;
+    this._scheduleEditSpamCooldownReset(authorId, state, now);
     return 'started';
   }
   _notifyEvent(eventType, channel, guild, messageId, options = {}) {
@@ -10027,7 +10100,7 @@ module.exports = class MessageLoggerV2 {
           [lastEditedSaved, currentSavedRecord]
         );
         if (this._shouldShowToast(channel, guild, 'edited', isLocalUser)) {
-          const spamDecision = this._getEditNotificationSpamDecision(author.id);
+          const spamDecision = this._getEditNotificationSpamDecision(author.id, Date.now(), author.username);
           if (spamDecision === 'started') {
             this._notifyEvent('editSpamBlocked', channel, guild, null, { username: author.username });
           } else if (spamDecision === 'allow') {

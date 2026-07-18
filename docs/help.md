@@ -221,7 +221,7 @@ Disabling saving reports the memory-only state. Re-enabling without a reload que
 - Current MessageLoggerV2 forks can still read the core fields. Metadata an older fork removed cannot be recreated and remains blank.
 - Migration reports progress and success through the selected notification mode. On failure, the primary and backup remain available and the alert directs you to the console.
 - A missing or invalid primary is rebuilt from a valid normalized backup. The backup remains untouched; newer schemas fail closed instead of being downgraded.
-- **Debug** can report backup queueing, reschedules, cancellations, starts, retries, and completions. Console and toast diagnostics are independent and off by default.
+- **Debug** can report backup queueing, reschedules, cancellations, starts, retries, and completions. It also reports edit-spam counters by username, cooldown start, 10 seconds remaining, final reset, and early settings resets. Console and toast diagnostics are independent and off by default; edit-spam debug text never prints user IDs.
 - Startup salvages common config comma/bracket damage, preserves valid settings, saves the exact damaged text as `MessageLoggerV2.config.corrupt-backup.json`, and never treats an existing repaired config as a first install.
 
 ### High-impact setting feedback

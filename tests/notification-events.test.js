@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createPlugin, resetHarness } = require('./helpers/plugin-harness');
+const { createPlugin, loggerEvents, resetHarness } = require('./helpers/plugin-harness');
 
 test.beforeEach(resetHarness);
 
@@ -163,17 +163,24 @@ test('edit-spam blocking follows the toggle and uses an exact per-author cooldow
 test('edit-spam setting resets clear every author and report only active state', () => {
   const now = Date.now();
   const reports = [];
+  const debugEvents = [];
   const plugin = createPlugin({
     settings: { blockSpamEdit: true, editSpamThreshold: 3 },
     editHistoryAntiSpam: {
-      first: { blockedUntil: now + 60_000, times: [], lastActivity: now },
-      second: { blockedUntil: 0, times: [now - 2_000, now - 1_000], lastActivity: now - 1_000 }
+      first: { blockedUntil: now + 60_000, times: [], lastActivity: now, username: 'Alice' },
+      second: { blockedUntil: 0, times: [now - 2_000, now - 1_000], lastActivity: now - 1_000, username: 'Bob' }
     },
+    reportDebugEvent(message) { debugEvents.push(message); },
     reportSettingState(...args) { reports.push(args); }
   });
 
-  plugin._resetEditNotificationSpamState(true);
+  plugin._resetEditNotificationSpamState(true, 'the threshold changed');
   assert.deepEqual(plugin.editHistoryAntiSpam, {});
+  assert.deepEqual(debugEvents, [
+    'Edit-spam timer for Alice is about to reset because the threshold changed.',
+    'Edit-spam timer for Bob is about to reset because the threshold changed.'
+  ]);
+  assert.ok(debugEvents.every(message => !message.includes('first') && !message.includes('second')));
   assert.deepEqual(reports, [[
     'Edit Spam Timers Reset',
     'All edit-spam author counts and notification pauses were cleared.',
@@ -196,6 +203,70 @@ test('edit-spam setting resets clear every author and report only active state',
   plugin.editHistoryAntiSpam.stale = { blockedUntil: now + 60_000, times: [], lastActivity: now };
   assert.equal(plugin._getEditNotificationSpamDecision('fresh', 5_000), 'allow');
   assert.equal(plugin.editHistoryAntiSpam.stale, undefined, 'runtime setting changes clear all stale authors');
+});
+
+test('edit-spam debug reports username counters and the full cooldown lifecycle', t => {
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+  const scheduled = [];
+  t.after(() => {
+    global.setTimeout = originalSetTimeout;
+    global.clearTimeout = originalClearTimeout;
+  });
+  global.setTimeout = (callback, delay) => {
+    const timer = { callback, delay, cleared: false, unref() {} };
+    scheduled.push(timer);
+    return timer;
+  };
+  global.clearTimeout = timer => {
+    if (timer) timer.cleared = true;
+  };
+
+  const notifications = [];
+  const plugin = createPlugin({
+    settings: {
+      blockSpamEdit: true,
+      editSpamThreshold: 2,
+      debugLogging: true,
+      debugToasts: true
+    },
+    editHistoryAntiSpam: {},
+    _showNotification(...args) { notifications.push(args); }
+  });
+
+  assert.equal(plugin._getEditNotificationSpamDecision('123456789', 0, 'Alice'), 'allow');
+  assert.equal(plugin._getEditNotificationSpamDecision('123456789', 1_000, 'Alice'), 'started');
+  assert.deepEqual(
+    loggerEvents.map(event => event[1]),
+    [
+      '[Debug] Edit-spam counter for Alice: 1/2 edits within 60 seconds.',
+      '[Debug] Edit-spam counter for Alice: 2/2 edits within 60 seconds.',
+      '[Debug] Edit-spam cooldown for Alice started. Resetting in 60 seconds.'
+    ]
+  );
+  assert.deepEqual(scheduled.map(timer => timer.delay), [50_000, 60_000]);
+
+  scheduled[0].callback();
+  scheduled[1].callback();
+  assert.deepEqual(
+    loggerEvents.slice(-2).map(event => event[1]),
+    [
+      '[Debug] Edit-spam cooldown for Alice will reset in 10 seconds.',
+      '[Debug] Edit-spam cooldown for Alice reset after 60 seconds.'
+    ]
+  );
+  assert.equal(plugin.editHistoryAntiSpam['123456789'], undefined);
+  assert.equal(plugin._editSpamCooldownTimers.size, 0);
+  assert.ok(loggerEvents.every(event => !String(event[1]).includes('123456789')));
+  assert.ok(notifications.every(args => !String(args[1]).includes('123456789')));
+  assert.ok(notifications.every(args => args[5].pauseOnHover === false && args[5].instantDismiss === true));
+
+  assert.equal(plugin._getEditNotificationSpamDecision('987654321', 70_000, 'Bob'), 'allow');
+  assert.equal(plugin._getEditNotificationSpamDecision('987654321', 71_000, 'Bob'), 'started');
+  const unloadTimers = scheduled.slice(-2);
+  plugin._clearEditSpamCooldownTimers();
+  assert.ok(unloadTimers.every(timer => timer.cleared));
+  assert.equal(plugin._editSpamCooldownTimers.size, 0);
 });
 
 test('edit-spam warnings keep expiring while hovered and dismiss from the whole card', () => {

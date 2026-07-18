@@ -542,12 +542,13 @@ test('automatic backup interval is configurable and bounded in settings and conf
   assert.equal(plugin.settings.autoBackupIntervalSeconds, 20);
 });
 
-test('backup diagnostics remain opt-in under their own warning-colored Debug category', () => {
+test('backup and edit-spam diagnostics remain opt-in under their warning-colored Debug category', () => {
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Debug'[\s\S]*id: 'ml2-settings-debug'[\s\S]*collapsible: true[\s\S]*shown: false/);
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Enable debug logging[\s\S]*id: 'debugLogging'[\s\S]*type: 'switch'/);
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Show debug messages as toasts[\s\S]*id: 'debugToasts'[\s\S]*type: 'switch'/);
   assert.match(source, /if \(this\.settings\?\.debugLogging\) Logger\.log\(`\[Debug\] \$\{message\}`\)/);
   assert.match(source, /if \(this\.settings\?\.debugToasts\)[\s\S]*this\.notifyUser\(message,[\s\S]*title: 'Message Logger Debug'[\s\S]*type: 'warning'/);
+  assert.match(source, /automatic-backup and edit-spam timer[\s\S]*lifecycle events/);
 });
 
 test('system and UI feedback uses one router while only spam warnings opt into system interactions', () => {
@@ -616,18 +617,22 @@ test('edit-spam blocking is opt-in and uses a per-author sixty-second cooldown',
     source.indexOf('_notifyEvent(eventType, channel, guild, messageId, options = {})')
   );
   assert.match(spamHelpers, /configuredThreshold >= 1[\s\S]*DEFAULT_EDIT_SPAM_THRESHOLD/);
-  assert.match(spamHelpers, /_hasActiveEditNotificationSpamState\(now = Date\.now\(\)\)[\s\S]*blockedUntil\) > now[\s\S]*now - time < 60 \* 1000/);
-  assert.match(spamHelpers, /_resetEditNotificationSpamState\(showNotice = false\)[\s\S]*this\.editHistoryAntiSpam = \{\}/);
+  assert.match(spamHelpers, /_isActiveEditNotificationSpamState\(state, now = Date\.now\(\)\)[\s\S]*blockedUntil\) > now[\s\S]*now - time < 60 \* 1000/);
+  assert.match(spamHelpers, /_scheduleEditSpamCooldownReset\(authorId, state, now = Date\.now\(\)\)[\s\S]*started\. Resetting in 60 seconds[\s\S]*will reset in 10 seconds[\s\S]*reset after 60 seconds/);
+  assert.match(spamHelpers, /_resetEditNotificationSpamState\(showNotice = false, reason = 'the settings changed'\)[\s\S]*this\._clearEditSpamCooldownTimers\(\)[\s\S]*this\.editHistoryAntiSpam = \{\}/);
   assert.match(spamHelpers, /showNotice && hadActiveState[\s\S]*'Edit Spam Timers Reset'[\s\S]*'All edit-spam author counts and notification pauses were cleared\.'[\s\S]*'info'[\s\S]*'edit-spam-timers-reset'/);
-  assert.match(spamHelpers, /this\._editNotificationSpamSettingsKey !== settingsKey[\s\S]*this\.editHistoryAntiSpam = \{\}/);
+  assert.match(spamHelpers, /this\._editNotificationSpamSettingsKey !== settingsKey[\s\S]*_resetEditNotificationSpamState\(false, 'the settings changed outside the panel'\)/);
   assert.match(spamHelpers, /if \(!this\.settings\.blockSpamEdit\)[\s\S]*return 'allow'/);
+  assert.match(spamHelpers, /Edit-spam counter for \$\{currentUsername\}: \$\{state\.times\.length\}\/\$\{threshold\} edits within 60 seconds/);
   assert.match(spamHelpers, /state\.times\.length < threshold/);
-  assert.match(spamHelpers, /state\.blockedUntil = now \+ 60 \* 1000/);
+  assert.match(spamHelpers, /state\.blockedUntil = now \+ EDIT_SPAM_COOLDOWN_MS[\s\S]*_scheduleEditSpamCooldownReset\(authorId, state, now\)/);
   assert.match(spamHelpers, /return 'started'/);
+  assert.match(source, /stop\(\)[\s\S]*this\._clearEditSpamCooldownTimers\?\.\(\)/);
+  assert.match(source, /this\._editSpamCooldownTimers = new Map\(\)/);
 
   assert.match(source, /name: 'Block spam edit notifications \(if enabled\)'[\s\S]*id: 'blockSpamEdit'[\s\S]*action: 'toggleEditSpamState'[\s\S]*name: 'Edit spam threshold'[\s\S]*id: 'editSpamThreshold'[\s\S]*min: 1,[\s\S]*resetInvalidTo: DEFAULT_EDIT_SPAM_THRESHOLD,[\s\S]*inlineValidation: true,[\s\S]*action: 'resetEditSpamState'/);
-  assert.match(source, /resetEditSpamState: \(\) => this\._resetEditNotificationSpamState\(true\)/);
-  assert.match(source, /toggleEditSpamState: \(enabled\) => this\._resetEditNotificationSpamState\(!enabled\)/);
+  assert.match(source, /resetEditSpamState: \(\) => this\._resetEditNotificationSpamState\(true, 'the threshold changed'\)/);
+  assert.match(source, /toggleEditSpamState: \(enabled\) => this\._resetEditNotificationSpamState\([\s\S]*!enabled,[\s\S]*enabled \? 'blocking was enabled' : 'blocking was disabled'/);
   assert.match(source, /editSpamThreshold: \{ fallback: DEFAULT_EDIT_SPAM_THRESHOLD, min: 1 \}/);
   assert.match(source, /const value = event\.currentTarget\.value;[\s\S]*setDraft\(value\);[\s\S]*if \(config\.resetInvalidTo !== undefined\)[\s\S]*onValid\(resetValue\.value\)/);
   const validationPlugin = createPlugin();
@@ -641,9 +646,10 @@ test('edit-spam blocking is opt-in and uses a per-author sixty-second cooldown',
   });
 
   const editedDispatch = source.slice(
-    source.indexOf('const spamDecision = this._getEditNotificationSpamDecision(author.id)'),
-    source.indexOf("dispatch.type == 'MESSAGE_CREATE'", source.indexOf('const spamDecision = this._getEditNotificationSpamDecision(author.id)'))
+    source.indexOf('const spamDecision = this._getEditNotificationSpamDecision(author.id, Date.now(), author.username)'),
+    source.indexOf("dispatch.type == 'MESSAGE_CREATE'", source.indexOf('const spamDecision = this._getEditNotificationSpamDecision(author.id, Date.now(), author.username)'))
   );
+  assert.match(editedDispatch, /_getEditNotificationSpamDecision\(author\.id, Date\.now\(\), author\.username\)/);
   assert.match(editedDispatch, /spamDecision === 'started'[\s\S]*_notifyEvent\('editSpamBlocked'/);
   assert.match(editedDispatch, /spamDecision === 'allow'[\s\S]*_notifyEvent\('edited'/);
 });
