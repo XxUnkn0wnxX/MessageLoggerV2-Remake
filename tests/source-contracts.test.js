@@ -611,17 +611,23 @@ test('event notification identities cover deletes, threads, purges, and sent-mes
 });
 
 test('edit-spam blocking is opt-in and uses a per-author sixty-second cooldown', () => {
-  const spamDecision = source.slice(
-    source.indexOf('_getEditNotificationSpamDecision(authorId, now = Date.now())'),
+  const spamHelpers = source.slice(
+    source.indexOf('_getEditNotificationSpamThreshold()'),
     source.indexOf('_notifyEvent(eventType, channel, guild, messageId, options = {})')
   );
-  assert.match(spamDecision, /if \(!this\.settings\.blockSpamEdit\)[\s\S]*return 'allow'/);
-  assert.match(spamDecision, /configuredThreshold >= 1[\s\S]*DEFAULT_EDIT_SPAM_THRESHOLD/);
-  assert.match(spamDecision, /state\.times\.length < threshold/);
-  assert.match(spamDecision, /state\.blockedUntil = now \+ 60 \* 1000/);
-  assert.match(spamDecision, /return 'started'/);
+  assert.match(spamHelpers, /configuredThreshold >= 1[\s\S]*DEFAULT_EDIT_SPAM_THRESHOLD/);
+  assert.match(spamHelpers, /_hasActiveEditNotificationSpamState\(now = Date\.now\(\)\)[\s\S]*blockedUntil\) > now[\s\S]*now - time < 60 \* 1000/);
+  assert.match(spamHelpers, /_resetEditNotificationSpamState\(showNotice = false\)[\s\S]*this\.editHistoryAntiSpam = \{\}/);
+  assert.match(spamHelpers, /showNotice && hadActiveState[\s\S]*'Edit Spam Timers Reset'[\s\S]*'All edit-spam author counts and notification pauses were cleared\.'[\s\S]*'info'[\s\S]*'edit-spam-timers-reset'/);
+  assert.match(spamHelpers, /this\._editNotificationSpamSettingsKey !== settingsKey[\s\S]*this\.editHistoryAntiSpam = \{\}/);
+  assert.match(spamHelpers, /if \(!this\.settings\.blockSpamEdit\)[\s\S]*return 'allow'/);
+  assert.match(spamHelpers, /state\.times\.length < threshold/);
+  assert.match(spamHelpers, /state\.blockedUntil = now \+ 60 \* 1000/);
+  assert.match(spamHelpers, /return 'started'/);
 
-  assert.match(source, /name: 'Block spam edit notifications \(if enabled\)'[\s\S]*id: 'blockSpamEdit'[\s\S]*name: 'Edit spam threshold'[\s\S]*id: 'editSpamThreshold'[\s\S]*min: 1,[\s\S]*resetInvalidTo: DEFAULT_EDIT_SPAM_THRESHOLD,[\s\S]*inlineValidation: true/);
+  assert.match(source, /name: 'Block spam edit notifications \(if enabled\)'[\s\S]*id: 'blockSpamEdit'[\s\S]*action: 'toggleEditSpamState'[\s\S]*name: 'Edit spam threshold'[\s\S]*id: 'editSpamThreshold'[\s\S]*min: 1,[\s\S]*resetInvalidTo: DEFAULT_EDIT_SPAM_THRESHOLD,[\s\S]*inlineValidation: true,[\s\S]*action: 'resetEditSpamState'/);
+  assert.match(source, /resetEditSpamState: \(\) => this\._resetEditNotificationSpamState\(true\)/);
+  assert.match(source, /toggleEditSpamState: \(enabled\) => this\._resetEditNotificationSpamState\(!enabled\)/);
   assert.match(source, /editSpamThreshold: \{ fallback: DEFAULT_EDIT_SPAM_THRESHOLD, min: 1 \}/);
   assert.match(source, /const value = event\.currentTarget\.value;[\s\S]*setDraft\(value\);[\s\S]*if \(config\.resetInvalidTo !== undefined\)[\s\S]*onValid\(resetValue\.value\)/);
   const validationPlugin = createPlugin();

@@ -3305,7 +3305,12 @@ module.exports = class MessageLoggerV2 {
             type: 'switch',
             action: 'refreshNativeForumPosts'
           },
-          { name: 'Block spam edit notifications (if enabled)', id: 'blockSpamEdit', type: 'switch' },
+          {
+            name: 'Block spam edit notifications (if enabled)',
+            id: 'blockSpamEdit',
+            type: 'switch',
+            action: 'toggleEditSpamState'
+          },
           {
             name: 'Edit spam threshold',
             note: 'Eligible edits within 60 seconds before a 60-second notification pause. Invalid input stays red while the saved value resets to 10.',
@@ -3314,7 +3319,8 @@ module.exports = class MessageLoggerV2 {
             validator: 'number',
             min: 1,
             resetInvalidTo: DEFAULT_EDIT_SPAM_THRESHOLD,
-            inlineValidation: true
+            inlineValidation: true,
+            action: 'resetEditSpamState'
           }
         ]
       },
@@ -3539,6 +3545,8 @@ module.exports = class MessageLoggerV2 {
       reportMediaCaching: (val) => this.reportMajorSettingChange('cacheAllImages', val),
       reportAntiNuke: (val) => this.reportMajorSettingChange('antiNukeEnabled', val),
       reportCachedFileDeletion: (val) => this.reportMajorSettingChange('deleteCachedFilesWithRecords', val),
+      resetEditSpamState: () => this._resetEditNotificationSpamState(true),
+      toggleEditSpamState: (enabled) => this._resetEditNotificationSpamState(!enabled),
       rescheduleBackup: () => this.handleAutoBackupIntervalChange(),
       toggleLogsButton: (val) => {
         if (val) return this.addOpenLogsButton();
@@ -6352,7 +6360,44 @@ module.exports = class MessageLoggerV2 {
     this._rememberNotifiedEventIds(group, unnotifiedIds);
     return unnotifiedIds;
   }
+  _getEditNotificationSpamThreshold() {
+    const configuredThreshold = Number(this.settings?.editSpamThreshold);
+    return Number.isFinite(configuredThreshold)
+      && Number.isInteger(configuredThreshold)
+      && configuredThreshold >= 1
+      ? configuredThreshold
+      : DEFAULT_EDIT_SPAM_THRESHOLD;
+  }
+  _hasActiveEditNotificationSpamState(now = Date.now()) {
+    return Object.values(this.editHistoryAntiSpam || {}).some(state => {
+      if (Number(state?.blockedUntil) > now) return true;
+      return Array.isArray(state?.times) && state.times.some(time => (
+        Number.isFinite(time) && time <= now && now - time < 60 * 1000
+      ));
+    });
+  }
+  _resetEditNotificationSpamState(showNotice = false) {
+    const hadActiveState = this._hasActiveEditNotificationSpamState();
+    this.editHistoryAntiSpam = {};
+    this._editNotificationSpamSettingsKey = `${Boolean(this.settings?.blockSpamEdit)}:${this._getEditNotificationSpamThreshold()}`;
+    if (showNotice && hadActiveState) {
+      this.reportSettingState(
+        'Edit Spam Timers Reset',
+        'All edit-spam author counts and notification pauses were cleared.',
+        'All edit-spam author counts and notification pauses were cleared.',
+        'info',
+        5000,
+        'edit-spam-timers-reset'
+      );
+    }
+  }
   _getEditNotificationSpamDecision(authorId, now = Date.now()) {
+    const threshold = this._getEditNotificationSpamThreshold();
+    const settingsKey = `${Boolean(this.settings?.blockSpamEdit)}:${threshold}`;
+    if (this._editNotificationSpamSettingsKey !== settingsKey) {
+      this.editHistoryAntiSpam = {};
+      this._editNotificationSpamSettingsKey = settingsKey;
+    }
     this.editHistoryAntiSpam ||= {};
     if (!this.settings.blockSpamEdit) {
       delete this.editHistoryAntiSpam[authorId];
@@ -6371,12 +6416,6 @@ module.exports = class MessageLoggerV2 {
     }
     state.times = state.times.filter(time => now - time < 60 * 1000);
     state.times.push(now);
-    const configuredThreshold = Number(this.settings.editSpamThreshold);
-    const threshold = Number.isFinite(configuredThreshold)
-      && Number.isInteger(configuredThreshold)
-      && configuredThreshold >= 1
-      ? configuredThreshold
-      : DEFAULT_EDIT_SPAM_THRESHOLD;
     if (state.times.length < threshold) return 'allow';
     state.times = [];
     state.blockedUntil = now + 60 * 1000;

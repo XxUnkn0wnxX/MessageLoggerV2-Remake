@@ -160,6 +160,44 @@ test('edit-spam blocking follows the toggle and uses an exact per-author cooldow
   assert.equal(configuredPlugin._getEditNotificationSpamDecision('author', 9_000), 'started');
 });
 
+test('edit-spam setting resets clear every author and report only active state', () => {
+  const now = Date.now();
+  const reports = [];
+  const plugin = createPlugin({
+    settings: { blockSpamEdit: true, editSpamThreshold: 3 },
+    editHistoryAntiSpam: {
+      first: { blockedUntil: now + 60_000, times: [], lastActivity: now },
+      second: { blockedUntil: 0, times: [now - 2_000, now - 1_000], lastActivity: now - 1_000 }
+    },
+    reportSettingState(...args) { reports.push(args); }
+  });
+
+  plugin._resetEditNotificationSpamState(true);
+  assert.deepEqual(plugin.editHistoryAntiSpam, {});
+  assert.deepEqual(reports, [[
+    'Edit Spam Timers Reset',
+    'All edit-spam author counts and notification pauses were cleared.',
+    'All edit-spam author counts and notification pauses were cleared.',
+    'info',
+    5000,
+    'edit-spam-timers-reset'
+  ]]);
+
+  plugin.editHistoryAntiSpam.third = { blockedUntil: 60_000, times: [], lastActivity: 0 };
+  plugin.settings.blockSpamEdit = false;
+  plugin._resetEditNotificationSpamState(false);
+  assert.deepEqual(plugin.editHistoryAntiSpam, {});
+  assert.equal(reports.length, 1, 'silent resets do not add another notice');
+
+  plugin._resetEditNotificationSpamState(true);
+  assert.equal(reports.length, 1, 'empty resets do not claim that timers were cleared');
+
+  plugin.settings.blockSpamEdit = true;
+  plugin.editHistoryAntiSpam.stale = { blockedUntil: now + 60_000, times: [], lastActivity: now };
+  assert.equal(plugin._getEditNotificationSpamDecision('fresh', 5_000), 'allow');
+  assert.equal(plugin.editHistoryAntiSpam.stale, undefined, 'runtime setting changes clear all stale authors');
+});
+
 test('edit-spam warnings keep expiring while hovered and dismiss from the whole card', () => {
   const notifications = [];
   const plugin = createPlugin({
