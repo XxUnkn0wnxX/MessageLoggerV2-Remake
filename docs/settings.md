@@ -207,7 +207,17 @@ The Debug category title and both setting labels use Discord's native warning co
 | Enable debug logging | Off | Writes automatic-backup lifecycle events, edit-spam diagnostics, and deleted/edited channel-entry counter increases to the console. Counter output includes the new total, increase, server, and channel; edit-spam output shows each username's current/threshold counter, cooldown start, 10-second warning, final reset, and early settings reset without printing user IDs. |
 | Show debug messages as toasts | Off | Sends the same backup, edit-spam, and channel-entry counter events through the selected BetterDiscord-notification or custom-toast mode. Debug alerts are warning-colored, expire without pausing on hover, and dismiss on a left- or right-click. This control is independent of console debug logging. |
 
-Debug output covers the automatic-backup lifecycle, edit-spam counters/cooldowns, and each deleted/edited channel-entry counter increase. It does not change backup timing, persistence, or normal error reporting.
+**Settings that can generate Debug output when the relevant event occurs:**
+
+- **Auto backup data**: queue, cancellation, start, retry, write cancellation, and completion events.
+- **Auto backup interval (seconds)**: rescheduling details when an automatic backup is already pending.
+- **Disable saving data**: cancellation details when disabling saving clears a pending automatic backup.
+- **Block spam edit notifications**: per-author counters, cooldown start/warning/completion, and active-state resets. Normal edit-spam diagnostics stop while this setting is off.
+- **Edit spam threshold**: active timer-reset details when the value changes while edit-spam blocking is enabled.
+- **Show amount of new deleted messages when entering a channel**: every enabled Deleted counter increase, including one combined increase for a bulk purge.
+- **Show amount of new edited messages when entering a channel**: every enabled Edited counter increase.
+
+Debug output does not change backup timing, persistence, counter behavior, edit blocking, or normal error reporting.
 
 ## 📣 High-Impact Setting Feedback
 
