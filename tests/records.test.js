@@ -176,6 +176,21 @@ test('hidden records and unanchored deleted forum or thread roots have no jump m
       forum_metadata: { parentId: '600', parentType: 0, isForumParent: false }
     }
   };
+  plugin.settings = {
+    restoreDeletedMessages: true,
+    showDeletedMessages: true,
+    showPurgedMessages: true,
+    showEditedMessages: true
+  };
+  plugin.messageRecord = {
+    [forumRootId]: forumRoot,
+    [threadRootId]: threadRoot
+  };
+  plugin.deletedMessageSet = new Map([
+    [forumRootId, new Set([forumRootId])],
+    [threadRootId, new Set([threadRootId])]
+  ]);
+  plugin.purgedMessageSet = new Map();
 
   global.document = {
     querySelector: () => null,
@@ -1959,6 +1974,11 @@ test('an early outer-toolbar fallback is rebuilt in the action row without movin
   toolbar.querySelector = () => existing;
   toolbar.querySelectorAll = () => [];
   const plugin = createPlugin({
+    settings: {
+      restoreDeletedMessages: true,
+      showDeletedMessages: true,
+      showPurgedMessages: true
+    },
     messageRecord: {
       [messageId]: { message: { id: messageId, channel_id: channelId }, delete_data: { hidden: false } }
     },
@@ -1990,6 +2010,11 @@ test('permission-independent toolbar fallback is owned only by exact indexed log
   const unindexedId = 'toolbar-unindexed';
   const saved = id => ({ message: { id, channel_id: channelId }, delete_data: { hidden: false } });
   const plugin = createPlugin({
+    settings: {
+      restoreDeletedMessages: true,
+      showDeletedMessages: true,
+      showPurgedMessages: true
+    },
     messageRecord: {
       [deletedId]: saved(deletedId),
       [purgedId]: saved(purgedId),
@@ -2038,6 +2063,14 @@ test('permission-independent toolbar fallback is owned only by exact indexed log
   const purgedToolbar = makeToolbar();
   assert.equal(plugin.wireNativeRestoredMessageDeleteControl(purgedToolbar, channelId, purgedId), true);
   assert.equal(purgedToolbar.appendCount, 1);
+
+  plugin.settings.restoreDeletedMessages = false;
+  const disabledFallback = purgedToolbar.existing;
+  assert.equal(plugin.wireNativeRestoredMessageDeleteControl(purgedToolbar, channelId, purgedId), false);
+  assert.equal(disabledFallback.removed, true, 'master-off reconciliation removes the logger toolbar action');
+  plugin.settings.restoreDeletedMessages = true;
+  purgedToolbar.existing = null;
+  assert.equal(plugin.wireNativeRestoredMessageDeleteControl(purgedToolbar, channelId, purgedId), true);
 
   const fallback = deletedToolbar.existing;
   deletedToolbar.candidates = [{}];

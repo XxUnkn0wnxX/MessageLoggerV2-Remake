@@ -167,13 +167,16 @@ test('live restored-message settings present the master switch before category c
   const masterIndex = displaySettings.indexOf("name: 'Display saved messages in chat'");
   const deletedIndex = displaySettings.indexOf("id: 'showDeletedMessages'");
   const purgedIndex = displaySettings.indexOf("id: 'showPurgedMessages'");
+  const editedIndex = displaySettings.indexOf("id: 'showEditedMessages'");
 
   assert.ok(masterIndex >= 0);
   assert.ok(masterIndex < deletedIndex);
   assert.ok(deletedIndex < purgedIndex);
-  assert.match(displaySettings, /Display saved messages in chat'[\s\S]*'Master switch for live mounting enabled '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Deleted'[\s\S]*' and '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Purged'[\s\S]*' records in chat, forum, and thread views\.[\s\S]*id: 'restoreDeletedMessages'/);
+  assert.ok(purgedIndex < editedIndex);
+  assert.match(displaySettings, /Display saved messages in chat'[\s\S]*'Master switch for live mounting enabled '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Deleted'[\s\S]*' and '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Purged'[\s\S]*' records in chat, forum, and thread views\.[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Jump actions are unavailable for records excluded by these live-display switches\.[\s\S]*id: 'restoreDeletedMessages'/);
   assert.match(displaySettings, /name: 'Include Deleted messages'[\s\S]*'Live mounts messages captured from individual deletions when '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Display saved messages in chat is enabled'[\s\S]*'\.'[\s\S]*id: 'showDeletedMessages'/);
   assert.match(displaySettings, /name: 'Include Purged messages'[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Display saved messages in chat must be enabled first\.[\s\S]*id: 'showPurgedMessages'/);
+  assert.match(displaySettings, /name: 'Display edited messages in chat'[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Inline edit history and its Jump actions are unavailable while this is off; edits are still logged\.[\s\S]*id: 'showEditedMessages'/);
 });
 
 test('date order applies to optional timestamps and forced logger dates', () => {
@@ -228,7 +231,15 @@ test('date order applies to optional timestamps and forced logger dates', () => 
   assert.doesNotMatch(deletedTooltip, /display:\s*['"]contents['"]/);
   assert.match(source, /text: 'Edited: ' \+ plugin\.createTimeStamp\(edit\.time\)[\s\S]*const currentContent = currentRecord\.delete_data\?\.time[\s\S]*deletedAt: currentRecord\.delete_data\.time,[\s\S]*block: true/);
   assert.doesNotMatch(source, /text: record\.delete_data \? null : 'Edited: '/);
-  assert.match(source, /if \(showEditHistory\)[\s\S]*ret\.props\.children = React\.createElement\(EditHistoryContent,[\s\S]*return;[\s\S]*if \(record\?\.delete_data\?\.time\)[\s\S]*return React\.createElement\(DeletedContentTooltip,[\s\S]*}, ret\)/);
+  const editHistoryGate = source.slice(
+    source.indexOf('const EditHistoryContent ='),
+    source.indexOf("EditHistoryContent.displayName = 'EditHistoryContent'")
+  );
+  assert.match(editHistoryGate, /shouldPresentEditedMessages\(\)[\s\S]*return renderOriginal\(\)/);
+  assert.match(editHistoryGate, /renderOriginal[\s\S]*DeletedContentTooltip[\s\S]*originalElement/);
+  assert.match(editHistoryGate, /renderEdited[\s\S]*React\.cloneElement\([\s\S]*originalElement/);
+  assert.match(source, /if \(record\?\.edit_history && Array\.isArray\(ret\.props\.children\)\)[\s\S]*return React\.createElement\(EditHistoryContent,[\s\S]*originalElement: ret/);
+  assert.doesNotMatch(source, /if \(showEditHistory\)/);
   assert.doesNotMatch(source, /const deletedChildren = ret\.props\.children\.slice\(\)/);
 });
 
@@ -262,6 +273,12 @@ test('channel-entry count toggles clear pending state through category-owned act
   assert.match(source, /_incrementMessageCount\(counterType, channel, guild, amount = 1\)[\s\S]*channel-entry counter increased to \$\{total\} \(\+\$\{increment\}\) for \$\{location\}/);
   assert.match(source, /_incrementMessageCount\('deleted', channel, guild, savedDeleteCount\)/);
   assert.match(source, /_incrementMessageCount\('edited', channel, guild\)/);
+  const entryAlerts = source.slice(
+    source.indexOf('observer({ addedNodes })'),
+    source.indexOf('buildSetting(data)')
+  );
+  assert.match(entryAlerts, /const showStuff = \(map, name\) =>[\s\S]*\[\{ label: "View", onClick: \(\) => this\.openWindow\(name\) \}\]/);
+  assert.doesNotMatch(entryAlerts, /label: ["']Jump/);
 });
 
 test('native BetterDiscord keybind recorders drive capture-phase logger shortcuts', () => {
@@ -370,17 +387,20 @@ test('restored forum cards and compact threads mount from visible Deleted or Pur
     source.indexOf('const copyClass =')
   );
   assert.match(rootSelection, /const rootIds = new Set\(\)/);
-  assert.match(rootSelection, /showDeletedMessages\) collect\(this\.deletedMessageRecord\)/);
-  assert.match(rootSelection, /showPurgedMessages\) collect\(this\.purgedMessageRecord\)/);
+  assert.match(rootSelection, /shouldPresentDeletedMessages\(\)\) collect\(this\.deletedMessageRecord\)/);
+  assert.match(rootSelection, /shouldPresentPurgedMessages\(\)\) collect\(this\.purgedMessageRecord\)/);
   assert.match(rootSelection, /getRestorableForumRecordsForChannel[\s\S]*getVisibleRestorableThreadRootIds\(\)/);
   assert.match(rootSelection, /getRestorableCompactThreadRecords[\s\S]*getVisibleRestorableThreadRootIds\(\)/);
   assert.match(rootSelection, /forum_thread_delete \|\| record\.delete_data\.hidden \|\| !message/);
-  assert.match(source, /canRestoreVisibleThreadRoots[\s\S]*restoreDeletedMessages[\s\S]*showDeletedMessages \|\| this\.settings\.showPurgedMessages/);
+  assert.match(source, /canRestoreVisibleThreadRoots[\s\S]*shouldPresentAnySavedDeletion\(\)/);
   assert.match(source, /restoreDeletedForumCards[\s\S]*desiredIds[\s\S]*data-ml2-restored-forum-card[\s\S]*target\.remove\?\.\(\)/);
   assert.match(source, /restoreDeletedSidebarThreads[\s\S]*getRestorableCompactThreadRecords\(parent\)/);
   assert.match(source, /restoreDeletedThreadBrowserCards[\s\S]*getRestorableCompactThreadRecords\(parent\)/);
-  assert.match(source, /shouldTintMessage = \(channelId, messageId\) => \{[\s\S]*if \(!record\?\.delete_data \|\| record\.delete_data\.hidden\) return false/);
-  assert.match(source, /applyRestoredThreadTint[\s\S]*!this\.messageRecord\?\.\[threadId\]\?\.delete_data\?\.hidden/);
+  assert.match(source, /shouldTintMessage = \(channelId, messageId\) => \{[\s\S]*shouldPresentSavedMessage\(channelId, messageId\)/);
+  assert.match(source, /applyRestoredThreadTint[\s\S]*shouldPresentSavedMessage\(threadId, threadId\)/);
+  assert.match(source, /shouldPresentDeletedMessages\(\)[\s\S]*restoreDeletedMessages[\s\S]*showDeletedMessages/);
+  assert.match(source, /shouldPresentPurgedMessages\(\)[\s\S]*restoreDeletedMessages[\s\S]*showPurgedMessages/);
+  assert.match(source, /tintMessageById[\s\S]*shouldTintMessage\(channelId, messageId\)[\s\S]*clearTintClasses\(article\)/);
 });
 
 test('surviving forum and thread cards tint only their deleted preview body', () => {
@@ -471,6 +491,12 @@ test('logger jump-availability tint stays scoped to the logger window', () => {
   assert.match(source, /#app-mount \.\$\{this\.style\.menuRoot\} \.\$\{this\.style\.jumpAvailableAuthor\}[\s\S]*color: var\(--text-warning, var\(--status-warning\)\) !important/);
   assert.doesNotMatch(source, /#app-mount \.\$\{this\.style\.jumpAvailableAuthor\}\s*\{/);
   assert.match(source, /canJumpToSavedRecord\(record\)[\s\S]*this\.isSavedRecordHidden\(record\)/);
+  assert.match(source, /canJumpToSavedRecord\(record, presentationCategory = null\)[\s\S]*record\.delete_data && !this\.shouldPresentSavedMessage\(message\.channel_id, message\.id\)/);
+  assert.match(source, /canJumpToSavedRecord\(record, presentationCategory = null\)[\s\S]*record\.edit_history[\s\S]*!this\.shouldPresentEditedMessages\(\)/);
+  assert.match(source, /canJumpToSavedRecord\(jumpRecord, jumpMountCategory\)/);
+  assert.match(source, /pendingDeletionPresentation[\s\S]*presentationCategory === 'deleted'[\s\S]*presentationCategory === 'purged'/);
+  assert.match(source, /eventType === 'sent'[\s\S]*this\.messageRecord\?\.\[messageId\][\s\S]*this\.jumpToSavedRecord\(currentRecord\)/);
+  assert.match(source, /jumpToSavedRecord\(record\)[\s\S]*if \(!this\.canJumpToSavedRecord\(record\)\) return/);
   assert.match(source, /forum_thread_delete\) return this\.hasSavedForumThreadMountPoint\(record, true\)/);
   assert.match(source, /A structurally deleted post\/thread can leave a stale ChannelStore entry behind/);
 });
@@ -578,6 +604,11 @@ test('shared logger help lists every current default shortcut', () => {
 
 test('the complete first-setup block uses Discord native warning color', () => {
   assert.match(source, /\.\$\{this\.style\.startupHelpTitle\} \{\s*color: var\(--text-warning, var\(--status-warning\)\);/);
+});
+
+test('shared help warns that Jump follows matching live-display switches', () => {
+  assert.match(source, /Deleted, edited, and ghost-ping alerts provide View and eligible Jump actions\.<\/br>/);
+  assert.match(source, /<span style="color: var\(--text-warning, var\(--status-warning\)\);">Jump is hidden while the matching live-display switch is off\.<\/span>/);
 });
 
 test('first-install help omits the regular help-modal greeting', () => {

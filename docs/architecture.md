@@ -133,7 +133,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 
 - `_showNotification` is the single low-level routing point between BetterDiscord native notifications and the plugin's custom toasts. `_showCustomToast` is an internal renderer and is called only by this router.
 - `notifyUser` is the system/UI feedback entry point used by settings, Debug, Hide/Unhide, validation, startup, migration, merge, recovery, and action results. It defaults to wall-clock expiry with whole-card left/right-click dismissal.
-- `_notifyEvent` sends actual saved-message events directly through `_showNotification`, preserving View/Jump actions and hover-aware timing.
+- `_notifyEvent` sends actual saved-message events directly through `_showNotification`, preserving eligible View/Jump actions and hover-aware timing.
 - Custom toast colors use Discord CSS variables. The plugin-owned `neutral` state becomes a theme-grey custom toast or a supported native `info` notification with a neutral icon, because BetterDiscord exposes no grey notification type.
 - System/UI alerts use wall-clock expiry rather than hover pause; custom alerts dismiss through their own handlers.
 - Native system/UI alerts use a unique content marker for whole-card left/right-click dismissal and a visible progress animation after BetterDiscord mounts the card. The wall-clock timer remains the fallback.

@@ -45,10 +45,10 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | --- | --- | --- |
 | Display dates with timestamps | On | Adds the configured date after ordinary plugin timestamps, including edit and deletion tooltips and restored-item labels. Turning it off leaves those displays as time-only; logger-viewer headers still force the date. Discord's native sent-time tooltip is unaffected. |
 | Date format | System locale pattern | Type exactly one day token (`D` or `DD`), month token (`M` or `MM`), and year token (`YY` or `YYYY`) in any order, separated by `/`; for example, `DD/MM/YYYY` produces `04/03/2026`, while `D/M/YY` produces `4/3/26`. Other separators, lowercase tokens, duplicates, missing parts, and blank values are invalid. An empty field shows the detected system pattern as faint placeholder text, which disappears when typing. Invalid input stays red with an inline error while the saved value resets to the slash-based pattern derived from Discord's cross-platform native preferred-language call. Discord's locale store and browser locale are guarded fallbacks when that call is unavailable. The field includes a live preview. This format also controls forced logger-viewer dates when **Display dates with timestamps** is off. Plugin timestamps separate time and date with ` - `. |
-| Display saved messages in chat | On | Master switch for live mounting enabled **Deleted** and **Purged** records in chat, forum, and thread views; only those two category names are warning-colored. Turning it off hides mounted records without deleting saved logs. |
+| Display saved messages in chat | On | Master switch for live mounting enabled **Deleted** and **Purged** records in chat, forum, and thread views; only those two category names are warning-colored. Turning it off hides mounted records without deleting saved logs. Jump is hidden for records excluded by this master or their matching category switch. |
 | Include Deleted messages | On | Live-mounts messages captured from individual deletions when the warning-colored phrase **Display saved messages in chat is enabled** applies. |
 | Include Purged messages | On | Live-mounts messages captured from bulk deletions. **Display saved messages in chat must be enabled first.** |
-| Display edited messages in chat | On | Shows saved edit history with messages. |
+| Display edited messages in chat | On | Shows saved edit history with messages. Turning it off hides inline history and its Jump actions, but edits remain logged. |
 | Max number of shown edits | `0` | Limits visible edits; `0` means no configured limit. |
 | Show oldest edit instead of newest | On | When the edit limit is exceeded, keeps older edits visible instead of newer ones. |
 | Use background instead of text tint | Off | Uses the configured deleted-message color as a background tint. |
@@ -262,7 +262,7 @@ The always-reported high-impact changes write one explicit `enabled` or `disable
 - Setting alerts keep expiring while hovered; left- or right-click dismisses either style immediately.
 - Debug alerts remain warning-colored; errors remain red.
 
-The same no-hover-pause and whole-card dismissal behavior applies to other system/UI feedback, including Hide/Unhide, validation, copy/delete confirmations, migration, backup recovery, no-save merging, and errors. Actual saved-message event alerts retain their View/Jump actions and hover-aware timeout behavior.
+The same no-hover-pause and whole-card dismissal behavior applies to other system/UI feedback, including Hide/Unhide, validation, copy/delete confirmations, migration, backup recovery, no-save merging, and errors. Actual saved-message event alerts retain their eligible View/Jump actions and hover-aware timeout behavior.
 
 ## 🖱️ Settings Actions
 

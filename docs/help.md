@@ -144,7 +144,7 @@ For custom toasts:
 
 For BetterDiscord notifications:
 
-- Deleted, edited, and ghost-ping alerts provide **View** and **Jump**.
+- Deleted, edited, and ghost-ping alerts provide **View** and an eligible **Jump**; Jump is omitted while the matching live-display switch is off.
 - Sent-message alerts provide **Jump** only. The Sent tab itself is memory-only and clears on reload.
 - Bulk-delete summaries provide **View** only.
 - Guild and DM alerts share one memory-only FIFO queue. Persistent ghost pings yield after 4.5 seconds when another alert is waiting.

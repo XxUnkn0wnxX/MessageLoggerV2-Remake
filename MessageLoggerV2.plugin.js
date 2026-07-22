@@ -3286,7 +3286,12 @@ module.exports = class MessageLoggerV2 {
                 { style: { color: 'var(--text-warning, var(--status-warning))' } },
                 'Purged'
               ),
-              ' records in chat, forum, and thread views. Turning it off hides mounted records without deleting saved logs.'
+              ' records in chat, forum, and thread views. Turning it off hides mounted records without deleting saved logs. ',
+              React.createElement(
+                'span',
+                { style: { color: 'var(--text-warning, var(--status-warning))' } },
+                'Jump actions are unavailable for records excluded by these live-display switches.'
+              )
             ),
             id: 'restoreDeletedMessages',
             type: 'switch',
@@ -3322,6 +3327,11 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Display edited messages in chat',
+            note: React.createElement(
+              'span',
+              { style: { color: 'var(--text-warning, var(--status-warning))' } },
+              'Inline edit history and its Jump actions are unavailable while this is off; edits are still logged.'
+            ),
             id: 'showEditedMessages',
             type: 'switch',
             action: 'forceUpdateContent'
@@ -3757,6 +3767,10 @@ module.exports = class MessageLoggerV2 {
       refreshCache: () => {
         this.invalidateAllChannelCache();
         if (this.selectedChannel) this.cacheChannelMessages(this.selectedChannel.id);
+        // Message-cache invalidation handles ordinary chat rows. Forum cards, compact thread
+        // entries, native placeholders, and their tint are DOM-owned and need an explicit
+        // reconciliation when any saved-message display switch changes.
+        this.scheduleForumListRefresh?.();
       },
       refreshDateFormatting: () => {
         this.invalidateAllChannelCache();
@@ -5478,6 +5492,30 @@ module.exports = class MessageLoggerV2 {
   shouldIgnoreSelfMessage(message) {
     return !!(this.settings.ignoreSelf && this.isLocalAuthorMessage(message));
   }
+  shouldPresentDeletedMessages() {
+    return !!(this.settings?.restoreDeletedMessages && this.settings?.showDeletedMessages);
+  }
+  shouldPresentPurgedMessages() {
+    return !!(this.settings?.restoreDeletedMessages && this.settings?.showPurgedMessages);
+  }
+  shouldPresentEditedMessages() {
+    // Settings are always normalized before live events. Treat an early missing settings
+    // object as the enabled default so startup-time notification checks remain compatible.
+    return this.settings?.showEditedMessages !== false;
+  }
+  shouldPresentAnySavedDeletion() {
+    return this.shouldPresentDeletedMessages() || this.shouldPresentPurgedMessages();
+  }
+  shouldPresentSavedMessage(channelId, messageId) {
+    const record = this.messageRecord?.[messageId];
+    if (!record?.delete_data || record.delete_data.hidden) return false;
+    if (String(record.message?.channel_id ?? '') !== String(channelId ?? '')) return false;
+    const deleted = this.shouldPresentDeletedMessages()
+      && this.deletedMessageSet?.get(channelId)?.has(messageId);
+    const purged = this.shouldPresentPurgedMessages()
+      && this.purgedMessageSet?.get(channelId)?.has(messageId);
+    return !!(deleted || purged);
+  }
   isThreadCreatedSystemMessage(message) {
     return Number(message?.type) === 18;
   }
@@ -6838,13 +6876,15 @@ module.exports = class MessageLoggerV2 {
         title: "Message Deleted",
         getMessage: (name) => `Message deleted from ${name}`,
         type: "error",
-        tab: "deleted"
+        tab: "deleted",
+        jumpMountCategory: "deleted"
       },
       edited: {
         title: "Message Edited",
         getMessage: (name) => `Message edited in ${name}`,
         type: "info",
-        tab: "edited"
+        tab: "edited",
+        jumpMountCategory: "edited"
       },
       ghostPing: {
         title: "Ghost Ping",
@@ -6857,7 +6897,8 @@ module.exports = class MessageLoggerV2 {
         title: "Bulk Delete",
         getMessage: (name, count) => `${count} messages bulk deleted from ${name}`,
         type: "error",
-        tab: "purged"
+        tab: "purged",
+        jumpMountCategory: "purged"
       },
       nukeDetected: {
         title: "Nuke Detected",
@@ -6895,10 +6936,27 @@ module.exports = class MessageLoggerV2 {
       ? this.messageRecord[messageId]
         || { message: { id: messageId, channel_id: channel.id, guild_id: guild?.id }, delete_data: null }
       : null;
-    if (jumpRecord && this.canJumpToSavedRecord(jumpRecord)) {
+    const jumpMountCategory = options.jumpMountCategory || config.jumpMountCategory;
+    const canOfferJump = !jumpMountCategory
+      || (jumpMountCategory === 'edited'
+        ? this.shouldPresentEditedMessages()
+        : jumpRecord?.delete_data
+          ? this.shouldPresentSavedMessage(jumpRecord.message?.channel_id, jumpRecord.message?.id)
+          : jumpMountCategory === 'purged'
+            ? this.shouldPresentPurgedMessages()
+            : this.shouldPresentDeletedMessages());
+    if (canOfferJump && jumpRecord && this.canJumpToSavedRecord(jumpRecord, jumpMountCategory)) {
       actions.push({
         label: "Jump",
-        onClick: () => this.jumpToSavedRecord(jumpRecord)
+        onClick: () => {
+          // Saved-event alerts can be built just before their record is captured. Resolve the
+          // canonical record at click time so later display, category, and Hide changes are
+          // enforced by jumpToSavedRecord instead of trusting the pre-save fallback object.
+          const currentRecord = eventType === 'sent'
+            ? jumpRecord
+            : this.messageRecord?.[messageId];
+          if (currentRecord) this.jumpToSavedRecord(currentRecord);
+        }
       });
     }
     if (config.pauseOnHover !== undefined || config.instantDismiss !== undefined) {
@@ -7011,9 +7069,19 @@ module.exports = class MessageLoggerV2 {
     }
     return false;
   }
-  canJumpToSavedRecord(record) {
+  canJumpToSavedRecord(record, presentationCategory = null) {
     const message = record?.message;
     if (!message?.channel_id || record?.delete_data?.anti_nuke || this.isSavedRecordHidden(record)) return false;
+    // Every Jump affordance funnels through this method, including logger rows, injected
+    // context menus, attachment menus, event notifications, and the final click handler.
+    // Keep records in Logger while their corresponding live presentation is disabled.
+    if (record.delete_data && !this.shouldPresentSavedMessage(message.channel_id, message.id)) return false;
+    const pendingDeletionPresentation = !record.delete_data
+      && (presentationCategory === 'deleted' || presentationCategory === 'purged');
+    if (!pendingDeletionPresentation
+      && !record.delete_data
+      && record.edit_history
+      && !this.shouldPresentEditedMessages()) return false;
     const deleteData = record?.delete_data || {};
     // A structurally deleted post/thread can leave a stale ChannelStore entry behind. Require
     // an exact mounted target or a real Discord anchor that Logger can clone before advertising
@@ -8187,11 +8255,14 @@ module.exports = class MessageLoggerV2 {
     if (!ignoredLocalStarter && this._shouldShowToast(channel, guild, 'deleted', isLocalDelete)) {
       this._notifyEventOnce('deleted', 'delete', [threadId], channel, guild, threadId);
     }
-    this._scheduleTintForMessage?.(threadId, threadId);
+    if (this.shouldPresentSavedMessage(threadId, threadId)) {
+      this._scheduleTintForMessage?.(threadId, threadId);
+    }
     this.saveData();
     const result = callDefault(...args);
-    if (this.settings.showDeletedMessages
-      && (selectedChannelId === channel.parent_id || selectedChannelId === threadId)) {
+    if (selectedChannelId === channel.parent_id || selectedChannelId === threadId) {
+      // Reconcile even while display is disabled: the restore helpers' disabled path removes
+      // stale forum/sidebar/browser clones instead of creating new ones.
       this.scheduleForumListRefresh();
     }
     return result;
@@ -8438,7 +8509,8 @@ module.exports = class MessageLoggerV2 {
                                     Note: BetterDiscord displays one notification at a time. Alerts from guilds and DMs share one memory-only queue that clears on plugin or Discord reload.</br></br>
                                     ACTIONS:</br>
                                     <div class="${this.style.textIndent}">
-                                        Deleted, edited, and ghost-ping alerts provide View and Jump.</br>
+                                        Deleted, edited, and ghost-ping alerts provide View and eligible Jump actions.</br>
+                                        <span style="color: var(--text-warning, var(--status-warning));">Jump is hidden while the matching live-display switch is off.</span></br>
                                         Sent-message alerts provide Jump only. The Sent tab is a bounded memory cache and clears on plugin or Discord reload.</br>
                                         Bulk-delete summaries provide View only.</br>
                                         Persistent ghost pings yield after 4.5 seconds when another alert is waiting.</br>
@@ -9484,6 +9556,7 @@ module.exports = class MessageLoggerV2 {
     const ownsRestoredRecord = record?.delete_data
       && !record.delete_data.hidden
       && String(record.message?.channel_id ?? '') === String(channelId)
+      && this.shouldPresentSavedMessage(channelId, messageId)
       && this.isIndexedSavedDeletedRecord(record, messageId);
     if (!ownsRestoredRecord) {
       if (existing) {
@@ -10176,12 +10249,15 @@ module.exports = class MessageLoggerV2 {
           const record = this.messageRecord[dispatch.id];
           const isLocalDelete = this.isLocalDeleteEvent(dispatch.id);
           if (this._shouldShowToast(channel, guild, 'ghostPings', isLocalDelete) && !record?.ghost_pinged) {
-            this._notifyEvent('ghostPing', channel, guild, dispatch.id);
+            this._notifyEvent('ghostPing', channel, guild, dispatch.id, { jumpMountCategory: 'deleted' });
           }
           this.saveDeletedMessage(deleted, this.deletedMessageRecord);
           this.annotateSavedForumThreadMessage(deleted, channel);
           this.saveData();
-          if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: dispatch.id });
+          if (this.shouldPresentDeletedMessages()
+            && DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) {
+            this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: dispatch.id });
+          }
         } else if (dispatch.type === 'MESSAGE_UPDATE') {
           if (!dispatch.message.edited_timestamp) {
             const last = this.getCachedMessage(dispatch.message.id);
@@ -10237,7 +10313,7 @@ module.exports = class MessageLoggerV2 {
             this.saveData();
           }
           if (this._shouldShowToast(channel, guild, 'ghostPings', isLocalUser)) {
-            this._notifyEvent('ghostPing', channel, guild, dispatch.message.id);
+            this._notifyEvent('ghostPing', channel, guild, dispatch.message.id, { jumpMountCategory: 'edited' });
           }
         } else if (dispatch.type == 'MESSAGE_CREATE' && this.hasSupportedMessagePayload(dispatch.message) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20) && this.tools.isMentioned(dispatch.message, this.localUser.id)) {
           if (this._cacheIncomingMessage(dispatch.message)) return callDefault(...args);
@@ -10249,10 +10325,10 @@ module.exports = class MessageLoggerV2 {
         if (dispatch.jump?.ML2) delete dispatch.jump;
         const deletedMessages = this.deletedMessageRecord[channel.id];
         const purgedMessages = this.purgedMessageRecord[channel.id];
-        if ((!deletedMessages && !purgedMessages) || (!this.settings.showPurgedMessages && !this.settings.showDeletedMessages)) return callDefault(...args);
+        if ((!deletedMessages && !purgedMessages) || !this.shouldPresentAnySavedDeletion()) return callDefault(...args);
         const wasEmpty = dispatch.messages.length === 0;
-        if (this.settings.showDeletedMessages && deletedMessages) this.reAddDeletedMessages(dispatch.messages, deletedMessages, !dispatch.hasMoreAfter && !dispatch.isBefore, !dispatch.hasMoreBefore && !dispatch.isAfter);
-        if (this.settings.showPurgedMessages && purgedMessages) this.reAddDeletedMessages(dispatch.messages, purgedMessages, !dispatch.hasMoreAfter && !dispatch.isBefore, !dispatch.hasMoreBefore && !dispatch.isAfter);
+        if (this.shouldPresentDeletedMessages() && deletedMessages) this.reAddDeletedMessages(dispatch.messages, deletedMessages, !dispatch.hasMoreAfter && !dispatch.isBefore, !dispatch.hasMoreBefore && !dispatch.isAfter);
+        if (this.shouldPresentPurgedMessages() && purgedMessages) this.reAddDeletedMessages(dispatch.messages, purgedMessages, !dispatch.hasMoreAfter && !dispatch.isBefore, !dispatch.hasMoreBefore && !dispatch.isAfter);
         if (wasEmpty && dispatch.messages.length > 0) {
           if (!this._refreshedEmptyChannels) this._refreshedEmptyChannels = new Set();
           if (!this._refreshedEmptyChannels.has(channel.id)) {
@@ -10270,13 +10346,14 @@ module.exports = class MessageLoggerV2 {
       if (dispatch.type == 'THREAD_DELETE') {
         return this.handleForumThreadDelete(channel, guild, callDefault, args);
       } else if (dispatch.type == 'MESSAGE_DELETE') {
+        const shouldPresentDeleted = this.shouldPresentDeletedMessages();
         const deleted = this.getCachedMessage(dispatch.id, dispatch.channelId) || (this.isForumThreadChannel(channel) && dispatch.id === channel.id ? this.getForumThreadDeleteMessage(channel) : null);
         this._ensureChannelCached(channel.id);
         if (!deleted) return callDefault(...args);
         if (this.isThreadCreatedSystemMessage(deleted)) return callDefault(...args);
         if (this.shouldIgnoreSelfMessage(deleted)) return callDefault(...args);
         if (this.deletedMessageSet.get(channel.id)?.has(deleted.id)) {
-          if (!this.settings.showDeletedMessages) ret = callDefault(...args);
+          if (!shouldPresentDeleted) ret = callDefault(...args);
           return ret;
         }
         if (deleted.type !== 0 && deleted.type !== 19 && (deleted.type !== 20 || (deleted.flags & 64) === 64)) return callDefault(...args);
@@ -10290,16 +10367,19 @@ module.exports = class MessageLoggerV2 {
         }
         const record = this.messageRecord[dispatch.id];
         if (this._shouldShowToast(channel, guild, 'ghostPings', isLocalDelete) && !record?.ghost_pinged && this.tools.isMentioned(deleted, this.localUser.id)) {
-          this._notifyEvent('ghostPing', channel, guild, dispatch.id);
+          this._notifyEvent('ghostPing', channel, guild, dispatch.id, { jumpMountCategory: 'deleted' });
         }
         this.saveDeletedMessage(deleted, this.deletedMessageRecord);
         this.annotateSavedForumThreadMessage(deleted, channel);
-        if (this.settings.showDeletedMessages) this.refreshCacheOnlyMessage(deleted);
-        this._scheduleTintForMessage?.(dispatch.channelId, dispatch.id);
-        if (!this.settings.showDeletedMessages) ret = callDefault(...args);
+        if (shouldPresentDeleted) {
+          this.refreshCacheOnlyMessage(deleted);
+          this._scheduleTintForMessage?.(dispatch.channelId, dispatch.id);
+        }
+        if (!shouldPresentDeleted) ret = callDefault(...args);
         else if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: dispatch.id });
         this.saveData();
       } else if (dispatch.type == 'MESSAGE_DELETE_BULK') {
+        const shouldPresentPurged = this.shouldPresentPurgedMessages();
         let failedMessage = false;
         let savedDeleteCount = 0;
         const savedDeleteIds = [];
@@ -10320,9 +10400,11 @@ module.exports = class MessageLoggerV2 {
           savedDeleteIds.push(dispatchId);
           this.saveDeletedMessage(purged, this.purgedMessageRecord, { captureBatch });
           this.annotateSavedForumThreadMessage(purged, channel);
-          if (this.settings.showPurgedMessages) this.refreshCacheOnlyMessage(purged);
-          this._scheduleTintForMessage?.(dispatch.channelId, purged.id);
-          if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: purged.id });
+          if (shouldPresentPurged) {
+            this.refreshCacheOnlyMessage(purged);
+            this._scheduleTintForMessage?.(dispatch.channelId, purged.id);
+            if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: purged.id });
+          }
         }
         if (savedDeleteCount > 0 && (!this.selectedChannel || this.selectedChannel.id != channel.id)) {
           this._incrementMessageCount('deleted', channel, guild, savedDeleteCount);
@@ -10340,7 +10422,7 @@ module.exports = class MessageLoggerV2 {
             unnotifiedIds => ({ count: unnotifiedIds.length })
           );
         }
-        if (!this.settings.showPurgedMessages) ret = callDefault(...args);
+        if (!shouldPresentPurged) ret = callDefault(...args);
         this.saveData();
       } else if (dispatch.type == 'MESSAGE_UPDATE') {
         if (!dispatch.message.edited_timestamp) {
@@ -10440,7 +10522,7 @@ module.exports = class MessageLoggerV2 {
           }
         }
         if (this._shouldShowToast(channel, guild, 'ghostPings', isLocalUser) && ghostPinged) {
-          this._notifyEvent('ghostPing', channel, guild, dispatch.message.id);
+          this._notifyEvent('ghostPing', channel, guild, dispatch.message.id, { jumpMountCategory: 'edited' });
         }
         this.saveData();
         return callDefault(...args);
@@ -10519,7 +10601,7 @@ module.exports = class MessageLoggerV2 {
           : React.createElement('span', tooltipProps, children)
     );
     DeletedContentTooltip.displayName = 'DeletedContentTooltip';
-    const EditHistoryContent = ({ plugin, messageId, record, originalChildren, compact }) => {
+    const EditHistoryContent = ({ plugin, messageId, originalElement, compact }) => {
       const [, forceUpdate] = Hooks.useForceUpdate();
       React.useEffect(() => {
         if (!plugin._messageUpdateRegistry.has(messageId)) {
@@ -10529,9 +10611,29 @@ module.exports = class MessageLoggerV2 {
         return plugin._unregisterMessageCallback.bind(plugin, messageId, forceUpdate);
       }, [messageId]);
       const currentRecord = plugin.messageRecord[messageId];
-      if (!currentRecord || !currentRecord.edit_history || currentRecord.edits_hidden) {
-        return originalChildren;
+      const renderOriginal = () => currentRecord?.delete_data?.time
+        ? React.createElement(DeletedContentTooltip, {
+          plugin,
+          deletedAt: currentRecord.delete_data.time
+        }, originalElement)
+        : originalElement;
+      if (!plugin.shouldPresentEditedMessages()
+        || !currentRecord
+        || !currentRecord.edit_history
+        || currentRecord.edits_hidden) {
+        return renderOriginal();
       }
+      const originalChildren = originalElement?.props?.children;
+      if (!Array.isArray(originalChildren)) return renderOriginal();
+      const renderEdited = children => React.cloneElement(
+        originalElement,
+        {
+          className: [originalElement.props.className, plugin.style.edited]
+            .filter(Boolean)
+            .join(' ')
+        },
+        children
+      );
       const createEditedMessage = (edit, editNum, isSingular, noSuffix) =>
         React.createElement(
           plugin.Tooltip,
@@ -10560,9 +10662,15 @@ module.exports = class MessageLoggerV2 {
                 })
             )
         );
-      const modifier = plugin.editModifiers[messageId];
-      if (modifier) {
-        return createEditedMessage(record.edit_history[modifier.editNum], modifier.editNum, true, modifier.noSuffix);
+      const modifier = plugin.editModifiers?.[messageId];
+      const modifiedEdit = modifier && currentRecord.edit_history[modifier.editNum];
+      if (modifiedEdit) {
+        return renderEdited(createEditedMessage(
+          modifiedEdit,
+          modifier.editNum,
+          true,
+          modifier.noSuffix
+        ));
       }
       const oContent = Array.isArray(originalChildren[0]) ? originalChildren[0] : originalChildren[1];
       const currentContent = currentRecord.delete_data?.time
@@ -10574,22 +10682,22 @@ module.exports = class MessageLoggerV2 {
         : oContent;
       const edits = [];
       let i = 0;
-      let max = record.edit_history.length;
+      let max = currentRecord.edit_history.length;
       if (plugin.settings.maxShownEdits) {
-        if (record.edit_history.length > plugin.settings.maxShownEdits) {
+        if (currentRecord.edit_history.length > plugin.settings.maxShownEdits) {
           if (plugin.settings.hideNewerEditsFirst) {
             max = plugin.settings.maxShownEdits;
           } else {
-            i = record.edit_history.length - plugin.settings.maxShownEdits;
+            i = currentRecord.edit_history.length - plugin.settings.maxShownEdits;
           }
         }
       }
       for (; i < max; i++) {
-        const edit = record.edit_history[i];
+        const edit = currentRecord.edit_history[i];
         if (!edit) continue;
         edits.push(createEditedMessage(edit, i));
       }
-      return React.createElement(React.Fragment, {}, edits, currentContent);
+      return renderEdited(React.createElement(React.Fragment, {}, edits, currentContent));
     };
     EditHistoryContent.displayName = 'EditHistoryContent';
     this.installEditHistoryPatch = (mcc) => {
@@ -10600,22 +10708,16 @@ module.exports = class MessageLoggerV2 {
           if (typeof props.className === 'string' && props.className.includes('repliedTextContent')) return;
           if (!this.messageRecordIds.has(props.message.id)) return;
           const record = this.messageRecord[props.message.id];
-          const showEditHistory = this.settings.showEditedMessages
-            && record?.edit_history
-            && !record.edits_hidden
-            && Array.isArray(ret.props.children);
-          if (showEditHistory) {
-            const newClassName = [ret.props.className, this.style.edited].filter(Boolean).join(' ');
-            const originalChildren = ret.props.children;
-            ret.props.className = newClassName;
-            ret.props.children = React.createElement(EditHistoryContent, {
+          // Keep one lightweight gate mounted for every edit-history record. Its registry
+          // callback can then hide or restore history immediately in either direction without
+          // waiting for Discord to rerender the message or reloading the channel.
+          if (record?.edit_history && Array.isArray(ret.props.children)) {
+            return React.createElement(EditHistoryContent, {
               plugin: this,
               messageId: props.message.id,
-              record: record,
-              originalChildren: originalChildren,
+              originalElement: ret,
               compact: props.compact
             });
-            return;
           }
           if (record?.delete_data?.time) {
             return React.createElement(DeletedContentTooltip, {
@@ -10645,14 +10747,9 @@ module.exports = class MessageLoggerV2 {
     }
     const tintClassFor = () => this.settings.useAlternativeDeletedStyle ? this.style.deletedAlt : this.style.deleted;
     const shouldTintMessage = (channelId, messageId) => {
-      const record = this.messageRecord?.[messageId];
-      // Hidden records remain indexed for persistence and later unhiding, but must have no
-      // presentation on surviving Discord mounts until the user explicitly restores them.
-      if (!record?.delete_data || record.delete_data.hidden) return false;
-      const shouldShowDeleted = this.settings.showDeletedMessages && this.deletedMessageSet.get(channelId)?.has(messageId);
-      const shouldShowPurged = this.settings.showPurgedMessages && this.purgedMessageSet.get(channelId)?.has(messageId);
-      if (!shouldShowDeleted && !shouldShowPurged) return false;
-      return shouldShowDeleted || shouldShowPurged;
+      // Hidden and disabled records remain indexed for persistence and logger viewing, but
+      // have no presentation on surviving Discord mounts until their display gates reopen.
+      return this.shouldPresentSavedMessage(channelId, messageId);
     };
     const getMessageNodeId = (channelId, messageId) => `chat-messages-${channelId}-${messageId}`;
     const clearTintClasses = (target) => {
@@ -10790,7 +10887,7 @@ module.exports = class MessageLoggerV2 {
         const threadId = match[1];
         const placeholder = getNativeDeletedThreadHeaderPlaceholder(container);
         const shouldTint = !!placeholder
-          && this.settings.showDeletedMessages
+          && this.shouldPresentDeletedMessages()
           && !this.noTintIds.has(threadId);
         container.querySelectorAll?.(`.${this.style.deletedForumText}`).forEach(target => {
           if (!shouldTint || target !== placeholder) target.classList.remove(this.style.deletedForumText);
@@ -10931,7 +11028,7 @@ module.exports = class MessageLoggerV2 {
         clearTintClassesFromNodes(forumTintTargets);
         const nativeDeletedPlaceholder = getNativeDeletedForumPlaceholder(card);
         if (nativeDeletedPlaceholder) this._nativeDeletedForumPreviewText?.delete?.(threadId);
-        const nativeDeletedPreview = this.settings.showDeletedMessages
+        const nativeDeletedPreview = this.shouldPresentDeletedMessages()
           ? nativeDeletedPlaceholder || getRememberedDeletedForumPreview(card, threadId)
           : null;
         if (nativeDeletedPreview && !this.noTintIds.has(threadId)) {
@@ -11005,12 +11102,11 @@ module.exports = class MessageLoggerV2 {
           if (Array.isArray(ids) && ids.some(id => String(id) === String(threadId))) rootIds.add(threadId);
         }
       };
-      if (this.settings.showDeletedMessages) collect(this.deletedMessageRecord);
-      if (this.settings.showPurgedMessages) collect(this.purgedMessageRecord);
+      if (this.shouldPresentDeletedMessages()) collect(this.deletedMessageRecord);
+      if (this.shouldPresentPurgedMessages()) collect(this.purgedMessageRecord);
       return rootIds;
     };
-    const canRestoreVisibleThreadRoots = () => this.settings.restoreDeletedMessages
-      && (this.settings.showDeletedMessages || this.settings.showPurgedMessages);
+    const canRestoreVisibleThreadRoots = () => this.shouldPresentAnySavedDeletion();
     const getRestorableForumRecordsForChannel = (parentChannel) => {
       if (!isForumListChannel(parentChannel) || !parentChannel?.id || !parentChannel.guild_id) return [];
       const out = [];
@@ -11257,7 +11353,8 @@ module.exports = class MessageLoggerV2 {
       }
     };
     const applyRestoredThreadTint = (threadId) => {
-      const shouldTint = !this.messageRecord?.[threadId]?.delete_data?.hidden && !this.noTintIds.has(threadId);
+      const shouldTint = this.shouldPresentSavedMessage(threadId, threadId)
+        && !this.noTintIds.has(threadId);
       document.querySelectorAll(
         `[data-ml2-restored-thread-entry="${threadId}"], [data-ml2-restored-thread-browser-card="${threadId}"]`
       ).forEach(node => node.classList.toggle(this.style.deleted, shouldTint));
@@ -11804,11 +11901,17 @@ module.exports = class MessageLoggerV2 {
         });
       }
       const article = document.querySelector(`[data-list-item-id="chat-messages___${domId}"]`);
-      if (article && addTintClass(article)) applied = true;
+      if (article) {
+        if (shouldTintMessage(channelId, messageId) && !this.noTintIds.has(messageId)) {
+          if (addTintClass(article)) applied = true;
+        } else {
+          clearTintClasses(article);
+        }
+      }
       return applied;
     };
     const scheduleTintForMessage = (channelId, messageId, attempt = 0) => {
-      if ((!this.settings.showDeletedMessages && !this.settings.showPurgedMessages) || !channelId || !messageId) return;
+      if (!this.shouldPresentAnySavedDeletion() || !channelId || !messageId) return;
       const delays = channelId === messageId
         ? [0, 32, 96, 192, 384, 768, 1200]
         : [0, 32, 96, 192, 384];
@@ -11837,7 +11940,6 @@ module.exports = class MessageLoggerV2 {
       // The open forum/thread view uses a second self-keyed system row for the same native
       // placeholder. Tint only that exact leaf; ordinary reply messages remain independent.
       tintNativeDeletedThreadHeaderPlaceholders(document);
-      if (!this.settings.showDeletedMessages && !this.settings.showPurgedMessages) return;
       removeSuppressedForumCards();
       document.querySelectorAll('[id^="chat-messages-"]').forEach(tintMessageNode);
       for (const channelId of this.deletedMessageSet.keys()) {
