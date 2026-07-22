@@ -214,6 +214,8 @@ After a no-save reload:
 
 Disabling saving reports memory-only additions and archival-removal write-through. Re-enabling without a reload queues in-memory changes; re-enabling after a reload reports the merge. Every message uses the selected notification mode and includes console detail.
 
+Changing **Obfuscate CSS classes** restarts MessageLogger by temporarily disabling and re-enabling it. With data saving active, the normal shutdown flush runs first. With **Disable saving data** enabled, a danger confirmation appears because memory-only session activity cannot survive the restart; **No** leaves the CSS-class setting unchanged.
+
 ### Legacy or mixed-fork data was detected
 
 - Legacy `deletedata` and `editHistory` fields are merged with surviving canonical and enhanced data, indexes are rebuilt, and the complete primary is atomically rewritten.

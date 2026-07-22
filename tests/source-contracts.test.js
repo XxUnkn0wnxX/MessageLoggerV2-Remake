@@ -344,7 +344,7 @@ test('settings documentation retains audited group order and current UI labels',
     assert.ok(settingsDocs.includes(`| ${label} |`), `${label} is missing from the settings reference`);
   }
 
-  assert.match(settingsDocs, /Obfuscate CSS classes \| On \|[^\n]*Changes take effect after the plugin reloads/);
+  assert.match(settingsDocs, /Obfuscate CSS classes \| On \|[^\n]*restarts MessageLogger by temporarily disabling and re-enabling it[^\n]*\*\*No\*\*[^\n]*leaves the setting unchanged/);
   assert.match(settingsDocs, /Automatic updates \| On \|[^\n]*offers \*\*Update Now\*\*/);
   assert.match(settingsDocs, /Delete cached files with log records \| Off \|[^\n]*Cached-file deletion still runs while \*\*Disable saving data\*\* is enabled[^\n]*deletion-only write path/);
 });
@@ -1128,6 +1128,29 @@ test('settings callbacks have one BetterDiscord owner', () => {
     source.indexOf('normalizeAutoBackupIntervalSeconds(value)')
   );
   assert.match(keybindRecorder, /plugin\.settings\[config\.id\] = validation\.value;[\s\S]*plugin\.saveSettings\(\)/);
+});
+
+test('CSS class mode changes use a confirmed controlled restart on both save paths', () => {
+  assert.match(source, /name: 'Obfuscate CSS classes'[\s\S]*confirmedCssClassRestart: true/);
+  const cssSetting = source.slice(
+    source.indexOf("name: 'Obfuscate CSS classes'"),
+    source.indexOf("name: 'Automatic updates'")
+  );
+  assert.match(cssSetting, /Restarts MessageLogger to apply by briefly disabling and re-enabling it\./);
+  assert.match(cssSetting, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*With Disable saving data enabled, confirmation is required because temporary session activity will be discarded\./);
+  assert.match(source, /config\.confirmedCssClassRestart[\s\S]*type = 'custom'[\s\S]*createConfirmedCssClassModeSwitch\(config\)/);
+  const cssControl = source.slice(
+    source.indexOf('createConfirmedCssClassModeSwitch(config)'),
+    source.indexOf('createSetting(data)')
+  );
+  assert.match(cssControl, /Components\.SwitchInput[\s\S]*internalState: false/);
+  assert.match(cssControl, /requestCssClassModeChange\(nextValue\)[\s\S]*this\.settings\.dontSaveData[\s\S]*showCssClassModeRestartWarning\(\)/);
+  assert.match(cssControl, /cancelText: 'No'[\s\S]*confirmButtonColor:[\s\S]*RED/);
+  assert.match(cssControl, /commitCssClassModeChange\(nextValue\)[\s\S]*this\.saveSettings\(\);[\s\S]*this\.scheduleCssClassModeRestart\(\)/);
+  assert.match(cssControl, /Plugins\.disable\?\.\(pluginName\) === true[\s\S]*Plugins\.enable\?\.\(pluginName\) === true/);
+  assert.doesNotMatch(cssControl, /_cssClassReenableTimer/);
+  assert.match(source, /if \(!this\._cssClassRestartInProgress\)[\s\S]*this\._settingsDependencyListeners\?\.clear\?\.\(\)/);
+  assert.match(source, /new Set\(\[this\.style\.css, this\.stringHeldCaptive, 'ML2-CSS'\]\)/);
 });
 
 test('high-impact setting changes use routed theme-aware state feedback', () => {

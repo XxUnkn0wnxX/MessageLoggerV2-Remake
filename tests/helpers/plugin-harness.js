@@ -6,6 +6,12 @@ const notificationEvents = [];
 const toastEvents = [];
 const confirmationEvents = [];
 const ReactDOM = {};
+const Plugins = {};
+const DOM = {};
+const Components = {
+  KeybindInput() {},
+  SwitchInput() {}
+};
 const React = {
   createElement(type, props, ...children) {
     return { type, props: { ...props, children } };
@@ -53,10 +59,10 @@ class MockBdApi {
       ReactDOM,
       Webpack: { Filters: {} },
       UI,
-      Plugins: {},
-      DOM: {},
+      Plugins,
+      DOM,
       Patcher: {},
-      Components: { KeybindInput() {} },
+      Components,
       ContextMenu: {},
       Utils: {},
       Hooks: {},
@@ -86,11 +92,16 @@ function resetHarness() {
   toastEvents.length = 0;
   confirmationEvents.length = 0;
   for (const key of Object.keys(ReactDOM)) delete ReactDOM[key];
+  for (const key of Object.keys(Plugins)) delete Plugins[key];
+  for (const key of Object.keys(DOM)) delete DOM[key];
 }
 
 module.exports = {
   Data,
+  DOM,
   Logger,
+  Components,
+  Plugins,
   React,
   ReactDOM,
   UI,

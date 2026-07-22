@@ -7,6 +7,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 ## 🔄 Lifecycle and Compatibility
 
 - `start`, `initialize`, and `stop` own plugin startup, module readiness, timers, patches, synchronous shutdown persistence, and cleanup.
+- `requestCssClassModeChange`, `commitCssClassModeChange`, and `restartForCssClassMode` apply class-map changes through BetterDiscord's public disable/enable lifecycle. The controlled custom switch commits only accepted changes; an ordinary stop clears its settings listeners, while the one intentional same-instance restart preserves them for the still-mounted settings panel. Normal saving receives the existing synchronous shutdown archive flush before restart. No-save mode requires explicit danger confirmation because its memory-only session state cannot be flushed.
 - `DiscordModules` lazily resolves Discord Webpack exports. Missing-module fixes must follow the runtime trace workflow in `AGENTS.md`; do not hide lookup warnings without proving the live export path.
 - `getChanges`, `checkNewUpdate`, and `performUpdate` provide the in-plugin changelog and maintained-fork updater.
 - Startup normalization preserves old installations, migrates legacy caps, validates keybind arrays, and forces the two locked cache settings on.
@@ -16,6 +17,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 ## ⚙️ Settings and Scope Policy
 
 - `getSettingsPanel`, `createSetting`, and `createGroup` keep the existing accordion interface while building one BetterDiscord panel per group. Every setting owns its callback and saves accepted changes immediately; the BetterDiscord **Done** action and React unmount lifecycle never own persistence. This works with upstream and the local fork, while older builders simply ignore dependency metadata.
+- `createConfirmedCssClassModeSwitch` uses BetterDiscord's public controlled `SwitchInput` because ordinary settings switches update their own visual state before callbacks and cannot represent a cancelled confirmation. Older hosts without that public component receive a controlled checkbox fallback.
 - Logger shortcuts use BetterDiscord's native `KeybindInput` recorder in the normal settings row.
   - Validation rejects unsafe or overlapping all-log, channel, and server chords inline, then clears stale pressed state when capture finishes.
   - Capture-phase listeners compare normalized, order-independent key sets. The recorder's earlier window-capture listener suppresses these checks while recording.

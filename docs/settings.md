@@ -222,7 +222,7 @@ Message-history caching and hierarchical media storage are core behavior with no
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Obfuscate CSS classes | On | Uses plugin-specific class names to reduce conflicts with themes and plugins. Changes take effect after the plugin reloads. |
+| Obfuscate CSS classes | On | Uses plugin-specific class names to reduce conflicts with themes and plugins. Changing either direction restarts MessageLogger by temporarily disabling and re-enabling it so the class map can be rebuilt. With **Disable saving data** **Off**, the accepted value saves immediately and the existing shutdown path flushes pending archive data before restart. With it **On**, a small danger confirmation warns that memory-only session activity will be discarded; **Restart Logger** saves and proceeds, while **No** or dismissing the modal leaves the setting unchanged. |
 | Automatic updates | On | Periodically checks the repository for a newer plugin version and offers **Update Now**. Choosing it installs the update and reloads the renderer. |
 | Display update notes | On | Shows the plugin changelog after a version change. |
 | Contextmenu submenu name | Empty | Replaces the **Message Logger** label. Empty values use the built-in label. |

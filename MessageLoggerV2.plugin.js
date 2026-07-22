@@ -322,7 +322,15 @@ module.exports = class MessageLoggerV2 {
   stop() {
     this._startupGeneration = (this._startupGeneration || 0) + 1;
     this._startupPending = false;
-    this._settingsDependencyListeners?.clear?.();
+    // A CSS-class mode restart uses BetterDiscord's disable/enable lifecycle on this same
+    // instance. Its settings panel remains mounted, so retain the controlled/custom-input
+    // listeners only for that one stop/start. Every ordinary stop still tears them down.
+    if (!this._cssClassRestartInProgress) {
+      if (this._cssClassRestartTimer) clearTimeout(this._cssClassRestartTimer);
+      this._cssClassRestartTimer = 0;
+      this._pendingCssClassModeValue = null;
+      this._settingsDependencyListeners?.clear?.();
+    }
     if (!this.__started) return;
     // Archival removals are the one write-through exception while new data saving is disabled.
     // Flush their detached disk-only journal before teardown invalidates every data write.
@@ -1438,8 +1446,13 @@ module.exports = class MessageLoggerV2 {
     };
     this.stringHeldCaptive = this.randomString();
     this.updateCSS = () => {
-      DOM.removeStyle(this.settings.obfuscateCSSClasses ? this.stringHeldCaptive : 'ML2-CSS')
-      this.style.css = this.settings.obfuscateCSSClasses ? this.stringHeldCaptive : 'ML2-CSS';
+      const nextStyleKey = this.settings.obfuscateCSSClasses ? this.stringHeldCaptive : 'ML2-CSS';
+      // Remove every possible key before adding the current sheet. This also keeps a failed
+      // or deferred class-mode restart from leaving both literal and randomized sheets active.
+      for (const styleKey of new Set([this.style.css, this.stringHeldCaptive, 'ML2-CSS'])) {
+        if (styleKey) DOM.removeStyle(styleKey);
+      }
+      this.style.css = nextStyleKey;
       DOM.addStyle(
         this.style.css,
         `
@@ -2066,6 +2079,142 @@ module.exports = class MessageLoggerV2 {
     const listeners = this._settingsDependencyListeners?.get(settingId);
     if (!listeners) return;
     for (const listener of [...listeners]) listener();
+  }
+  createConfirmedCssClassModeSwitch(config) {
+    const plugin = this;
+    // Keep the mounted input paired with the SettingItem label that BetterDiscord built for
+    // the current panel. The class mode may change while that panel intentionally stays open.
+    const switchId = this.obfuscatedClass(config.id);
+    function ConfirmedCssClassModeSwitch() {
+      const [value, setValue] = React.useState(() => !!plugin.settings[config.id]);
+      React.useEffect(() => plugin.subscribeSettingDependency(config.id, () => {
+        setValue(!!plugin.settings[config.id]);
+      }), []);
+      const onChange = nextValue => plugin.requestCssClassModeChange(!!nextValue);
+      if (typeof Components.SwitchInput === 'function') {
+        // BetterDiscord's ordinary settings switch changes its own visual state before the
+        // callback and cannot roll back a cancelled operation. This controlled form changes
+        // only after the plugin has actually accepted and saved the requested mode.
+        return React.createElement(Components.SwitchInput, {
+          id: switchId,
+          value,
+          internalState: false,
+          onChange
+        });
+      }
+      // Retain a functional controlled fallback for older BetterDiscord builds that expose
+      // custom settings but not the public SwitchInput component.
+      return React.createElement('input', {
+        id: switchId,
+        type: 'checkbox',
+        checked: value,
+        onChange: event => onChange(event.currentTarget.checked)
+      });
+    }
+    return React.createElement(ConfirmedCssClassModeSwitch);
+  }
+  requestCssClassModeChange(nextValue) {
+    const requestedValue = !!nextValue;
+    if (requestedValue === !!this.settings.obfuscateCSSClasses) return false;
+    if (!this.settings.dontSaveData) return this.commitCssClassModeChange(requestedValue);
+
+    this._pendingCssClassModeValue = requestedValue;
+    this.showCssClassModeRestartWarning();
+    return false;
+  }
+  showCssClassModeRestartWarning() {
+    const modalKey = `${this.getName()}_CSS_CLASS_RESTART_WARNING`;
+    if (this.ModalStack?.hasModalOpen?.(modalKey)) return;
+    const warning = React.createElement(
+      'div',
+      { style: { color: 'var(--text-default)' } },
+      React.createElement(
+        'p',
+        { style: { margin: 0 } },
+        'Disable saving data is ',
+        this.createSettingStateLabel(true),
+        '. Restarting MessageLogger will discard this session\'s memory-only logs, Sent history, queued alerts, and temporary counters. Your existing saved archive stays intact.'
+      ),
+      React.createElement(
+        'p',
+        { style: { margin: '12px 0 0' } },
+        'Restart Logger saves the requested CSS-class setting and proceeds. No leaves the setting unchanged.'
+      )
+    );
+    const clearPending = () => {
+      this._pendingCssClassModeValue = null;
+    };
+    this.createModal({
+      header: 'Restart MessageLogger?',
+      size: this.tools?.resolvedModalStuff?.ModalSize?.SMALL,
+      children: warning,
+      confirmText: 'Restart Logger',
+      cancelText: 'No',
+      confirmButtonColor: this.tools?.buttonColors?.RED ?? Components.Button?.Colors?.RED,
+      onConfirm: () => {
+        const requestedValue = this._pendingCssClassModeValue;
+        clearPending();
+        if (typeof requestedValue === 'boolean') this.commitCssClassModeChange(requestedValue);
+      },
+      onCancel: clearPending,
+      onClose: clearPending
+    }, false, modalKey);
+  }
+  commitCssClassModeChange(nextValue) {
+    const requestedValue = !!nextValue;
+    if (requestedValue === !!this.settings.obfuscateCSSClasses) return false;
+    this.settings.obfuscateCSSClasses = requestedValue;
+    // Persist before scheduling the lifecycle transition. BetterDiscord's settings Done
+    // button merely unmounts the panel and is deliberately not part of this transaction.
+    this.saveSettings();
+    this.notifySettingDependencyChange('obfuscateCSSClasses');
+    this.scheduleCssClassModeRestart();
+    return true;
+  }
+  scheduleCssClassModeRestart() {
+    if (this._cssClassRestartTimer) clearTimeout(this._cssClassRestartTimer);
+    this._cssClassRestartTimer = setTimeout(() => {
+      this._cssClassRestartTimer = 0;
+      this.restartForCssClassMode();
+    }, 0);
+  }
+  restartForCssClassMode() {
+    if (this._cssClassRestartInProgress) return false;
+    const pluginName = this.getName();
+    this._cssClassRestartInProgress = true;
+    let disableResult = false;
+    try {
+      disableResult = Plugins.disable?.(pluginName) === true;
+    } catch (error) {
+      Logger.error('Could not disable MessageLogger to apply its CSS class mode.', error);
+    }
+    if (!disableResult) {
+      this._cssClassRestartInProgress = false;
+      if (Plugins.isEnabled?.(pluginName) === false) this._settingsDependencyListeners?.clear?.();
+      UI.showToast?.('MessageLogger could not complete its restart. Enable or restart it manually to apply the saved CSS class setting.', {
+        type: 'error',
+        timeout: 0
+      });
+      return false;
+    }
+
+    // BetterDiscord's disable call completes stop and persists the disabled state before it
+    // returns. Re-enable immediately after that successful return, leaving no queued timer
+    // that could override a later manual disable or file-watcher unload.
+    let enabled = false;
+    try {
+      enabled = Plugins.enable?.(pluginName) === true;
+    } catch (error) {
+      Logger.error('Could not re-enable MessageLogger after applying its CSS class mode.', error);
+    }
+    this._cssClassRestartInProgress = false;
+    if (enabled) return true;
+    this._settingsDependencyListeners?.clear?.();
+    UI.showToast?.('MessageLogger could not re-enable itself. Enable it manually in BetterDiscord settings.', {
+      type: 'error',
+      timeout: 0
+    });
+    return false;
   }
   createSetting(data) {
     const current = { ...data };
@@ -3867,9 +4016,19 @@ module.exports = class MessageLoggerV2 {
         settings: [
           {
             name: 'Obfuscate CSS classes',
-            note: 'Helps when another plugin, library, or theme blocks MessageLogger.',
+            note: React.createElement(
+              'span',
+              null,
+              'Restarts MessageLogger to apply by briefly disabling and re-enabling it. ',
+              React.createElement(
+                'span',
+                { style: { color: 'var(--text-warning, var(--status-warning))' } },
+                'With Disable saving data enabled, confirmation is required because temporary session activity will be discarded.'
+              )
+            ),
             id: 'obfuscateCSSClasses',
-            type: 'switch'
+            type: 'switch',
+            confirmedCssClassRestart: true
           },
           {
             name: 'Automatic updates',
@@ -3996,7 +4155,13 @@ module.exports = class MessageLoggerV2 {
     };
     const createSettingFromConfig = (config) => {
       const setting = { ...config };
-      if (config.validator === 'loggerKeybind') {
+      if (config.confirmedCssClassRestart) {
+        setting.type = 'custom';
+        setting.children = this.createConfirmedCssClassModeSwitch(config);
+        setting.onChange = () => {};
+        delete setting.confirmedCssClassRestart;
+      }
+      else if (config.validator === 'loggerKeybind') {
         // Retain BetterDiscord's native recorder while wrapping only its value callback with
         // logger-specific safety/conflict validation and inline rejection feedback.
         setting.type = 'custom';
@@ -9469,6 +9634,12 @@ module.exports = class MessageLoggerV2 {
           cancelText: options.cancelText,
           onConfirm: options.onConfirm,
           onCancel: options.onCancel ?? props.onClose,
+          ...(options.onClose ? {
+            onClose: (...args) => {
+              options.onClose();
+              props.onClose?.(...args);
+            }
+          } : {}),
           variant: isCritical ? "critical" : undefined,
           children: options.children,
         });

@@ -5,7 +5,9 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  Components,
   Data,
+  Plugins,
   React,
   UI,
   createPlugin,
@@ -451,6 +453,164 @@ test('mounted linked custom inputs update live without changing their saved chil
   plugin.settings.dontSaveData = true;
   assert.equal(plugin.isSettingDependencyDisabled({ disableWith: 'dontSaveData' }), true);
   assert.equal(plugin.isSettingDependencyDisabled({ enableWith: 'autoBackup' }), true);
+});
+
+test('CSS class mode uses a controlled switch so no-save cancellation changes nothing', () => {
+  const requests = [];
+  const plugin = createPlugin({
+    settings: { obfuscateCSSClasses: true, dontSaveData: true },
+    obfuscatedClass: id => `obfuscated-${id}`,
+    requestCssClassModeChange(value) { requests.push(value); }
+  });
+
+  const element = plugin.createConfirmedCssClassModeSwitch({ id: 'obfuscateCSSClasses' });
+  const tree = element.type();
+
+  assert.equal(tree.type, Components.SwitchInput);
+  assert.equal(tree.props.id, 'obfuscated-obfuscateCSSClasses');
+  assert.equal(tree.props.value, true);
+  assert.equal(tree.props.internalState, false);
+  tree.props.onChange(false);
+  assert.deepEqual(requests, [false]);
+  assert.equal(plugin.settings.obfuscateCSSClasses, true);
+
+  plugin.settings.obfuscateCSSClasses = false;
+  const rerenderedTree = element.type();
+  assert.equal(rerenderedTree.props.id, 'obfuscated-obfuscateCSSClasses');
+  assert.equal(rerenderedTree.props.value, false);
+});
+
+test('CSS class mode confirmation cancels or commits either direction before restart', () => {
+  const modals = [];
+  const dependencyChanges = [];
+  let saves = 0;
+  let restarts = 0;
+  const plugin = createPlugin({
+    settings: { obfuscateCSSClasses: true, dontSaveData: true },
+    ModalStack: { hasModalOpen: () => false },
+    tools: {
+      buttonColors: { RED: 'danger' },
+      resolvedModalStuff: { ModalSize: { SMALL: 'small' } }
+    },
+    createModal(options, image, key) { modals.push({ options, image, key }); },
+    saveSettings() { saves++; },
+    notifySettingDependencyChange(id) { dependencyChanges.push(id); },
+    scheduleCssClassModeRestart() { restarts++; }
+  });
+
+  plugin.requestCssClassModeChange(false);
+  assert.equal(plugin.settings.obfuscateCSSClasses, true);
+  assert.equal(saves, 0);
+  assert.equal(restarts, 0);
+  assert.equal(modals[0].options.confirmText, 'Restart Logger');
+  assert.equal(modals[0].options.cancelText, 'No');
+  assert.equal(modals[0].options.confirmButtonColor, 'danger');
+  modals[0].options.onCancel();
+  assert.equal(plugin.settings.obfuscateCSSClasses, true);
+  assert.equal(saves, 0);
+
+  plugin.requestCssClassModeChange(false);
+  modals[1].options.onClose();
+  assert.equal(plugin.settings.obfuscateCSSClasses, true);
+  assert.equal(saves, 0);
+
+  plugin.requestCssClassModeChange(false);
+  modals[2].options.onConfirm();
+  assert.equal(plugin.settings.obfuscateCSSClasses, false);
+  assert.equal(saves, 1);
+  assert.equal(restarts, 1);
+
+  plugin.requestCssClassModeChange(true);
+  modals[3].options.onCancel();
+  assert.equal(plugin.settings.obfuscateCSSClasses, false);
+  assert.equal(saves, 1);
+
+  plugin.requestCssClassModeChange(true);
+  modals[4].options.onConfirm();
+  assert.equal(plugin.settings.obfuscateCSSClasses, true);
+  assert.equal(saves, 2);
+  assert.equal(restarts, 2);
+  assert.deepEqual(dependencyChanges, ['obfuscateCSSClasses', 'obfuscateCSSClasses']);
+});
+
+test('CSS class mode saves immediately without a warning when data saving is active', () => {
+  const order = [];
+  let saves = 0;
+  let restarts = 0;
+  let warnings = 0;
+  const plugin = createPlugin({
+    settings: { obfuscateCSSClasses: true, dontSaveData: false },
+    saveSettings() {
+      order.push('save');
+      saves++;
+    },
+    notifySettingDependencyChange() {},
+    scheduleCssClassModeRestart() {
+      order.push('schedule');
+      restarts++;
+    },
+    showCssClassModeRestartWarning() { warnings++; }
+  });
+
+  assert.equal(plugin.requestCssClassModeChange(false), true);
+  assert.equal(plugin.settings.obfuscateCSSClasses, false);
+  assert.equal(saves, 1);
+  assert.equal(restarts, 1);
+  assert.equal(warnings, 0);
+  assert.deepEqual(order, ['save', 'schedule']);
+});
+
+test('CSS class restart reuses the plugin instance and preserves mounted setting listeners', async () => {
+  const events = [];
+  let enabled = true;
+  const plugin = createPlugin({
+    __started: false,
+    _settingsDependencyListeners: new Map([['master', new Set([() => {}])]])
+  });
+  Plugins.isEnabled = () => enabled;
+  Plugins.disable = () => {
+    events.push('disable');
+    enabled = false;
+    plugin.stop();
+    return true;
+  };
+  Plugins.enable = () => {
+    events.push('enable');
+    enabled = true;
+    return true;
+  };
+
+  assert.equal(plugin.restartForCssClassMode(), true);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(events, ['disable', 'enable']);
+  assert.equal(plugin._settingsDependencyListeners.size, 1);
+  assert.equal(plugin._cssClassRestartInProgress, false);
+
+  plugin.stop();
+  assert.equal(plugin._settingsDependencyListeners.size, 0);
+});
+
+test('CSS class restart never re-enables after BetterDiscord reports a failed stop', () => {
+  const events = [];
+  let enabled = true;
+  const plugin = createPlugin({
+    _settingsDependencyListeners: new Map([['master', new Set([() => {}])]])
+  });
+  Plugins.isEnabled = () => enabled;
+  Plugins.disable = () => {
+    events.push('disable');
+    enabled = false;
+    return false;
+  };
+  Plugins.enable = () => {
+    events.push('enable');
+    return true;
+  };
+
+  assert.equal(plugin.restartForCssClassMode(), false);
+  assert.deepEqual(events, ['disable']);
+  assert.equal(plugin._cssClassRestartInProgress, false);
+  assert.equal(plugin._settingsDependencyListeners.size, 0);
 });
 
 test('deleted message color saves optional-hash values case-insensitively', () => {
