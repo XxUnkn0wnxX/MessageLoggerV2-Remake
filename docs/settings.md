@@ -8,12 +8,12 @@ On current BetterDiscord builds, dependent controls are greyed out while their m
 
 | Master switch | Controls unavailable while Off |
 | --- | --- |
-| Display saved messages in chat | Include Deleted messages; Include Purged messages; Use background instead of text tint |
-| Display edited messages in chat | Max number of shown edits; Show oldest edit instead of newest |
-| Auto backup data | Auto backup interval |
-| Cache media locally | Add user ID to filename; Cache all attachment types; Max cache file size |
-| Block spam edit notifications | Edit spam threshold |
-| Enable Anti Nuke | Nuke-detection toasts and all three Anti-Nuke caps |
+| Display saved messages in chat | Include Deleted messages; Include Purged messages; Use background instead of text tint for deleted messages |
+| Display edited messages in chat | Max number of shown edits; Show oldest edit instead of newest if over the shown edits limit |
+| Auto backup data (won't fully prevent losing data, just prevent total data loss) | Auto backup interval (seconds) |
+| Cache media locally | Add user id to saved media filename; Cache all attachment types; Max cache file size (MB, 0 = no limit) |
+| Block spam edit notifications (if enabled) | Edit spam threshold |
+| Enable Anti Nuke | Show nuke detection toasts; Thread and forum post cap; Total message cap; Total attachment cap |
 
 The deleted-message color, media-cache path, advanced cached-file policies, and self-message/edit ignores remain independent by design.
 
@@ -65,11 +65,11 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Include Purged messages | On | Live-mounts messages captured from bulk deletions. **Display saved messages in chat must be enabled first.** |
 | Display edited messages in chat | On | Shows saved edit history with messages. Turning it off hides inline history and its Jump actions, but edits remain logged. |
 | Max number of shown edits | `0` | Limits visible edits; `0` means no configured limit. |
-| Show oldest edit instead of newest | On | When the edit limit is exceeded, keeps older edits visible instead of newer ones. |
-| Use background instead of text tint | Off | Uses the configured deleted-message color as a background tint. |
+| Show oldest edit instead of newest if over the shown edits limit | On | When the edit limit is exceeded, keeps older edits visible instead of newer ones. |
+| Use background instead of text tint for deleted messages | Off | Uses the configured deleted-message color as a background tint. |
 | Deleted messages color | Empty | Sets deleted text and forum/thread tints. Accepts six hex digits with an optional `#` in any letter case; an empty value uses the built-in red. |
-| Show amount of new deleted messages | On | Displays the unseen deleted-message count when entering a channel. Turning it off clears every pending deleted counter and reports the reset only when at least one pending count existed. |
-| Show amount of new edited messages | On | Displays the unseen edited-message count when entering a channel. Turning it off clears every pending edited counter and reports the reset only when at least one pending count existed. |
+| Show amount of new deleted messages when entering a channel | On | Displays the unseen deleted-message count when entering a channel. Turning it off clears every pending deleted counter and reports the reset only when at least one pending count existed. |
+| Show amount of new edited messages when entering a channel | On | Displays the unseen edited-message count when entering a channel. Turning it off clears every pending edited counter and reports the reset only when at least one pending count existed. |
 | Show Hidden tab in logger | Off | Adds the **Hidden** tab. Hidden records remain stored when the tab is disabled. |
 | Menu sort direction | New to old | Controls message ordering in the logger window. |
 
@@ -77,23 +77,23 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Disable saving data | Off | Keeps new logs in memory and disables automatic backups. Existing disk history remains untouched. If the plugin started in this mode, re-enabling saving validates and merges disk history with eligible session records before atomically replacing the primary file. A failed recovery leaves saving disabled and directs you to the console. |
-| Auto backup data | Off | Maintains a fallback copy of the logger data. It reduces, but cannot eliminate, data-loss risk. |
+| Disable saving data | Off | Keeps new records and edits in memory and pauses ordinary primary/backup additions. Archival removals still commit deletion-only updates to each valid existing data snapshot, so record, edit, clear-log, cap, and thread/forum removals survive restart without saving session additions. If the plugin started in this mode, re-enabling saving validates and merges disk history with eligible session records before atomically replacing the primary file. A failed recovery leaves saving disabled and directs you to the console. |
+| Auto backup data (won't fully prevent losing data, just prevent total data loss) | Off | Maintains a fallback copy of the logger data. It reduces, but cannot eliminate, data-loss risk. |
 | Auto backup interval (seconds) | 20 | Waits this many seconds after saved data changes before refreshing the backup. Accepts whole numbers from 10 through 86,400; for example, `300` is five minutes. Blank is valid and saves the 20-second default. Other invalid drafts remain unsaved and are marked with a red field border and inline error instead of a toast. Invalid settings or manual config edits reset to 20 at startup. |
 | Cache media locally | On | Master switch for caching attachments, embed images, and stickers. |
-| Add user ID to saved media filename | Off | Includes the author ID in hierarchical cache filenames. |
+| Add user id to saved media filename | Off | Includes the author ID in hierarchical cache filenames. |
 | Cache all attachment types | Off | Also caches videos, audio, and other non-image files. |
-| Max cache file size | `0` MB | Skips larger attachment files; blank or `0` disables the limit. Embed images and stickers are unaffected. |
-| Media cache path | Empty | Uses a custom existing directory instead of `MLV2_IMAGE_CACHE`. |
+| Max cache file size (MB, 0 = no limit) | `0` MB | Skips larger attachment files; blank or `0` disables the limit. Embed images and stickers are unaffected. |
+| Media cache path (optional) | Empty | Uses a custom existing directory instead of `MLV2_IMAGE_CACHE`. |
 | Aggresive message caching | On (locked) | Legacy setting retained for compatibility. It must remain enabled on this fork so message history is available for reliable forum and thread restoration. A saved `false` value is reset to `true` at startup. |
 | Use new cached images system | On (locked) | Legacy setting retained for compatibility. The organized server/channel cache layout must remain enabled for reliable forum and thread media restoration. A saved `false` value is reset to `true` at startup. |
-| Use BdApi basic notifications | On | Selects BetterDiscord notifications or plugin custom toasts for every logger alert and system/UI message. Switching it off immediately dismisses the active native notification and clears its memory-only queue. |
+| Use BdApi notifications instead of custom toasts | On | Selects BetterDiscord notifications or plugin custom toasts for every logger alert and system/UI message. Switching it off immediately dismisses the active native notification and clears its memory-only queue. |
 | Always show notifications for selected channel | Off | Allows enabled alerts while viewing the active channel, thread, or parent forum and overrides notification location lists there. |
 | Always show notifications for selected guild | Off | Treats the currently open server as an override for notification location lists. |
 | Show notifications to whitelisted only | Off | Restricts logger notifications to the notification whitelist. |
-| Block spam edit notifications | Off | When enabled, reaching the configured threshold for one author within 60 seconds shows one warning and suppresses that author's edit alerts for 60 seconds. Toggling either way clears all author counts and pauses; turning it off shows the same reset notice as a threshold change only when something active was cleared, while turning it on resets silently. A preceding threshold reset consumes that state, so disabling immediately afterward cannot show a duplicate notice. The warning keeps expiring while hovered and dismisses immediately from a left- or right-click anywhere on its card. Edit history and Ghost Ping alerts continue normally. |
+| Block spam edit notifications (if enabled) | Off | When enabled, reaching the configured threshold for one author within 60 seconds shows one warning and suppresses that author's edit alerts for 60 seconds. Toggling either way clears all author counts and pauses; turning it off shows the same reset notice as a threshold change only when something active was cleared, while turning it on resets silently. A preceding threshold reset consumes that state, so disabling immediately afterward cannot show a duplicate notice. The warning keeps expiring while hovered and dismisses immediately from a left- or right-click anywhere on its card. Edit history and Ghost Ping alerts continue normally. |
 | Edit spam threshold | `10` | Sets the eligible edit count within 60 seconds that triggers the warning and fixed 60-second notification pause. Whole numbers `1` or higher are valid. Invalid input, including `0`, stays red with an inline error while the saved value resets to `10`; reopening the panel shows `10`. While blocking is enabled, changing this value clears all existing author counts and active pauses and shows a replaceable info notice only when live state existed. While blocking is off, changing it cannot clear state or send the notice. |
-| Display open logs button | On | Shows the logger button beside channel search. |
+| Display open logs button next to the search box top right in channels | On | Shows the logger button beside channel search. |
 | Toggle all logs keybind | `Ctrl+M` | Uses BetterDiscord's native keybind recorder. It closes an open unfiltered logger; any other logger state or stacked plugin-owned panel closes and reopens as all logs. An open native media viewer closes first, including one opened from a normal Discord message. Clear the recorder to disable it. Unsafe or overlapping captures are rejected inline. |
 | Toggle selected channel logs keybind | `Ctrl+N` | Resolves the selected channel when pressed. It closes an open logger already filtered to that exact channel; any other logger state or stacked plugin-owned panel closes and reopens with that channel filter. Native media viewers close first; all other Discord panels remain open. Clear the recorder to disable it. |
 | Toggle selected server logs keybind | `Ctrl+S` | Resolves the selected server when pressed and uses its server ID filter. It closes an open logger already filtered to that exact server; any other logger state or stacked plugin-owned panel closes and reopens with that server filter. It does nothing except show a warning in DMs and group DMs; the all-log and selected-channel shortcuts continue working there. Native media viewers close first; all other Discord panels remain open. Clear the recorder to disable it. |
@@ -119,7 +119,7 @@ BetterDiscord stores the plugin's data beside the installed plugin:
 
 ### Saving and recovery
 
-- **Disable saving data** keeps new records in memory and cancels queued primary and backup writes.
+- **Disable saving data** keeps new records and edits in memory and cancels queued ordinary primary and backup writes. Archival removals are the exception: they update detached disk payloads with deletions only, never the live session payload.
 - Re-enabling without a reload queues the current in-memory changes. Re-enabling after a no-save reload merges disk and session history, de-duplicates indexes, preserves hidden/forum/thread state, applies normal caps, then atomically writes the primary before the backup.
 - Progress and errors use the selected notification mode and include detailed console output. A failed recovery leaves existing files untouched and saving disabled.
 - If the primary is missing or invalid, a valid backup is normalized and atomically rebuilds it. The backup remains untouched as a rollback copy and reports **Valid backup loaded. Rebuilding the main data file.**
@@ -146,10 +146,10 @@ Guilds and DMs have separate notification controls. These affect alerts, not whe
 | --- | --- | --- |
 | **Message sent**, **Message edited**, **Message deleted**, and **Ghost pings** under Guilds | Allows that guild alert when its other author, location, and scope gates pass. | Suppresses that guild alert without changing logging. |
 | **Message sent**, **Message edited**, **Message deleted**, and **Ghost pings** under DMs | Allows that DM alert when its other author and scope gates pass. | Suppresses that DM alert without changing logging. |
-| **Disable toasts for local user** | Suppresses eligible guild alerts for actions initiated by this Discord client. | Allows those local-action guild alerts when their event toggle and other gates pass. |
+| **Disable toasts for local user (yourself)** | Suppresses eligible guild alerts for actions initiated by this Discord client. | Allows those local-action guild alerts when their event toggle and other gates pass. |
 | **Show nuke detection toasts** | Alerts only after Anti Nuke actually captures records from a deleted parent channel. | Anti Nuke can keep capturing silently. |
 | **Show debug messages as toasts** | Sends eligible Debug events through the selected BetterDiscord-notification or custom-toast route. | Suppresses only Debug toasts; **Enable debug logging** remains independent. |
-| **Use BdApi basic notifications instead of custom toasts** | Routes enabled alerts through BetterDiscord notifications. | Routes enabled alerts through plugin custom toasts; it does not disable them. |
+| **Use BdApi notifications instead of custom toasts** | Routes enabled alerts through BetterDiscord notifications. | Routes enabled alerts through plugin custom toasts; it does not disable them. |
 | **Block spam edit notifications** | Rate-limits eligible edit alerts per author after the configured threshold. | Applies no edit-spam rate limit; the guild/DM **Message edited** toggle still decides whether edit alerts are enabled. |
 
 ### Guilds
@@ -160,7 +160,7 @@ Guilds and DMs have separate notification controls. These affect alerts, not whe
 | Message edited | On |
 | Message deleted | On |
 | Ghost pings | On |
-| Disable toasts for local user | Off |
+| Disable toasts for local user (yourself) | Off |
 
 ### DMs
 
@@ -179,6 +179,8 @@ Sent alerts accept only Discord's final non-optimistic message event. Guild aler
 
 - It does not suppress a remote deletion only because you authored the message or thread.
 - If **Ignore messages posted by you** is enabled too, the ignored message or thread root produces no alert.
+
+Older configs that stored this Guild-only value under DM toast settings are migrated automatically.
 
 ## 🛡️ Anti Nuke
 
@@ -220,12 +222,12 @@ Message-history caching and hierarchical media storage are core behavior with no
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Obfuscate CSS classes | On | Uses plugin-specific class names to reduce conflicts with themes and plugins. |
-| Automatic updates | On | Checks the repository for a newer plugin version, then reloads the Discord renderer cleanly. |
+| Obfuscate CSS classes | On | Uses plugin-specific class names to reduce conflicts with themes and plugins. Changes take effect after the plugin reloads. |
+| Automatic updates | On | Periodically checks the repository for a newer plugin version and offers **Update Now**. Choosing it installs the update and reloads the renderer. |
 | Display update notes | On | Shows the plugin changelog after a version change. |
 | Contextmenu submenu name | Empty | Replaces the **Message Logger** label. Empty values use the built-in label. |
 | Only render locally cached attachments | Off | Prevents uncached attachments from rendering through Discord CDN. The saved record shows a filename placeholder instead. Toggling this reevaluates open logger and channel views immediately. |
-| Delete cached files with log records | Off | Permanently deletes related cached attachments, embeds, and stickers whenever their final log record is removed, including purges and thread/forum cascades. |
+| Delete cached files with log records | Off | Permanently deletes related cached attachments, embeds, and stickers whenever their final log record is removed, including purges and thread/forum cascades. Cached-file deletion still runs while **Disable saving data** is enabled, and any matching archival record removal is committed through the deletion-only write path. |
 
 ## 🐞 Debug
 
@@ -257,14 +259,14 @@ Settings can also produce their own state-change notification. This is separate 
 | Setting | Notification states |
 | --- | --- |
 | **Only log whitelist** | Both states: enabled uses info; disabled uses neutral. |
-| **Disable saving data** | Both states: enabled reports memory-only saving as neutral; disabled reports normal saving or recovery resuming as info. |
+| **Disable saving data** | Both states: enabled reports memory-only additions plus deletion-only archival write-through as neutral; disabled reports normal saving or recovery resuming as info. |
 | **Auto backup data** | Both states: enabled reports active or saving-paused backup behavior as info; disabled reports shutdown and any pending cancellation as neutral. |
 | **Cache media locally** | Both states: enabled uses info; disabled uses neutral. |
 | **Enable Anti Nuke** | Both states: enabled uses info; disabled uses neutral and explains that existing Nuked records remain saved. |
 | **Automatic updates** | Both states: enabled uses info; disabled uses neutral. |
 | **Only render locally cached attachments** | Both states: enabled uses info; disabled uses neutral. |
 | **Delete cached files with log records** | Both states: enabled uses a longer info warning; disabled uses neutral. |
-| **Use BdApi basic notifications instead of custom toasts** | Both states: shows an info preview through the newly selected route. |
+| **Use BdApi notifications instead of custom toasts** | Both states: shows an info preview through the newly selected route. |
 | **Block spam edit notifications** | Disable-only, and only when active author counts or pauses were actually cleared. Enabling is silent. |
 | **Edit spam threshold** | Change-only, and only when blocking is enabled and active author counts or pauses were actually cleared. |
 | **Show amount of new deleted messages when entering a channel** | Disable-only, and only when at least one pending Deleted count was reset to `0`. Enabling and empty disables are silent. |

@@ -324,6 +324,13 @@ module.exports = class MessageLoggerV2 {
     this._startupPending = false;
     this._settingsDependencyListeners?.clear?.();
     if (!this.__started) return;
+    // Archival removals are the one write-through exception while new data saving is disabled.
+    // Flush their detached disk-only journal before teardown invalidates every data write.
+    try {
+      this.flushNoSavePersistedRemovals?.();
+    } catch (error) {
+      Logger.error('Could not flush pending archival removals during plugin shutdown.', error);
+    }
     this.__started = false;
     try {
       // Invalidate queued and in-flight persistence before any other teardown. This keeps an
@@ -463,7 +470,10 @@ module.exports = class MessageLoggerV2 {
         type: 'improved',
         items: [
           'Accepted settings save immediately, including deleted-message colors with an optional # in either letter case.',
-          'Related media, notification, logger-access, and update controls are grouped together.'
+          'Related controls stay grouped, while Filter Help and Logger Help now use clearer nested spacing, visible filter syntax, and consistent On/Off state labels.',
+          'The notification-mode setting now uses the accurate BdApi notifications wording without the outdated basic qualifier.',
+          'The guild-only local-user toast option now uses its correct Guild settings location and migrates its misplaced legacy DM value.',
+          'Disable saving data now blocks new additions while archival record, edit, clear-log, cap, and thread/forum removals still write through.'
         ]
       }
     ];
@@ -668,14 +678,14 @@ module.exports = class MessageLoggerV2 {
         sent: false,
         edited: true,
         deleted: true,
-        ghostPings: true
+        ghostPings: true,
+        disableToastsForLocal: false
       },
       toastTogglesDMs: {
         sent: false,
         edited: true,
         deleted: true,
-        ghostPings: true,
-        disableToastsForLocal: false
+        ghostPings: true
       },
       useNotificationsInstead: true,
       blockSpamEdit: false,
@@ -793,6 +803,7 @@ module.exports = class MessageLoggerV2 {
     const hadAntiNukeThreadCap = Object.prototype.hasOwnProperty.call(this.settings, 'antiNukeThreadCap');
     const hadAntiNukeMessageCap = Object.prototype.hasOwnProperty.call(this.settings, 'antiNukeMessageCap');
     const legacyChannelDeleteCaptureCap = this.settings.channelDeleteCaptureCap;
+    if (this.migrateDisableToastsForLocalSetting()) settingsChanged = true;
     if (this.normalizeSettingsAgainstDefaults(this.settings, defaultSettings)) settingsChanged = true;
     if (legacyChannelDeleteCaptureCap !== undefined) {
       const parsedLegacyCap = legacyChannelDeleteCaptureCap === null || String(legacyChannelDeleteCaptureCap).trim() === ''
@@ -1042,6 +1053,8 @@ module.exports = class MessageLoggerV2 {
     this._dataWriteEpoch = 0;
     this._noSaveMergeInProgress = false;
     this._noSaveMergeDirty = false;
+    this._pendingNoSavePersistedRemovals = [];
+    this._noSavePersistedRemovalTimer = 0;
     // Only instances that skipped disk loading at startup need a later disk/session merge.
     // Toggling saving off and back on without a reload must keep the existing in-memory behavior.
     this._needsNoSaveDataMerge = !!this.settings.dontSaveData;
@@ -2436,6 +2449,37 @@ module.exports = class MessageLoggerV2 {
     }
     return changed;
   }
+  migrateDisableToastsForLocalSetting(settings = this.settings) {
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return false;
+    const settingId = 'disableToastsForLocal';
+    const guildTogglesAreObject = !!settings.toastToggles
+      && typeof settings.toastToggles === 'object'
+      && !Array.isArray(settings.toastToggles);
+    const dmTogglesAreObject = !!settings.toastTogglesDMs
+      && typeof settings.toastTogglesDMs === 'object'
+      && !Array.isArray(settings.toastTogglesDMs);
+    const guildHasSetting = guildTogglesAreObject
+      && Object.prototype.hasOwnProperty.call(settings.toastToggles, settingId);
+    const legacyValue = dmTogglesAreObject ? settings.toastTogglesDMs[settingId] : undefined;
+    let changed = false;
+
+    if (!guildHasSetting) {
+      if (!guildTogglesAreObject) settings.toastToggles = {};
+      settings.toastToggles[settingId] = typeof legacyValue === 'boolean' ? legacyValue : false;
+      changed = true;
+    } else if (typeof settings.toastToggles[settingId] !== 'boolean') {
+      // A present Guild value belongs to the current schema, so repair it instead of letting
+      // a stale legacy DM value override that location.
+      settings.toastToggles[settingId] = false;
+      changed = true;
+    }
+
+    if (dmTogglesAreObject && Object.prototype.hasOwnProperty.call(settings.toastTogglesDMs, settingId)) {
+      delete settings.toastTogglesDMs[settingId];
+      changed = true;
+    }
+    return changed;
+  }
   tokenizeRecoverableSettingsJson(text) {
     // BetterDiscord configs are ordinary JSON, but hand edits commonly leave one missing or
     // extra comma/bracket. Tokenizing first lets recovery ignore damaged separators without
@@ -3492,7 +3536,7 @@ module.exports = class MessageLoggerV2 {
         settings: [
           {
             name: 'Disable saving data',
-            note: 'Keeps new logs memory-only and pauses backups. Re-enabling after reload safely merges them with saved history.',
+            note: 'Keeps new logs memory-only and pauses additions/backups. Removing saved records or edits still writes through.',
             id: 'dontSaveData',
             type: 'switch',
             action: 'handleDataSave'
@@ -3596,7 +3640,7 @@ module.exports = class MessageLoggerV2 {
             }
           },
           {
-            name: 'Use BdApi basic notifications instead of custom toasts',
+            name: 'Use BdApi notifications instead of custom toasts',
             note: 'Use BetterDiscord notifications instead of custom toasts. Switching modes clears active and queued alerts.',
             id: 'useNotificationsInstead',
             type: 'switch',
@@ -4878,6 +4922,231 @@ module.exports = class MessageLoggerV2 {
       return { status: 'invalid', filePath, error };
     }
   }
+  getNoSaveEditRemovalIdentity(edit) {
+    if (!edit || typeof edit !== 'object' || Array.isArray(edit)) return null;
+    return JSON.stringify([edit.time ?? null, edit.content ?? null]);
+  }
+  queueNoSavePersistedRemoval(operation) {
+    if (!this.settings?.dontSaveData || this._noSaveMergeInProgress || !operation) return false;
+    const id = String(operation.id ?? '');
+    if (!id) return false;
+    if (operation.type === 'edit' && typeof operation.identity !== 'string') return false;
+    if (operation.type !== 'record' && operation.type !== 'edit') return false;
+    this._pendingNoSavePersistedRemovals ||= [];
+    this._pendingNoSavePersistedRemovals.push({
+      type: operation.type,
+      id,
+      identity: operation.identity,
+      threadRoot: operation.threadRoot === true
+    });
+    // A zero-delay batch coalesces root cascades, Clear Log, and cap pruning. Most callers invoke
+    // saveData after their loop, which flushes the same journal immediately and clears this timer.
+    if (!this._noSavePersistedRemovalTimer) {
+      this._noSavePersistedRemovalTimer = setTimeout(() => {
+        this._noSavePersistedRemovalTimer = 0;
+        this.flushNoSavePersistedRemovals();
+      }, 0);
+    }
+    return true;
+  }
+  applyNoSavePersistedRemovals(data, operations) {
+    data = this.sanitizeDataPayload(
+      this.prepareDataPayloadForNormalization(this.cloneDataValue(data))
+    );
+    const recordRemovals = new Map();
+    const editRemovals = [];
+    for (const operation of operations || []) {
+      const id = String(operation?.id ?? '');
+      if (!id) continue;
+      if (operation.type === 'record') {
+        const current = recordRemovals.get(id) || { id, threadRoot: false };
+        current.threadRoot ||= operation.threadRoot === true;
+        recordRemovals.set(id, current);
+      } else if (operation.type === 'edit' && typeof operation.identity === 'string') {
+        editRemovals.push({ id, identity: operation.identity });
+      }
+    }
+
+    let changed = false;
+    for (const operation of recordRemovals.values()) {
+      const ids = new Set([operation.id]);
+      if (operation.threadRoot) {
+        for (const [messageId, record] of Object.entries(data.messageRecord)) {
+          if (messageId === operation.id || String(record?.message?.channel_id ?? '') === operation.id) {
+            ids.add(messageId);
+          }
+        }
+        for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord', 'nukedMessageRecord']) {
+          for (const messageId of data[key][operation.id] || []) ids.add(messageId);
+        }
+      }
+      let removedArchivedRecord = false;
+      for (const messageId of ids) {
+        if (!Object.prototype.hasOwnProperty.call(data.messageRecord, messageId)) continue;
+        delete data.messageRecord[messageId];
+        removedArchivedRecord = true;
+        changed = true;
+      }
+      if (operation.threadRoot
+        && removedArchivedRecord
+        && /^\d+$/.test(operation.id)
+        && !data.suppressedForumThreadIds.includes(operation.id)) {
+        // This is deletion tombstone metadata, not a newly captured record. It prevents a
+        // deliberately removed restored root from being reconstructed after reload.
+        data.suppressedForumThreadIds.push(operation.id);
+        changed = true;
+      }
+    }
+
+    for (const operation of editRemovals) {
+      if (recordRemovals.has(operation.id)) continue;
+      const record = data.messageRecord[operation.id];
+      if (!record || !Array.isArray(record.edit_history)) continue;
+      const editIndex = record.edit_history.findIndex(edit => this.getNoSaveEditRemovalIdentity(edit) === operation.identity);
+      if (editIndex < 0) continue;
+      record.edit_history.splice(editIndex, 1);
+      changed = true;
+      if (record.edit_history.length) continue;
+      record.edit_history = null;
+      // Removing the final edit from an edit-only archive removes its now-empty record, exactly
+      // like deleteEditedMessageFromRecord. A deletion-backed record keeps its other saved state.
+      if (!record.delete_data) delete data.messageRecord[operation.id];
+    }
+    return { data: changed ? this.sanitizeDataPayload(data) : data, changed };
+  }
+  writeDataPayloadAtomicSync(name, data, options = {}) {
+    const fs = this.nodeModules?.fs;
+    if (typeof fs?.writeFileSync !== 'function' || typeof fs?.renameSync !== 'function') {
+      return { ok: false, cancelled: false, error: new TypeError('Synchronous atomic filesystem writes are unavailable') };
+    }
+    let result = null;
+    this.efficientlySaveData(
+      name,
+      'data',
+      data,
+      (error, cancelled = false) => {
+        result = { ok: !error && !cancelled, error, cancelled };
+      },
+      true,
+      {
+        notifyError: false,
+        shouldCommit: options.shouldCommit
+      }
+    );
+    return result || {
+      ok: false,
+      cancelled: false,
+      error: new Error('Synchronous atomic data write did not complete')
+    };
+  }
+  reportNoSavePersistedRemovalFailure(stage, error) {
+    Logger.error(`Deletion-only archival persistence failed during ${stage}.`, {
+      stage,
+      primaryPath: this.nodeModules?.path?.join(this.pluginDir, `${this.getName()}Data.config.json`),
+      backupPath: this.nodeModules?.path?.join(this.pluginDir, `${this.getName()}DataBackup.config.json`),
+      error
+    });
+    this.notifyUser(
+      'A saved logger removal could not be written to disk while new-data saving is disabled. The in-memory removal is still active; view the console before reloading.',
+      {
+        title: 'Message Logger Removal Error',
+        type: 'error',
+        timeout: 0,
+        replaceKey: 'system:no-save-removal-error'
+      }
+    );
+  }
+  flushNoSavePersistedRemovals() {
+    if (this._noSavePersistedRemovalTimer) clearTimeout(this._noSavePersistedRemovalTimer);
+    this._noSavePersistedRemovalTimer = 0;
+    const operations = this._pendingNoSavePersistedRemovals?.splice?.(0) || [];
+    if (!operations.length) return { ok: true, changed: false };
+    if (this._noSaveMergeInProgress) {
+      // Recovery intentionally serializes the live payload. The removal is already reflected
+      // there, so force another recovery pass instead of racing it with a detached disk write.
+      this._noSaveMergeDirty = true;
+      return { ok: true, changed: false };
+    }
+
+    let primary;
+    let backup;
+    try {
+      primary = this.readDataPayloadFile(this.getName() + 'Data');
+      backup = this.readDataPayloadFile(this.getName() + 'DataBackup');
+    } catch (error) {
+      this._pendingNoSavePersistedRemovals.unshift(...operations);
+      this.reportNoSavePersistedRemovalFailure('reading saved data', error);
+      return { ok: false, changed: false, error };
+    }
+    const incompatible = [primary, backup].find(candidate => candidate.status === 'incompatible');
+    if (incompatible) {
+      this._pendingNoSavePersistedRemovals.unshift(...operations);
+      this.reportNoSavePersistedRemovalFailure('checking saved data schema', incompatible.error);
+      return { ok: false, changed: false, error: incompatible.error };
+    }
+    const candidates = [
+      { label: 'primary', name: this.getName() + 'Data', result: primary },
+      { label: 'backup', name: this.getName() + 'DataBackup', result: backup }
+    ].filter(candidate => candidate.result.status === 'valid');
+    if (!candidates.length) {
+      if (primary.status === 'missing' && backup.status === 'missing') {
+        // Every queued operation targeted session-only state; there is no archive to change.
+        return { ok: true, changed: false };
+      }
+      const error = new Error('No valid saved logger payload was available for deletion-only persistence');
+      error.cause = { primary: primary.error, backup: backup.error };
+      this._pendingNoSavePersistedRemovals.unshift(...operations);
+      this.reportNoSavePersistedRemovalFailure('validating saved data', error);
+      return { ok: false, changed: false, error };
+    }
+
+    const writeEpoch = this._dataWriteEpoch || 0;
+    const outcomes = new Map();
+    try {
+      for (const candidate of candidates) {
+        const applied = this.applyNoSavePersistedRemovals(candidate.result.data, operations);
+        if (!applied.changed) {
+          outcomes.set(candidate.label, { ok: true, changed: false });
+          continue;
+        }
+        const result = this.writeDataPayloadAtomicSync(candidate.name, applied.data, {
+          shouldCommit: () => this.__started !== false && (this._dataWriteEpoch || 0) === writeEpoch
+        });
+        outcomes.set(candidate.label, { ...result, changed: true });
+      }
+    } catch (error) {
+      this._pendingNoSavePersistedRemovals.unshift(...operations);
+      this.reportNoSavePersistedRemovalFailure('applying archival removals', error);
+      return { ok: false, changed: false, error };
+    }
+
+    const authoritativeLabel = primary.status === 'valid' ? 'primary' : 'backup';
+    const authoritative = outcomes.get(authoritativeLabel);
+    if (authoritative?.changed && !authoritative.ok) {
+      this._pendingNoSavePersistedRemovals.unshift(...operations);
+      const error = authoritative.error || new Error(`${authoritativeLabel} deletion-only write was cancelled`);
+      this.reportNoSavePersistedRemovalFailure(`writing the ${authoritativeLabel}`, error);
+      return { ok: false, changed: false, error };
+    }
+    const secondary = authoritativeLabel === 'primary' ? outcomes.get('backup') : null;
+    if (secondary?.changed && !secondary.ok) {
+      Logger.warn('The primary archival removal succeeded, but the existing backup could not be reconciled.', secondary.error);
+      this.notifyUser('The saved record was removed from the main logger data, but the existing backup could not be updated. View the console for details.', {
+        title: 'Message Logger Backup Warning',
+        type: 'warning',
+        timeout: 8000,
+        replaceKey: 'system:no-save-removal-backup-warning'
+      });
+    } else if (primary.status === 'valid' && backup.status === 'invalid' && authoritative?.changed) {
+      Logger.warn('The primary archival removal succeeded, but the existing invalid backup was left untouched.', backup.error);
+    } else if (primary.status !== 'valid' && authoritative?.changed) {
+      Logger.warn(`The ${primary.status} primary was left untouched; the deletion-only update was committed to the valid backup.`, primary.error);
+    }
+    return {
+      ok: true,
+      changed: Array.from(outcomes.values()).some(outcome => outcome.changed && outcome.ok)
+    };
+  }
   loadPersistedDataForNoSaveMerge() {
     const primary = this.readDataPayloadFile(this.getName() + 'Data');
     if (primary.status === 'incompatible') throw primary.error;
@@ -5023,8 +5292,8 @@ module.exports = class MessageLoggerV2 {
     // neutral alert tells the user what will happen to new logger changes until saving returns.
     this.reportSettingState(
       'Message Logger Data Saving',
-      'Data saving disabled; new logger changes will remain in memory and will not be written to disk. Pending primary and backup writes were cancelled.',
-      'Data saving disabled. New logger changes will stay in memory and will not be written to disk.',
+      'Data saving disabled; new logger additions will remain in memory and will not be written to disk. Archival removals still commit deletion-only updates. Pending ordinary primary and backup writes were cancelled.',
+      'Data saving disabled. New additions stay in memory; removing saved records or edits still writes through.',
       'neutral',
       5000,
       'setting:dontSaveData'
@@ -5159,6 +5428,12 @@ module.exports = class MessageLoggerV2 {
     // Transaction order is intentional: load -> merge -> cap -> install -> primary -> backup.
     // The setting stays logically disabled until at least one complete primary write succeeds.
     if (!this._needsNoSaveDataMerge) return true;
+    const removalFlush = this.flushNoSavePersistedRemovals();
+    if (!removalFlush.ok) {
+      this.settings.dontSaveData = true;
+      if (this.__started !== false) this.saveSettings();
+      return false;
+    }
     this.cancelPendingDataWrites();
     const writeEpoch = this._dataWriteEpoch;
     this._noSaveMergeInProgress = true;
@@ -5256,6 +5531,14 @@ module.exports = class MessageLoggerV2 {
       if (hadPendingBackup) {
         this.reportDebugEvent('Pending automatic backup cancelled because data saving was disabled.');
       }
+      return;
+    }
+    const removalFlush = this.flushNoSavePersistedRemovals();
+    if (!removalFlush.ok) {
+      // Never merge a pre-deletion disk snapshot back into the session. The failed journal
+      // remains queued, saving stays disabled, and the routed error explains how to retry.
+      this.settings.dontSaveData = true;
+      this.saveSettings();
       return;
     }
     if (!this._needsNoSaveDataMerge) {
@@ -5358,6 +5641,7 @@ module.exports = class MessageLoggerV2 {
   saveData() {
     if (this.settings.dontSaveData) {
       if (this._noSaveMergeInProgress) this._noSaveMergeDirty = true;
+      else this.flushNoSavePersistedRemovals();
       return;
     }
     if (!this.requestedDataSave) this.requestedDataSave = setTimeout(() => this.handleDataSaving(), 1000);
@@ -7102,8 +7386,14 @@ module.exports = class MessageLoggerV2 {
   deleteEditedMessageFromRecord(id, editNum) {
     const record = this.messageRecord[id];
     if (!record) return;
+    const removedEditIdentity = this.getNoSaveEditRemovalIdentity(record.edit_history?.[editNum]);
     record.edit_history.splice(editNum, 1);
-    if (record.edit_history.length) { return this.saveData(); }
+    if (record.edit_history.length) {
+      if (removedEditIdentity) {
+        this.queueNoSavePersistedRemoval({ type: 'edit', id, identity: removedEditIdentity });
+      }
+      return this.saveData();
+    }
     else { record.edit_history = null; }
     const channelId = record.message.channel_id;
     const channelMessages = this.editedMessageRecord[channelId];
@@ -7111,13 +7401,19 @@ module.exports = class MessageLoggerV2 {
       channelMessages.indexOf(id),
       1
     );
-    if (this.deletedMessageSet.get(channelId)?.has(id)) return this.saveData();
-    if (this.purgedMessageSet.get(channelId)?.has(id)) return this.saveData();
-    if (this.nukedMessageSet.get(channelId)?.has(id)) return this.saveData();
-    if (this.settings?.deleteCachedFilesWithRecords) this.deleteCachedFilesForRecord(record);
-    delete this.messageRecord[id];
-    this.messageRecordIds.delete(id);
-    this.saveData();
+    const keepsDeletionRecord = this.deletedMessageSet.get(channelId)?.has(id)
+      || this.purgedMessageSet.get(channelId)?.has(id)
+      || this.nukedMessageSet.get(channelId)?.has(id);
+    if (keepsDeletionRecord) {
+      if (removedEditIdentity) {
+        this.queueNoSavePersistedRemoval({ type: 'edit', id, identity: removedEditIdentity });
+      }
+      return this.saveData();
+    }
+    // The final edit on an edit-only record removes the complete archive. Route it through the
+    // same primitive as every other record shape so no-save deletion persistence stays central.
+    this.deleteMessageFromRecords(id);
+    return this.saveData();
   }
   jumpToMessage(channelId, messageId, guildId) {
     if (this.menu.open) this.ModalStack.closeModal(this.style.menu);
@@ -9293,7 +9589,10 @@ module.exports = class MessageLoggerV2 {
     this.suppressForumThreadId(threadId);
     this.closeForumThreadLogModal(threadId);
     for (const id of ids) {
-      this.deleteMessageFromRecords(id, { skipForumThreadCascade: true });
+      this.deleteMessageFromRecords(id, {
+        skipForumThreadCascade: true,
+        skipNoSavePersistedRemoval: true
+      });
       this.noTintIds?.delete(id);
       if (this.editModifiers) delete this.editModifiers[id];
     }
@@ -9316,6 +9615,7 @@ module.exports = class MessageLoggerV2 {
     this.sortedNukedMessageIds?.delete(threadId);
     this.forumThreadMetadataCache?.delete(threadId);
     if (this.deletedChatMessagesCount) delete this.deletedChatMessagesCount[threadId];
+    this.queueNoSavePersistedRemoval({ type: 'record', id: threadId, threadRoot: true });
     return ids;
   }
   closeForumThreadLogModal(threadId) {
@@ -10189,6 +10489,9 @@ module.exports = class MessageLoggerV2 {
     }
     delete this.messageRecord[id];
     this.messageRecordIds.delete(id);
+    if (!options.skipNoSavePersistedRemoval) {
+      this.queueNoSavePersistedRemoval({ type: 'record', id });
+    }
     if (!options.skipForumThreadCascade && channelId && channelId !== id) this.refreshForumThreadLogModal(channelId);
   }
   removeForumCardFromDom(threadId) {

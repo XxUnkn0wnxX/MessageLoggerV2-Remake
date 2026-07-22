@@ -45,6 +45,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 - `efficientlySaveData` writes complete JSON to a same-directory temporary file and atomically renames it over the destination. Its commit predicate prevents stale in-flight writes from renaming after saving is disabled.
 - `cleanUpStaleDataTempFiles` removes only old logger-owned temp files.
 - When the plugin starts with `dontSaveData`, disk history is intentionally skipped and the session starts empty. `_needsNoSaveDataMerge` distinguishes this from toggling saving without a reload.
+- Full-record, edit-history, cap, clear-log, and forum/thread removals enter a batched deletion journal while `dontSaveData` is enabled. The journal reads and mutates detached primary/backup payloads and never serializes `_getDataPayload`, so session additions cannot leak into the archive.
 - `loadPersistedDataForNoSaveMerge` reads files directly because BetterDiscord's data API can return a cached payload after direct atomic writes.
 - `mlv2RemakeSchemaVersion` marks this fork's additive canonical payload without replacing the standard four logger maps.
   - Current forks can ignore the marker and enhanced fields; their absence after another fork writes the file triggers normalization on the next load.

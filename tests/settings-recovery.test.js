@@ -20,6 +20,11 @@ const defaults = {
   openServerLogsKeybind: ['Control', 's'],
   toastToggles: {
     sent: false,
+    edited: true,
+    disableToastsForLocal: false
+  },
+  toastTogglesDMs: {
+    sent: false,
     edited: true
   },
   aggresiveMessageCaching: true,
@@ -34,6 +39,7 @@ function temporaryDirectory(t) {
 
 function normalizeRecovered(plugin, settings) {
   plugin.ensureLoggerKeybindSettings(settings, defaults);
+  plugin.migrateDisableToastsForLocalSetting(settings);
   plugin.normalizeSettingsAgainstDefaults(settings, defaults);
   plugin.ensureRequiredLegacySettings(settings);
   return settings;
@@ -103,6 +109,37 @@ test('a valid legacy file initializes missing settings without corruption classi
   assert.deepEqual(settings.forkSpecificSetting, { keep: true });
 });
 
+test('a valid legacy DM local-toast setting migrates without corruption classification', t => {
+  const pluginDir = temporaryDirectory(t);
+  const plugin = createPlugin({ pluginDir });
+  const configPath = path.join(pluginDir, 'MessageLoggerV2.config.json');
+  const original = JSON.stringify({
+    settings: {
+      toastTogglesDMs: {
+        sent: true,
+        edited: false,
+        disableToastsForLocal: true,
+        forkSpecificAlert: 'keep'
+      },
+      flags: 2
+    }
+  });
+  fs.writeFileSync(configPath, original, 'utf8');
+
+  const result = plugin.loadSettingsConfigForStartup(defaults, { fs, path });
+  assert.equal(result.existed, true);
+  assert.equal(result.repaired, false);
+  assert.equal(result.backupPath, null);
+  assert.equal(fs.existsSync(path.join(pluginDir, 'MessageLoggerV2.config.corrupt-backup.json')), false);
+
+  const settings = normalizeRecovered(plugin, result.settings);
+  assert.equal(settings.toastToggles.disableToastsForLocal, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(settings.toastTogglesDMs, 'disableToastsForLocal'), false);
+  assert.equal(settings.toastTogglesDMs.sent, true);
+  assert.equal(settings.toastTogglesDMs.edited, false);
+  assert.equal(settings.toastTogglesDMs.forkSpecificAlert, 'keep');
+});
+
 test('a trailing comma preserves existing settings and restores only missing defaults', () => {
   const plugin = createPlugin();
   const original = `{
@@ -151,7 +188,7 @@ test('missing and extra commas are repaired without changing valid values', () =
   assert.equal(settings.autoBackup, true);
   assert.equal(settings.messageCacheCap, 2468);
   assert.equal(settings.flags, 2);
-  assert.deepEqual(settings.toastToggles, { sent: true, edited: false });
+  assert.deepEqual(settings.toastToggles, { sent: true, edited: false, disableToastsForLocal: false });
   assert.ok(result.issues.some(issue => issue.type === 'missing-comma'));
   assert.ok(result.issues.some(issue => issue.type === 'extra-comma'));
 });
@@ -177,7 +214,7 @@ test('missing and misplaced brackets still salvage later known settings', () => 
   assert.equal(settings.messageCacheCap, 3579);
   assert.equal(settings.savedMessagesCap, 9753);
   assert.equal(settings.flags, 2);
-  assert.deepEqual(settings.toastToggles, { sent: true, edited: false });
+  assert.deepEqual(settings.toastToggles, { sent: true, edited: false, disableToastsForLocal: false });
   assert.ok(result.issues.some(issue => issue.type.includes('close')));
 });
 

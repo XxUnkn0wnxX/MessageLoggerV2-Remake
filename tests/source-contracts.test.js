@@ -6,6 +6,7 @@ const vm = require('node:vm');
 const { createPlugin } = require('./helpers/plugin-harness');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'MessageLoggerV2.plugin.js'), 'utf8');
+const settingsDocs = fs.readFileSync(path.join(__dirname, '..', 'docs', 'settings.md'), 'utf8');
 
 function readDefaultSettings() {
   const match = source.match(/const defaultSettings = (\{[\s\S]*?\n    \});\n    const Flags =/);
@@ -64,14 +65,14 @@ test('all fresh-install settings defaults remain stable', () => {
       sent: false,
       edited: true,
       deleted: true,
-      ghostPings: true
+      ghostPings: true,
+      disableToastsForLocal: false
     },
     toastTogglesDMs: {
       sent: false,
       edited: true,
       deleted: true,
-      ghostPings: true,
-      disableToastsForLocal: false
+      ghostPings: true
     },
     useNotificationsInstead: true,
     blockSpamEdit: false,
@@ -111,7 +112,7 @@ test('all fresh-install settings defaults remain stable', () => {
     autoUpdate: true,
     versionInfo: ''
   });
-  assert.match(source, /loadedSettingsAreUsable[\s\S]*structuredClone\(defaultSettings\)[\s\S]*normalizeSettingsAgainstDefaults\(this\.settings, defaultSettings\)[\s\S]*if \(settingsChanged\) this\.saveSettings\(\);/);
+  assert.match(source, /loadedSettingsAreUsable[\s\S]*structuredClone\(defaultSettings\)[\s\S]*migrateDisableToastsForLocalSetting\(\)[\s\S]*normalizeSettingsAgainstDefaults\(this\.settings, defaultSettings\)[\s\S]*if \(settingsChanged\) this\.saveSettings\(\);/);
 
   const defaults = readDefaultSettings();
   const migrated = {
@@ -131,6 +132,7 @@ test('all fresh-install settings defaults remain stable', () => {
     edited: false,
     deleted: defaults.toastToggles.deleted,
     ghostPings: defaults.toastToggles.ghostPings,
+    disableToastsForLocal: defaults.toastToggles.disableToastsForLocal,
     forkSpecificAlert: true
   });
   assert.deepEqual(migrated.forkSpecificSetting, { enabled: true });
@@ -158,6 +160,65 @@ test('all fresh-install settings defaults remain stable', () => {
   assert.equal(plugin.ensureAutoBackupIntervalSetting(customized), false);
   assert.deepEqual(plugin.ensureLoggerKeybindSettings(customized, defaults), []);
   assert.deepEqual(customized, before);
+});
+
+test('the guild-only local-user toast setting migrates from the legacy DM schema once', () => {
+  const plugin = createPlugin();
+  const cases = [
+    {
+      name: 'missing Guild value uses a valid legacy DM value',
+      settings: {
+        toastToggles: { guildExtension: 'keep' },
+        toastTogglesDMs: { disableToastsForLocal: true, dmExtension: 'keep' }
+      },
+      expected: true
+    },
+    {
+      name: 'an explicit Guild false wins over legacy true',
+      settings: {
+        toastToggles: { disableToastsForLocal: false, guildExtension: 'keep' },
+        toastTogglesDMs: { disableToastsForLocal: true, dmExtension: 'keep' }
+      },
+      expected: false
+    },
+    {
+      name: 'an explicit Guild true wins over legacy false',
+      settings: {
+        toastToggles: { disableToastsForLocal: true, guildExtension: 'keep' },
+        toastTogglesDMs: { disableToastsForLocal: false, dmExtension: 'keep' }
+      },
+      expected: true
+    },
+    {
+      name: 'an invalid present Guild value resets instead of importing legacy state',
+      settings: {
+        toastToggles: { disableToastsForLocal: 'invalid', guildExtension: 'keep' },
+        toastTogglesDMs: { disableToastsForLocal: true, dmExtension: 'keep' }
+      },
+      expected: false
+    },
+    {
+      name: 'missing and invalid legacy values use the safe default',
+      settings: {
+        toastTogglesDMs: { disableToastsForLocal: 'invalid', dmExtension: 'keep' }
+      },
+      expected: false
+    }
+  ];
+
+  for (const migrationCase of cases) {
+    const guildExtension = migrationCase.settings.toastToggles?.guildExtension;
+    assert.equal(plugin.migrateDisableToastsForLocalSetting(migrationCase.settings), true, migrationCase.name);
+    assert.equal(migrationCase.settings.toastToggles.disableToastsForLocal, migrationCase.expected, migrationCase.name);
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(migrationCase.settings.toastTogglesDMs, 'disableToastsForLocal'),
+      false,
+      migrationCase.name
+    );
+    assert.equal(migrationCase.settings.toastToggles.guildExtension, guildExtension, migrationCase.name);
+    assert.equal(migrationCase.settings.toastTogglesDMs.dmExtension, 'keep', migrationCase.name);
+    assert.equal(plugin.migrateDisableToastsForLocalSetting(migrationCase.settings), false, `${migrationCase.name} is idempotent`);
+  }
 });
 
 test('live restored-message settings present the master switch before category controls', () => {
@@ -235,6 +296,57 @@ test('global notification controls form one block before logger access controls'
       'editSpamThreshold'
     ]
   );
+});
+
+test('the BdApi notification setting omits the outdated basic qualifier', () => {
+  assert.match(source, /name: 'Use BdApi notifications instead of custom toasts'/);
+  assert.doesNotMatch(source, /BdApi basic notifications/i);
+});
+
+test('the current changelog covers the polished Help presentation and BdApi wording', () => {
+  assert.match(source, /Filter Help and Logger Help now use clearer nested spacing, visible filter syntax, and consistent On\/Off state labels/);
+  assert.match(source, /accurate BdApi notifications wording without the outdated basic qualifier/);
+  assert.match(source, /guild-only local-user toast option now uses its correct Guild settings location/);
+  assert.match(source, /archival record, edit, clear-log, cap, and thread\/forum removals still write through/);
+});
+
+test('settings documentation retains audited group order and current UI labels', () => {
+  let previousSection = -1;
+  for (const section of [
+    '## 🚫 Ignores and Overrides',
+    '## 🎨 Display Settings',
+    '## 🧰 Misc Settings',
+    '## 🔔 Toast Notifications',
+    '## 🛡️ Anti Nuke',
+    '## 📏 Message Caps',
+    '## 🔧 Advanced',
+    '## 🐞 Debug'
+  ]) {
+    const sectionIndex = settingsDocs.indexOf(section);
+    assert.ok(sectionIndex > previousSection, `${section} is missing or out of order`);
+    previousSection = sectionIndex;
+  }
+
+  for (const label of [
+    'Show oldest edit instead of newest if over the shown edits limit',
+    'Use background instead of text tint for deleted messages',
+    'Show amount of new deleted messages when entering a channel',
+    'Show amount of new edited messages when entering a channel',
+    "Auto backup data (won't fully prevent losing data, just prevent total data loss)",
+    'Add user id to saved media filename',
+    'Max cache file size (MB, 0 = no limit)',
+    'Media cache path (optional)',
+    'Use BdApi notifications instead of custom toasts',
+    'Block spam edit notifications (if enabled)',
+    'Display open logs button next to the search box top right in channels',
+    'Disable toasts for local user (yourself)'
+  ]) {
+    assert.ok(settingsDocs.includes(`| ${label} |`), `${label} is missing from the settings reference`);
+  }
+
+  assert.match(settingsDocs, /Obfuscate CSS classes \| On \|[^\n]*Changes take effect after the plugin reloads/);
+  assert.match(settingsDocs, /Automatic updates \| On \|[^\n]*offers \*\*Update Now\*\*/);
+  assert.match(settingsDocs, /Delete cached files with log records \| Off \|[^\n]*Cached-file deletion still runs while \*\*Disable saving data\*\* is enabled[^\n]*deletion-only write path/);
 });
 
 test('update-note visibility sits directly below automatic updates', () => {
@@ -1068,9 +1180,49 @@ test('no-save recovery remains guarded and ordered before backup persistence', (
   assert.match(source, /View the console log for more details/);
   assert.match(source, /this\.cancelPendingDataWrites\?\.\(\)/);
   assert.match(source, /reportDataSavingResume\(requiresRecoveryMerge\)[\s\S]*this\.reportSettingState\([\s\S]*Message Logger Data Recovery[\s\S]*Message Logger Data Saving/);
-  assert.match(source, /reportDataSavingDisabled\(\)[\s\S]*new logger changes will remain in memory[\s\S]*will not be written to disk[\s\S]*'neutral'/);
+  assert.match(source, /reportDataSavingDisabled\(\)[\s\S]*new logger additions will remain in memory[\s\S]*removing saved records or edits still writes through[\s\S]*'neutral'/);
   const recovery = source.slice(source.indexOf('async mergeNoSaveSessionIntoPersistedData()'), source.indexOf('handleDataSaveSetting(disabled)'));
   assert.ok(recovery.indexOf("this.getName() + 'Data'") < recovery.indexOf("this.getName() + 'DataBackup'"));
+});
+
+test('no-save mode persists removals from disk without serializing session additions', () => {
+  const removalPersistence = source.slice(
+    source.indexOf('getNoSaveEditRemovalIdentity(edit)'),
+    source.indexOf('loadPersistedDataForNoSaveMerge()')
+  );
+  const editRemoval = source.slice(
+    source.indexOf('deleteEditedMessageFromRecord(id, editNum)'),
+    source.indexOf('jumpToMessage(channelId, messageId, guildId)')
+  );
+  const recordRemoval = source.slice(
+    source.indexOf('deleteMessageFromRecords(id, options = {})'),
+    source.indexOf('  removeForumCardFromDom(threadId) {', source.indexOf('deleteMessageFromRecords(id, options = {})'))
+  );
+  const rootRemoval = source.slice(
+    source.indexOf('deleteForumThreadFromRecords(threadId)'),
+    source.indexOf('  closeForumThreadLogModal(threadId) {', source.indexOf('deleteForumThreadFromRecords(threadId)'))
+  );
+  const capRemoval = source.slice(
+    source.indexOf('handleMessagesCap()'),
+    source.indexOf('onDispatchEvent(args, callDefault)')
+  );
+  const clearLogStart = source.indexOf('const onClearLog = e =>');
+  const clearLogConfirmation = source.indexOf('this.createModal(', clearLogStart);
+  const clearLogRemoval = source.slice(
+    clearLogStart,
+    source.indexOf('this.createModal(', clearLogConfirmation + 1)
+  );
+
+  assert.match(removalPersistence, /readDataPayloadFile\(this\.getName\(\) \+ 'Data'\)/);
+  assert.match(removalPersistence, /readDataPayloadFile\(this\.getName\(\) \+ 'DataBackup'\)/);
+  assert.match(removalPersistence, /writeDataPayloadAtomicSync/);
+  assert.doesNotMatch(removalPersistence, /this\._getDataPayload\(\)|mergeDataPayloads\(/);
+  assert.match(editRemoval, /queueNoSavePersistedRemoval\(\{ type: 'edit'/);
+  assert.match(recordRemoval, /queueNoSavePersistedRemoval\(\{ type: 'record'/);
+  assert.match(rootRemoval, /threadRoot: true/);
+  assert.match(capRemoval, /this\.deleteMessageFromRecords\(map\[i\]\)/);
+  assert.match(clearLogRemoval, /this\.deleteMessageFromRecords\(id\)/);
+  assert.match(settingsDocs, /Disable saving data \| Off \|[^\n]*archival removals[^\n]*deletion-only/i);
 });
 
 test('schema updates use canonical whole-file output and routed notifications', () => {

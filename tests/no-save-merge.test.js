@@ -71,6 +71,41 @@ function createNormalizationPlugin(overrides = {}) {
   });
 }
 
+function createNoSaveDeletionPlugin(pluginDir, runtimeData, overrides = {}) {
+  const createSetMap = map => new Map(
+    Object.entries(map || {}).map(([channelId, ids]) => [channelId, new Set(ids)])
+  );
+  return createMergePlugin({
+    settings: {
+      savedMessagesCap: 1000,
+      autoBackup: false,
+      dontSaveData: true,
+      useNotificationsInstead: true,
+      deleteCachedFilesWithRecords: false
+    },
+    pluginDir,
+    nodeModules: { fs, path },
+    ...runtimeData,
+    messageRecordIds: new Set(Object.keys(runtimeData.messageRecord || {})),
+    deletedMessageSet: createSetMap(runtimeData.deletedMessageRecord),
+    editedMessageSet: createSetMap(runtimeData.editedMessageRecord),
+    purgedMessageSet: createSetMap(runtimeData.purgedMessageRecord),
+    nukedMessageSet: createSetMap(runtimeData.nukedMessageRecord),
+    suppressedForumThreadIds: new Set(runtimeData.suppressedForumThreadIds || []),
+    cachedMessageRecord: [],
+    cachedMessageIds: new Set(),
+    cachedMessagesMap: new Map(),
+    sortedDeletedMessageIds: new Map(),
+    sortedPurgedMessageIds: new Map(),
+    sortedNukedMessageIds: new Map(),
+    forumThreadMetadataCache: new Map(),
+    deletedChatMessagesCount: {},
+    normalizePersistedDataPayload(data) { return this.sanitizeDataPayload(data); },
+    refreshForumThreadLogModal() {},
+    ...overrides
+  });
+}
+
 test.beforeEach(resetHarness);
 
 test('disk and no-save session payloads merge without duplicate indexes', () => {
@@ -614,6 +649,152 @@ test('forum root cap removal cascades across deleted, edited, purged, and nuked 
   assert.deepEqual(capped.nukedMessageRecord, {});
 });
 
+test('no-save full-record deletion updates primary and backup without leaking session records', t => {
+  const pluginDir = temporaryDirectory(t);
+  const primaryPath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
+  const backupPath = path.join(pluginDir, 'MessageLoggerV2DataBackup.config.json');
+  const archived = payload({
+    '100': record('100', 'channel', { delete_data: { time: 100 } }),
+    '300': record('300', 'channel', { delete_data: { time: 300 } })
+  }, { deleted: { channel: ['100', '300'] } });
+  fs.writeFileSync(primaryPath, JSON.stringify({ data: archived }));
+  fs.writeFileSync(backupPath, JSON.stringify({ data: archived }));
+  const runtime = payload({
+    ...structuredClone(archived.messageRecord),
+    '200': record('200', 'channel', { delete_data: { time: 200 } })
+  }, { deleted: { channel: ['100', '200', '300'] } });
+  const plugin = createNoSaveDeletionPlugin(pluginDir, runtime);
+
+  plugin.deleteMessageFromRecords('100');
+  plugin.saveData();
+
+  for (const filePath of [primaryPath, backupPath]) {
+    const saved = JSON.parse(fs.readFileSync(filePath, 'utf8')).data;
+    assert.deepEqual(Object.keys(saved.messageRecord), ['300']);
+    assert.deepEqual(saved.deletedMessageRecord, { channel: ['300'] });
+    assert.equal(saved.messageRecord['200'], undefined, 'session-only additions never enter an archival deletion write');
+  }
+});
+
+test('deleting a session-only record under no-save leaves persisted bytes untouched', t => {
+  const pluginDir = temporaryDirectory(t);
+  const primaryPath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
+  const original = JSON.stringify({
+    data: payload({ '100': record('100', 'channel', { delete_data: { time: 100 } }) }, { deleted: { channel: ['100'] } })
+  });
+  fs.writeFileSync(primaryPath, original);
+  const runtime = payload({
+    '200': record('200', 'channel', { delete_data: { time: 200 } })
+  }, { deleted: { channel: ['200'] } });
+  const plugin = createNoSaveDeletionPlugin(pluginDir, runtime);
+
+  plugin.deleteMessageFromRecords('200');
+  plugin.saveData();
+
+  assert.equal(fs.readFileSync(primaryPath, 'utf8'), original);
+});
+
+test('no-save forum-root deletion cascades through every archived category and persists suppression', t => {
+  const pluginDir = temporaryDirectory(t);
+  const primaryPath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
+  const archived = payload({
+    '100': record('100', '100', { delete_data: { time: 100, forum_thread_delete: true } }),
+    '101': record('101', '100', { delete_data: { time: 101 } }),
+    '102': record('102', '100', { edit_history: [{ time: 102, content: 'edited child' }] }),
+    '103': record('103', '100', { delete_data: { time: 103 } }),
+    '104': record('104', '100', { delete_data: { time: 104, anti_nuke: true } }),
+    '300': record('300', 'channel', { delete_data: { time: 300 } })
+  }, {
+    deleted: { '100': ['100', '101'], channel: ['300'] },
+    edited: { '100': ['102'] },
+    purged: { '100': ['103'] },
+    nuked: { '100': ['104'] }
+  });
+  fs.writeFileSync(primaryPath, JSON.stringify({ data: archived }));
+  const runtime = structuredClone(archived);
+  runtime.messageRecord['999'] = record('999', 'channel', { delete_data: { time: 999 } });
+  runtime.deletedMessageRecord.channel.push('999');
+  const plugin = createNoSaveDeletionPlugin(pluginDir, runtime);
+
+  plugin.deleteMessageFromRecords('100');
+  plugin.saveData();
+
+  const saved = JSON.parse(fs.readFileSync(primaryPath, 'utf8')).data;
+  assert.deepEqual(Object.keys(saved.messageRecord), ['300']);
+  assert.deepEqual(saved.deletedMessageRecord, { channel: ['300'] });
+  assert.deepEqual(saved.editedMessageRecord, {});
+  assert.deepEqual(saved.purgedMessageRecord, {});
+  assert.deepEqual(saved.nukedMessageRecord, {});
+  assert.deepEqual(saved.suppressedForumThreadIds, ['100']);
+  assert.equal(saved.messageRecord['999'], undefined);
+});
+
+test('no-save edit deletion removes only the matching archived edit', t => {
+  const pluginDir = temporaryDirectory(t);
+  const primaryPath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
+  const first = { time: 10, content: 'first' };
+  const second = { time: 20, content: 'second' };
+  const sessionOnly = { time: 30, content: 'session only' };
+  const archived = payload({
+    '100': record('100', 'channel', {
+      delete_data: { time: 100 },
+      edit_history: [first, second]
+    })
+  }, { deleted: { channel: ['100'] } });
+  fs.writeFileSync(primaryPath, JSON.stringify({ data: archived }));
+  const runtime = structuredClone(archived);
+  runtime.messageRecord['100'].edit_history.push(sessionOnly);
+  const plugin = createNoSaveDeletionPlugin(pluginDir, runtime);
+
+  plugin.deleteEditedMessageFromRecord('100', 0);
+  let saved = JSON.parse(fs.readFileSync(primaryPath, 'utf8')).data;
+  assert.deepEqual(saved.messageRecord['100'].edit_history, [second]);
+
+  plugin.deleteEditedMessageFromRecord('100', 1);
+  saved = JSON.parse(fs.readFileSync(primaryPath, 'utf8')).data;
+  assert.deepEqual(saved.messageRecord['100'].edit_history, [second]);
+});
+
+test('deleting the final archived edit under no-save removes its edit-only record and index', t => {
+  const pluginDir = temporaryDirectory(t);
+  const primaryPath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
+  const archived = payload({
+    '100': record('100', 'channel', { edit_history: [{ time: 10, content: 'only edit' }] })
+  }, { edited: { channel: ['100'] } });
+  fs.writeFileSync(primaryPath, JSON.stringify({ data: archived }));
+  const plugin = createNoSaveDeletionPlugin(pluginDir, structuredClone(archived));
+
+  plugin.deleteEditedMessageFromRecord('100', 0);
+
+  const saved = JSON.parse(fs.readFileSync(primaryPath, 'utf8')).data;
+  assert.deepEqual(saved.messageRecord, {});
+  assert.deepEqual(saved.editedMessageRecord, {});
+});
+
+test('a failed no-save deletion-only rename preserves disk and keeps the journal pending', t => {
+  const pluginDir = temporaryDirectory(t);
+  const primaryPath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
+  const archived = payload({
+    '100': record('100', 'channel', { delete_data: { time: 100 } })
+  }, { deleted: { channel: ['100'] } });
+  const original = JSON.stringify({ data: archived });
+  fs.writeFileSync(primaryPath, original);
+  const failingFs = {
+    ...fs,
+    renameSync() { throw new Error('simulated deletion-only rename failure'); }
+  };
+  const plugin = createNoSaveDeletionPlugin(pluginDir, structuredClone(archived), {
+    nodeModules: { fs: failingFs, path }
+  });
+
+  plugin.deleteMessageFromRecords('100');
+  plugin.saveData();
+
+  assert.equal(fs.readFileSync(primaryPath, 'utf8'), original);
+  assert.equal(plugin._pendingNoSavePersistedRemovals.length, 1);
+  assert.deepEqual(fs.readdirSync(pluginDir).filter(name => name.includes('.tmp-')), []);
+});
+
 test('re-enabling after a no-save startup atomically preserves disk and session history', async t => {
   const pluginDir = temporaryDirectory(t);
   const filePath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
@@ -1090,9 +1271,9 @@ test('no-reload disable and re-enable keeps the existing save behavior', () => {
 
   plugin.handleDataSaveSetting(true);
   assert.ok(loggerEvents.some(event => event[0] === 'log'
-    && String(event[1]).includes('new logger changes will remain in memory')));
+    && String(event[1]).includes('new logger additions will remain in memory')));
   assert.equal(notifications[0][0], 'Message Logger Data Saving');
-  assert.match(notifications[0][1], /will stay in memory.*will not be written to disk/i);
+  assert.match(notifications[0][1], /new additions stay in memory.*removing saved records or edits still writes through/i);
   assert.equal(notifications[0][2], 'neutral');
 
   plugin.handleDataSaveSetting(false);
