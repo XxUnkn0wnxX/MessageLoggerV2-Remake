@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.7
+ * @version 2.8.2.8
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -322,6 +322,7 @@ module.exports = class MessageLoggerV2 {
   stop() {
     this._startupGeneration = (this._startupGeneration || 0) + 1;
     this._startupPending = false;
+    this._settingsDependencyListeners?.clear?.();
     if (!this.__started) return;
     this.__started = false;
     try {
@@ -442,35 +443,27 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Notification hardening',
+        title: 'Live display controls',
         type: 'fixed',
         items: [
-          'Delete, purge, thread, forum, and sent-message alerts now reject repeated IDs across BetterDiscord notifications and custom toasts.',
-          'Edit-spam blocking now uses a per-author threshold and cooldown without suppressing saved edits or Ghost Ping alerts.'
+          'Turning off saved-message or edit display now prevents future live mounts across chats, forums, and threads without stopping logging.',
+          'Mount-dependent Jump actions stay hidden while View in Log remains available.'
         ]
       },
       {
-        title: 'Clearer display settings',
+        title: 'Linked settings controls',
         type: 'improved',
         items: [
-          'The restored-message master switch now describes live mounting and unmounting instead of requiring a reload.',
-          'Deleted and Purged display controls are grouped beneath it with clearer labels and dependency notes.'
+          'Related switches and fields now grey out when their master is off while keeping their saved values.',
+          'Links cover saved-message display, edit history, backups, media caching, edit-spam controls, and Anti-Nuke.'
         ]
       },
       {
-        title: 'Minor notification updates',
+        title: 'Settings reliability and layout',
         type: 'improved',
         items: [
-          'Edit Spam Blocked warnings now keep expiring while hovered and dismiss from a left- or right-click anywhere on the card.',
-          'The edit-spam threshold is configurable per author, defaults to 10, and resets invalid values to 10.'
-        ]
-      },
-      {
-        title: 'Date formatting and deletion tooltips',
-        type: 'improved',
-        items: [
-          'A validated slash-based date field now supports padded or unpadded day and month tokens plus two- or four-digit years.',
-          'Logger timestamps use clearer dash separators, and live deleted content exposes its deletion time without replacing edit or sent-time tooltips.'
+          'Accepted settings save immediately, including deleted-message colors with an optional # in either letter case.',
+          'Related media, notification, logger-access, and update controls are grouped together.'
         ]
       }
     ];
@@ -1989,6 +1982,49 @@ module.exports = class MessageLoggerV2 {
       }
     }
   }
+  isSettingDependencyDisabled(config = {}) {
+    let disabled = typeof config.disabled === 'boolean' ? config.disabled : false;
+    if (config.enableWith) disabled = !this.settings?.[config.enableWith];
+    if (config.disableWith) disabled = !!this.settings?.[config.disableWith];
+    return disabled;
+  }
+  createLinkedSettingNote(onText, offText) {
+    const stateLabel = (label, color) => React.createElement(
+      'strong',
+      { style: { color } },
+      label
+    );
+    return React.createElement(
+      'span',
+      null,
+      stateLabel('On', 'var(--status-positive)'),
+      ': ',
+      onText,
+      ' ',
+      stateLabel('Off', 'var(--status-danger)'),
+      ': ',
+      offText
+    );
+  }
+  subscribeSettingDependency(settingId, listener) {
+    if (!settingId || typeof listener !== 'function') return () => {};
+    if (!this._settingsDependencyListeners) this._settingsDependencyListeners = new Map();
+    let listeners = this._settingsDependencyListeners.get(settingId);
+    if (!listeners) {
+      listeners = new Set();
+      this._settingsDependencyListeners.set(settingId, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+      if (!listeners.size) this._settingsDependencyListeners?.delete(settingId);
+    };
+  }
+  notifySettingDependencyChange(settingId) {
+    const listeners = this._settingsDependencyListeners?.get(settingId);
+    if (!listeners) return;
+    for (const listener of [...listeners]) listener();
+  }
   createSetting(data) {
     const current = { ...data };
     if (current.type === "textbox") current.type = "text";
@@ -1996,7 +2032,14 @@ module.exports = class MessageLoggerV2 {
       current.onChange = value => {
         this.settings[current.id] = value;
         if (current.callback) current.callback(value);
+        this.notifySettingDependencyChange(current.id);
         this.saveSettings();
+      };
+    } else {
+      const onChange = current.onChange;
+      current.onChange = value => {
+        onChange(value);
+        this.notifySettingDependencyChange(current.id);
       };
     }
     if (current.value === undefined) current.value = this.settings[current.id];
@@ -2950,8 +2993,18 @@ module.exports = class MessageLoggerV2 {
     const plugin = this;
     function InlineValidatedNumberInput() {
       const [draft, setDraft] = React.useState(String(plugin.settings[config.id] ?? ''));
+      const [, setDependencyRevision] = React.useState(0);
+      React.useEffect(() => {
+        const dependencyIds = [...new Set([config.enableWith, config.disableWith].filter(Boolean))];
+        const refresh = () => setDependencyRevision(revision => revision + 1);
+        const unsubscribers = dependencyIds.map(id => plugin.subscribeSettingDependency(id, refresh));
+        return () => unsubscribers.forEach(unsubscribe => unsubscribe());
+      }, []);
+      const disabled = plugin.isSettingDependencyDisabled(config);
       const validation = plugin.validateNumericSettingValue(draft, config);
+      const showValidationError = !disabled && !validation.valid;
       const onChange = event => {
+        if (disabled) return;
         const value = event.currentTarget.value;
         setDraft(value);
         const nextValidation = plugin.validateNumericSettingValue(value, config);
@@ -2975,15 +3028,16 @@ module.exports = class MessageLoggerV2 {
           type: 'text',
           inputMode: 'numeric',
           value: draft,
+          disabled,
           onChange,
-          'aria-invalid': !validation.valid,
-          'aria-describedby': validation.valid ? undefined : `${config.id}-validation-error`,
-          style: validation.valid ? undefined : {
+          'aria-invalid': showValidationError,
+          'aria-describedby': showValidationError ? `${config.id}-validation-error` : undefined,
+          style: showValidationError ? {
             borderColor: 'var(--status-danger)',
             boxShadow: '0 0 0 1px var(--status-danger)'
-          }
+          } : undefined
         }),
-        validation.valid ? null : React.createElement(
+        showValidationError ? React.createElement(
           'div',
           {
             id: `${config.id}-validation-error`,
@@ -2991,7 +3045,7 @@ module.exports = class MessageLoggerV2 {
             style: { color: 'var(--status-danger)', fontSize: '12px', marginTop: '4px' }
           },
           validation.message
-        )
+        ) : null
       );
     }
     return React.createElement(InlineValidatedNumberInput);
@@ -3291,27 +3345,9 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Display saved messages in chat',
-            note: React.createElement(
-              'span',
-              null,
-              'Master switch for live mounting enabled ',
-              React.createElement(
-                'span',
-                { style: { color: 'var(--text-warning, var(--status-warning))' } },
-                'Deleted'
-              ),
-              ' and ',
-              React.createElement(
-                'span',
-                { style: { color: 'var(--text-warning, var(--status-warning))' } },
-                'Purged'
-              ),
-              ' records in chat, forum, and thread views. Turning it off hides mounted records without deleting saved logs. ',
-              React.createElement(
-                'span',
-                { style: { color: 'var(--text-warning, var(--status-warning))' } },
-                'Jump actions are unavailable for records excluded by these live-display switches.'
-              )
+            note: this.createLinkedSettingNote(
+              'Mounts enabled Deleted and Purged records in chats, forums, and threads.',
+              'Hides them and disables linked controls and Jump; logs and child values stay saved.'
             ),
             id: 'restoreDeletedMessages',
             type: 'switch',
@@ -3331,6 +3367,7 @@ module.exports = class MessageLoggerV2 {
               '.'
             ),
             id: 'showDeletedMessages',
+            enableWith: 'restoreDeletedMessages',
             type: 'switch',
             action: 'refreshCache'
           },
@@ -3342,15 +3379,15 @@ module.exports = class MessageLoggerV2 {
               'Display saved messages in chat must be enabled first.'
             ),
             id: 'showPurgedMessages',
+            enableWith: 'restoreDeletedMessages',
             type: 'switch',
             action: 'refreshCache'
           },
           {
             name: 'Display edited messages in chat',
-            note: React.createElement(
-              'span',
-              { style: { color: 'var(--text-warning, var(--status-warning))' } },
-              'Inline edit history and its Jump actions are unavailable while this is off; edits are still logged.'
+            note: this.createLinkedSettingNote(
+              'Shows inline edit history and enables its linked controls.',
+              'Hides history and Jump; edits and child values stay saved.'
             ),
             id: 'showEditedMessages',
             type: 'switch',
@@ -3359,6 +3396,7 @@ module.exports = class MessageLoggerV2 {
           {
             name: 'Max number of shown edits',
             id: 'maxShownEdits',
+            enableWith: 'showEditedMessages',
             type: 'textbox',
             validator: 'number',
             min: 0,
@@ -3367,6 +3405,7 @@ module.exports = class MessageLoggerV2 {
           {
             name: 'Show oldest edit instead of newest if over the shown edits limit',
             id: 'hideNewerEditsFirst',
+            enableWith: 'showEditedMessages',
             type: 'switch',
             action: 'forceUpdateContent'
           },
@@ -3374,6 +3413,7 @@ module.exports = class MessageLoggerV2 {
             name: 'Use background instead of text tint for deleted messages',
             note: 'Uses the deleted-message color as a background.',
             id: 'useAlternativeDeletedStyle',
+            enableWith: 'restoreDeletedMessages',
             type: 'switch',
             action: 'forceUpdateMessage'
           },
@@ -3429,7 +3469,10 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: "Auto backup data (won't fully prevent losing data, just prevent total data loss)",
-            note: 'Keep a fallback copy of saved logger data.',
+            note: this.createLinkedSettingNote(
+              'Enables fallback backups and the interval field.',
+              'Disables both; the interval stays saved.'
+            ),
             id: 'autoBackup',
             type: 'switch',
             action: 'handleBackup'
@@ -3438,6 +3481,7 @@ module.exports = class MessageLoggerV2 {
             name: 'Auto backup interval (seconds)',
             note: 'Backup delay in seconds (10–86,400). Blank resets to 20; 300 is 5 minutes.',
             id: 'autoBackupIntervalSeconds',
+            enableWith: 'autoBackup',
             type: 'textbox',
             validator: 'number',
             emptyValue: DEFAULT_AUTO_BACKUP_INTERVAL_SECONDS,
@@ -3448,16 +3492,25 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Cache media locally',
-            note: 'Cache attachments, embed images, and stickers.',
+            note: this.createLinkedSettingNote(
+              'Caches media and enables its three linked controls.',
+              'Disables them; child values stay saved.'
+            ),
             id: 'cacheAllImages',
             type: 'switch',
             action: 'reportMediaCaching'
           },
-          { name: "Add user id to saved media filename", id: 'addUserIdToSavedMediaFilename', type: 'switch' },
+          {
+            name: "Add user id to saved media filename",
+            id: 'addUserIdToSavedMediaFilename',
+            enableWith: 'cacheAllImages',
+            type: 'switch'
+          },
           {
             name: "Cache all attachment types",
             note: 'Also cache videos, audio, and other files.',
             id: 'newSaveAllFileTypes',
+            enableWith: 'cacheAllImages',
             type: 'switch',
             customValue: true
           },
@@ -3465,6 +3518,7 @@ module.exports = class MessageLoggerV2 {
             name: 'Max cache file size (MB, 0 = no limit)',
             note: 'Skip larger attachments. Blank or 0 disables the limit.',
             id: 'maxCacheFileSize',
+            enableWith: 'cacheAllImages',
             type: 'textbox',
             validator: 'number',
             emptyValue: 0,
@@ -3526,6 +3580,10 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Block spam edit notifications (if enabled)',
+            note: this.createLinkedSettingNote(
+              'Enables edit-alert rate limiting and the threshold field.',
+              'Disables both; the threshold stays saved.'
+            ),
             id: 'blockSpamEdit',
             type: 'switch',
             action: 'toggleEditSpamState'
@@ -3534,6 +3592,7 @@ module.exports = class MessageLoggerV2 {
             name: 'Edit spam threshold',
             note: 'Eligible edits within 60 seconds before a 60-second notification pause. Invalid input stays red while the saved value resets to 10.',
             id: 'editSpamThreshold',
+            enableWith: 'blockSpamEdit',
             type: 'textbox',
             validator: 'number',
             min: 1,
@@ -3622,7 +3681,10 @@ module.exports = class MessageLoggerV2 {
         settings: [
           {
             name: 'Enable Anti Nuke',
-            note: 'Save a bounded Nuked snapshot when a forum or text channel is deleted. Disabling hides the Nuked tab but keeps existing records.',
+            note: this.createLinkedSettingNote(
+              'Captures Nuked snapshots and enables its toast and caps.',
+              'Stops captures and hides the tab; records and child values stay saved.'
+            ),
             id: 'antiNukeEnabled',
             type: 'switch',
             action: 'reportAntiNuke'
@@ -3631,6 +3693,7 @@ module.exports = class MessageLoggerV2 {
             name: 'Show nuke detection toasts',
             note: 'With Anti Nuke enabled, alert only when records from a deleted channel were captured. Ignores normal logging/alert scope.',
             id: 'antiNukeToasts',
+            enableWith: 'antiNukeEnabled',
             type: 'switch'
           },
           {
@@ -3641,6 +3704,7 @@ module.exports = class MessageLoggerV2 {
               'Roots captured per deleted channel. Blank or 0 is unlimited and may freeze Discord.'
             ),
             id: 'antiNukeThreadCap',
+            enableWith: 'antiNukeEnabled',
             type: 'textbox',
             validator: 'number',
             min: 0,
@@ -3654,6 +3718,7 @@ module.exports = class MessageLoggerV2 {
               'Shared cap for replies and ordinary messages; roots are excluded. Blank or 0 is unlimited and may freeze Discord.'
             ),
             id: 'antiNukeMessageCap',
+            enableWith: 'antiNukeEnabled',
             type: 'textbox',
             validator: 'number',
             min: 0,
@@ -3667,6 +3732,7 @@ module.exports = class MessageLoggerV2 {
               'Shared newest-first attachment cap. Blank or 0 is unlimited and may use substantial disk space.'
             ),
             id: 'antiNukeAttachmentCap',
+            enableWith: 'antiNukeEnabled',
             type: 'textbox',
             validator: 'number',
             min: 0,

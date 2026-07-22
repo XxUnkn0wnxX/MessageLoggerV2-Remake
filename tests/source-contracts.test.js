@@ -18,10 +18,11 @@ function readDefaultSettings() {
 }
 
 test('plugin metadata and updater remain pointed at the maintained main branch', () => {
-  assert.match(source, /@version 2\.8\.2\.7/);
+  assert.match(source, /@version 2\.8\.2\.8/);
   assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
-  assert.match(source, /title: 'Notification hardening'[\s\S]*title: 'Minor notification updates'[\s\S]*title: 'Date formatting and deletion tooltips'/);
+  assert.match(source, /title: 'Live display controls'[\s\S]*title: 'Linked settings controls'[\s\S]*title: 'Settings reliability and layout'/);
+  assert.doesNotMatch(source, /title: 'Notification hardening'|title: 'Date formatting and deletion tooltips'/);
 });
 
 test('all fresh-install settings defaults remain stable', () => {
@@ -191,10 +192,10 @@ test('live restored-message settings present the master switch before category c
     Array.from(displaySettings.slice(deletedStyleIndex, deletedCountIndex).matchAll(/id: '([^']+)'/g), match => match[1]),
     ['useAlternativeDeletedStyle', 'deletedMessageColor']
   );
-  assert.match(displaySettings, /Display saved messages in chat'[\s\S]*'Master switch for live mounting enabled '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Deleted'[\s\S]*' and '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Purged'[\s\S]*' records in chat, forum, and thread views\.[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Jump actions are unavailable for records excluded by these live-display switches\.[\s\S]*id: 'restoreDeletedMessages'/);
+  assert.match(displaySettings, /Display saved messages in chat'[\s\S]*createLinkedSettingNote\([\s\S]*Mounts enabled Deleted and Purged records in chats, forums, and threads\.[\s\S]*Hides them and disables linked controls and Jump; logs and child values stay saved\.[\s\S]*id: 'restoreDeletedMessages'/);
   assert.match(displaySettings, /name: 'Include Deleted messages'[\s\S]*'Live mounts messages captured from individual deletions when '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Display saved messages in chat is enabled'[\s\S]*'\.'[\s\S]*id: 'showDeletedMessages'/);
   assert.match(displaySettings, /name: 'Include Purged messages'[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Display saved messages in chat must be enabled first\.[\s\S]*id: 'showPurgedMessages'/);
-  assert.match(displaySettings, /name: 'Display edited messages in chat'[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Inline edit history and its Jump actions are unavailable while this is off; edits are still logged\.[\s\S]*id: 'showEditedMessages'/);
+  assert.match(displaySettings, /name: 'Display edited messages in chat'[\s\S]*createLinkedSettingNote\([\s\S]*Shows inline edit history and enables its linked controls\.[\s\S]*Hides history and Jump; edits and child values stay saved\.[\s\S]*id: 'showEditedMessages'/);
 });
 
 test('media-cache controls sit together below their master switch', () => {
@@ -250,6 +251,77 @@ test('update-note visibility sits directly below automatic updates', () => {
     Array.from(advancedSettings.slice(automaticUpdatesIndex, contextMenuIndex).matchAll(/id: '([^']+)'/g), match => match[1]),
     ['autoUpdate', 'displayUpdateNotes']
   );
+});
+
+test('settings dependencies match the approved master controls', () => {
+  const settingsConfig = source.slice(
+    source.indexOf('const settingsConfig = ['),
+    source.indexOf('const actions = {', source.indexOf('const settingsConfig = ['))
+  );
+  const links = Array.from(
+    settingsConfig.matchAll(/id: '([^']+)',\n\s+enableWith: '([^']+)'/g),
+    match => [match[1], match[2]]
+  );
+
+  assert.deepEqual(links, [
+    ['showDeletedMessages', 'restoreDeletedMessages'],
+    ['showPurgedMessages', 'restoreDeletedMessages'],
+    ['maxShownEdits', 'showEditedMessages'],
+    ['hideNewerEditsFirst', 'showEditedMessages'],
+    ['useAlternativeDeletedStyle', 'restoreDeletedMessages'],
+    ['autoBackupIntervalSeconds', 'autoBackup'],
+    ['addUserIdToSavedMediaFilename', 'cacheAllImages'],
+    ['newSaveAllFileTypes', 'cacheAllImages'],
+    ['maxCacheFileSize', 'cacheAllImages'],
+    ['editSpamThreshold', 'blockSpamEdit'],
+    ['antiNukeToasts', 'antiNukeEnabled'],
+    ['antiNukeThreadCap', 'antiNukeEnabled'],
+    ['antiNukeMessageCap', 'antiNukeEnabled'],
+    ['antiNukeAttachmentCap', 'antiNukeEnabled']
+  ]);
+  assert.doesNotMatch(settingsConfig, /id: 'ignoreLocalEdits',[\s\S]{0,80}(?:enableWith|disableWith):/);
+  assert.doesNotMatch(settingsConfig, /id: 'newCacheAllImagesPath',[\s\S]{0,80}(?:enableWith|disableWith):/);
+  assert.doesNotMatch(settingsConfig, /id: 'deletedMessageColor',[\s\S]{0,80}(?:enableWith|disableWith):/);
+});
+
+test('linked master notes use bold semantic On and Off labels', () => {
+  const plugin = createPlugin();
+  const note = plugin.createLinkedSettingNote('Enables linked controls.', 'Disables linked controls.');
+  const children = note.props.children;
+  const stateLabels = children.filter(child => child?.type === 'strong');
+
+  assert.equal(note.type, 'span');
+  assert.deepEqual(stateLabels.map(label => label.props.children[0]), ['On', 'Off']);
+  assert.deepEqual(stateLabels.map(label => label.props.style.color), [
+    'var(--status-positive)',
+    'var(--status-danger)'
+  ]);
+  assert.equal(
+    children.map(child => typeof child === 'string' ? child : child.props.children.join('')).join(''),
+    'On: Enables linked controls. Off: Disables linked controls.'
+  );
+
+  const settingsConfig = source.slice(
+    source.indexOf('const settingsConfig = ['),
+    source.indexOf('const actions = {', source.indexOf('const settingsConfig = ['))
+  );
+  assert.equal((settingsConfig.match(/note: this\.createLinkedSettingNote\(/g) || []).length, 6);
+  for (const masterId of [
+    'restoreDeletedMessages',
+    'showEditedMessages',
+    'autoBackup',
+    'cacheAllImages',
+    'blockSpamEdit',
+    'antiNukeEnabled'
+  ]) {
+    const idIndex = settingsConfig.indexOf(`id: '${masterId}'`);
+    assert.notEqual(idIndex, -1, `${masterId} setting was not found`);
+    assert.match(
+      settingsConfig.slice(Math.max(0, idIndex - 700), idIndex),
+      /note: this\.createLinkedSettingNote\(/,
+      `${masterId} must use the linked master note helper`
+    );
+  }
 });
 
 test('date order applies to optional timestamps and forced logger dates', () => {

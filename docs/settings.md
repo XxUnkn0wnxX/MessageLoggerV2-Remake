@@ -2,6 +2,21 @@
 
 This page documents the controls shown in **BetterDiscord Settings > Plugins > MessageLoggerV2 Settings**. Defaults refer to a fresh installation; older installations retain saved values when new settings are added.
 
+## 🔗 Linked Controls
+
+On current BetterDiscord builds, dependent controls are greyed out while their master is off. Their saved values are retained and become active again when the master is re-enabled; the master does not flip or reset them. Older BetterDiscord builds that do not understand dependency metadata may leave standard child controls usable, but the plugin and saved values continue to work; the plugin-provided **Auto backup interval** and **Edit spam threshold** fields still follow their master.
+
+| Master switch | Controls unavailable while Off |
+| --- | --- |
+| Display saved messages in chat | Include Deleted messages; Include Purged messages; Use background instead of text tint |
+| Display edited messages in chat | Max number of shown edits; Show oldest edit instead of newest |
+| Auto backup data | Auto backup interval |
+| Cache media locally | Add user ID to filename; Cache all attachment types; Max cache file size |
+| Block spam edit notifications | Edit spam threshold |
+| Enable Anti Nuke | Nuke-detection toasts and all three Anti-Nuke caps |
+
+The deleted-message color, media-cache path, advanced cached-file policies, and self-message/edit ignores remain independent by design.
+
 ## 🎯 Logging Scope
 
 The whitelist and blacklist are managed from the **Message Logger** submenu in server, channel, DM, and thread context menus.

@@ -6,6 +6,18 @@ const notificationEvents = [];
 const toastEvents = [];
 const confirmationEvents = [];
 const ReactDOM = {};
+const React = {
+  createElement(type, props, ...children) {
+    return { type, props: { ...props, children } };
+  },
+  useState(initialValue) {
+    const value = typeof initialValue === 'function' ? initialValue() : initialValue;
+    return [value, () => {}];
+  },
+  useEffect(effect) {
+    effect();
+  }
+};
 
 const Data = {
   load(name, key) {
@@ -37,15 +49,7 @@ const UI = {
 class MockBdApi {
   constructor() {
     return {
-      React: {
-        createElement(type, props, ...children) {
-          return { type, props: { ...props, children } };
-        },
-        useState(initialValue) {
-          const value = typeof initialValue === 'function' ? initialValue() : initialValue;
-          return [value, () => {}];
-        }
-      },
+      React,
       ReactDOM,
       Webpack: { Filters: {} },
       UI,
@@ -87,6 +91,7 @@ function resetHarness() {
 module.exports = {
   Data,
   Logger,
+  React,
   ReactDOM,
   UI,
   createPlugin,

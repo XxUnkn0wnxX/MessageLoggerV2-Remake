@@ -6,6 +6,7 @@ const test = require('node:test');
 
 const {
   Data,
+  React,
   UI,
   createPlugin,
   loggerEvents,
@@ -367,6 +368,89 @@ test('plugin-rendered custom settings persist accepted changes immediately', () 
   keybindTree.props.children[0].props.onChange(['Alt', 'l']);
   assert.deepEqual(plugin.settings.openLogsKeybind, ['Alt', 'l']);
   assert.equal(saves, 3);
+});
+
+test('mounted linked custom inputs update live without changing their saved child values', t => {
+  let saves = 0;
+  const plugin = createPlugin({
+    obfuscatedClass: id => id,
+    settings: {
+      autoBackup: false,
+      autoBackupIntervalSeconds: 300
+    },
+    saveSettings() { saves++; }
+  });
+  const config = {
+    id: 'autoBackupIntervalSeconds',
+    enableWith: 'autoBackup',
+    min: 10,
+    max: 86400,
+    emptyValue: 20
+  };
+  const saveInterval = value => {
+    plugin.settings.autoBackupIntervalSeconds = value;
+    plugin.saveSettings();
+  };
+
+  const originalUseState = React.useState;
+  const originalUseEffect = React.useEffect;
+  const states = [];
+  let hookIndex = 0;
+  let effectMounted = false;
+  let cleanupEffect = () => {};
+  let tree;
+  let element;
+  const render = () => {
+    hookIndex = 0;
+    tree = element.type();
+  };
+  React.useState = initialValue => {
+    const index = hookIndex++;
+    if (!(index in states)) states[index] = typeof initialValue === 'function' ? initialValue() : initialValue;
+    return [states[index], update => {
+      states[index] = typeof update === 'function' ? update(states[index]) : update;
+      render();
+    }];
+  };
+  React.useEffect = effect => {
+    if (effectMounted) return;
+    effectMounted = true;
+    cleanupEffect = effect() || (() => {});
+  };
+  t.after(() => {
+    cleanupEffect();
+    React.useState = originalUseState;
+    React.useEffect = originalUseEffect;
+  });
+
+  element = plugin.createInlineValidatedNumberInput(config, saveInterval);
+  render();
+  const currentInput = () => tree.props.children[0];
+  assert.equal(currentInput().props.disabled, true);
+  currentInput().props.onChange({ currentTarget: { value: '600' } });
+  assert.equal(plugin.settings.autoBackupIntervalSeconds, 300);
+  assert.equal(saves, 0);
+
+  const master = plugin.createSetting({ id: 'autoBackup', type: 'switch' });
+  master.onChange(true);
+  assert.equal(currentInput().props.disabled, false);
+  assert.equal(plugin.settings.autoBackup, true);
+  assert.equal(plugin.settings.autoBackupIntervalSeconds, 300);
+  assert.equal(saves, 1);
+
+  currentInput().props.onChange({ currentTarget: { value: '600' } });
+  assert.equal(plugin.settings.autoBackupIntervalSeconds, 600);
+  assert.equal(saves, 2);
+
+  master.onChange(false);
+  assert.equal(currentInput().props.disabled, true);
+  assert.equal(plugin.settings.autoBackup, false);
+  assert.equal(plugin.settings.autoBackupIntervalSeconds, 600);
+  assert.equal(saves, 3);
+
+  plugin.settings.dontSaveData = true;
+  assert.equal(plugin.isSettingDependencyDisabled({ disableWith: 'dontSaveData' }), true);
+  assert.equal(plugin.isSettingDependencyDisabled({ enableWith: 'autoBackup' }), true);
 });
 
 test('deleted message color saves optional-hash values case-insensitively', () => {
