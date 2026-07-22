@@ -15,7 +15,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 
 ## ⚙️ Settings and Scope Policy
 
-- `getSettingsPanel`, `createSetting`, and `createGroup` build the accordion settings interface. `buildSetting` assigns changes only to BetterDiscord's panel-level callback because BetterDiscord invokes both item-level and panel-level callbacks when both are supplied.
+- `getSettingsPanel`, `createSetting`, and `createGroup` keep the existing accordion interface while building one BetterDiscord panel per group. Every setting owns its callback and saves accepted changes immediately; the BetterDiscord **Done** action and React unmount lifecycle never own persistence. This works with upstream and the local fork, while older builders simply ignore dependency metadata.
 - Logger shortcuts use BetterDiscord's native `KeybindInput` recorder in the normal settings row.
   - Validation rejects unsafe or overlapping all-log, channel, and server chords inline, then clears stale pressed state when capture finishes.
   - Capture-phase listeners compare normalized, order-independent key sets. The recorder's earlier window-capture listener suppresses these checks while recording.

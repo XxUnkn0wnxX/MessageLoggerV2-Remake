@@ -162,17 +162,21 @@ test('all fresh-install settings defaults remain stable', () => {
 test('live restored-message settings present the master switch before category controls', () => {
   const displaySettings = source.slice(
     source.indexOf("name: 'Display settings'"),
-    source.indexOf("name: 'Menu settings'")
+    source.indexOf("name: 'Misc settings'")
   );
   const masterIndex = displaySettings.indexOf("name: 'Display saved messages in chat'");
   const deletedIndex = displaySettings.indexOf("id: 'showDeletedMessages'");
   const purgedIndex = displaySettings.indexOf("id: 'showPurgedMessages'");
   const editedIndex = displaySettings.indexOf("id: 'showEditedMessages'");
+  const deletedColorIndex = displaySettings.indexOf("id: 'deletedMessageColor'");
+  const deletedStyleIndex = displaySettings.indexOf("id: 'useAlternativeDeletedStyle'");
 
   assert.ok(masterIndex >= 0);
   assert.ok(masterIndex < deletedIndex);
   assert.ok(deletedIndex < purgedIndex);
   assert.ok(purgedIndex < editedIndex);
+  assert.ok(editedIndex < deletedColorIndex);
+  assert.ok(deletedColorIndex < deletedStyleIndex);
   assert.match(displaySettings, /Display saved messages in chat'[\s\S]*'Master switch for live mounting enabled '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Deleted'[\s\S]*' and '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Purged'[\s\S]*' records in chat, forum, and thread views\.[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Jump actions are unavailable for records excluded by these live-display switches\.[\s\S]*id: 'restoreDeletedMessages'/);
   assert.match(displaySettings, /name: 'Include Deleted messages'[\s\S]*'Live mounts messages captured from individual deletions when '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Display saved messages in chat is enabled'[\s\S]*'\.'[\s\S]*id: 'showDeletedMessages'/);
   assert.match(displaySettings, /name: 'Include Purged messages'[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Display saved messages in chat must be enabled first\.[\s\S]*id: 'showPurgedMessages'/);
@@ -215,7 +219,7 @@ test('date order applies to optional timestamps and forced logger dates', () => 
 
   const displaySettings = source.slice(
     source.indexOf("name: 'Display settings'"),
-    source.indexOf("name: 'Menu settings'")
+    source.indexOf("name: 'Misc settings'")
   );
   assert.match(displaySettings, /name: 'Display dates with timestamps'[\s\S]*name: 'Date format'[\s\S]*type: 'textbox'[\s\S]*validator: 'dateFormat'[\s\S]*inlineValidation: true/);
   assert.match(source, /loadPreferredSystemDateLocales\(\)[\s\S]*DiscordNative\?\.app\?\.getPreferredSystemLanguages[\s\S]*getSystemDateLocale\(\)[\s\S]*DiscordModules\.SystemLocaleUtils[\s\S]*DiscordModules\.LocaleStore\?\.locale[\s\S]*navigator\.languages/);
@@ -275,7 +279,7 @@ test('channel-entry count toggles clear pending state through category-owned act
   assert.match(source, /_incrementMessageCount\('edited', channel, guild\)/);
   const entryAlerts = source.slice(
     source.indexOf('observer({ addedNodes })'),
-    source.indexOf('buildSetting(data)')
+    source.indexOf('createSetting(data)')
   );
   assert.match(entryAlerts, /const showStuff = \(map, name\) =>[\s\S]*\[\{ label: "View", onClick: \(\) => this\.openWindow\(name\) \}\]/);
   assert.doesNotMatch(entryAlerts, /label: ["']Jump/);
@@ -787,17 +791,37 @@ test('edit-spam blocking is opt-in and uses a per-author sixty-second cooldown',
 });
 
 test('settings callbacks have one BetterDiscord owner', () => {
-  const buildSetting = source.slice(source.indexOf('buildSetting(data)'), source.indexOf('createSetting(data)'));
-  assert.match(buildSetting, /const \{ id, onChange, \.\.\.settingData \} = data/);
-  assert.match(buildSetting, /settings: \[\{[\s\S]*\.\.\.settingData/);
-  assert.match(buildSetting, /onChange\(c, id, v\) \{[\s\S]*onChange\(v\)/);
-  assert.doesNotMatch(buildSetting, /\.\.\.data/);
+  const createSetting = source.slice(source.indexOf('createSetting(data)'), source.indexOf('normalizeLoggerShortcutKey(key)'));
+  assert.match(createSetting, /current\.onChange = value => \{[\s\S]*this\.settings\[current\.id\] = value;[\s\S]*this\.saveSettings\(\)/);
+  assert.match(createSetting, /const \{ id, enableWith, disableWith, \.\.\.settingData \} = current/);
+  assert.match(createSetting, /id: this\.obfuscatedClass\(id\),[\s\S]*\.\.\.settingData/);
+  assert.match(createSetting, /setting\.enableWith = this\.obfuscatedClass\(enableWith\)/);
+  assert.match(createSetting, /setting\.disableWith = this\.obfuscatedClass\(disableWith\)/);
+  const createGroup = source.slice(source.indexOf('createGroup(group)'), source.indexOf('getSettingsPanel()'));
+  assert.match(createGroup, /UI\.buildSettingsPanel\(\{[\s\S]*settings: settings\.map\(setting => this\.createSetting\(setting\)\)[\s\S]*\}\)/);
+  assert.doesNotMatch(createGroup, /onChange\s*:/);
   const ordinaryCallback = source.slice(
     source.indexOf('else if (!setting.onChange)'),
     source.indexOf('if (config.inlineValidation')
   );
   assert.match(ordinaryCallback, /setting\.callback = val =>/);
   assert.doesNotMatch(ordinaryCallback, /saveSettings\(\)/);
+  const configFactory = source.slice(
+    source.indexOf('const createSettingFromConfig = (config) =>'),
+    source.indexOf('const AccordionGroups = () =>')
+  );
+  assert.match(configFactory, /config\.validator === 'loggerKeybind'[\s\S]*createValidatedLoggerKeybindRecorder\(config\)/);
+  assert.match(configFactory, /config\.parent[\s\S]*this\.settings\[config\.parent\]\[config\.id\] = val;[\s\S]*this\.saveSettings\(\)/);
+  assert.match(configFactory, /config\.customValue[\s\S]*this\.settings\[config\.id\] = val;[\s\S]*this\.saveSettings\(\)/);
+  assert.match(configFactory, /config\.validator === 'number'[\s\S]*handleNumericSettingInput[\s\S]*this\.settings\[config\.id\] = parsed;[\s\S]*this\.saveSettings\(\)/);
+  assert.match(configFactory, /config\.validator === 'dateFormat'[\s\S]*normalizeDateFormatSetting[\s\S]*this\.settings\[config\.id\] = nextValue;[\s\S]*this\.saveSettings\(\)/);
+  assert.match(configFactory, /config\.validator === 'cachePath'[\s\S]*this\.settings\[config\.id\] = trimmed;[\s\S]*this\.saveSettings\(\)/);
+  assert.match(configFactory, /config\.validator === 'hexColor'[\s\S]*handleHexColorSettingInput\(config, val, actions\)/);
+  const keybindRecorder = source.slice(
+    source.indexOf('createValidatedLoggerKeybindRecorder(config)'),
+    source.indexOf('normalizeAutoBackupIntervalSeconds(value)')
+  );
+  assert.match(keybindRecorder, /plugin\.settings\[config\.id\] = validation\.value;[\s\S]*plugin\.saveSettings\(\)/);
 });
 
 test('high-impact setting changes use routed theme-aware state feedback', () => {

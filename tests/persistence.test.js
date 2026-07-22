@@ -230,32 +230,183 @@ test('pre-initialization native alerts receive unique BetterDiscord notification
   );
 });
 
-test('BetterDiscord settings invoke each plugin callback exactly once', t => {
+test('BetterDiscord settings keep one item-owned callback in each shared group panel', t => {
   const originalBuildSettingsPanel = UI.buildSettingsPanel;
   t.after(() => { UI.buildSettingsPanel = originalBuildSettingsPanel; });
   UI.buildSettingsPanel = panel => panel;
   const changes = [];
   let saves = 0;
   const plugin = createPlugin({
-    obfuscatedClass: id => id,
-    settings: { antiNukeEnabled: true },
+    obfuscatedClass: id => `obfuscated-${id}`,
+    settings: {
+      antiNukeEnabled: true,
+      contextmenuSubmenuName: '',
+      reverseOrder: false,
+      antiNukeToasts: true
+    },
     saveSettings() { saves++; }
   });
 
-  const panel = plugin.createSetting({
-    id: 'antiNukeEnabled',
-    type: 'switch',
-    callback(value) { changes.push(value); }
+  const group = plugin.createGroup({
+    id: 'test-group',
+    name: 'Test group',
+    settings: [
+      {
+        id: 'antiNukeEnabled',
+        type: 'switch',
+        callback(value) { changes.push(['switch', value]); }
+      },
+      {
+        id: 'contextmenuSubmenuName',
+        type: 'textbox',
+        callback(value) { changes.push(['text', value]); }
+      },
+      {
+        id: 'reverseOrder',
+        type: 'radio',
+        options: [
+          { name: 'New - old', value: false },
+          { name: 'Old - new', value: true }
+        ],
+        callback(value) { changes.push(['radio', value]); }
+      },
+      {
+        id: 'antiNukeToasts',
+        type: 'switch',
+        enableWith: 'antiNukeEnabled'
+      }
+    ]
+  });
+  const panel = group.props.children[0];
+
+  assert.equal(panel.onChange, undefined);
+  assert.equal(panel.settings.length, 4);
+  assert.equal(panel.settings[0].id, 'obfuscated-antiNukeEnabled');
+  assert.equal(panel.settings[1].id, 'obfuscated-contextmenuSubmenuName');
+  assert.equal(panel.settings[1].type, 'text');
+  assert.equal(panel.settings[2].id, 'obfuscated-reverseOrder');
+  assert.equal(panel.settings[2].type, 'radio');
+  assert.equal(panel.settings[3].enableWith, 'obfuscated-antiNukeEnabled');
+
+  const invokeCurrentBuilderChange = (setting, value) => {
+    setting.onChange?.(value);
+    if (setting.type === 'switch') panel.onChange?.(null, setting.id, value);
+  };
+  const invokeLegacyBuilderChange = (setting, value) => {
+    setting.onChange?.(value);
+    panel.onChange?.(null, setting.id, value);
+  };
+
+  // Current and older BetterDiscord builders both invoke the item callback. Omitting the
+  // panel callback keeps one callback owner across their different wrapper paths.
+  invokeCurrentBuilderChange(panel.settings[0], false);
+  invokeCurrentBuilderChange(panel.settings[1], 'Logger Tools');
+  invokeCurrentBuilderChange(panel.settings[2], true);
+
+  assert.deepEqual(changes, [['switch', false], ['text', 'Logger Tools'], ['radio', true]]);
+  assert.equal(plugin.settings.antiNukeEnabled, false);
+  assert.equal(plugin.settings.contextmenuSubmenuName, 'Logger Tools');
+  assert.equal(plugin.settings.reverseOrder, true);
+  assert.equal(saves, 3);
+
+  invokeLegacyBuilderChange(panel.settings[0], true);
+  invokeLegacyBuilderChange(panel.settings[1], 'Message Logger');
+  invokeLegacyBuilderChange(panel.settings[2], false);
+
+  assert.deepEqual(changes.slice(3), [['switch', true], ['text', 'Message Logger'], ['radio', false]]);
+  assert.equal(plugin.settings.antiNukeEnabled, true);
+  assert.equal(plugin.settings.contextmenuSubmenuName, 'Message Logger');
+  assert.equal(plugin.settings.reverseOrder, false);
+  assert.equal(saves, 6);
+});
+
+test('plugin-rendered custom settings persist accepted changes immediately', () => {
+  let saves = 0;
+  const plugin = createPlugin({
+    settings: {
+      autoBackupIntervalSeconds: 20,
+      dateFormat: 'M/D/YYYY',
+      openLogsKeybind: ['Control', 'm'],
+      openFilteredLogsKeybind: ['Control', 'n'],
+      openServerLogsKeybind: ['Control', 's']
+    },
+    _pressedShortcutKeys: new Set(),
+    saveSettings() { saves++; }
   });
 
-  // BetterDiscord invokes an item callback first when present, then the panel callback.
-  panel.settings[0].onChange?.(false);
-  panel.onChange(null, panel.settings[0].id, false);
-
-  assert.equal(panel.settings[0].onChange, undefined);
-  assert.deepEqual(changes, [false]);
-  assert.equal(plugin.settings.antiNukeEnabled, false);
+  const numberElement = plugin.createInlineValidatedNumberInput(
+    { id: 'autoBackupIntervalSeconds', min: 10, max: 86400, emptyValue: 20 },
+    value => {
+      plugin.settings.autoBackupIntervalSeconds = value;
+      plugin.saveSettings();
+    }
+  );
+  const numberTree = numberElement.type();
+  numberTree.props.children[0].props.onChange({ currentTarget: { value: '300' } });
+  assert.equal(plugin.settings.autoBackupIntervalSeconds, 300);
   assert.equal(saves, 1);
+
+  const dateElement = plugin.createInlineValidatedDateFormatInput(
+    { id: 'dateFormat', resetInvalidTo: 'M/D/YYYY' },
+    value => {
+      plugin.settings.dateFormat = value;
+      plugin.saveSettings();
+    }
+  );
+  const dateTree = dateElement.type();
+  dateTree.props.children[0].props.onChange({ currentTarget: { value: 'DD/MM/YYYY' } });
+  assert.equal(plugin.settings.dateFormat, 'DD/MM/YYYY');
+  assert.equal(saves, 2);
+
+  const keybindElement = plugin.createValidatedLoggerKeybindRecorder({
+    id: 'openLogsKeybind',
+    max: 4,
+    clearable: true
+  });
+  const keybindTree = keybindElement.type();
+  keybindTree.props.children[0].props.onChange(['Alt', 'l']);
+  assert.deepEqual(plugin.settings.openLogsKeybind, ['Alt', 'l']);
+  assert.equal(saves, 3);
+});
+
+test('deleted message color saves optional-hash values case-insensitively', () => {
+  const actions = [];
+  const notifications = [];
+  let saves = 0;
+  const plugin = createPlugin({
+    settings: { deletedMessageColor: '' },
+    saveSettings() { saves++; },
+    notifyUser(message, options) { notifications.push([message, options]); }
+  });
+  const config = { id: 'deletedMessageColor', action: 'refreshDeletedStyle' };
+  const settingActions = {
+    refreshDeletedStyle(value) { actions.push(value); }
+  };
+  const accepted = [
+    ['#FFFF00', '#FFFF00'],
+    ['ffff00', '#ffff00'],
+    ['#FfFf00', '#FfFf00'],
+    [' 00ffAA ', '#00ffAA'],
+    ['', '']
+  ];
+
+  for (const [input, expected] of accepted) {
+    assert.equal(plugin.handleHexColorSettingInput(config, input, settingActions), true);
+    assert.equal(plugin.settings.deletedMessageColor, expected);
+  }
+  assert.equal(saves, accepted.length);
+  assert.deepEqual(actions, accepted.map(([, expected]) => expected));
+  assert.deepEqual(notifications, []);
+
+  const savedValue = plugin.settings.deletedMessageColor;
+  assert.equal(plugin.handleHexColorSettingInput(config, '#FFF', settingActions), false);
+  assert.equal(plugin.settings.deletedMessageColor, savedValue);
+  assert.equal(saves, accepted.length);
+  assert.equal(actions.length, accepted.length);
+  assert.deepEqual(notifications, [[
+    'Color must be a 6-digit hex value!',
+    { type: 'error' }
+  ]]);
 });
 
 test('neutral state alerts use a theme-colored native card or custom grey toast', () => {

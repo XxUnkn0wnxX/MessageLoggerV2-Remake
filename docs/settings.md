@@ -51,6 +51,7 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Display edited messages in chat | On | Shows saved edit history with messages. Turning it off hides inline history and its Jump actions, but edits remain logged. |
 | Max number of shown edits | `0` | Limits visible edits; `0` means no configured limit. |
 | Show oldest edit instead of newest | On | When the edit limit is exceeded, keeps older edits visible instead of newer ones. |
+| Deleted messages color | Empty | Sets deleted text and forum/thread tints. Accepts six hex digits with an optional `#` in any letter case; an empty value uses the built-in red. |
 | Use background instead of text tint | Off | Uses the configured deleted-message color as a background tint. |
 | Show amount of new deleted messages | On | Displays the unseen deleted-message count when entering a channel. Turning it off clears every pending deleted counter and reports the reset only when at least one pending count existed. |
 | Show amount of new edited messages | On | Displays the unseen edited-message count when entering a channel. Turning it off clears every pending edited counter and reports the reset only when at least one pending count existed. |
@@ -66,7 +67,6 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Disable saving data | Off | Keeps new logs in memory and disables automatic backups. Existing disk history remains untouched. If the plugin started in this mode, re-enabling saving validates and merges disk history with eligible session records before atomically replacing the primary file. A failed recovery leaves saving disabled and directs you to the console. |
 | Auto backup data | Off | Maintains a fallback copy of the logger data. It reduces, but cannot eliminate, data-loss risk. |
 | Auto backup interval (seconds) | 20 | Waits this many seconds after saved data changes before refreshing the backup. Accepts whole numbers from 10 through 86,400; for example, `300` is five minutes. Blank is valid and saves the 20-second default. Other invalid drafts remain unsaved and are marked with a red field border and inline error instead of a toast. Invalid settings or manual config edits reset to 20 at startup. |
-| Deleted messages color | Empty | Sets deleted text and forum/thread tints; an empty value uses the built-in red. |
 | Cache media locally | On | Master switch for caching attachments, embed images, and stickers. |
 | Aggresive message caching | On (locked) | Legacy setting retained for compatibility. It must remain enabled on this fork so message history is available for reliable forum and thread restoration. A saved `false` value is reset to `true` at startup. |
 | Use new cached images system | On (locked) | Legacy setting retained for compatibility. The organized server/channel cache layout must remain enabled for reliable forum and thread media restoration. A saved `false` value is reset to `true` at startup. |
@@ -96,6 +96,7 @@ BetterDiscord stores the plugin's data beside the installed plugin:
 
 ### Config safety
 
+- Every accepted control change saves immediately through that setting's `onChange`. BetterDiscord's **Done** button only closes the panel, and hot reload or another unmount never acts as a save step.
 - The two legacy cache settings remain present and locked to `true`. Manual `false` values are restored at startup.
 - Missing or invalid owned settings are repaired to current defaults. Valid custom values and unknown fork-specific keys are retained.
 - Keybinds accept modifiers plus one key, or `F1`–`F24` alone. Unsafe, duplicate, or overlapping combinations are rejected.

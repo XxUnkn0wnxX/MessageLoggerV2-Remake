@@ -1989,22 +1989,6 @@ module.exports = class MessageLoggerV2 {
       }
     }
   }
-  buildSetting(data) {
-    // BetterDiscord invokes an individual setting callback before its panel-level callback.
-    // Keep the callback only at panel level; supplying it in both places duplicates saves,
-    // feature actions, console entries, and notifications for every settings interaction.
-    const { id, onChange, ...settingData } = data;
-    const setting = UI.buildSettingsPanel({
-      settings: [{
-        id: this.obfuscatedClass(id),
-        ...settingData,
-      }],
-      onChange(c, id, v) {
-        onChange(v);
-      },
-    });
-    return setting;
-  }
   createSetting(data) {
     const current = { ...data };
     if (current.type === "textbox") current.type = "text";
@@ -2016,7 +2000,18 @@ module.exports = class MessageLoggerV2 {
       };
     }
     if (current.value === undefined) current.value = this.settings[current.id];
-    return this.buildSetting(current);
+    // BetterDiscord's Done action only unmounts the panel. Keep persistence on each setting
+    // so accepted values save immediately on upstream, this fork, and older builders that
+    // ignore dependency metadata. A panel-level callback would either duplicate item changes
+    // or miss root non-switch controls depending on the BetterDiscord version.
+    const { id, enableWith, disableWith, ...settingData } = current;
+    const setting = {
+      id: this.obfuscatedClass(id),
+      ...settingData
+    };
+    if (enableWith) setting.enableWith = this.obfuscatedClass(enableWith);
+    if (disableWith) setting.disableWith = this.obfuscatedClass(disableWith);
+    return setting;
   }
   normalizeLoggerShortcutKey(key) {
     if (typeof key !== 'string' || !key.length) return null;
@@ -2921,6 +2916,27 @@ module.exports = class MessageLoggerV2 {
     }
     return { valid: true, value: parsed };
   }
+  validateHexColorSettingValue(value) {
+    const trimmed = String(value ?? '').trim();
+    if (trimmed && !/^#?[0-9a-f]{6}$/i.test(trimmed)) {
+      return { valid: false, message: 'Color must be a 6-digit hex value!' };
+    }
+    return {
+      valid: true,
+      value: trimmed && !trimmed.startsWith('#') ? `#${trimmed}` : trimmed
+    };
+  }
+  handleHexColorSettingInput(config, value, actions = {}) {
+    const validation = this.validateHexColorSettingValue(value);
+    if (!validation.valid) {
+      this.notifyUser(validation.message, { type: 'error' });
+      return false;
+    }
+    this.settings[config.id] = validation.value;
+    if (config.action && actions[config.action]) actions[config.action](validation.value);
+    this.saveSettings();
+    return true;
+  }
   handleNumericSettingInput(config, value, onValid) {
     const validation = this.validateNumericSettingValue(value, config);
     if (validation.valid) {
@@ -3186,12 +3202,16 @@ module.exports = class MessageLoggerV2 {
   }
   createGroup(group) {
     const { name, id, collapsible, shown, settings, onDrawerToggle, reactKey = id } = group;
-    const list = [];
-    for (const setting of settings) list.push(this.createSetting(setting));
+    // One BetterDiscord panel per existing accordion group exposes sibling switches to the
+    // dependency state store without changing MessageLogger's outer group layout. Individual
+    // setting callbacks remain the sole save owner; Done/unmount is intentionally irrelevant.
+    const panel = UI.buildSettingsPanel({
+      settings: settings.map(setting => this.createSetting(setting))
+    });
     const settingGroup = React.createElement(
       Components.SettingGroup,
       { key: reactKey, id, shown, collapsible, name, onDrawerToggle },
-      ...list
+      panel
     );
     return settingGroup;
   }
@@ -3351,6 +3371,14 @@ module.exports = class MessageLoggerV2 {
             action: 'forceUpdateContent'
           },
           {
+            name: 'Deleted messages color',
+            note: 'Six-digit hex with or without #; letter case does not matter. Blank uses the built-in red.',
+            id: 'deletedMessageColor',
+            type: 'textbox',
+            validator: 'hexColor',
+            action: 'refreshDeletedStyle'
+          },
+          {
             name: 'Use background instead of text tint for deleted messages',
             note: 'Uses the deleted-message color as a background.',
             id: 'useAlternativeDeletedStyle',
@@ -3425,14 +3453,6 @@ module.exports = class MessageLoggerV2 {
             max: MAX_AUTO_BACKUP_INTERVAL_SECONDS,
             inlineValidation: true,
             action: 'rescheduleBackup'
-          },
-          {
-            name: 'Deleted messages color',
-            note: 'Hex color; blank uses the built-in red.',
-            id: 'deletedMessageColor',
-            type: 'textbox',
-            validator: 'hexColor',
-            action: 'refreshDeletedStyle'
           },
           {
             name: 'Cache media locally',
@@ -3881,15 +3901,7 @@ module.exports = class MessageLoggerV2 {
         };
       }
       else if (config.validator === 'hexColor') {
-        setting.onChange = val => {
-          const trimmed = String(val ?? '').trim();
-          if (trimmed && !/^#?[0-9a-f]{6}$/i.test(trimmed)) {
-            return this.notifyUser('Color must be a 6-digit hex value!', { type: 'error' });
-          }
-          this.settings[config.id] = trimmed && !trimmed.startsWith('#') ? `#${trimmed}` : trimmed;
-          if (config.action && actions[config.action]) actions[config.action](this.settings[config.id]);
-          this.saveSettings();
-        };
+        setting.onChange = val => this.handleHexColorSettingInput(config, val, actions);
       }
       else if (!setting.onChange) {
         // createSetting owns the value update and single settings-file save. This callback

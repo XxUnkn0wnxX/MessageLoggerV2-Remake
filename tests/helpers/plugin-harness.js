@@ -40,6 +40,10 @@ class MockBdApi {
       React: {
         createElement(type, props, ...children) {
           return { type, props: { ...props, children } };
+        },
+        useState(initialValue) {
+          const value = typeof initialValue === 'function' ? initialValue() : initialValue;
+          return [value, () => {}];
         }
       },
       ReactDOM,
@@ -48,7 +52,7 @@ class MockBdApi {
       Plugins: {},
       DOM: {},
       Patcher: {},
-      Components: {},
+      Components: { KeybindInput() {} },
       ContextMenu: {},
       Utils: {},
       Hooks: {},
