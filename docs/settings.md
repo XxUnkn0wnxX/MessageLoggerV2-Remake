@@ -77,7 +77,7 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Disable saving data | Off | Keeps new records and edits in memory and pauses ordinary primary/backup additions. Archival removals still commit deletion-only updates to each valid existing data snapshot, so record, edit, clear-log, cap, and thread/forum removals survive restart without saving session additions. If the plugin started in this mode, re-enabling saving validates and merges disk history with eligible session records before atomically replacing the primary file. A failed recovery leaves saving disabled and directs you to the console. |
+| Disable saving data | Off | Always loads the existing archive into the logger. New records and edits stay in memory while ordinary primary/backup additions are paused. Archival removals still commit deletion-only updates to each valid existing data snapshot, so record, edit, clear-log, cap, and thread/forum removals survive restart without saving session additions. If the plugin started in this mode, re-enabling saving validates and merges disk history with eligible session records before atomically replacing the primary file. A failed recovery leaves saving disabled and directs you to the console. |
 | Auto backup data (won't fully prevent losing data, just prevent total data loss) | Off | Maintains a fallback copy of the logger data. It reduces, but cannot eliminate, data-loss risk. |
 | Auto backup interval (seconds) | 20 | Waits this many seconds after saved data changes before refreshing the backup. Accepts whole numbers from 10 through 86,400; for example, `300` is five minutes. Blank is valid and saves the 20-second default. Other invalid drafts remain unsaved and are marked with a red field border and inline error instead of a toast. Invalid settings or manual config edits reset to 20 at startup. |
 | Cache media locally | On | Master switch for caching attachments, embed images, and stickers. |
@@ -119,7 +119,7 @@ BetterDiscord stores the plugin's data beside the installed plugin:
 
 ### Saving and recovery
 
-- **Disable saving data** keeps new records and edits in memory and cancels queued ordinary primary and backup writes. Archival removals are the exception: they update detached disk payloads with deletions only, never the live session payload.
+- **Disable saving data** still loads the saved archive for viewing. New records and edits stay in memory and queued ordinary primary and backup writes are cancelled. Archival removals are the exception: they update detached disk payloads with deletions only, never the live session payload.
 - Re-enabling without a reload queues the current in-memory changes. Re-enabling after a no-save reload merges disk and session history, de-duplicates indexes, preserves hidden/forum/thread state, applies normal caps, then atomically writes the primary before the backup.
 - Progress and errors use the selected notification mode and include detailed console output. A failed recovery leaves existing files untouched and saving disabled.
 - If the primary is missing or invalid, a valid backup is normalized and atomically rebuilds it. The backup remains untouched as a rollback copy and reports **Valid backup loaded. Rebuilding the main data file.**

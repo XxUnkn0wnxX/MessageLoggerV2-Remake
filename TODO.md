@@ -13,13 +13,14 @@ Status: Implemented and live validated
 
 ### Problem
 
-When **Disable saving data** is enabled, reloading starts the logger with an empty in-memory record while leaving existing history on disk.
+When **Disable saving data** is enabled, the saved archive must remain loaded and visible while new records stay memory-only.
 
-Without a merge, re-enabling saving could overwrite that older disk-backed history with the temporary session.
+Re-enabling saving must still merge the current session with the latest disk-backed history without duplicates or lost state.
 
 ### Required Behavior
 
 - [x] Preserve existing disk-backed history.
+- [x] Keep existing history visible after a no-save reload.
 - [x] Preserve eligible records captured during the no-save session.
 - [x] Merge both sets when saving is re-enabled after a reload.
 - [x] Keep duplicate message IDs out of every category index.
@@ -42,6 +43,7 @@ Without a merge, re-enabling saving could overwrite that older disk-backed histo
 
 - [x] Create a known saved record while normal saving is enabled.
 - [x] Enable **Disable saving data**, then reload Discord or the plugin.
+- [x] Confirm the existing archive remains visible before creating temporary records.
 - [x] Create deleted, edited, purged, nuked, and forum/thread test records.
 - [x] Re-enable saving.
 - [x] Confirm original and temporary records remain in their correct tabs after another reload.

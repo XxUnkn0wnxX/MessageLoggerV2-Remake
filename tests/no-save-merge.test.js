@@ -517,6 +517,33 @@ test('startup selection restores missing primary data from backup but blocks new
   );
 });
 
+test('no-save startup installs the saved archive while session additions stay detached', () => {
+  const plugin = createNormalizationPlugin();
+  const persisted = payload({
+    '100': record('100', 'channel', { delete_data: { time: 100 } })
+  }, {
+    deleted: { channel: ['100'] }
+  });
+  const persistedSnapshot = structuredClone(persisted);
+
+  const selected = plugin.selectStartupDataPayload(persisted, null);
+  plugin.installDataPayload(plugin.normalizePersistedDataPayload(selected.data));
+
+  assert.equal(plugin.settings.dontSaveData, true);
+  assert.equal(plugin.messageRecord['100'].message.id, '100');
+  assert.deepEqual(plugin.deletedMessageRecord, { channel: ['100'] });
+
+  plugin.messageRecord['200'] = record('200', 'channel', { delete_data: { time: 200 } });
+  plugin.deletedMessageRecord.channel.push('200');
+  assert.deepEqual(persisted, persistedSnapshot, 'memory-only additions must not mutate BetterDiscord cached disk data');
+
+  const reloaded = plugin.normalizePersistedDataPayload(
+    plugin.selectStartupDataPayload(persisted, null).data
+  );
+  assert.deepEqual(Object.keys(reloaded.messageRecord), ['100']);
+  assert.deepEqual(reloaded.deletedMessageRecord, { channel: ['100'] });
+});
+
 test('no-save payload merging preserves opaque persisted fork extensions', () => {
   const plugin = createNormalizationPlugin();
   const persisted = {

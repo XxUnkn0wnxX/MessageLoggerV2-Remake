@@ -307,7 +307,7 @@ test('the current changelog covers the polished Help presentation and BdApi word
   assert.match(source, /Filter Help and Logger Help now use clearer nested spacing, visible filter syntax, and consistent On\/Off state labels/);
   assert.match(source, /accurate BdApi notifications wording without the outdated basic qualifier/);
   assert.match(source, /guild-only local-user toast option now uses its correct Guild settings location/);
-  assert.match(source, /archival record, edit, clear-log, cap, and thread\/forum removals still write through/);
+  assert.match(source, /always loads saved history, keeps new additions memory-only, and writes archival record, edit, clear-log, cap, and thread\/forum removals through/);
 });
 
 test('settings documentation retains audited group order and current UI labels', () => {
@@ -1183,6 +1183,21 @@ test('no-save recovery remains guarded and ordered before backup persistence', (
   assert.match(source, /reportDataSavingDisabled\(\)[\s\S]*new logger additions will remain in memory[\s\S]*removing saved records or edits still writes through[\s\S]*'neutral'/);
   const recovery = source.slice(source.indexOf('async mergeNoSaveSessionIntoPersistedData()'), source.indexOf('handleDataSaveSetting(disabled)'));
   assert.ok(recovery.indexOf("this.getName() + 'Data'") < recovery.indexOf("this.getName() + 'DataBackup'"));
+});
+
+test('no-save startup still loads and normalizes the saved archive', () => {
+  const startupStart = source.indexOf('this._pendingNoSavePersistedRemovals = [];');
+  const startupEnd = source.indexOf('this.cachedMessageRecord = [];', startupStart);
+  const startup = source.slice(startupStart, startupEnd);
+
+  assert.ok(startupStart >= 0 && startupEnd > startupStart);
+  assert.match(startup, /this\._needsNoSaveDataMerge = !!this\.settings\.dontSaveData/);
+  assert.match(startup, /const selectedData = this\.selectStartupDataPayload\([\s\S]*Data\.load\(this\.getName\(\) \+ 'Data', 'data'\)[\s\S]*Data\.load\(this\.getName\(\) \+ 'DataBackup', 'data'\)/);
+  assert.match(startup, /data = selectedData\.data[\s\S]*data = this\.normalizePersistedDataPayload\(data\)/);
+  assert.doesNotMatch(startup, /if \(this\.settings\.dontSaveData\)\s*\{\s*data =/);
+  assert.doesNotMatch(startup, /if \(!this\.settings\.dontSaveData\)\s*\{\s*let loadedPayloadSnapshot/);
+  assert.ok(source.indexOf('this.installDataPayload(data)', startupEnd) > startupEnd);
+  assert.match(settingsDocs, /Disable saving data \| Off \| Always loads the existing archive into the logger\./);
 });
 
 test('no-save mode persists removals from disk without serializing session additions', () => {

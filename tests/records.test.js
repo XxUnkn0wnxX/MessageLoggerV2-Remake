@@ -54,6 +54,47 @@ function createRecordPlugin() {
 
 test.beforeEach(resetHarness);
 
+test('logger archive tabs ignore live-display master switches', () => {
+  const channelId = 'channel';
+  const plugin = createPlugin();
+  plugin.installDataPayload({
+    messageRecord: {
+      deleted: {
+        message: { id: 'deleted', channel_id: channelId, timestamp: 100 },
+        delete_data: { time: 300 }
+      },
+      purged: {
+        message: { id: 'purged', channel_id: channelId, timestamp: 200 },
+        delete_data: { time: 400 }
+      },
+      edited: {
+        message: { id: 'edited', channel_id: channelId, timestamp: 300 },
+        edit_history: [{ time: 500, content: 'before' }]
+      }
+    },
+    deletedMessageRecord: { [channelId]: ['deleted'] },
+    editedMessageRecord: { [channelId]: ['edited'] },
+    purgedMessageRecord: { [channelId]: ['purged'] },
+    nukedMessageRecord: {},
+    suppressedForumThreadIds: []
+  });
+  plugin.settings = {
+    restoreDeletedMessages: false,
+    showDeletedMessages: false,
+    showPurgedMessages: false,
+    showEditedMessages: false,
+    reverseOrder: false,
+    antiNukeEnabled: true
+  };
+  plugin.menu = { selectedTab: 'deleted', filter: '' };
+
+  assert.deepEqual(plugin.getFilteredMessages(), ['deleted']);
+  plugin.menu.selectedTab = 'purged';
+  assert.deepEqual(plugin.getFilteredMessages(), ['purged']);
+  plugin.menu.selectedTab = 'edited';
+  assert.deepEqual(plugin.getFilteredMessages(), ['edited']);
+});
+
 test('logger viewer double-click jumps only valid non-interactive saved messages', () => {
   let doubleClick;
   let mouseDown;

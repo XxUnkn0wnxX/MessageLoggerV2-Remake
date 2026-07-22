@@ -204,13 +204,13 @@ Notification settings affect alerts only. Logging scope is controlled separately
 
 ## 🛠️ Troubleshooting
 
-### Saving was re-enabled after a no-save reload
+### Using no-save mode across a reload
 
 After a no-save reload:
 
-1. New records and edits stay in a temporary in-memory session. Removing existing archival records or edits still commits deletion-only changes without saving session additions.
-2. Re-enabling saving validates and merges disk and eligible session records, de-duplicates indexes, preserves saved state, applies caps, then atomically writes the primary before the backup.
-3. A failed validation or primary write leaves saving disabled and both existing files untouched.
+1. The saved archive still loads into the logger for viewing.
+2. New records and edits stay in a temporary in-memory session. Reloading while saving remains disabled discards those additions, while archival removals still commit deletion-only changes.
+3. Re-enabling saving validates and merges disk and eligible session records, de-duplicates indexes, preserves saved state, applies caps, then atomically writes the primary before the backup. A failed validation or primary write leaves saving disabled and both existing files untouched.
 
 Disabling saving reports memory-only additions and archival-removal write-through. Re-enabling without a reload queues in-memory changes; re-enabling after a reload reports the merge. Every message uses the selected notification mode and includes console detail.
 

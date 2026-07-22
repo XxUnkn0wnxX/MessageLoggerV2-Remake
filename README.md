@@ -37,7 +37,7 @@ This fork also restores logged forum posts and channel threads, preserves their 
 - One console entry and routed alert per high-impact setting change.
 - Info-blue enabled states, theme-neutral disabled states, warning-colored backup diagnostics, and red errors.
 - Optional local media caching, cache-size/type controls, local-only rendering, CDN fallback, custom cache paths, and cached-file cleanup when records are removed.
-- Safe no-save sessions: re-enabling saving after a reload validates and merges disk and session history before an atomic primary-file replacement.
+- Safe no-save sessions: saved history remains visible while new additions stay memory-only; re-enabling validates and merges before an atomic primary-file replacement.
 - Atomic legacy/mixed-fork normalization and recoverable settings-config repair.
 - Clearly reported valid-backup recovery, configurable bounded backup timing, optional queue/write diagnostics, additive metadata, and fail-closed newer-schema protection.
 - Built-in settings/help pages, update notes, automatic update checks, and compatibility with legacy flat media caches.

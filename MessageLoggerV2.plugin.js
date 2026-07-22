@@ -473,7 +473,7 @@ module.exports = class MessageLoggerV2 {
           'Related controls stay grouped, while Filter Help and Logger Help now use clearer nested spacing, visible filter syntax, and consistent On/Off state labels.',
           'The notification-mode setting now uses the accurate BdApi notifications wording without the outdated basic qualifier.',
           'The guild-only local-user toast option now uses its correct Guild settings location and migrates its misplaced legacy DM value.',
-          'Disable saving data now blocks new additions while archival record, edit, clear-log, cap, and thread/forum removals still write through.'
+          'Disable saving data now always loads saved history, keeps new additions memory-only, and writes archival record, edit, clear-log, cap, and thread/forum removals through.'
         ]
       }
     ];
@@ -1049,82 +1049,81 @@ module.exports = class MessageLoggerV2 {
     this.nodeModules.electron.clipboard = {};
     this.nodeModules.electron.clipboard.write = DiscordNative.clipboard.copy;
     this.nodeModules.electron.clipboard.writeText = DiscordNative.clipboard.copy;
-    const defaultConstruct = () => this.createDefaultDataPayload();
     this._dataWriteEpoch = 0;
     this._noSaveMergeInProgress = false;
     this._noSaveMergeDirty = false;
     this._pendingNoSavePersistedRemovals = [];
     this._noSavePersistedRemovalTimer = 0;
-    // Only instances that skipped disk loading at startup need a later disk/session merge.
-    // Toggling saving off and back on without a reload must keep the existing in-memory behavior.
+    // A no-save startup still loads the saved archive for viewing. Re-enabling later re-reads
+    // disk and merges the memory-only session so external changes and deletion-only writes stay safe.
     this._needsNoSaveDataMerge = !!this.settings.dontSaveData;
     let data;
     let dataLoadedFromBackup = false;
     let backupRecoveryReason = null;
-    if (this.settings.dontSaveData) {
-      data = defaultConstruct();
-    } else {
-      const selectedData = this.selectStartupDataPayload(
-        Data.load(this.getName() + 'Data', 'data'),
-        Data.load(this.getName() + 'DataBackup', 'data')
-      );
-      data = selectedData.data;
-      if (selectedData.source === 'backup') {
-        dataLoadedFromBackup = true;
-        backupRecoveryReason = selectedData.primaryWasPresent ? 'could not be validated' : 'was missing';
-        Logger.warn(`Valid logger backup loaded because primary data ${backupRecoveryReason}; the main data file will be rebuilt after startup initialization.`);
-      } else if (selectedData.source === 'empty') {
-        if (selectedData.hadPersistedCandidate) {
-          if (this.settings.autoBackup) {
-            this.notifyUser(`[${this.getName()}] Data and backup files were corrupted. All deleted/edited/purged/nuked messages have been erased.`, {
-              title: 'Message Logger Data Error',
-              type: 'error',
-              timeout: 0
-            });
-          } else {
-            this.notifyUser(`[${this.getName()}] Data was corrupted! Recommended to enable auto backup in settings! All deleted/edited/purged/nuked messages have been erased.`, {
-              title: 'Message Logger Data Error',
-              type: 'error',
-              timeout: 0
-            });
-          }
+    const selectedData = this.selectStartupDataPayload(
+      Data.load(this.getName() + 'Data', 'data'),
+      Data.load(this.getName() + 'DataBackup', 'data')
+    );
+    data = selectedData.data;
+    if (selectedData.source === 'backup') {
+      dataLoadedFromBackup = true;
+      backupRecoveryReason = selectedData.primaryWasPresent ? 'could not be validated' : 'was missing';
+      const rebuildTiming = this.settings.dontSaveData
+        ? 'after data saving is re-enabled'
+        : 'after startup initialization';
+      Logger.warn(`Valid logger backup loaded because primary data ${backupRecoveryReason}; the main data file will be rebuilt ${rebuildTiming}.`);
+    } else if (selectedData.source === 'empty') {
+      if (selectedData.hadPersistedCandidate) {
+        if (this.settings.autoBackup) {
+          this.notifyUser(`[${this.getName()}] Data and backup files were corrupted. All deleted/edited/purged/nuked messages have been erased.`, {
+            title: 'Message Logger Data Error',
+            type: 'error',
+            timeout: 0
+          });
         } else {
-          Logger.log('No persisted logger primary or backup was found; starting with an empty payload.');
+          this.notifyUser(`[${this.getName()}] Data was corrupted! Recommended to enable auto backup in settings! All deleted/edited/purged/nuked messages have been erased.`, {
+            title: 'Message Logger Data Error',
+            type: 'error',
+            timeout: 0
+          });
         }
+      } else {
+        Logger.log('No persisted logger primary or backup was found; starting with an empty payload.');
       }
     }
     this.messageStore = DiscordModules.MessageStore;
     this.ChannelStore = DiscordModules.ChannelStore;
-    if (!this.settings.dontSaveData) {
-      let loadedPayloadSnapshot = JSON.stringify(data);
+    let loadedPayloadSnapshot = JSON.stringify(data);
+    try {
+      data = this.normalizePersistedDataPayload(data);
+    } catch (primaryNormalizationError) {
+      // Structural checks are intentionally cheap. If deeper record normalization fails,
+      // make one safe attempt to use the backup before aborting startup with files intact.
+      if (dataLoadedFromBackup) throw primaryNormalizationError;
+      const backupData = Data.load(this.getName() + 'DataBackup', 'data');
+      if (!this.canNormalizePersistedDataPayload(backupData)) throw primaryNormalizationError;
       try {
-        data = this.normalizePersistedDataPayload(data);
-      } catch (primaryNormalizationError) {
-        // Structural checks are intentionally cheap. If deeper record normalization fails,
-        // make one safe attempt to use the backup before aborting startup with files intact.
-        if (dataLoadedFromBackup) throw primaryNormalizationError;
-        const backupData = Data.load(this.getName() + 'DataBackup', 'data');
-        if (!this.canNormalizePersistedDataPayload(backupData)) throw primaryNormalizationError;
-        try {
-          loadedPayloadSnapshot = JSON.stringify(backupData);
-          data = this.normalizePersistedDataPayload(backupData);
-          dataLoadedFromBackup = true;
-          backupRecoveryReason = 'failed canonical normalization';
-          Logger.warn('Valid logger backup loaded because primary data failed canonical normalization; the main data file will be rebuilt after startup initialization.', primaryNormalizationError);
-        } catch (backupNormalizationError) {
-          const error = new Error('Primary and backup logger data both failed canonical normalization');
-          error.cause = { primaryNormalizationError, backupNormalizationError };
-          throw error;
-        }
+        loadedPayloadSnapshot = JSON.stringify(backupData);
+        data = this.normalizePersistedDataPayload(backupData);
+        dataLoadedFromBackup = true;
+        backupRecoveryReason = 'failed canonical normalization';
+        const rebuildTiming = this.settings.dontSaveData
+          ? 'after data saving is re-enabled'
+          : 'after startup initialization';
+        Logger.warn(`Valid logger backup loaded because primary data failed canonical normalization; the main data file will be rebuilt ${rebuildTiming}.`, primaryNormalizationError);
+      } catch (backupNormalizationError) {
+        const error = new Error('Primary and backup logger data both failed canonical normalization');
+        error.cause = { primaryNormalizationError, backupNormalizationError };
+        throw error;
       }
-      this._dataNeedsCanonicalRewrite = dataLoadedFromBackup || loadedPayloadSnapshot !== JSON.stringify(data);
-      // Keep backup restoration distinct from an ordinary legacy-schema migration so every
-      // progress, success, and failure message accurately describes the primary-file rebuild.
-      this._canonicalRewriteReason = dataLoadedFromBackup
-        ? 'backup'
-        : this._dataNeedsCanonicalRewrite ? 'migration' : null;
-      this._backupRecoveryReason = backupRecoveryReason;
     }
+    this._dataNeedsCanonicalRewrite = dataLoadedFromBackup || loadedPayloadSnapshot !== JSON.stringify(data);
+    // Keep backup restoration distinct from an ordinary legacy-schema migration so every
+    // progress, success, and failure message accurately describes the primary-file rebuild.
+    this._canonicalRewriteReason = dataLoadedFromBackup
+      ? 'backup'
+      : this._dataNeedsCanonicalRewrite ? 'migration' : null;
+    this._backupRecoveryReason = backupRecoveryReason;
     this.cachedMessageRecord = [];
     this.cachedMessageIds = new Set();
     this.cachedMessagesMap = new Map();
@@ -3536,7 +3535,7 @@ module.exports = class MessageLoggerV2 {
         settings: [
           {
             name: 'Disable saving data',
-            note: 'Keeps new logs memory-only and pauses additions/backups. Removing saved records or edits still writes through.',
+            note: 'Always loads saved history. New logs stay memory-only and additions/backups pause; removing saved records or edits still writes through.',
             id: 'dontSaveData',
             type: 'switch',
             action: 'handleDataSave'
