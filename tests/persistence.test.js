@@ -480,6 +480,92 @@ test('CSS class mode uses a controlled switch so no-save cancellation changes no
   assert.equal(rerenderedTree.props.value, false);
 });
 
+test('archive loading uses a linked controlled switch with a preserved inactive preference', () => {
+  const requests = [];
+  const plugin = createPlugin({
+    settings: { dontSaveData: false, dontLoadArchivedData: true },
+    obfuscatedClass: id => `obfuscated-${id}`,
+    requestArchiveLoadModeChange(value) { requests.push(value); }
+  });
+
+  const element = plugin.createControlledArchiveLoadSwitch({ id: 'dontLoadArchivedData' });
+  let tree = element.type();
+  assert.equal(tree.type, Components.SwitchInput);
+  assert.equal(tree.props.id, 'obfuscated-dontLoadArchivedData');
+  assert.equal(tree.props.value, false);
+  assert.equal(tree.props.disabled, true);
+
+  plugin.settings.dontSaveData = true;
+  tree = element.type();
+  assert.equal(tree.props.value, true);
+  assert.equal(tree.props.disabled, false);
+  tree.props.onChange(false);
+  assert.deepEqual(requests, [false]);
+  assert.equal(plugin.settings.dontLoadArchivedData, true);
+});
+
+test('archive loading commits its saved child value only after a successful transition', () => {
+  const dependencyChanges = [];
+  let saves = 0;
+  let detachAccepted = false;
+  const plugin = createPlugin({
+    settings: { dontSaveData: true, dontLoadArchivedData: false },
+    detachArchivedDataFromMemory() { return detachAccepted; },
+    attachArchivedDataToMemory() { return true; },
+    saveSettings() { saves++; },
+    notifySettingDependencyChange(id) { dependencyChanges.push(id); }
+  });
+
+  assert.equal(plugin.requestArchiveLoadModeChange(true), false);
+  assert.equal(plugin.settings.dontLoadArchivedData, false);
+  assert.equal(saves, 0);
+
+  detachAccepted = true;
+  assert.equal(plugin.requestArchiveLoadModeChange(true), true);
+  assert.equal(plugin.settings.dontLoadArchivedData, true);
+  assert.equal(saves, 1);
+
+  assert.equal(plugin.requestArchiveLoadModeChange(false), true);
+  assert.equal(plugin.settings.dontLoadArchivedData, false);
+  assert.equal(saves, 2);
+  assert.deepEqual(dependencyChanges, [
+    'dontLoadArchivedData',
+    'dontLoadArchivedData',
+    'dontLoadArchivedData'
+  ]);
+});
+
+test('enabling no-save activates a stored archive-detach preference and rolls back only failed detaches', () => {
+  let detachCalls = 0;
+  const successful = createPlugin({
+    settings: { dontSaveData: true, dontLoadArchivedData: true },
+    cancelPendingDataWrites() {},
+    detachArchivedDataFromMemory() { detachCalls++; return true; },
+    reportDataSavingDisabled() {},
+    notifySettingDependencyChange() {}
+  });
+
+  successful.handleDataSaveSetting(true);
+  assert.equal(detachCalls, 1);
+  assert.equal(successful.settings.dontSaveData, true);
+  assert.equal(successful.settings.dontLoadArchivedData, true);
+
+  let saves = 0;
+  const failed = createPlugin({
+    settings: { dontSaveData: true, dontLoadArchivedData: true },
+    cancelPendingDataWrites() {},
+    detachArchivedDataFromMemory() { return false; },
+    saveSettings() { saves++; },
+    reportDataSavingDisabled() {},
+    notifySettingDependencyChange() {}
+  });
+
+  failed.handleDataSaveSetting(true);
+  assert.equal(failed.settings.dontSaveData, true);
+  assert.equal(failed.settings.dontLoadArchivedData, false);
+  assert.equal(saves, 1);
+});
+
 test('CSS class mode confirmation cancels or commits either direction before restart', () => {
   const modals = [];
   const dependencyChanges = [];

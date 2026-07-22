@@ -12,6 +12,8 @@ const defaults = {
   editSpamThreshold: 10,
   debugLogging: false,
   debugToasts: false,
+  dontSaveData: false,
+  dontLoadArchivedData: false,
   flags: 0,
   messageCacheCap: 1000,
   savedMessagesCap: 1000,
@@ -46,6 +48,22 @@ function normalizeRecovered(plugin, settings) {
 }
 
 test.beforeEach(resetHarness);
+
+test('archive-load preference defaults safely and normalizes malformed values', () => {
+  const plugin = createPlugin();
+  const missing = { dontSaveData: true };
+  normalizeRecovered(plugin, missing);
+  assert.equal(missing.dontSaveData, true);
+  assert.equal(missing.dontLoadArchivedData, false);
+
+  const enabled = { dontSaveData: false, dontLoadArchivedData: true };
+  normalizeRecovered(plugin, enabled);
+  assert.equal(enabled.dontLoadArchivedData, true, 'stored child preference survives while its parent is inactive');
+
+  const malformed = { dontSaveData: true, dontLoadArchivedData: 'yes' };
+  normalizeRecovered(plugin, malformed);
+  assert.equal(malformed.dontLoadArchivedData, false);
+});
 
 test('legacy configs gain shortcut defaults while valid custom and cleared bindings survive normalization', () => {
   const plugin = createPlugin();

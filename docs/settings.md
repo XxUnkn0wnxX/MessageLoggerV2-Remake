@@ -10,6 +10,7 @@ On current BetterDiscord builds, dependent controls are greyed out while their m
 | --- | --- |
 | Display saved messages in chat | Include Deleted messages; Include Purged messages; Use background instead of text tint for deleted messages |
 | Display edited messages in chat | Max number of shown edits; Show oldest edit instead of newest if over the shown edits limit |
+| Disable saving data | Disable loading archived data |
 | Auto backup data (won't fully prevent losing data, just prevent total data loss) | Auto backup interval (seconds) |
 | Cache media locally | Add user id to saved media filename; Cache all attachment types; Max cache file size (MB, 0 = no limit) |
 | Block spam edit notifications (if enabled) | Edit spam threshold |
@@ -77,7 +78,8 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Disable saving data | Off | Always loads the existing archive into the logger. New records and edits stay in memory while ordinary primary/backup additions are paused. Archival removals still commit deletion-only updates to each valid existing data snapshot, so record, edit, clear-log, cap, and thread/forum removals survive restart without saving session additions. If the plugin started in this mode, re-enabling saving validates and merges disk history with eligible session records before atomically replacing the primary file. A failed recovery leaves saving disabled and directs you to the console. |
+| Disable saving data | Off | New records and edits stay in memory while ordinary primary/backup additions pause. Saved history remains loaded unless the linked child below is enabled. While loaded, archival removals still use deletion-only writes. Re-enabling validates and merges when recovery is required, then atomically replaces the primary file. A failed recovery leaves saving disabled. |
+| Disable loading archived data | Off | When both this setting and **Disable saving data** are enabled, the saved archive is skipped or hot-unloaded and only temporary session records remain in memory. The archive stays unchanged on disk, archival removals and cached-file deletion are unavailable, and reload/disable discards the temporary session. Disabling this child hot-loads the latest archive and combines it with the session in memory without writing. Its saved preference remains stored but the control displays and behaves as Off while its parent is disabled. |
 | Auto backup data (won't fully prevent losing data, just prevent total data loss) | Off | Maintains a fallback copy of the logger data. It reduces, but cannot eliminate, data-loss risk. |
 | Auto backup interval (seconds) | 20 | Waits this many seconds after saved data changes before refreshing the backup. Accepts whole numbers from 10 through 86,400; for example, `300` is five minutes. Blank is valid and saves the 20-second default. Other invalid drafts remain unsaved and are marked with a red field border and inline error instead of a toast. Invalid settings or manual config edits reset to 20 at startup. |
 | Cache media locally | On | Master switch for caching attachments, embed images, and stickers. |
@@ -119,8 +121,9 @@ BetterDiscord stores the plugin's data beside the installed plugin:
 
 ### Saving and recovery
 
-- **Disable saving data** still loads the saved archive for viewing. New records and edits stay in memory and queued ordinary primary and backup writes are cancelled. Archival removals are the exception: they update detached disk payloads with deletions only, never the live session payload.
-- Re-enabling without a reload queues the current in-memory changes. Re-enabling after a no-save reload merges disk and session history, de-duplicates indexes, preserves hidden/forum/thread state, applies normal caps, then atomically writes the primary before the backup.
+- **Disable saving data** loads the saved archive by default. New records and edits stay in memory and queued ordinary primary/backup writes are cancelled. While the archive is loaded, removals use deletion-only writes that never serialize session additions.
+- **Disable loading archived data** is active only with the parent above. Enabling it hot-detaches unchanged archived records, indexes, suppression state, fork extensions, archive-only author fallbacks, and BetterDiscord's retained archive objects while retaining records changed or created in this temporary session. Disabling it re-reads and reattaches the archive in memory without writing; a three-way delta preserves unrelated newer disk changes.
+- Re-enabling saving from detached mode re-reads disk, applies the exact temporary overlay and removals, de-duplicates indexes, preserves hidden/forum/thread state, applies caps, then atomically writes the primary before the backup. The child's stored preference remains available for the next no-save session.
 - Progress and errors use the selected notification mode and include detailed console output. A failed recovery leaves existing files untouched and saving disabled.
 - If the primary is missing or invalid, a valid backup is normalized and atomically rebuilds it. The backup remains untouched as a rollback copy and reports **Valid backup loaded. Rebuilding the main data file.**
 
@@ -222,12 +225,12 @@ Message-history caching and hierarchical media storage are core behavior with no
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Obfuscate CSS classes | On | Uses plugin-specific class names to reduce conflicts with themes and plugins. Changing either direction restarts MessageLogger by temporarily disabling and re-enabling it so the class map can be rebuilt. With **Disable saving data** **Off**, the accepted value saves immediately and the existing shutdown path flushes pending archive data before restart. With it **On**, a small danger confirmation warns that memory-only session activity will be discarded; **Restart Logger** saves and proceeds, while **No** or dismissing the modal leaves the setting unchanged. |
+| Obfuscate CSS classes | On | Uses plugin-specific class names to reduce conflicts with themes and plugins. Changing either direction restarts MessageLogger by temporarily disabling and re-enabling it so the class map can be rebuilt. With **Disable saving data** **Off**, the accepted value saves immediately and the existing shutdown path flushes pending archive data before restart. With it **On**, a compact danger confirmation warns that memory-only session activity will be discarded; **Restart Logger** saves and proceeds, while **No** or dismissing the modal leaves the setting unchanged. |
 | Automatic updates | On | Periodically checks the repository for a newer plugin version and offers **Update Now**. Choosing it installs the update and reloads the renderer. |
 | Display update notes | On | Shows the plugin changelog after a version change. |
 | Contextmenu submenu name | Empty | Replaces the **Message Logger** label. Empty values use the built-in label. |
 | Only render locally cached attachments | Off | Prevents uncached attachments from rendering through Discord CDN. The saved record shows a filename placeholder instead. Toggling this reevaluates open logger and channel views immediately. |
-| Delete cached files with log records | Off | Permanently deletes related cached attachments, embeds, and stickers whenever their final log record is removed, including purges and thread/forum cascades. Cached-file deletion still runs while **Disable saving data** is enabled, and any matching archival record removal is committed through the deletion-only write path. |
+| Delete cached files with log records | Off | Permanently deletes related cached attachments, embeds, and stickers whenever their final log record is removed, including purges and thread/forum cascades. It still runs in ordinary no-save mode, but pauses while **Disable loading archived data** is active because unseen archive records cannot participate in shared-media reference checks. |
 
 ## 🐞 Debug
 
@@ -259,7 +262,8 @@ Settings can also produce their own state-change notification. This is separate 
 | Setting | Notification states |
 | --- | --- |
 | **Only log whitelist** | Both states: enabled uses info; disabled uses neutral. |
-| **Disable saving data** | Both states: enabled reports memory-only additions plus deletion-only archival write-through as neutral; disabled reports normal saving or recovery resuming as info. |
+| **Disable saving data** | Both states: enabled reports memory-only behavior and whether the archive is loaded or detached; disabled reports normal saving or recovery resuming. |
+| **Disable loading archived data** | Both states: reports archive unload or in-memory reload only after the transition succeeds. |
 | **Auto backup data** | Both states: enabled reports active or saving-paused backup behavior as info; disabled reports shutdown and any pending cancellation as neutral. |
 | **Cache media locally** | Both states: enabled uses info; disabled uses neutral. |
 | **Enable Anti Nuke** | Both states: enabled uses info; disabled uses neutral and explains that existing Nuked records remain saved. |

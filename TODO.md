@@ -9,11 +9,11 @@ Status markers:
 
 ## 💾 Preserve Data After No-Save Sessions
 
-Status: Implemented and live validated
+Status: Implemented and covered by automated tests; live validation pending
 
 ### Problem
 
-When **Disable saving data** is enabled, the saved archive must remain loaded and visible while new records stay memory-only.
+When **Disable saving data** is enabled, saved history remains loaded by default while new records stay memory-only. The linked **Disable loading archived data** preference may instead detach the archive without changing it on disk.
 
 Re-enabling saving must still merge the current session with the latest disk-backed history without duplicates or lost state.
 
@@ -21,6 +21,8 @@ Re-enabling saving must still merge the current session with the latest disk-bac
 
 - [x] Preserve existing disk-backed history.
 - [x] Keep existing history visible after a no-save reload.
+- [x] Optionally skip or hot-detach archived history while preserving temporary session activity.
+- [x] Hot-reattach the archive in memory without writing and block archive removal writes while detached.
 - [x] Preserve eligible records captured during the no-save session.
 - [x] Merge both sets when saving is re-enabled after a reload.
 - [x] Keep duplicate message IDs out of every category index.

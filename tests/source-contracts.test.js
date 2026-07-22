@@ -34,6 +34,7 @@ test('all fresh-install settings defaults remain stable', () => {
     debugLogging: false,
     debugToasts: false,
     dontSaveData: false,
+    dontLoadArchivedData: false,
     displayUpdateNotes: true,
     ignoreMutedGuilds: true,
     ignoreMutedChannels: true,
@@ -346,7 +347,7 @@ test('settings documentation retains audited group order and current UI labels',
 
   assert.match(settingsDocs, /Obfuscate CSS classes \| On \|[^\n]*restarts MessageLogger by temporarily disabling and re-enabling it[^\n]*\*\*No\*\*[^\n]*leaves the setting unchanged/);
   assert.match(settingsDocs, /Automatic updates \| On \|[^\n]*offers \*\*Update Now\*\*/);
-  assert.match(settingsDocs, /Delete cached files with log records \| Off \|[^\n]*Cached-file deletion still runs while \*\*Disable saving data\*\* is enabled[^\n]*deletion-only write path/);
+  assert.match(settingsDocs, /Delete cached files with log records \| Off \|[^\n]*pauses while \*\*Disable loading archived data\*\* is active/);
 });
 
 test('update-note visibility sits directly below automatic updates', () => {
@@ -381,6 +382,7 @@ test('settings dependencies match the approved master controls', () => {
     ['maxShownEdits', 'showEditedMessages'],
     ['hideNewerEditsFirst', 'showEditedMessages'],
     ['useAlternativeDeletedStyle', 'restoreDeletedMessages'],
+    ['dontLoadArchivedData', 'dontSaveData'],
     ['autoBackupIntervalSeconds', 'autoBackup'],
     ['addUserIdToSavedMediaFilename', 'cacheAllImages'],
     ['newSaveAllFileTypes', 'cacheAllImages'],
@@ -1151,6 +1153,10 @@ test('CSS class mode changes use a confirmed controlled restart on both save pat
   assert.doesNotMatch(cssControl, /_cssClassReenableTimer/);
   assert.match(source, /if \(!this\._cssClassRestartInProgress\)[\s\S]*this\._settingsDependencyListeners\?\.clear\?\.\(\)/);
   assert.match(source, /new Set\(\[this\.style\.css, this\.stringHeldCaptive, 'ML2-CSS'\]\)/);
+  assert.match(source, /cssClassRestartWarning = this\.obfuscatedClass\('ml2-css-class-restart-warning'\)/);
+  assert.match(cssControl, /className: this\.style\?\.cssClassRestartWarning/);
+  assert.match(source, /this\.tools\.manaModule\.ConfirmModal,[\s\S]*className: options\.className/);
+  assert.match(source, /\.\$\{this\.style\.cssClassRestartWarning\} \{[\s\S]*width: min\(420px, calc\(100vw - 32px\)\) !important;[\s\S]*min-height: 0 !important;/);
 });
 
 test('high-impact setting changes use routed theme-aware state feedback', () => {
@@ -1198,35 +1204,44 @@ test('no-save recovery remains guarded and ordered before backup persistence', (
   assert.match(source, /this\._needsNoSaveDataMerge = !!this\.settings\.dontSaveData/);
   assert.match(source, /loadPersistedDataForNoSaveMerge\(\)/);
   assert.match(source, /mergeDataPayloads\(loaded\.data, this\._getDataPayload\(\)\)/);
+  assert.match(source, /wasArchiveDetached[\s\S]*applyNoSaveSessionOverlay\(loaded\.data, detachedOverlay\)/);
   assert.match(source, /applySavedMessagesCapToPayload/);
   assert.match(source, /Data Recovery Error/);
   assert.match(source, /View the console log for more details/);
   assert.match(source, /this\.cancelPendingDataWrites\?\.\(\)/);
   assert.match(source, /reportDataSavingResume\(requiresRecoveryMerge\)[\s\S]*this\.reportSettingState\([\s\S]*Message Logger Data Recovery[\s\S]*Message Logger Data Saving/);
-  assert.match(source, /reportDataSavingDisabled\(\)[\s\S]*new logger additions will remain in memory[\s\S]*removing saved records or edits still writes through[\s\S]*'neutral'/);
+  const noSaveFeedback = source.slice(
+    source.indexOf('reportDataSavingDisabled()'),
+    source.indexOf('reportMajorSettingChange(', source.indexOf('reportDataSavingDisabled()'))
+  );
+  assert.match(noSaveFeedback, /saved archive is detached/);
+  assert.match(noSaveFeedback, /new logger additions will remain in memory/);
+  assert.match(noSaveFeedback, /Archival removals still commit deletion-only updates/);
+  assert.match(noSaveFeedback, /'neutral'/);
   const recovery = source.slice(source.indexOf('async mergeNoSaveSessionIntoPersistedData()'), source.indexOf('handleDataSaveSetting(disabled)'));
   assert.ok(recovery.indexOf("this.getName() + 'Data'") < recovery.indexOf("this.getName() + 'DataBackup'"));
 });
 
-test('no-save startup still loads and normalizes the saved archive', () => {
+test('no-save startup loads the archive unless the linked child detaches it', () => {
   const startupStart = source.indexOf('this._pendingNoSavePersistedRemovals = [];');
   const startupEnd = source.indexOf('this.cachedMessageRecord = [];', startupStart);
   const startup = source.slice(startupStart, startupEnd);
 
   assert.ok(startupStart >= 0 && startupEnd > startupStart);
   assert.match(startup, /this\._needsNoSaveDataMerge = !!this\.settings\.dontSaveData/);
-  assert.match(startup, /const selectedData = this\.selectStartupDataPayload\([\s\S]*Data\.load\(this\.getName\(\) \+ 'Data', 'data'\)[\s\S]*Data\.load\(this\.getName\(\) \+ 'DataBackup', 'data'\)/);
+  assert.match(startup, /this\._archiveDetached = !!\(this\.settings\.dontSaveData && this\.settings\.dontLoadArchivedData\)/);
+  assert.match(startup, /const selectedData = this\._archiveDetached[\s\S]*source: 'detached'[\s\S]*loadStartupDataPayloadFromDisk\(\)\)\.selected/);
+  assert.doesNotMatch(startup, /Data\.load\(this\.getName\(\) \+ 'Data(?:Backup)?', 'data'\)/);
   assert.match(startup, /data = selectedData\.data[\s\S]*data = this\.normalizePersistedDataPayload\(data\)/);
-  assert.doesNotMatch(startup, /if \(this\.settings\.dontSaveData\)\s*\{\s*data =/);
-  assert.doesNotMatch(startup, /if \(!this\.settings\.dontSaveData\)\s*\{\s*let loadedPayloadSnapshot/);
   assert.ok(source.indexOf('this.installDataPayload(data)', startupEnd) > startupEnd);
-  assert.match(settingsDocs, /Disable saving data \| Off \| Always loads the existing archive into the logger\./);
+  assert.match(settingsDocs, /Disable loading archived data \| Off \|/);
+  assert.match(settingsDocs, /When both this setting and \*\*Disable saving data\*\* are enabled/i);
 });
 
 test('no-save mode persists removals from disk without serializing session additions', () => {
   const removalPersistence = source.slice(
     source.indexOf('getNoSaveEditRemovalIdentity(edit)'),
-    source.indexOf('loadPersistedDataForNoSaveMerge()')
+    source.indexOf('  loadPersistedDataForNoSaveMerge() {')
   );
   const editRemoval = source.slice(
     source.indexOf('deleteEditedMessageFromRecord(id, editNum)'),
@@ -1255,12 +1270,14 @@ test('no-save mode persists removals from disk without serializing session addit
   assert.match(removalPersistence, /readDataPayloadFile\(this\.getName\(\) \+ 'DataBackup'\)/);
   assert.match(removalPersistence, /writeDataPayloadAtomicSync/);
   assert.doesNotMatch(removalPersistence, /this\._getDataPayload\(\)|mergeDataPayloads\(/);
+  assert.match(removalPersistence, /if \(this\._archiveDetached\) return \{ ok: true, changed: false, detached: true \}/);
+  assert.match(removalPersistence, /!this\.settings\?\.dontSaveData \|\| this\._archiveDetached/);
   assert.match(editRemoval, /queueNoSavePersistedRemoval\(\{ type: 'edit'/);
   assert.match(recordRemoval, /queueNoSavePersistedRemoval\(\{ type: 'record'/);
   assert.match(rootRemoval, /threadRoot: true/);
   assert.match(capRemoval, /this\.deleteMessageFromRecords\(map\[i\]\)/);
   assert.match(clearLogRemoval, /this\.deleteMessageFromRecords\(id\)/);
-  assert.match(settingsDocs, /Disable saving data \| Off \|[^\n]*archival removals[^\n]*deletion-only/i);
+  assert.match(settingsDocs, /archival removals[^\n]*deletion-only/i);
 });
 
 test('schema updates use canonical whole-file output and routed notifications', () => {

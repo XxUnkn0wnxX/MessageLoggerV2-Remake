@@ -208,11 +208,11 @@ Notification settings affect alerts only. Logging scope is controlled separately
 
 After a no-save reload:
 
-1. The saved archive still loads into the logger for viewing.
-2. New records and edits stay in a temporary in-memory session. Reloading while saving remains disabled discards those additions, while archival removals still commit deletion-only changes.
-3. Re-enabling saving validates and merges disk and eligible session records, de-duplicates indexes, preserves saved state, applies caps, then atomically writes the primary before the backup. A failed validation or primary write leaves saving disabled and both existing files untouched.
+1. **Disable saving data** normally keeps the saved archive visible while new records and edits stay in a temporary in-memory session. Loaded archival removals still commit deletion-only changes.
+2. Its linked **Disable loading archived data** setting skips or hot-unloads the archive and keeps only temporary session activity. Turning the child back off hot-loads and combines the archive in memory without writing. Archive removal and cached-file deletion are unavailable while detached.
+3. Re-enabling saving validates and merges disk and eligible session records, de-duplicates indexes, preserves exact saved state, applies caps, then atomically writes the primary before the backup. A failed validation or primary write leaves saving disabled, restores detached session memory when needed, and keeps existing files untouched.
 
-Disabling saving reports memory-only additions and archival-removal write-through. Re-enabling without a reload queues in-memory changes; re-enabling after a reload reports the merge. Every message uses the selected notification mode and includes console detail.
+The child preference remains saved but displays and behaves as Off while **Disable saving data** is disabled. Plugin or Discord reload still discards temporary session activity. State and failure messages use the selected notification mode and include console detail.
 
 Changing **Obfuscate CSS classes** restarts MessageLogger by temporarily disabling and re-enabling it. With data saving active, the normal shutdown flush runs first. With **Disable saving data** enabled, a danger confirmation appears because memory-only session activity cannot survive the restart; **No** leaves the CSS-class setting unchanged.
 

@@ -655,6 +655,7 @@ module.exports = class MessageLoggerV2 {
       debugLogging: false,
       debugToasts: false,
       dontSaveData: false,
+      dontLoadArchivedData: false,
       displayUpdateNotes: true,
       ignoreMutedGuilds: true,
       ignoreMutedChannels: true,
@@ -1062,16 +1063,24 @@ module.exports = class MessageLoggerV2 {
     this._noSaveMergeDirty = false;
     this._pendingNoSavePersistedRemovals = [];
     this._noSavePersistedRemovalTimer = 0;
-    // A no-save startup still loads the saved archive for viewing. Re-enabling later re-reads
-    // disk and merges the memory-only session so external changes and deletion-only writes stay safe.
+    this._archiveLoadModeTransitionInProgress = false;
+    this._archiveDetached = !!(this.settings.dontSaveData && this.settings.dontLoadArchivedData);
+    this._noSaveSessionOverlay = null;
+    // Both no-save modes merge their temporary session with a fresh archive read when saving
+    // resumes. Detached mode deliberately skips BetterDiscord's cached archive reads entirely.
     this._needsNoSaveDataMerge = !!this.settings.dontSaveData;
     let data;
     let dataLoadedFromBackup = false;
     let backupRecoveryReason = null;
-    const selectedData = this.selectStartupDataPayload(
-      Data.load(this.getName() + 'Data', 'data'),
-      Data.load(this.getName() + 'DataBackup', 'data')
-    );
+    let startupDataFiles = null;
+    const selectedData = this._archiveDetached
+      ? {
+          data: this.createDefaultDataPayload(),
+          source: 'detached',
+          primaryWasPresent: false,
+          hadPersistedCandidate: false
+        }
+      : (startupDataFiles = this.loadStartupDataPayloadFromDisk()).selected;
     data = selectedData.data;
     if (selectedData.source === 'backup') {
       dataLoadedFromBackup = true;
@@ -1098,6 +1107,8 @@ module.exports = class MessageLoggerV2 {
       } else {
         Logger.log('No persisted logger primary or backup was found; starting with an empty payload.');
       }
+    } else if (selectedData.source === 'detached') {
+      Logger.log('Saved logger archive loading is disabled for this no-save session; starting with temporary memory only.');
     }
     this.messageStore = DiscordModules.MessageStore;
     this.ChannelStore = DiscordModules.ChannelStore;
@@ -1108,7 +1119,9 @@ module.exports = class MessageLoggerV2 {
       // Structural checks are intentionally cheap. If deeper record normalization fails,
       // make one safe attempt to use the backup before aborting startup with files intact.
       if (dataLoadedFromBackup) throw primaryNormalizationError;
-      const backupData = Data.load(this.getName() + 'DataBackup', 'data');
+      const backupData = startupDataFiles?.backup?.status === 'candidate'
+        ? startupDataFiles.backup.data
+        : null;
       if (!this.canNormalizePersistedDataPayload(backupData)) throw primaryNormalizationError;
       try {
         loadedPayloadSnapshot = JSON.stringify(backupData);
@@ -1136,6 +1149,9 @@ module.exports = class MessageLoggerV2 {
     this.cachedMessageIds = new Set();
     this.cachedMessagesMap = new Map();
     this.installDataPayload(data);
+    if (this._archiveDetached) {
+      this._noSaveSessionOverlay = this.createEmptyNoSaveSessionOverlay(data);
+    }
     this._messageUpdateRegistry = new Map();
     this._globalUpdateCallbackMessage = null;
     this._globalUpdateCallbackContent = null;
@@ -1164,26 +1180,14 @@ module.exports = class MessageLoggerV2 {
       }
     }
     const CUser = DiscordModules.CUser;
-    const userRecord = {};
-    const lastSeenUser = {};
-    for (const messageId in this.messageRecord) {
-      const record = this.messageRecord[messageId];
-      const userObj = record.message.author;
-      if (!userObj || typeof userObj === 'string') continue;
-      const date = new Date(record.message.timestamp);
-      if (!(userRecord[userObj.id] && lastSeenUser[userObj.id] && lastSeenUser[userObj.id] > date)) {
-        userRecord[userObj.id] = userObj;
-        lastSeenUser[userObj.id] = date;
-      }
-    }
     this.unpatches = [];
     this.unpatches.push(
       Patcher.after(this.UserStore, 'getUser', (_this, args, ret) => {
         if (!ret && !args[1]) {
           const userId = args[0];
           const users = this.UserStore.getUsers();
-          if (userRecord[userId]) {
-            users[userId] = new CUser(userRecord[userId]);
+          if (this._savedUserRecord?.[userId]) {
+            users[userId] = new CUser(this._savedUserRecord[userId]);
             return users[userId];
           }
         }
@@ -1396,6 +1400,7 @@ module.exports = class MessageLoggerV2 {
     this.style.settingsHelpModal = this.obfuscatedClass('ml2-settings-help-modal');
     this.style.startupHelpModal = this.obfuscatedClass('ml2-startup-help-modal');
     this.style.cachedFilesModal = this.obfuscatedClass('ml2-cached-files-modal');
+    this.style.cssClassRestartWarning = this.obfuscatedClass('ml2-css-class-restart-warning');
     this.style.menu = this.obfuscatedClass('ML2-MENU');
     this.loggerHelpModalKey = `${this.style.menu}-logger-help`;
     this.filterHelpModalKey = `${this.style.menu}-filter-help`;
@@ -1738,6 +1743,13 @@ module.exports = class MessageLoggerV2 {
                     .${this.style.cachedFilesModal} {
                       width: min(560px, calc(100vw - 32px)) !important;
                       max-width: 560px !important;
+                      margin-inline: auto;
+                    }
+                    .${this.style.cssClassRestartWarning} {
+                      width: min(420px, calc(100vw - 32px)) !important;
+                      max-width: calc(100vw - 32px) !important;
+                      min-height: 0 !important;
+                      box-sizing: border-box;
                       margin-inline: auto;
                     }
                     .${this.style.imageRoot} {
@@ -2113,6 +2125,66 @@ module.exports = class MessageLoggerV2 {
     }
     return React.createElement(ConfirmedCssClassModeSwitch);
   }
+  createControlledArchiveLoadSwitch(config) {
+    const plugin = this;
+    const switchId = this.obfuscatedClass(config.id);
+    function ControlledArchiveLoadSwitch() {
+      const [, refresh] = React.useState(0);
+      React.useEffect(() => {
+        const update = () => refresh(value => value + 1);
+        const unsubscribeSetting = plugin.subscribeSettingDependency(config.id, update);
+        const unsubscribeParent = plugin.subscribeSettingDependency('dontSaveData', update);
+        return () => {
+          unsubscribeSetting();
+          unsubscribeParent();
+        };
+      }, []);
+      // The stored preference survives while the parent is off, but its displayed/effective
+      // value is Off until Disable saving data makes the child active again.
+      const value = !!plugin.settings.dontSaveData && !!plugin.settings[config.id];
+      const disabled = !plugin.settings.dontSaveData
+        || !!plugin._noSaveMergeInProgress
+        || !!plugin._noSaveMergePromise
+        || !!plugin._archiveLoadModeTransitionInProgress;
+      const onChange = nextValue => plugin.requestArchiveLoadModeChange(!!nextValue);
+      if (typeof Components.SwitchInput === 'function') {
+        return React.createElement(Components.SwitchInput, {
+          id: switchId,
+          value,
+          disabled,
+          internalState: false,
+          onChange
+        });
+      }
+      return React.createElement('input', {
+        id: switchId,
+        type: 'checkbox',
+        checked: value,
+        disabled,
+        onChange: event => onChange(event.currentTarget.checked)
+      });
+    }
+    return React.createElement(ControlledArchiveLoadSwitch);
+  }
+  requestArchiveLoadModeChange(nextValue) {
+    const requestedValue = !!nextValue;
+    if (!this.settings.dontSaveData
+      || this._noSaveMergeInProgress
+      || this._noSaveMergePromise
+      || this._archiveLoadModeTransitionInProgress) return false;
+    if (requestedValue === !!this.settings.dontLoadArchivedData) return true;
+    const accepted = requestedValue
+      ? this.detachArchivedDataFromMemory()
+      : this.attachArchivedDataToMemory();
+    if (!accepted) {
+      this.notifySettingDependencyChange('dontLoadArchivedData');
+      return false;
+    }
+    this.settings.dontLoadArchivedData = requestedValue;
+    this.saveSettings();
+    this.notifySettingDependencyChange('dontLoadArchivedData');
+    return true;
+  }
   requestCssClassModeChange(nextValue) {
     const requestedValue = !!nextValue;
     if (requestedValue === !!this.settings.obfuscateCSSClasses) return false;
@@ -2147,6 +2219,7 @@ module.exports = class MessageLoggerV2 {
     this.createModal({
       header: 'Restart MessageLogger?',
       size: this.tools?.resolvedModalStuff?.ModalSize?.SMALL,
+      className: this.style?.cssClassRestartWarning,
       children: warning,
       confirmText: 'Restart Logger',
       cancelText: 'No',
@@ -3684,10 +3757,28 @@ module.exports = class MessageLoggerV2 {
         settings: [
           {
             name: 'Disable saving data',
-            note: 'Always loads saved history. New logs stay memory-only and additions/backups pause; removing saved records or edits still writes through.',
+            note: 'New logs stay memory-only and additions/backups pause. Saved history stays loaded unless the linked archive setting is enabled.',
             id: 'dontSaveData',
             type: 'switch',
             action: 'handleDataSave'
+          },
+          {
+            name: 'Disable loading archived data',
+            note: React.createElement(
+              'span',
+              null,
+              'Works only with ',
+              React.createElement(
+                'span',
+                { style: { color: 'var(--text-warning, var(--status-warning))' } },
+                'Disable saving data'
+              ),
+              '. Unloads saved history from memory and keeps only temporary session records; the archive stays unchanged on disk.'
+            ),
+            id: 'dontLoadArchivedData',
+            enableWith: 'dontSaveData',
+            type: 'switch',
+            controlledArchiveLoad: true
           },
           {
             name: "Auto backup data (won't fully prevent losing data, just prevent total data loss)",
@@ -4161,6 +4252,12 @@ module.exports = class MessageLoggerV2 {
         setting.onChange = () => {};
         delete setting.confirmedCssClassRestart;
       }
+      else if (config.controlledArchiveLoad) {
+        setting.type = 'custom';
+        setting.children = this.createControlledArchiveLoadSwitch(config);
+        setting.onChange = () => {};
+        delete setting.controlledArchiveLoad;
+      }
       else if (config.validator === 'loggerKeybind') {
         // Retain BetterDiscord's native recorder while wrapping only its value callback with
         // logger-specific safety/conflict validation and inline rejection feedback.
@@ -4393,6 +4490,62 @@ module.exports = class MessageLoggerV2 {
       source: 'empty',
       primaryWasPresent: !!primaryData,
       hadPersistedCandidate: !!(primaryData || backupData)
+    };
+  }
+  readRawDataPayloadFile(name) {
+    const filePath = this.nodeModules.path.join(this.pluginDir, `${name}.config.json`);
+    if (!this.nodeModules.fs.existsSync(filePath)) return { status: 'missing', filePath };
+    try {
+      const parsed = JSON.parse(this.nodeModules.fs.readFileSync(filePath, 'utf8'));
+      const newerVersion = this.getUnsupportedDataSchemaVersion(parsed?.data);
+      if (newerVersion !== null) {
+        const error = new Error(`Logger data schema ${newerVersion} is newer than supported schema ${DATA_SCHEMA_VERSION}`);
+        error.code = 'MLV2_NEWER_DATA_SCHEMA';
+        return { status: 'incompatible', filePath, error };
+      }
+      return { status: 'candidate', filePath, data: parsed?.data };
+    } catch (error) {
+      return { status: 'invalid', filePath, error };
+    }
+  }
+  selectStartupDataFilePayload(primary, backup) {
+    if (primary?.status === 'incompatible') throw primary.error;
+    const primaryData = primary?.status === 'candidate' ? primary.data : null;
+    if (primaryData && this.canNormalizePersistedDataPayload(primaryData)) {
+      return {
+        data: primaryData,
+        source: 'primary',
+        primaryWasPresent: true,
+        hadPersistedCandidate: true
+      };
+    }
+    if (backup?.status === 'incompatible') throw backup.error;
+    const backupData = backup?.status === 'candidate' ? backup.data : null;
+    if (backupData && this.canNormalizePersistedDataPayload(backupData)) {
+      return {
+        data: backupData,
+        source: 'backup',
+        primaryWasPresent: primary?.status !== 'missing',
+        hadPersistedCandidate: true
+      };
+    }
+    return {
+      data: this.createDefaultDataPayload(),
+      source: 'empty',
+      primaryWasPresent: primary?.status !== 'missing',
+      hadPersistedCandidate: primary?.status !== 'missing' || backup?.status !== 'missing'
+    };
+  }
+  loadStartupDataPayloadFromDisk() {
+    // Startup must see the bytes written by the deletion-only no-save journal. BetterDiscord's
+    // JsonStore can retain an older Data.load() object across a hot reload and resurrect a record
+    // if that stale object is later merged back into the current file.
+    const primary = this.readRawDataPayloadFile(this.getName() + 'Data');
+    const backup = this.readRawDataPayloadFile(this.getName() + 'DataBackup');
+    return {
+      primary,
+      backup,
+      selected: this.selectStartupDataFilePayload(primary, backup)
     };
   }
   normalizeLegacyDeleteData(record) {
@@ -4879,8 +5032,42 @@ module.exports = class MessageLoggerV2 {
     return Object.fromEntries(
       Object.entries(data || {})
         .filter(([key]) => !knownKeys.has(key))
-        .map(([key, value]) => [key, this.cloneDataValue(value)])
+      .map(([key, value]) => [key, this.cloneDataValue(value)])
     );
+  }
+  replaceBetterDiscordDataCache(name, data = null) {
+    // Data.load returns BetterDiscord JsonStore's retained object. Mutating that object in place
+    // updates only the host cache; Data.save/Data.delete are deliberately avoided so a hot
+    // archive detach cannot touch the file on disk.
+    try {
+      const cached = Data.load(name, 'data');
+      if (!cached || typeof cached !== 'object' || Array.isArray(cached)) return false;
+      for (const key of Object.keys(cached)) delete cached[key];
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        for (const [key, value] of Object.entries(data)) cached[key] = value;
+      }
+      return true;
+    } catch (error) {
+      Logger.warn(`Could not align BetterDiscord's in-memory ${name} cache.`, error);
+      return false;
+    }
+  }
+  clearBetterDiscordArchiveDataCache() {
+    this.replaceBetterDiscordDataCache(this.getName() + 'Data');
+    this.replaceBetterDiscordDataCache(this.getName() + 'DataBackup');
+  }
+  rebuildSavedUserRecordCache() {
+    const userRecord = {};
+    const lastSeenUser = {};
+    for (const record of Object.values(this.messageRecord || {})) {
+      const userObj = record?.message?.author;
+      if (!userObj || typeof userObj === 'string' || !userObj.id) continue;
+      const date = new Date(record.message.timestamp);
+      if (userRecord[userObj.id] && lastSeenUser[userObj.id] && lastSeenUser[userObj.id] > date) continue;
+      userRecord[userObj.id] = userObj;
+      lastSeenUser[userObj.id] = date;
+    }
+    this._savedUserRecord = userRecord;
   }
   installDataPayload(data) {
     data = this.sanitizeDataPayload(data);
@@ -4902,6 +5089,7 @@ module.exports = class MessageLoggerV2 {
     this.sortedDeletedMessageIds = new Map();
     this.sortedPurgedMessageIds = new Map();
     this.sortedNukedMessageIds = new Map();
+    this.rebuildSavedUserRecordCache();
   }
   getRecordActivityTime(record) {
     const times = [
@@ -5032,6 +5220,409 @@ module.exports = class MessageLoggerV2 {
     this.migrateAntiNukeCategoryRecords(merged);
     return this.sanitizeDataPayload(merged);
   }
+  areDataValuesEqual(left, right) {
+    if (Object.is(left, right)) return true;
+    if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false;
+    if (Array.isArray(left) || Array.isArray(right)) {
+      if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+      return left.every((value, index) => this.areDataValuesEqual(value, right[index]));
+    }
+    const leftKeys = Object.keys(left).sort();
+    const rightKeys = Object.keys(right).sort();
+    if (leftKeys.length !== rightKeys.length) return false;
+    return leftKeys.every((key, index) => key === rightKeys[index]
+      && this.areDataValuesEqual(left[key], right[key]));
+  }
+  serializeDataValueCanonical(value) {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) {
+      return `[${value.map(item => this.serializeDataValueCanonical(item)).join(',')}]`;
+    }
+    return `{${Object.keys(value).sort().map(key => (
+      `${JSON.stringify(key)}:${this.serializeDataValueCanonical(value[key])}`
+    )).join(',')}}`;
+  }
+  getNoSaveArrayItemIdentity(value, path = []) {
+    const field = path[path.length - 1];
+    if (field === 'edit_history') {
+      return `edit:${this.getNoSaveEditRemovalIdentity(value) || this.serializeDataValueCanonical(value)}`;
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      if (value.id !== undefined && value.id !== null) return `id:${String(value.id)}`;
+      if (field === 'attachments') {
+        const location = value.url || value.proxy_url || value.filename;
+        if (location) return `attachment:${String(location)}`;
+      }
+      if (field === 'embeds') {
+        const location = value.url
+          || value.image?.url
+          || value.image?.proxy_url
+          || value.video?.url
+          || value.thumbnail?.url;
+        if (location) return `embed:${String(value.type || '')}:${String(location)}`;
+      }
+    }
+    return `value:${this.serializeDataValueCanonical(value)}`;
+  }
+  applyNoSaveArrayDelta(base, session, current, path = []) {
+    if (this.areDataValuesEqual(base, session)) return this.cloneDataValue(current);
+    if (!Array.isArray(current)) return this.cloneDataValue(session);
+    const toMap = values => new Map(values.map(value => [this.getNoSaveArrayItemIdentity(value, path), value]));
+    const baseMap = toMap(base);
+    const sessionMap = toMap(session);
+    const removedIds = new Set(Array.from(baseMap.keys()).filter(id => !sessionMap.has(id)));
+    const result = current
+      .filter(value => !removedIds.has(this.getNoSaveArrayItemIdentity(value, path)))
+      .map(value => this.cloneDataValue(value));
+    const resultIndex = () => new Map(result.map((value, index) => [this.getNoSaveArrayItemIdentity(value, path), index]));
+    for (const sessionValue of session) {
+      const identity = this.getNoSaveArrayItemIdentity(sessionValue, path);
+      const baseValue = baseMap.get(identity);
+      const indexes = resultIndex();
+      const currentIndex = indexes.get(identity);
+      if (!baseMap.has(identity)) {
+        if (currentIndex === undefined) result.push(this.cloneDataValue(sessionValue));
+        else result[currentIndex] = this.cloneDataValue(sessionValue);
+        continue;
+      }
+      if (this.areDataValuesEqual(baseValue, sessionValue)) continue;
+      if (currentIndex === undefined) result.push(this.cloneDataValue(sessionValue));
+      else result[currentIndex] = this.applyNoSaveDataDelta(
+        baseValue,
+        sessionValue,
+        result[currentIndex],
+        [...path, identity]
+      );
+    }
+    if (path[path.length - 1] === 'edit_history') {
+      const editTime = value => Number(value?.time) || Date.parse(value?.time) || 0;
+      result.sort((left, right) => editTime(left) - editTime(right)
+        || String(left?.content || '').localeCompare(String(right?.content || '')));
+    }
+    return result;
+  }
+  applyNoSaveDataDelta(base, session, current, path = []) {
+    if (this.areDataValuesEqual(base, session)) return this.cloneDataValue(current);
+    if (Array.isArray(base) && Array.isArray(session)) {
+      return this.applyNoSaveArrayDelta(base, session, current, path);
+    }
+    const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
+    if (isPlainObject(base) && isPlainObject(session)) {
+      if (!isPlainObject(current)) return this.cloneDataValue(session);
+      const result = this.cloneDataValue(current);
+      const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+      for (const key of new Set([...Object.keys(base), ...Object.keys(session)])) {
+        if (!hasOwn(session, key)) {
+          delete result[key];
+          continue;
+        }
+        if (!hasOwn(base, key)) {
+          result[key] = this.cloneDataValue(session[key]);
+          continue;
+        }
+        result[key] = this.applyNoSaveDataDelta(base[key], session[key], current[key], [...path, key]);
+      }
+      return result;
+    }
+    return this.cloneDataValue(session);
+  }
+  getDataPayloadCategoryMap(data) {
+    const categories = new Map();
+    const descriptors = [
+      ['deletedMessageRecord', 'deleted'],
+      ['editedMessageRecord', 'edited'],
+      ['purgedMessageRecord', 'purged'],
+      ['nukedMessageRecord', 'nuked']
+    ];
+    for (const [key, category] of descriptors) {
+      for (const ids of Object.values(data?.[key] || {})) {
+        for (const id of ids || []) categories.set(String(id), category);
+      }
+    }
+    return categories;
+  }
+  createEmptyNoSaveSessionOverlay(payload = null) {
+    const sessionPayload = payload
+      ? this.sanitizeDataPayload(this.prepareDataPayloadForNormalization(this.cloneDataValue(payload)))
+      : this.createDefaultDataPayload();
+    return {
+      payload: sessionPayload,
+      archiveBackedUpsertIds: new Set(),
+      archiveBaseRecords: {},
+      archiveBaseCategories: {},
+      removedRecordIds: new Set(),
+      archiveSuppressedIds: new Set(),
+      suppressionTouchedIds: new Set(sessionPayload.suppressedForumThreadIds),
+      lastSessionSuppressedIds: new Set(sessionPayload.suppressedForumThreadIds),
+      suppressedAdds: new Set(sessionPayload.suppressedForumThreadIds),
+      suppressedRemoves: new Set()
+    };
+  }
+  buildNoSaveSessionOverlay(archiveData, runtimeData) {
+    const archive = this.sanitizeDataPayload(
+      this.prepareDataPayloadForNormalization(this.cloneDataValue(archiveData))
+    );
+    const runtime = this.sanitizeDataPayload(
+      this.prepareDataPayloadForNormalization(this.cloneDataValue(runtimeData))
+    );
+    const archiveCategories = this.getDataPayloadCategoryMap(archive);
+    const runtimeCategories = this.getDataPayloadCategoryMap(runtime);
+    const overlay = this.createEmptyNoSaveSessionOverlay();
+    const categoryKeys = {
+      deleted: 'deletedMessageRecord',
+      edited: 'editedMessageRecord',
+      purged: 'purgedMessageRecord',
+      nuked: 'nukedMessageRecord'
+    };
+
+    for (const messageId of Object.keys(runtime.messageRecord).sort()) {
+      const archiveRecord = archive.messageRecord[messageId];
+      const runtimeRecord = runtime.messageRecord[messageId];
+      const recordChanged = !archiveRecord || !this.areDataValuesEqual(archiveRecord, runtimeRecord);
+      const categoryChanged = archiveCategories.get(messageId) !== runtimeCategories.get(messageId);
+      if (!recordChanged && !categoryChanged) continue;
+      overlay.payload.messageRecord[messageId] = this.cloneDataValue(runtimeRecord);
+      if (archiveRecord) {
+        overlay.archiveBackedUpsertIds.add(messageId);
+        overlay.archiveBaseRecords[messageId] = this.cloneDataValue(archiveRecord);
+        overlay.archiveBaseCategories[messageId] = archiveCategories.get(messageId) || null;
+      }
+      const category = runtimeCategories.get(messageId);
+      const categoryKey = categoryKeys[category];
+      const channelId = runtimeRecord?.message?.channel_id;
+      if (categoryKey && channelId) (overlay.payload[categoryKey][channelId] ||= []).push(messageId);
+    }
+    for (const messageId of Object.keys(archive.messageRecord).sort()) {
+      if (!Object.prototype.hasOwnProperty.call(runtime.messageRecord, messageId)) {
+        overlay.removedRecordIds.add(messageId);
+      }
+    }
+    const archiveSuppressed = new Set(archive.suppressedForumThreadIds);
+    const runtimeSuppressed = new Set(runtime.suppressedForumThreadIds);
+    const retainedIds = new Set(Object.keys(overlay.payload.messageRecord));
+    overlay.archiveSuppressedIds = new Set(archiveSuppressed);
+    overlay.suppressedAdds = new Set(Array.from(runtimeSuppressed).filter(id => !archiveSuppressed.has(id)));
+    overlay.suppressedRemoves = new Set(Array.from(archiveSuppressed).filter(id => !runtimeSuppressed.has(id)));
+    overlay.suppressionTouchedIds = new Set([...overlay.suppressedAdds, ...overlay.suppressedRemoves]);
+    // Keep suppression needed by retained session/changed roots active while the rest of the
+    // archive is absent. It is not treated as a session write unless its membership changes.
+    overlay.payload.suppressedForumThreadIds = Array.from(runtimeSuppressed)
+      .filter(id => !archiveSuppressed.has(id) || retainedIds.has(id));
+    overlay.lastSessionSuppressedIds = new Set(overlay.payload.suppressedForumThreadIds);
+    overlay.payload = this.sanitizeDataPayload(overlay.payload);
+    return overlay;
+  }
+  captureDetachedNoSaveSessionOverlay() {
+    if (!this._archiveDetached) return this._noSaveSessionOverlay;
+    const previous = this._noSaveSessionOverlay || this.createEmptyNoSaveSessionOverlay();
+    const current = this.sanitizeDataPayload(
+      this.prepareDataPayloadForNormalization(this.cloneDataValue(this._getDataPayload()))
+    );
+    const payload = this.createDefaultDataPayload();
+    for (const key of [
+      'messageRecord',
+      'deletedMessageRecord',
+      'editedMessageRecord',
+      'purgedMessageRecord',
+      'nukedMessageRecord',
+      'suppressedForumThreadIds'
+    ]) payload[key] = this.cloneDataValue(current[key]);
+    const archiveBackedUpsertIds = new Set(previous.archiveBackedUpsertIds || []);
+    const archiveBaseRecords = this.cloneDataValue(previous.archiveBaseRecords || {});
+    const archiveBaseCategories = { ...(previous.archiveBaseCategories || {}) };
+    const removedRecordIds = new Set(previous.removedRecordIds || []);
+    for (const messageId of new Set([...archiveBackedUpsertIds, ...removedRecordIds])) {
+      if (Object.prototype.hasOwnProperty.call(payload.messageRecord, messageId)) {
+        archiveBackedUpsertIds.add(messageId);
+        removedRecordIds.delete(messageId);
+      } else if (archiveBackedUpsertIds.has(messageId)) {
+        removedRecordIds.add(messageId);
+      }
+    }
+    const archiveSuppressedIds = new Set(previous.archiveSuppressedIds || []);
+    const suppressionTouchedIds = new Set(previous.suppressionTouchedIds || []);
+    const previousSuppressedIds = new Set(previous.lastSessionSuppressedIds || []);
+    const currentSuppressedIds = new Set(payload.suppressedForumThreadIds);
+    for (const threadId of new Set([...previousSuppressedIds, ...currentSuppressedIds])) {
+      if (previousSuppressedIds.has(threadId) !== currentSuppressedIds.has(threadId)) {
+        suppressionTouchedIds.add(threadId);
+      }
+    }
+    const suppressedAdds = new Set();
+    const suppressedRemoves = new Set();
+    for (const threadId of suppressionTouchedIds) {
+      if (currentSuppressedIds.has(threadId)) suppressedAdds.add(threadId);
+      else if (archiveSuppressedIds.has(threadId)) suppressedRemoves.add(threadId);
+    }
+    this._noSaveSessionOverlay = {
+      payload: this.sanitizeDataPayload(payload),
+      archiveBackedUpsertIds,
+      archiveBaseRecords,
+      archiveBaseCategories,
+      removedRecordIds,
+      archiveSuppressedIds,
+      suppressionTouchedIds,
+      lastSessionSuppressedIds: currentSuppressedIds,
+      suppressedAdds,
+      suppressedRemoves
+    };
+    return this._noSaveSessionOverlay;
+  }
+  applyNoSaveSessionOverlay(archiveData, overlay = this._noSaveSessionOverlay) {
+    const archive = this.sanitizeDataPayload(
+      this.prepareDataPayloadForNormalization(this.cloneDataValue(archiveData))
+    );
+    if (!overlay) return archive;
+    const session = this.sanitizeDataPayload(
+      this.prepareDataPayloadForNormalization(this.cloneDataValue(overlay.payload))
+    );
+    const archiveCategories = this.getDataPayloadCategoryMap(archive);
+    const sessionCategories = this.getDataPayloadCategoryMap(session);
+    const removedIds = new Set(overlay.removedRecordIds || []);
+    const upsertIds = new Set(Object.keys(session.messageRecord));
+    const affectedIds = new Set([...removedIds, ...upsertIds]);
+    const resolvedCategories = new Map();
+    for (const messageId of removedIds) delete archive.messageRecord[messageId];
+    for (const messageId of upsertIds) {
+      const baseRecord = overlay.archiveBaseRecords?.[messageId];
+      const currentRecord = archive.messageRecord[messageId];
+      archive.messageRecord[messageId] = baseRecord && currentRecord
+        ? this.applyNoSaveDataDelta(baseRecord, session.messageRecord[messageId], currentRecord)
+        : this.cloneDataValue(session.messageRecord[messageId]);
+      const sessionCategory = sessionCategories.get(messageId) || null;
+      const hasBaseCategory = Object.prototype.hasOwnProperty.call(overlay.archiveBaseCategories || {}, messageId);
+      const baseCategory = hasBaseCategory ? overlay.archiveBaseCategories[messageId] : null;
+      resolvedCategories.set(
+        messageId,
+        currentRecord && hasBaseCategory && sessionCategory === baseCategory
+          ? archiveCategories.get(messageId) || null
+          : sessionCategory
+      );
+    }
+    for (const key of ['deletedMessageRecord', 'editedMessageRecord', 'purgedMessageRecord', 'nukedMessageRecord']) {
+      for (const [channelId, ids] of Object.entries(archive[key])) {
+        archive[key][channelId] = ids.filter(id => !affectedIds.has(id));
+        if (!archive[key][channelId].length) delete archive[key][channelId];
+      }
+    }
+    const categoryKeys = {
+      deleted: 'deletedMessageRecord',
+      edited: 'editedMessageRecord',
+      purged: 'purgedMessageRecord',
+      nuked: 'nukedMessageRecord'
+    };
+    for (const [messageId, category] of resolvedCategories) {
+      const key = categoryKeys[category];
+      const channelId = archive.messageRecord[messageId]?.message?.channel_id;
+      if (key && channelId) (archive[key][channelId] ||= []).push(messageId);
+    }
+    const suppressed = new Set(archive.suppressedForumThreadIds);
+    for (const threadId of overlay.suppressedRemoves || []) suppressed.delete(threadId);
+    for (const threadId of overlay.suppressedAdds || []) suppressed.add(threadId);
+    archive.suppressedForumThreadIds = Array.from(suppressed);
+    return this.sanitizeDataPayload(archive);
+  }
+  refreshArchiveLoadPresentation() {
+    try {
+      this.invalidateAllChannelCache?.();
+      if (this.selectedChannel?.id) this.cacheChannelMessages?.(this.selectedChannel.id);
+      this.dispatcher?.dispatch?.({ type: 'MLV2_FORCE_UPDATE_MESSAGE' });
+      this.dispatcher?.dispatch?.({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' });
+      this.scheduleForumListRefresh?.();
+      this.scheduleLoggerMenuRefresh?.();
+      for (const refresh of this._forumThreadLogRefreshers?.values?.() || []) refresh();
+      this._tintSweep?.();
+      if (typeof document !== 'undefined') this.forceUpdateUI?.();
+    } catch (error) {
+      Logger.warn('Could not fully refresh the logger presentation after changing archive memory mode.', error);
+    }
+  }
+  reportArchiveLoadModeError(stage, error) {
+    Logger.error(`Could not ${stage} the saved logger archive.`, error);
+    this.notifyUser(`The saved archive could not be ${stage === 'detach' ? 'unloaded' : 'loaded'}; the setting was left unchanged. View the console log for details.`, {
+      title: 'Message Logger Archive Error',
+      type: 'error',
+      timeout: 0,
+      replaceKey: 'system:archive-load-mode-error'
+    });
+  }
+  detachArchivedDataFromMemory() {
+    if (this._archiveDetached) return true;
+    if (!this.settings.dontSaveData
+      || this._archiveLoadModeTransitionInProgress
+      || this._noSaveMergeInProgress
+      || this._noSaveMergePromise) return false;
+    this._archiveLoadModeTransitionInProgress = true;
+    this.notifySettingDependencyChange('dontLoadArchivedData');
+    try {
+      const removalFlush = this.flushNoSavePersistedRemovals();
+      if (!removalFlush.ok) return false;
+      this.cancelPendingDataWrites();
+      const loaded = this.loadPersistedDataForNoSaveMerge();
+      const overlay = this.buildNoSaveSessionOverlay(loaded.data, this._getDataPayload());
+      this.installDataPayload(overlay.payload);
+      this._noSaveSessionOverlay = overlay;
+      this._archiveDetached = true;
+      this._needsNoSaveDataMerge = true;
+      this._pendingNoSavePersistedRemovals = [];
+      this.clearBetterDiscordArchiveDataCache();
+      this.refreshArchiveLoadPresentation();
+      this.reportSettingState(
+        'Logger Archive Unloaded',
+        'Saved logger archive unloaded from memory; temporary session records remain active.',
+        'Saved history was unloaded from memory. Temporary session records remain active and the archive on disk was not changed.',
+        'info',
+        5000,
+        'setting:dontLoadArchivedData'
+      );
+      return true;
+    } catch (error) {
+      this.reportArchiveLoadModeError('detach', error);
+      return false;
+    } finally {
+      this._archiveLoadModeTransitionInProgress = false;
+      this.notifySettingDependencyChange('dontLoadArchivedData');
+    }
+  }
+  attachArchivedDataToMemory() {
+    if (!this._archiveDetached) return true;
+    if (!this.settings.dontSaveData
+      || this._archiveLoadModeTransitionInProgress
+      || this._noSaveMergeInProgress
+      || this._noSaveMergePromise) return false;
+    this._archiveLoadModeTransitionInProgress = true;
+    this.notifySettingDependencyChange('dontLoadArchivedData');
+    try {
+      const overlay = this.captureDetachedNoSaveSessionOverlay();
+      const loaded = this.loadPersistedDataForNoSaveMerge();
+      const attached = this.applyNoSaveSessionOverlay(loaded.data, overlay);
+      this.installDataPayload(attached);
+      this._archiveDetached = false;
+      this._noSaveSessionOverlay = null;
+      this._needsNoSaveDataMerge = true;
+      if (loaded.source === 'primary') {
+        this.replaceBetterDiscordDataCache(this.getName() + 'Data', attached);
+      } else if (loaded.source === 'backup') {
+        this.replaceBetterDiscordDataCache(this.getName() + 'DataBackup', attached);
+      }
+      this.refreshArchiveLoadPresentation();
+      this.reportSettingState(
+        'Logger Archive Loaded',
+        `Saved logger archive loaded from ${loaded.source} and combined with temporary session records in memory.`,
+        'Saved history was loaded into memory and combined with this temporary session. No archive file was written.',
+        'info',
+        5000,
+        'setting:dontLoadArchivedData'
+      );
+      return true;
+    } catch (error) {
+      this.reportArchiveLoadModeError('attach', error);
+      return false;
+    } finally {
+      this._archiveLoadModeTransitionInProgress = false;
+      this.notifySettingDependencyChange('dontLoadArchivedData');
+    }
+  }
   applySavedMessagesCapToPayload(data, cap = this.settings.savedMessagesCap) {
     // Apply caps to the detached merged payload before any file is replaced. Removing a
     // forum/thread root also removes its children, matching normal runtime cap behavior.
@@ -5061,29 +5652,22 @@ module.exports = class MessageLoggerV2 {
   readDataPayloadFile(name) {
     // Read the JSON file directly. BdApi.Data.load() may return BetterDiscord's cached copy,
     // which can be stale after this plugin's direct atomic filesystem writes.
-    const filePath = this.nodeModules.path.join(this.pluginDir, `${name}.config.json`);
-    if (!this.nodeModules.fs.existsSync(filePath)) return { status: 'missing', filePath };
+    const raw = this.readRawDataPayloadFile(name);
+    if (raw.status !== 'candidate') return raw;
     try {
-      const parsed = JSON.parse(this.nodeModules.fs.readFileSync(filePath, 'utf8'));
-      const newerVersion = this.getUnsupportedDataSchemaVersion(parsed?.data);
-      if (newerVersion !== null) {
-        const error = new Error(`Logger data schema ${newerVersion} is newer than supported schema ${DATA_SCHEMA_VERSION}`);
-        error.code = 'MLV2_NEWER_DATA_SCHEMA';
-        return { status: 'incompatible', filePath, error };
-      }
-      const data = this.normalizePersistedDataPayload(parsed?.data);
+      const data = this.normalizePersistedDataPayload(raw.data);
       const validationErrors = this.getDataPayloadValidationErrors(data, { strict: true });
       if (validationErrors.length) {
         return {
           status: 'invalid',
-          filePath,
+          filePath: raw.filePath,
           validationErrors,
           error: new TypeError(`JSON does not contain a valid data payload: ${validationErrors.join('; ')}`)
         };
       }
-      return { status: 'valid', filePath, data };
+      return { status: 'valid', filePath: raw.filePath, data };
     } catch (error) {
-      return { status: 'invalid', filePath, error };
+      return { status: 'invalid', filePath: raw.filePath, error };
     }
   }
   getNoSaveEditRemovalIdentity(edit) {
@@ -5091,7 +5675,7 @@ module.exports = class MessageLoggerV2 {
     return JSON.stringify([edit.time ?? null, edit.content ?? null]);
   }
   queueNoSavePersistedRemoval(operation) {
-    if (!this.settings?.dontSaveData || this._noSaveMergeInProgress || !operation) return false;
+    if (!this.settings?.dontSaveData || this._archiveDetached || this._noSaveMergeInProgress || !operation) return false;
     const id = String(operation.id ?? '');
     if (!id) return false;
     if (operation.type === 'edit' && typeof operation.identity !== 'string') return false;
@@ -5223,6 +5807,9 @@ module.exports = class MessageLoggerV2 {
   flushNoSavePersistedRemovals() {
     if (this._noSavePersistedRemovalTimer) clearTimeout(this._noSavePersistedRemovalTimer);
     this._noSavePersistedRemovalTimer = 0;
+    // Detached mode deliberately has no archive deletion write-through. Any in-memory removal
+    // is part of the temporary overlay and is resolved only if normal saving is re-enabled.
+    if (this._archiveDetached) return { ok: true, changed: false, detached: true };
     const operations = this._pendingNoSavePersistedRemovals?.splice?.(0) || [];
     if (!operations.length) return { ok: true, changed: false };
     if (this._noSaveMergeInProgress) {
@@ -5454,10 +6041,19 @@ module.exports = class MessageLoggerV2 {
   reportDataSavingDisabled() {
     // The detailed console entry records the cancelled write state, while the shorter
     // neutral alert tells the user what will happen to new logger changes until saving returns.
+    const archiveBehavior = this._archiveDetached
+      ? {
+          console: 'The saved archive is detached, so archival removals and cached-file deletion are paused.',
+          notification: 'Saved history is unloaded; only temporary session records remain in memory.'
+        }
+      : {
+          console: 'Archival removals still commit deletion-only updates.',
+          notification: 'Removing loaded saved records or edits still writes through.'
+        };
     this.reportSettingState(
       'Message Logger Data Saving',
-      'Data saving disabled; new logger additions will remain in memory and will not be written to disk. Archival removals still commit deletion-only updates. Pending ordinary primary and backup writes were cancelled.',
-      'Data saving disabled. New additions stay in memory; removing saved records or edits still writes through.',
+      `Data saving disabled; new logger additions will remain in memory and will not be written to disk. ${archiveBehavior.console} Pending ordinary primary and backup writes were cancelled.`,
+      `Data saving disabled. New additions stay in memory. ${archiveBehavior.notification}`,
       'neutral',
       5000,
       'setting:dontSaveData'
@@ -5588,6 +6184,22 @@ module.exports = class MessageLoggerV2 {
       );
     });
   }
+  restoreDetachedNoSaveAfterRecovery(archiveData, fallbackOverlay = null) {
+    let overlay = fallbackOverlay;
+    try {
+      if (archiveData) overlay = this.buildNoSaveSessionOverlay(archiveData, this._getDataPayload());
+    } catch (error) {
+      Logger.error('Could not rebuild the detached no-save overlay after recovery stopped.', error);
+    }
+    if (!overlay) return false;
+    this.installDataPayload(overlay.payload);
+    this._noSaveSessionOverlay = overlay;
+    this._archiveDetached = true;
+    this._needsNoSaveDataMerge = true;
+    this.clearBetterDiscordArchiveDataCache();
+    this.refreshArchiveLoadPresentation();
+    return true;
+  }
   async mergeNoSaveSessionIntoPersistedData() {
     // Transaction order is intentional: load -> merge -> cap -> install -> primary -> backup.
     // The setting stays logically disabled until at least one complete primary write succeeds.
@@ -5602,12 +6214,22 @@ module.exports = class MessageLoggerV2 {
     const writeEpoch = this._dataWriteEpoch;
     this._noSaveMergeInProgress = true;
     this._noSaveMergeDirty = false;
+    const wasArchiveDetached = !!this._archiveDetached;
+    let detachedOverlay = null;
+    let loaded = null;
     let stage = 'loading persisted data';
     try {
-      const loaded = this.loadPersistedDataForNoSaveMerge();
+      if (wasArchiveDetached) {
+        stage = 'capturing the temporary detached session';
+        detachedOverlay = this.captureDetachedNoSaveSessionOverlay();
+      }
+      stage = 'loading persisted data';
+      loaded = this.loadPersistedDataForNoSaveMerge();
       stage = 'merging persisted and session data';
       const merged = this.applySavedMessagesCapToPayload(
-        this.mergeDataPayloads(loaded.data, this._getDataPayload())
+        wasArchiveDetached
+          ? this.applyNoSaveSessionOverlay(loaded.data, detachedOverlay)
+          : this.mergeDataPayloads(loaded.data, this._getDataPayload())
       );
       this.installDataPayload(merged);
       const shouldCommit = () => this.__started !== false && this._noSaveMergeInProgress && this._dataWriteEpoch === writeEpoch;
@@ -5624,7 +6246,10 @@ module.exports = class MessageLoggerV2 {
           Logger.log('No-save data recovery was cancelled because saving was disabled again.');
           this._noSaveMergeInProgress = false;
           this.settings.dontSaveData = true;
+          if (wasArchiveDetached) this.restoreDetachedNoSaveAfterRecovery(loaded?.data, detachedOverlay);
           if (this.__started !== false) this.saveSettings();
+          this.notifySettingDependencyChange('dontSaveData');
+          this.notifySettingDependencyChange('dontLoadArchivedData');
           return false;
         }
         if (!result.ok) throw result.error || new Error('Atomic primary data write failed');
@@ -5641,15 +6266,23 @@ module.exports = class MessageLoggerV2 {
         if (result.cancelled) {
           this._noSaveMergeInProgress = false;
           this.settings.dontSaveData = true;
+          if (wasArchiveDetached) this.restoreDetachedNoSaveAfterRecovery(loaded?.data, detachedOverlay);
           if (this.__started !== false) this.saveSettings();
+          this.notifySettingDependencyChange('dontSaveData');
+          this.notifySettingDependencyChange('dontLoadArchivedData');
           return false;
         }
         if (!result.ok) throw result.error || new Error('Final atomic primary data write failed');
       }
       this._needsNoSaveDataMerge = false;
       this._noSaveMergeInProgress = false;
+      this._archiveDetached = false;
+      this._noSaveSessionOverlay = null;
+      this._pendingNoSavePersistedRemovals = [];
       this.settings.dontSaveData = false;
       this.saveSettings();
+      this.notifySettingDependencyChange('dontSaveData');
+      this.notifySettingDependencyChange('dontLoadArchivedData');
       if (this.settings.autoBackup) {
         stage = 'saving merged backup data';
         const backupResult = await this.writeDataPayloadAtomic(
@@ -5678,11 +6311,14 @@ module.exports = class MessageLoggerV2 {
     } catch (error) {
       this._noSaveMergeInProgress = false;
       this.settings.dontSaveData = true;
+      if (wasArchiveDetached) this.restoreDetachedNoSaveAfterRecovery(loaded?.data, detachedOverlay);
       try {
         this.saveSettings();
       } catch (settingsError) {
         Logger.error('Could not persist the fail-closed no-save setting after recovery failure.', settingsError);
       }
+      this.notifySettingDependencyChange('dontSaveData');
+      this.notifySettingDependencyChange('dontLoadArchivedData');
       this.reportNoSaveDataError(stage, error, true);
       return false;
     }
@@ -5691,7 +6327,14 @@ module.exports = class MessageLoggerV2 {
     if (disabled) {
       const hadPendingBackup = !!this.saveBackupTimeout;
       this.cancelPendingDataWrites();
+      if (this.settings.dontLoadArchivedData && !this.detachArchivedDataFromMemory()) {
+        // The parent transition remains safely in no-save mode. Roll back only the child so its
+        // saved/UI state cannot claim the archive was unloaded when validation or flushing failed.
+        this.settings.dontLoadArchivedData = false;
+        this.saveSettings();
+      }
       this.reportDataSavingDisabled();
+      this.notifySettingDependencyChange('dontLoadArchivedData');
       if (hadPendingBackup) {
         this.reportDebugEvent('Pending automatic backup cancelled because data saving was disabled.');
       }
@@ -5713,6 +6356,8 @@ module.exports = class MessageLoggerV2 {
     }
     this.settings.dontSaveData = true;
     this.saveSettings();
+    this.notifySettingDependencyChange('dontSaveData');
+    this.notifySettingDependencyChange('dontLoadArchivedData');
     if (!this._noSaveMergePromise) {
       this.reportDataSavingResume(true);
       this._noSaveMergePromise = this.mergeNoSaveSessionIntoPersistedData()
@@ -5866,14 +6511,7 @@ module.exports = class MessageLoggerV2 {
         throw new TypeError("No supported atomic filesystem write method");
       }
       tempPath = null;
-      let loadedData;
-      try {
-        loadedData = Data.load(name, key);
-      } catch { }
-      if (loadedData) {
-        for (const key of Object.keys(loadedData)) delete loadedData[key];
-        for (const dataKey in data) loadedData[dataKey] = data[dataKey];
-      }
+      this.replaceBetterDiscordDataCache(name, data);
       if (callback) callback(null);
     } catch (e) {
       if (tempPath) {
@@ -9068,6 +9706,12 @@ module.exports = class MessageLoggerV2 {
                                     Nuked contains Anti-Nuke channel snapshots and is shown only while Anti Nuke is ${this.formatHelpStateLabel(true)}. Disabling it keeps the saved records.</br>
                                     Hidden contains hidden records from every category when its Display setting is enabled. Unhiding a Nuked record while Anti Nuke is ${this.formatHelpStateLabel(false)} keeps it stored but invisible until Anti Nuke is ${this.formatHelpStateLabel(true)} again.</br>
                                 </div>
+                                <strong>No-save archive:</strong></br>
+                                <div class="${this.style.textIndent}">
+                                    <span style="color: var(--text-warning, var(--status-warning));"><strong>Disable saving data</strong></span> keeps new activity temporary. Its linked <strong>Disable loading archived data</strong> setting can hot-unload saved history while leaving the archive unchanged on disk.</br>
+                                    While the parent is ${this.formatHelpStateLabel(false)}, the child also displays ${this.formatHelpStateLabel(false)} but keeps its saved preference.</br>
+                                    Disabling the child reloads and combines the archive in memory without writing. Re-enabling saving merges the temporary session into the archive; reload or plugin disable discards temporary activity.
+                                </div>
                                 <strong>Toasts:</strong></br>
                                 <div class="${this.style.textIndent}">
                                     <strong>Note:</strong> Custom toasts can stack and expose actions through mouse clicks.</br>
@@ -9628,6 +10272,7 @@ module.exports = class MessageLoggerV2 {
       const modalKey = ModalActions.openModal(props => {
         return React.createElement(this.tools.manaModule.ConfirmModal, {
           ...props,
+          className: options.className,
           size: options.size,
           title: options.header,
           confirmText: options.confirmText,
@@ -10594,7 +11239,7 @@ module.exports = class MessageLoggerV2 {
     const rootType = record.delete_data.forum_thread_delete
       ? this.getSavedThreadRootTypeLabel(record)
       : 'Message';
-    const mediaNotice = this.settings?.deleteCachedFilesWithRecords
+    const mediaNotice = this.settings?.deleteCachedFilesWithRecords && !this._archiveDetached
       ? ' Related locally cached media will also be deleted.'
       : '';
     UI.showConfirmationModal(
@@ -10643,7 +11288,11 @@ module.exports = class MessageLoggerV2 {
     if (!options.skipForumThreadCascade && record.delete_data?.forum_thread_delete) {
       return this.deleteForumThreadFromRecords(id);
     }
-    if (this.settings?.deleteCachedFilesWithRecords) this.deleteCachedFilesForRecord(record);
+    // Archived and session media can share cache identities. Keep cache files intact while the
+    // archive is detached because unseen archive records cannot participate in reference checks.
+    if (this.settings?.deleteCachedFilesWithRecords && !this._archiveDetached) {
+      this.deleteCachedFilesForRecord(record);
+    }
     for (let i = 0; i < recordMaps.length; i++) {
       const map = recordMaps[i];
       const setMap = setMaps[i];
