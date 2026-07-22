@@ -3371,19 +3371,19 @@ module.exports = class MessageLoggerV2 {
             action: 'forceUpdateContent'
           },
           {
+            name: 'Use background instead of text tint for deleted messages',
+            note: 'Uses the deleted-message color as a background.',
+            id: 'useAlternativeDeletedStyle',
+            type: 'switch',
+            action: 'forceUpdateMessage'
+          },
+          {
             name: 'Deleted messages color',
             note: 'Six-digit hex with or without #; letter case does not matter. Blank uses the built-in red.',
             id: 'deletedMessageColor',
             type: 'textbox',
             validator: 'hexColor',
             action: 'refreshDeletedStyle'
-          },
-          {
-            name: 'Use background instead of text tint for deleted messages',
-            note: 'Uses the deleted-message color as a background.',
-            id: 'useAlternativeDeletedStyle',
-            type: 'switch',
-            action: 'forceUpdateMessage'
           },
           {
             name: 'Show amount of new deleted messages when entering a channel',
@@ -3403,7 +3403,6 @@ module.exports = class MessageLoggerV2 {
             id: 'showHiddenTab',
             type: 'switch'
           },
-          { name: 'Display update notes', id: 'displayUpdateNotes', type: 'switch' },
           {
             name: 'Menu sort direction',
             id: 'reverseOrder',
@@ -3412,13 +3411,6 @@ module.exports = class MessageLoggerV2 {
               { name: 'New - old', value: false },
               { name: 'Old - new', value: true }
             ]
-          },
-          {
-            name: 'Use BdApi basic notifications instead of custom toasts',
-            note: 'Use BetterDiscord notifications instead of custom toasts. Switching modes clears active and queued alerts.',
-            id: 'useNotificationsInstead',
-            type: 'switch',
-            action: 'notificationModeChange'
           }
         ]
       },
@@ -3461,6 +3453,30 @@ module.exports = class MessageLoggerV2 {
             type: 'switch',
             action: 'reportMediaCaching'
           },
+          { name: "Add user id to saved media filename", id: 'addUserIdToSavedMediaFilename', type: 'switch' },
+          {
+            name: "Cache all attachment types",
+            note: 'Also cache videos, audio, and other files.',
+            id: 'newSaveAllFileTypes',
+            type: 'switch',
+            customValue: true
+          },
+          {
+            name: 'Max cache file size (MB, 0 = no limit)',
+            note: 'Skip larger attachments. Blank or 0 disables the limit.',
+            id: 'maxCacheFileSize',
+            type: 'textbox',
+            validator: 'number',
+            emptyValue: 0,
+            min: 0
+          },
+          {
+            name: 'Media cache path (optional)',
+            note: 'Use an existing folder instead of MLV2_IMAGE_CACHE.',
+            id: 'newCacheAllImagesPath',
+            type: 'textbox',
+            validator: 'cachePath'
+          },
           {
             name: 'Aggresive message caching (makes sure we have the data of any deleted or edited messages)',
             note: 'Legacy control locked on for reliable forum and thread restoration.',
@@ -3484,6 +3500,13 @@ module.exports = class MessageLoggerV2 {
             }
           },
           {
+            name: 'Use BdApi basic notifications instead of custom toasts',
+            note: 'Use BetterDiscord notifications instead of custom toasts. Switching modes clears active and queued alerts.',
+            id: 'useNotificationsInstead',
+            type: 'switch',
+            action: 'notificationModeChange'
+          },
+          {
             name: "Always show notifications for selected channel",
             note: 'Allow alerts while viewing the active channel, thread, or parent forum.',
             id: 'alwaysNotifChannel',
@@ -3495,7 +3518,6 @@ module.exports = class MessageLoggerV2 {
             id: 'alwaysNotifGuild',
             type: 'switch'
           },
-          { name: "Add user id to saved media filename", id: 'addUserIdToSavedMediaFilename', type: 'switch' },
           {
             name: "Show notifications to whitelisted only",
             note: 'Restrict alerts without changing what is logged.',
@@ -3503,27 +3525,21 @@ module.exports = class MessageLoggerV2 {
             type: 'switch'
           },
           {
-            name: 'Media cache path (optional)',
-            note: 'Use an existing folder instead of MLV2_IMAGE_CACHE.',
-            id: 'newCacheAllImagesPath',
-            type: 'textbox',
-            validator: 'cachePath'
-          },
-          {
-            name: "Cache all attachment types",
-            note: 'Also cache videos, audio, and other files.',
-            id: 'newSaveAllFileTypes',
+            name: 'Block spam edit notifications (if enabled)',
+            id: 'blockSpamEdit',
             type: 'switch',
-            customValue: true
+            action: 'toggleEditSpamState'
           },
           {
-            name: 'Max cache file size (MB, 0 = no limit)',
-            note: 'Skip larger attachments. Blank or 0 disables the limit.',
-            id: 'maxCacheFileSize',
+            name: 'Edit spam threshold',
+            note: 'Eligible edits within 60 seconds before a 60-second notification pause. Invalid input stays red while the saved value resets to 10.',
+            id: 'editSpamThreshold',
             type: 'textbox',
             validator: 'number',
-            emptyValue: 0,
-            min: 0
+            min: 1,
+            resetInvalidTo: DEFAULT_EDIT_SPAM_THRESHOLD,
+            inlineValidation: true,
+            action: 'resetEditSpamState'
           },
           {
             name: 'Display open logs button next to the search box top right in channels',
@@ -3564,23 +3580,6 @@ module.exports = class MessageLoggerV2 {
             id: 'autoRefreshForumPosts',
             type: 'switch',
             action: 'refreshNativeForumPosts'
-          },
-          {
-            name: 'Block spam edit notifications (if enabled)',
-            id: 'blockSpamEdit',
-            type: 'switch',
-            action: 'toggleEditSpamState'
-          },
-          {
-            name: 'Edit spam threshold',
-            note: 'Eligible edits within 60 seconds before a 60-second notification pause. Invalid input stays red while the saved value resets to 10.',
-            id: 'editSpamThreshold',
-            type: 'textbox',
-            validator: 'number',
-            min: 1,
-            resetInvalidTo: DEFAULT_EDIT_SPAM_THRESHOLD,
-            inlineValidation: true,
-            action: 'resetEditSpamState'
           }
         ]
       },
@@ -3728,6 +3727,7 @@ module.exports = class MessageLoggerV2 {
             type: 'switch',
             action: 'toggleAutoUpdate'
           },
+          { name: 'Display update notes', id: 'displayUpdateNotes', type: 'switch' },
           {
             name: 'Contextmenu submenu name',
             note: 'Custom label for the Message Logger submenu.',

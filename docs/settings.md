@@ -51,14 +51,12 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Display edited messages in chat | On | Shows saved edit history with messages. Turning it off hides inline history and its Jump actions, but edits remain logged. |
 | Max number of shown edits | `0` | Limits visible edits; `0` means no configured limit. |
 | Show oldest edit instead of newest | On | When the edit limit is exceeded, keeps older edits visible instead of newer ones. |
-| Deleted messages color | Empty | Sets deleted text and forum/thread tints. Accepts six hex digits with an optional `#` in any letter case; an empty value uses the built-in red. |
 | Use background instead of text tint | Off | Uses the configured deleted-message color as a background tint. |
+| Deleted messages color | Empty | Sets deleted text and forum/thread tints. Accepts six hex digits with an optional `#` in any letter case; an empty value uses the built-in red. |
 | Show amount of new deleted messages | On | Displays the unseen deleted-message count when entering a channel. Turning it off clears every pending deleted counter and reports the reset only when at least one pending count existed. |
 | Show amount of new edited messages | On | Displays the unseen edited-message count when entering a channel. Turning it off clears every pending edited counter and reports the reset only when at least one pending count existed. |
 | Show Hidden tab in logger | Off | Adds the **Hidden** tab. Hidden records remain stored when the tab is disabled. |
-| Display update notes | On | Shows the plugin changelog after a version change. |
 | Menu sort direction | New to old | Controls message ordering in the logger window. |
-| Use BdApi basic notifications | On | Selects BetterDiscord notifications or plugin custom toasts for every logger alert and system/UI message. Switching it off immediately dismisses the active native notification and clears its memory-only queue. |
 
 ## 🧰 Misc Settings
 
@@ -68,22 +66,23 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Auto backup data | Off | Maintains a fallback copy of the logger data. It reduces, but cannot eliminate, data-loss risk. |
 | Auto backup interval (seconds) | 20 | Waits this many seconds after saved data changes before refreshing the backup. Accepts whole numbers from 10 through 86,400; for example, `300` is five minutes. Blank is valid and saves the 20-second default. Other invalid drafts remain unsaved and are marked with a red field border and inline error instead of a toast. Invalid settings or manual config edits reset to 20 at startup. |
 | Cache media locally | On | Master switch for caching attachments, embed images, and stickers. |
-| Aggresive message caching | On (locked) | Legacy setting retained for compatibility. It must remain enabled on this fork so message history is available for reliable forum and thread restoration. A saved `false` value is reset to `true` at startup. |
-| Use new cached images system | On (locked) | Legacy setting retained for compatibility. The organized server/channel cache layout must remain enabled for reliable forum and thread media restoration. A saved `false` value is reset to `true` at startup. |
-| Always show notifications for selected channel | Off | Allows enabled alerts while viewing the active channel, thread, or parent forum and overrides notification location lists there. |
-| Always show notifications for selected guild | Off | Treats the currently open server as an override for notification location lists. |
 | Add user ID to saved media filename | Off | Includes the author ID in hierarchical cache filenames. |
-| Show notifications to whitelisted only | Off | Restricts logger notifications to the notification whitelist. |
-| Media cache path | Empty | Uses a custom existing directory instead of `MLV2_IMAGE_CACHE`. |
 | Cache all attachment types | Off | Also caches videos, audio, and other non-image files. |
 | Max cache file size | `0` MB | Skips larger attachment files; blank or `0` disables the limit. Embed images and stickers are unaffected. |
+| Media cache path | Empty | Uses a custom existing directory instead of `MLV2_IMAGE_CACHE`. |
+| Aggresive message caching | On (locked) | Legacy setting retained for compatibility. It must remain enabled on this fork so message history is available for reliable forum and thread restoration. A saved `false` value is reset to `true` at startup. |
+| Use new cached images system | On (locked) | Legacy setting retained for compatibility. The organized server/channel cache layout must remain enabled for reliable forum and thread media restoration. A saved `false` value is reset to `true` at startup. |
+| Use BdApi basic notifications | On | Selects BetterDiscord notifications or plugin custom toasts for every logger alert and system/UI message. Switching it off immediately dismisses the active native notification and clears its memory-only queue. |
+| Always show notifications for selected channel | Off | Allows enabled alerts while viewing the active channel, thread, or parent forum and overrides notification location lists there. |
+| Always show notifications for selected guild | Off | Treats the currently open server as an override for notification location lists. |
+| Show notifications to whitelisted only | Off | Restricts logger notifications to the notification whitelist. |
+| Block spam edit notifications | Off | When enabled, reaching the configured threshold for one author within 60 seconds shows one warning and suppresses that author's edit alerts for 60 seconds. Toggling either way clears all author counts and pauses; turning it off shows the same reset notice as a threshold change only when something active was cleared, while turning it on resets silently. A preceding threshold reset consumes that state, so disabling immediately afterward cannot show a duplicate notice. The warning keeps expiring while hovered and dismisses immediately from a left- or right-click anywhere on its card. Edit history and Ghost Ping alerts continue normally. |
+| Edit spam threshold | `10` | Sets the eligible edit count within 60 seconds that triggers the warning and fixed 60-second notification pause. Whole numbers `1` or higher are valid. Invalid input, including `0`, stays red with an inline error while the saved value resets to `10`; reopening the panel shows `10`. While blocking is enabled, changing this value clears all existing author counts and active pauses and shows a replaceable info notice only when live state existed. While blocking is off, changing it cannot clear state or send the notice. |
 | Display open logs button | On | Shows the logger button beside channel search. |
 | Toggle all logs keybind | `Ctrl+M` | Uses BetterDiscord's native keybind recorder. It closes an open unfiltered logger; any other logger state or stacked plugin-owned panel closes and reopens as all logs. An open native media viewer closes first, including one opened from a normal Discord message. Clear the recorder to disable it. Unsafe or overlapping captures are rejected inline. |
 | Toggle selected channel logs keybind | `Ctrl+N` | Resolves the selected channel when pressed. It closes an open logger already filtered to that exact channel; any other logger state or stacked plugin-owned panel closes and reopens with that channel filter. Native media viewers close first; all other Discord panels remain open. Clear the recorder to disable it. |
 | Toggle selected server logs keybind | `Ctrl+S` | Resolves the selected server when pressed and uses its server ID filter. It closes an open logger already filtered to that exact server; any other logger state or stacked plugin-owned panel closes and reopens with that server filter. It does nothing except show a warning in DMs and group DMs; the all-log and selected-channel shortcuts continue working there. Native media viewers close first; all other Discord panels remain open. Clear the recorder to disable it. |
 | Automatically refresh new forum posts | On | Uses Discord's native **New Post(s)** control so cards appear without leaving and reopening the forum. |
-| Block spam edit notifications | Off | When enabled, reaching the configured threshold for one author within 60 seconds shows one warning and suppresses that author's edit alerts for 60 seconds. Toggling either way clears all author counts and pauses; turning it off shows the same reset notice as a threshold change only when something active was cleared, while turning it on resets silently. A preceding threshold reset consumes that state, so disabling immediately afterward cannot show a duplicate notice. The warning keeps expiring while hovered and dismisses immediately from a left- or right-click anywhere on its card. Edit history and Ghost Ping alerts continue normally. |
-| Edit spam threshold | `10` | Sets the eligible edit count within 60 seconds that triggers the warning and fixed 60-second notification pause. Whole numbers `1` or higher are valid. Invalid input, including `0`, stays red with an inline error while the saved value resets to `10`; reopening the panel shows `10`. While blocking is enabled, changing this value clears all existing author counts and active pauses and shows a replaceable info notice only when live state existed. While blocking is off, changing it cannot clear state or send the notice. |
 
 ### Local files
 
@@ -208,6 +207,7 @@ Message-history caching and hierarchical media storage are core behavior with no
 | --- | --- | --- |
 | Obfuscate CSS classes | On | Uses plugin-specific class names to reduce conflicts with themes and plugins. |
 | Automatic updates | On | Checks the repository for a newer plugin version, then reloads the Discord renderer cleanly. |
+| Display update notes | On | Shows the plugin changelog after a version change. |
 | Contextmenu submenu name | Empty | Replaces the **Message Logger** label. Empty values use the built-in label. |
 | Only render locally cached attachments | Off | Prevents uncached attachments from rendering through Discord CDN. The saved record shows a filename placeholder instead. Toggling this reevaluates open logger and channel views immediately. |
 | Delete cached files with log records | Off | Permanently deletes related cached attachments, embeds, and stickers whenever their final log record is removed, including purges and thread/forum cascades. |

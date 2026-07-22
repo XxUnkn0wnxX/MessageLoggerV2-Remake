@@ -167,20 +167,89 @@ test('live restored-message settings present the master switch before category c
   const masterIndex = displaySettings.indexOf("name: 'Display saved messages in chat'");
   const deletedIndex = displaySettings.indexOf("id: 'showDeletedMessages'");
   const purgedIndex = displaySettings.indexOf("id: 'showPurgedMessages'");
-  const editedIndex = displaySettings.indexOf("id: 'showEditedMessages'");
-  const deletedColorIndex = displaySettings.indexOf("id: 'deletedMessageColor'");
   const deletedStyleIndex = displaySettings.indexOf("id: 'useAlternativeDeletedStyle'");
+  const editedIndex = displaySettings.indexOf("id: 'showEditedMessages'");
+  const maxEditsIndex = displaySettings.indexOf("id: 'maxShownEdits'");
+  const editOrderIndex = displaySettings.indexOf("id: 'hideNewerEditsFirst'");
+  const deletedColorIndex = displaySettings.indexOf("id: 'deletedMessageColor'");
+  const deletedCountIndex = displaySettings.indexOf("id: 'showDeletedCount'");
 
   assert.ok(masterIndex >= 0);
   assert.ok(masterIndex < deletedIndex);
   assert.ok(deletedIndex < purgedIndex);
   assert.ok(purgedIndex < editedIndex);
-  assert.ok(editedIndex < deletedColorIndex);
-  assert.ok(deletedColorIndex < deletedStyleIndex);
+  assert.ok(editedIndex < maxEditsIndex);
+  assert.ok(maxEditsIndex < editOrderIndex);
+  assert.ok(editOrderIndex < deletedStyleIndex);
+  assert.ok(deletedStyleIndex < deletedColorIndex);
+  assert.ok(deletedColorIndex < deletedCountIndex);
+  assert.deepEqual(
+    Array.from(displaySettings.slice(masterIndex, editedIndex).matchAll(/id: '([^']+)'/g), match => match[1]),
+    ['restoreDeletedMessages', 'showDeletedMessages', 'showPurgedMessages']
+  );
+  assert.deepEqual(
+    Array.from(displaySettings.slice(deletedStyleIndex, deletedCountIndex).matchAll(/id: '([^']+)'/g), match => match[1]),
+    ['useAlternativeDeletedStyle', 'deletedMessageColor']
+  );
   assert.match(displaySettings, /Display saved messages in chat'[\s\S]*'Master switch for live mounting enabled '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Deleted'[\s\S]*' and '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Purged'[\s\S]*' records in chat, forum, and thread views\.[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Jump actions are unavailable for records excluded by these live-display switches\.[\s\S]*id: 'restoreDeletedMessages'/);
   assert.match(displaySettings, /name: 'Include Deleted messages'[\s\S]*'Live mounts messages captured from individual deletions when '[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Display saved messages in chat is enabled'[\s\S]*'\.'[\s\S]*id: 'showDeletedMessages'/);
   assert.match(displaySettings, /name: 'Include Purged messages'[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Display saved messages in chat must be enabled first\.[\s\S]*id: 'showPurgedMessages'/);
   assert.match(displaySettings, /name: 'Display edited messages in chat'[\s\S]*var\(--text-warning, var\(--status-warning\)\)[\s\S]*Inline edit history and its Jump actions are unavailable while this is off; edits are still logged\.[\s\S]*id: 'showEditedMessages'/);
+});
+
+test('media-cache controls sit together below their master switch', () => {
+  const miscSettings = source.slice(
+    source.indexOf("name: 'Misc settings'"),
+    source.indexOf("name: 'Toast notifications for guilds'")
+  );
+  const cacheMasterIndex = miscSettings.indexOf("name: 'Cache media locally'");
+  const nextIndependentIndex = miscSettings.indexOf("name: 'Aggresive message caching");
+
+  assert.ok(cacheMasterIndex >= 0);
+  assert.ok(cacheMasterIndex < nextIndependentIndex);
+  assert.deepEqual(
+    Array.from(miscSettings.slice(cacheMasterIndex, nextIndependentIndex).matchAll(/id: '([^']+)'/g), match => match[1]),
+    ['cacheAllImages', 'addUserIdToSavedMediaFilename', 'newSaveAllFileTypes', 'maxCacheFileSize', 'newCacheAllImagesPath']
+  );
+});
+
+test('global notification controls form one block before logger access controls', () => {
+  const miscSettings = source.slice(
+    source.indexOf("name: 'Misc settings'"),
+    source.indexOf("name: 'Toast notifications for guilds'")
+  );
+  const notificationModeIndex = miscSettings.indexOf("id: 'useNotificationsInstead'");
+  const loggerAccessIndex = miscSettings.indexOf("id: 'showOpenLogsButton'");
+
+  assert.ok(notificationModeIndex >= 0);
+  assert.ok(notificationModeIndex < loggerAccessIndex);
+  assert.deepEqual(
+    Array.from(miscSettings.slice(notificationModeIndex, loggerAccessIndex).matchAll(/id: '([^']+)'/g), match => match[1]),
+    [
+      'useNotificationsInstead',
+      'alwaysNotifChannel',
+      'alwaysNotifGuild',
+      'notifOnlyWhitelist',
+      'blockSpamEdit',
+      'editSpamThreshold'
+    ]
+  );
+});
+
+test('update-note visibility sits directly below automatic updates', () => {
+  const advancedSettings = source.slice(
+    source.indexOf("name: 'Advanced'"),
+    source.indexOf("id: 'ml2-settings-debug'")
+  );
+  const automaticUpdatesIndex = advancedSettings.indexOf("id: 'autoUpdate'");
+  const contextMenuIndex = advancedSettings.indexOf("id: 'contextmenuSubmenuName'");
+
+  assert.ok(automaticUpdatesIndex >= 0);
+  assert.ok(automaticUpdatesIndex < contextMenuIndex);
+  assert.deepEqual(
+    Array.from(advancedSettings.slice(automaticUpdatesIndex, contextMenuIndex).matchAll(/id: '([^']+)'/g), match => match[1]),
+    ['autoUpdate', 'displayUpdateNotes']
+  );
 });
 
 test('date order applies to optional timestamps and forced logger dates', () => {
