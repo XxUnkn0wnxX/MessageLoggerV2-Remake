@@ -324,6 +324,28 @@ test('linked master notes use bold semantic On and Off labels', () => {
   }
 });
 
+test('all rich UI state labels share the native positive and danger colors', () => {
+  const plugin = createPlugin();
+  const onLabel = plugin.createSettingStateLabel(true);
+  const offLabel = plugin.createSettingStateLabel(false);
+
+  assert.equal(onLabel.type, 'strong');
+  assert.equal(onLabel.props.children[0], 'On');
+  assert.equal(onLabel.props.style.color, 'var(--status-positive)');
+  assert.equal(offLabel.type, 'strong');
+  assert.equal(offLabel.props.children[0], 'Off');
+  assert.equal(offLabel.props.style.color, 'var(--status-danger)');
+  assert.equal(
+    plugin.formatHelpStateLabel(true),
+    '<strong style="color: var(--status-positive);">On</strong>'
+  );
+  assert.equal(
+    plugin.formatHelpStateLabel(false),
+    '<strong style="color: var(--status-danger);">Off</strong>'
+  );
+  assert.equal((source.match(/Legacy control locked ',\s*this\.createSettingStateLabel\(true\)/g) || []).length, 2);
+});
+
 test('date order applies to optional timestamps and forced logger dates', () => {
   const date = new Date(2026, 2, 4, 15, 43, 15);
   const time = date.toLocaleTimeString();
@@ -679,8 +701,8 @@ test('logger submenus prefer visible Copy ID rows and retain action fallbacks', 
 
 test('required legacy cache toggles stay visible, locked, and forced on', () => {
   assert.match(source, /if \(this\.ensureRequiredLegacySettings\(\)\) settingsChanged = true;/);
-  assert.match(source, /name: 'Aggresive message caching \(makes sure we have the data of any deleted or edited messages\)'[\s\S]*?id: 'aggresiveMessageCaching'[\s\S]*?disabled: true/);
-  assert.match(source, /name: 'Use new cached images system'[\s\S]*?Legacy control locked on for organized forum and thread media storage\.[\s\S]*?id: 'newCacheAllImages'[\s\S]*?disabled: true/);
+  assert.match(source, /name: 'Aggresive message caching \(makes sure we have the data of any deleted or edited messages\)'[\s\S]*?Legacy control locked ',\s*this\.createSettingStateLabel\(true\),[\s\S]*?id: 'aggresiveMessageCaching'[\s\S]*?disabled: true/);
+  assert.match(source, /name: 'Use new cached images system'[\s\S]*?Legacy control locked ',\s*this\.createSettingStateLabel\(true\),[\s\S]*?id: 'newCacheAllImages'[\s\S]*?disabled: true/);
 
   const plugin = createPlugin({
     settings: {
@@ -710,6 +732,7 @@ test('settings startup repairs existing configs without classifying them as firs
 
 test('first-install help has one full-width dismiss-only action', () => {
   assert.match(source, /initial[\s\S]*?confirmText: 'OK'[\s\S]*?closeModal\(this\.loggerHelpModalKey\)[\s\S]*?ml2Data: true[\s\S]*?className: this\.style\.startupHelpModal/);
+  assert.match(source, /header: initial \? 'First setup' : 'Logger help'/);
   assert.match(source, /\.\$\{this\.style\.startupHelpModal\} footer \[data-mana-component="button"\][\s\S]*?width: 100%/);
   const initialBranch = source.match(/\.\.\.\(initial([\s\S]*?): fromSettings/);
   assert.ok(initialBranch, 'startup help branch was not found');
@@ -717,7 +740,7 @@ test('first-install help has one full-width dismiss-only action', () => {
 });
 
 test('first-install help matches the current logging-scope onboarding', () => {
-  assert.match(source, /<strong class="\$\{this\.style\.startupHelpTitle\}">First setup:<\/strong>/);
+  assert.match(source, /const firstTimeIntroduction = initial\s*\? `<div class="\$\{this\.style\.startupHelpTitle\}">/);
   assert.match(source, /Welcome to MessageLoggerV2/);
   assert.match(source, /New installations start in <strong>whitelist-only mode<\/strong>/);
   assert.match(source, /Right-click a server, channel, DM, or thread/);
@@ -725,7 +748,8 @@ test('first-install help matches the current logging-scope onboarding', () => {
   assert.match(source, /Only log whitelist<\/strong> under <strong>Ignores and overrides/);
   assert.match(source, /Always log selected channel<\/strong> and <strong>Always log DMs/);
   assert.match(source, /Cache media locally<\/strong> and <strong>Disable saving data/);
-  assert.match(source, /<div class="\$\{this\.style\.textIndent\} \$\{this\.style\.startupHelpTitle\}">/);
+  assert.match(source, /<div class="\$\{this\.style\.textIndent\}">\s*<strong>1\.<\/strong>/);
+  assert.doesNotMatch(source, /<strong class="\$\{this\.style\.startupHelpTitle\}">First setup:<\/strong>/);
   assert.doesNotMatch(source, /startupHelpIntro|ml2-startup-help-intro/);
   assert.doesNotMatch(source, /font-size: 40px/);
 });
@@ -753,7 +777,8 @@ test('the complete first-setup block uses Discord native warning color', () => {
 
 test('shared help warns that Jump follows matching live-display switches', () => {
   assert.match(source, /Deleted, edited, and ghost-ping alerts provide View and eligible Jump actions\.<\/br>/);
-  assert.match(source, /<span style="color: var\(--text-warning, var\(--status-warning\)\);">Jump is hidden while the matching live-display switch is off\.<\/span>/);
+  assert.match(source, /<span style="color: var\(--text-warning, var\(--status-warning\)\);">Jump is hidden while the matching live-display switch is \$\{this\.formatHelpStateLabel\(false\)\}\.<\/span>/);
+  assert.doesNotMatch(source, /matching live-display switch is off/);
 });
 
 test('first-install help omits the regular help-modal greeting', () => {
@@ -762,11 +787,39 @@ test('first-install help omits the regular help-modal greeting', () => {
 });
 
 test('top-level help headings always start on a separate spaced line', () => {
+  assert.match(source, /\.\$\{this\.style\.helpContent\} \{[\s\S]*?line-height: 1\.5;/);
   assert.match(source, /\.\$\{this\.style\.helpContent\} > strong \{\s*display: block;\s*margin-top: 18px;/);
+  assert.match(source, /\.\$\{this\.style\.helpContent\} > strong:first-child \{\s*margin-top: 0;/);
   assert.match(source, /\.\$\{this\.style\.helpContent\} > strong \+ br \{\s*display: none;/);
   assert.match(source, /<strong>Menu:<\/strong><\/br>\s*<div class="\$\{this\.style\.textIndent\}">/);
   assert.doesNotMatch(source, /<strong>Menu:<\/strong><\/br><\/br>/);
   assert.match(source, /<strong>Toasts:<\/strong><\/br>[\s\S]*?<strong>Notifications:<\/strong><\/br>/);
+});
+
+test('logger help preserves nested sections with spaced subsection labels', () => {
+  const helpStart = source.indexOf('showLoggerHelpModal(initial = false');
+  const helpEnd = source.indexOf('showStatsModal()', helpStart);
+  const helpBlock = source.slice(helpStart, helpEnd);
+
+  assert.match(source, /\.\$\{this\.style\.helpSubheading\} \{\s*display: block;\s*margin-top: 12px;\s*margin-bottom: 4px;/);
+  assert.match(source, /\.\$\{this\.style\.helpSubheading\} \+ \.\$\{this\.style\.textIndent\} \{\s*margin-top: 0;\s*margin-bottom: 10px;/);
+  assert.equal((helpBlock.match(/class="\$\{this\.style\.helpSubheading\}"/g) || []).length, 14);
+  assert.match(helpBlock, /<strong class="\$\{this\.style\.helpSubheading\}">DELETE \+ LEFT-CLICK:<\/strong>\s*<div class="\$\{this\.style\.textIndent\}">/);
+  assert.match(helpBlock, /<strong class="\$\{this\.style\.helpSubheading\}">WHITELIST-ONLY:<\/strong>\s*<div class="\$\{this\.style\.textIndent\}">/);
+  assert.match(helpBlock, /<strong class="\$\{this\.style\.helpSubheading\}">TRASH:<\/strong>\s*<div class="\$\{this\.style\.textIndent\}">/);
+  assert.doesNotMatch(helpBlock, /(?:DELETE \+ LEFT-CLICK|WHITELIST-ONLY|TRASH):<\/br>/);
+  assert.doesNotMatch(helpBlock, /then then Logger help/);
+});
+
+test('filter help uses spaced sections and renders placeholder text literally', () => {
+  assert.match(source, /<div class="\$\{this\.multiClasses\.defaultColor\} \$\{this\.style\.helpContent\}">\s*<strong>Search filters:<\/strong>/);
+  assert.match(source, /<strong>Search format:<\/strong><\/br>/);
+  assert.match(source, /<strong>Shortcut help:<\/strong><\/br>/);
+  assert.match(source, /<strong>Window behavior:<\/strong><\/br>/);
+  assert.match(source, /&lt;server name or ID&gt;/);
+  assert.match(source, /<strong>message:<\/strong> or <strong>content:<\/strong> - Filter results with the specified message content or message ID\.<\/br>/);
+  assert.doesNotMatch(source, /<servername or serverid>/);
+  assert.doesNotMatch(source, /<image\|link>/);
 });
 
 test('atomic persistence and startup cleanup remain wired into the plugin', () => {

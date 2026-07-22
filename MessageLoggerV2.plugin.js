@@ -446,7 +446,7 @@ module.exports = class MessageLoggerV2 {
         title: 'Live display controls',
         type: 'fixed',
         items: [
-          'Turning off saved-message or edit display now prevents future live mounts across chats, forums, and threads without stopping logging.',
+          'Disabling saved-message or edit display now prevents future live mounts across chats, forums, and threads without stopping logging.',
           'Mount-dependent Jump actions stay hidden while View in Log remains available.'
         ]
       },
@@ -454,7 +454,7 @@ module.exports = class MessageLoggerV2 {
         title: 'Linked settings controls',
         type: 'improved',
         items: [
-          'Related switches and fields now grey out when their master is off while keeping their saved values.',
+          'Related switches and fields now grey out when their master is disabled while keeping their saved values.',
           'Links cover saved-message display, edit history, backups, media caching, edit-spam controls, and Anti-Nuke.'
         ]
       },
@@ -1069,7 +1069,7 @@ module.exports = class MessageLoggerV2 {
               timeout: 0
             });
           } else {
-            this.notifyUser(`[${this.getName()}] Data was corrupted! Recommended to turn on auto backup in settings! All deleted/edited/purged/nuked messages have been erased.`, {
+            this.notifyUser(`[${this.getName()}] Data was corrupted! Recommended to enable auto backup in settings! All deleted/edited/purged/nuked messages have been erased.`, {
               title: 'Message Logger Data Error',
               type: 'error',
               timeout: 0
@@ -1370,6 +1370,7 @@ module.exports = class MessageLoggerV2 {
     this.style.tabSelected = this.obfuscatedClass('ml2-tab-selected');
     this.style.textIndent = this.obfuscatedClass('ml2-help-text-indent');
     this.style.helpContent = this.obfuscatedClass('ml2-help-content');
+    this.style.helpSubheading = this.obfuscatedClass('ml2-help-subheading');
     this.style.startupHelpTitle = this.obfuscatedClass('ml2-startup-help-title');
     this.style.filterHelpModal = this.obfuscatedClass('ml2-filter-help-modal');
     this.style.settingsHelpModal = this.obfuscatedClass('ml2-settings-help-modal');
@@ -1665,13 +1666,35 @@ module.exports = class MessageLoggerV2 {
                       overflow-y: auto;
                       padding-right: 12px;
                       scrollbar-gutter: stable;
+                      line-height: 1.5;
                     }
                     .${this.style.helpContent} > strong {
                       display: block;
                       margin-top: 18px;
                     }
+                    .${this.style.helpContent} > strong:first-child {
+                      margin-top: 0;
+                    }
                     .${this.style.helpContent} > strong + br {
                       display: none;
+                    }
+                    .${this.style.helpContent} > div {
+                      margin-top: 6px;
+                    }
+                    .${this.style.helpSubheading} {
+                      display: block;
+                      margin-top: 12px;
+                      margin-bottom: 4px;
+                    }
+                    .${this.style.textIndent} > .${this.style.helpSubheading}:first-child {
+                      margin-top: 0;
+                    }
+                    .${this.style.helpSubheading} + .${this.style.textIndent} {
+                      margin-top: 0;
+                      margin-bottom: 10px;
+                    }
+                    .${this.style.filterHelpModal} .${this.style.helpContent} {
+                      margin-bottom: 16px;
                     }
                     .${this.style.startupHelpTitle} {
                       color: var(--text-warning, var(--status-warning));
@@ -1988,20 +2011,27 @@ module.exports = class MessageLoggerV2 {
     if (config.disableWith) disabled = !!this.settings?.[config.disableWith];
     return disabled;
   }
-  createLinkedSettingNote(onText, offText) {
-    const stateLabel = (label, color) => React.createElement(
+  createSettingStateLabel(enabled) {
+    return React.createElement(
       'strong',
-      { style: { color } },
-      label
+      { style: { color: enabled ? 'var(--status-positive)' : 'var(--status-danger)' } },
+      enabled ? 'On' : 'Off'
     );
+  }
+  formatHelpStateLabel(enabled) {
+    const label = enabled ? 'On' : 'Off';
+    const color = enabled ? 'var(--status-positive)' : 'var(--status-danger)';
+    return `<strong style="color: ${color};">${label}</strong>`;
+  }
+  createLinkedSettingNote(onText, offText) {
     return React.createElement(
       'span',
       null,
-      stateLabel('On', 'var(--status-positive)'),
+      this.createSettingStateLabel(true),
       ': ',
       onText,
       ' ',
-      stateLabel('Off', 'var(--status-danger)'),
+      this.createSettingStateLabel(false),
       ': ',
       offText
     );
@@ -3533,7 +3563,13 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Aggresive message caching (makes sure we have the data of any deleted or edited messages)',
-            note: 'Legacy control locked on for reliable forum and thread restoration.',
+            note: React.createElement(
+              'span',
+              null,
+              'Legacy control locked ',
+              this.createSettingStateLabel(true),
+              ' for reliable forum and thread restoration.'
+            ),
             id: 'aggresiveMessageCaching',
             type: 'switch',
             disabled: true,
@@ -3544,7 +3580,13 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Use new cached images system',
-            note: 'Legacy control locked on for organized forum and thread media storage.',
+            note: React.createElement(
+              'span',
+              null,
+              'Legacy control locked ',
+              this.createSettingStateLabel(true),
+              ' for organized forum and thread media storage.'
+            ),
             id: 'newCacheAllImages',
             type: 'switch',
             disabled: true,
@@ -8495,22 +8537,23 @@ module.exports = class MessageLoggerV2 {
     // Keep first-install onboarding aligned with docs/help.md#first-setup while reusing the
     // same heading-and-indent layout as the ordinary help modal shown directly below it.
     const firstTimeIntroduction = initial
-      ? `<strong class="${this.style.startupHelpTitle}">First setup:</strong></br>
-         <div class="${this.style.textIndent} ${this.style.startupHelpTitle}">
+      ? `<div class="${this.style.startupHelpTitle}">
            Welcome to MessageLoggerV2. New installations start in <strong>whitelist-only mode</strong>; unlisted locations are ignored unless an enabled override applies.</br></br>
-           1. Right-click a server, channel, DM, or thread.</br>
-           2. Open the <strong>Message Logger</strong> submenu.</br>
-           3. Add that location to the whitelist.</br></br>
+           <div class="${this.style.textIndent}">
+             <strong>1.</strong> Right-click a server, channel, DM, or thread.</br>
+             <strong>2.</strong> Open the <strong>Message Logger</strong> submenu.</br>
+             <strong>3.</strong> Add that location to the whitelist.
+           </div></br>
            To log all eligible unmuted servers and channels, disable <strong>Only log whitelist</strong> under <strong>Ignores and overrides</strong>.</br>
            <strong>Always log selected channel</strong> and <strong>Always log DMs</strong> are enabled by default and can override the normal whitelist, blacklist, mute, and NSFW scope rules for their targets.</br>
            Logged message content and any enabled media cache remain local to this device. Review <strong>Cache media locally</strong> and <strong>Disable saving data</strong> under Misc settings if needed.
-         </div></br>`
+         </div>`
       : '';
     // The generic help greeting is useful when the modal is opened manually, but it adds
     // noise to first-install onboarding because the dedicated setup introduction replaces it.
     const regularHelpIntroduction = initial
       ? ''
-      : `Hello! This is the ${this.getName()} help modal! You may at any time open this in plugin settings by clicking the help button, or in the menu by pressing the question mark button and then then Logger help button.</br>`;
+      : `Hello! This is the ${this.getName()} help modal! You may at any time open this in plugin settings by clicking the help button, or in the menu by pressing the question mark button and then the Logger help button.</br>`;
     this.createModal({
       ...(initial
         ? {
@@ -8533,7 +8576,7 @@ module.exports = class MessageLoggerV2 {
           cancelText: 'Back',
           onConfirm: () => this.returnToLoggerWindow(this.filterHelpModalKey)
         }),
-      header: 'Logger help',
+      header: initial ? 'First setup' : 'Logger help',
       size: this.tools.resolvedModalStuff.ModalSize.LARGE,
       confirmButtonColor: this.tools.buttonColors.BRAND,
       children: [
@@ -8544,67 +8587,67 @@ module.exports = class MessageLoggerV2 {
                                ${regularHelpIntroduction}
                                <strong>Menu:</strong></br>
                                 <div class="${this.style.textIndent}">
-                                    DELETE + LEFT-CLICK:</br>
+                                    <strong class="${this.style.helpSubheading}">DELETE + LEFT-CLICK:</strong>
                                     <div class="${this.style.textIndent}">
-                                        Clicking on a message, deletes the message</br>
-                                        Clicking on an edit deletes that specific edit</br>
-                                        Clicking on the timestamp deletes all messages in that message group
-                                    </div></br>
-                                    RIGHT-CLICK:</br>
+                                        Clicking a message deletes that message.</br>
+                                        Clicking an edit deletes that specific edit.</br>
+                                        Clicking the timestamp deletes every message in that message group.
+                                    </div>
+                                    <strong class="${this.style.helpSubheading}">RIGHT-CLICK:</strong>
                                     <div class="${this.style.textIndent}">
-                                        Right-clicking the timestamp opens up options for the entire message group
-                                    </div></br>
-                                    DOUBLE-CLICK:</br>
+                                        Right-clicking the timestamp opens options for the entire message group.
+                                    </div>
+                                    <strong class="${this.style.helpSubheading}">DOUBLE-CLICK:</strong>
                                     <div class="${this.style.textIndent}">
-                                        Double-clicking a logged message jumps to its Discord location when available. A warning-orange username marks an available destination
-                                    </div></br>
+                                        Double-clicking a logged message jumps to its Discord location when available. A warning-orange username marks an available destination.
+                                    </div>
                                 </div>
                                 <strong>Logger tabs:</strong></br>
                                 <div class="${this.style.textIndent}">
                                     Deleted contains individual deletes; Purged contains ordinary bulk deletes.</br>
-                                    Nuked contains Anti-Nuke channel snapshots and is shown only while Anti Nuke is enabled. Disabling it keeps the saved records.</br>
-                                    Hidden contains hidden records from every category when its Display setting is enabled. Unhiding a Nuked record while Anti Nuke is off keeps it stored but invisible until Anti Nuke is enabled again.</br>
+                                    Nuked contains Anti-Nuke channel snapshots and is shown only while Anti Nuke is ${this.formatHelpStateLabel(true)}. Disabling it keeps the saved records.</br>
+                                    Hidden contains hidden records from every category when its Display setting is enabled. Unhiding a Nuked record while Anti Nuke is ${this.formatHelpStateLabel(false)} keeps it stored but invisible until Anti Nuke is ${this.formatHelpStateLabel(true)} again.</br>
                                 </div>
                                 <strong>Toasts:</strong></br>
                                 <div class="${this.style.textIndent}">
-                                    Note: Custom toasts can stack and expose actions through mouse clicks.</br></br>
-                                    LEFT-CLICK:</br>
+                                    <strong>Note:</strong> Custom toasts can stack and expose actions through mouse clicks.</br>
+                                    <strong class="${this.style.helpSubheading}">LEFT-CLICK:</strong>
                                     <div class="${this.style.textIndent}">
-                                        Runs the first available action. Saved events open the relevant logger tab; sent-message alerts jump directly to the live message.</br>
-                                    </div></br>
-                                    RIGHT-CLICK:</br>
+                                        Runs the first available action. Saved events open the relevant logger tab; sent-message alerts jump directly to the live message.
+                                    </div>
+                                    <strong class="${this.style.helpSubheading}">RIGHT-CLICK:</strong>
                                     <div class="${this.style.textIndent}">
                                         Runs the second action when available, normally jumping to the relevant message or location.
-                                    </div></br>
-                                    MIDDLE-CLICK/SCROLLWHEEL-CLICK:</br>
+                                    </div>
+                                    <strong class="${this.style.helpSubheading}">MIDDLE-CLICK/SCROLLWHEEL-CLICK:</strong>
                                     <div class="${this.style.textIndent}">
                                         Only dismisses/closes the Toast.
-                                    </div></br>
-                                    Hovering pauses the remaining timeout until the pointer leaves.</br>
+                                    </div>
+                                    Hovering pauses the remaining timeout until the pointer leaves.
                                 </div>
                                 <strong>Notifications:</strong></br>
                                 <div class="${this.style.textIndent}">
-                                    Note: BetterDiscord displays one notification at a time. Alerts from guilds and DMs share one memory-only queue that clears on plugin or Discord reload.</br></br>
-                                    ACTIONS:</br>
+                                    <strong>Note:</strong> BetterDiscord displays one notification at a time. Alerts from guilds and DMs share one memory-only queue that clears on plugin or Discord reload.</br>
+                                    <strong class="${this.style.helpSubheading}">ACTIONS:</strong>
                                     <div class="${this.style.textIndent}">
                                         Deleted, edited, and ghost-ping alerts provide View and eligible Jump actions.</br>
-                                        <span style="color: var(--text-warning, var(--status-warning));">Jump is hidden while the matching live-display switch is off.</span></br>
+                                        <span style="color: var(--text-warning, var(--status-warning));">Jump is hidden while the matching live-display switch is ${this.formatHelpStateLabel(false)}.</span></br>
                                         Sent-message alerts provide Jump only. The Sent tab is a bounded memory cache and clears on plugin or Discord reload.</br>
                                         Bulk-delete summaries provide View only.</br>
                                         Persistent ghost pings yield after 4.5 seconds when another alert is waiting.</br>
                                         Hovering pauses the remaining timeout.
-                                    </div></br>
+                                    </div>
                                 </div>
                                 <strong>Open Logs button (top right next to search):</strong></br>
                                 <div class="${this.style.textIndent}">
-                                    LEFT-CLICK:</br>
+                                    <strong class="${this.style.helpSubheading}">LEFT-CLICK:</strong>
                                     <div class="${this.style.textIndent}">
-                                        Opens menu</br>
-                                    </div></br>
-                                    RIGHT-CLICK:</br>
+                                        Opens the logger menu.
+                                    </div>
+                                    <strong class="${this.style.helpSubheading}">RIGHT-CLICK:</strong>
                                     <div class="${this.style.textIndent}">
-                                        Opens filtered menu that only shows messages from selected channel</br>
-                                    </div></br>
+                                        Opens a filtered menu that only shows messages from the selected channel.
+                                    </div>
                                 </div>
                                 <strong>Keyboard shortcuts:</strong></br>
                                 <div class="${this.style.textIndent}">
@@ -8615,41 +8658,41 @@ module.exports = class MessageLoggerV2 {
                                 </div>
                                 <strong>Whitelist/blacklist, ignores and overrides:</strong></br>
                                 <div class="${this.style.textIndent}">
-                                    WHITELIST-ONLY:</br>
+                                    <strong class="${this.style.helpSubheading}">WHITELIST-ONLY:</strong>
                                     <div class="${this.style.textIndent}">
-                                        All servers are ignored unless whitelisted</br>
-                                        Muted channels in whitelisted servers are ignored unless whitelisted or "Ignore muted channels" is disabled</br>
-                                        All channels in whitelisted servers are logged unless blacklisted, or muted and "Ignore muted channels" is enabled
-                                    </div></br>
-                                    DEFAULT:</br>
+                                        All servers are ignored unless whitelisted.</br>
+                                        Muted channels in whitelisted servers are ignored unless whitelisted or "Ignore muted channels" is disabled.</br>
+                                        All channels in whitelisted servers are logged unless blacklisted, or muted while "Ignore muted channels" is enabled.
+                                    </div>
+                                    <strong class="${this.style.helpSubheading}">DEFAULT:</strong>
                                     <div class="${this.style.textIndent}">
-                                        All servers are logged unless blacklisted or muted and "Ignore muted servers" is enabled</br>
-                                        Muted channels are ignored unless whitelisted or "Ignore muted channels" is disabled</br>
-                                        Muted servers are ignored unless whitelisted or "Ignore muted servers" is disabled</br>
-                                        Whitelisted channels in muted or blacklisted servers are logged</br>
-                                    </div></br>
-                                    ALL:</br>
+                                        All servers are logged unless blacklisted or muted while "Ignore muted servers" is enabled.</br>
+                                        Muted channels are ignored unless whitelisted or "Ignore muted channels" is disabled.</br>
+                                        Muted servers are ignored unless whitelisted or "Ignore muted servers" is disabled.</br>
+                                        Whitelisted channels in muted or blacklisted servers are logged.
+                                    </div>
+                                    <strong class="${this.style.helpSubheading}">ALL:</strong>
                                     <div class="${this.style.textIndent}">
-                                        Whitelisted channels in blacklisted servers are logged</br>
-                                        Blacklisted channels in whitelisted servers are ignored</br>
-                                        "Always log selected channel" overrides blacklist, whitelist-only mode, NSFW channel ignore, mute</br>
-                                        "Always log DMs" overrides blacklist as well as whitelist-only mode</br>
-                                        Channels marked NSFW and not whitelisted are ignored unless "Ignore NSFW channels" is disabled
-                                    </div></br>
+                                        Whitelisted channels in blacklisted servers are logged.</br>
+                                        Blacklisted channels in whitelisted servers are ignored.</br>
+                                        "Always log selected channel" overrides blacklist, whitelist-only mode, NSFW channel ignore, and mute rules.</br>
+                                        "Always log DMs" overrides blacklist and whitelist-only mode.</br>
+                                        Channels marked NSFW and not whitelisted are ignored unless "Ignore NSFW channels" is disabled.
+                                    </div>
                                 </div>
                                 <strong>Chat:</strong></br>
                                 <div class="${this.style.textIndent}">
-                                    TRASH:</br>
+                                    <strong class="${this.style.helpSubheading}">TRASH:</strong>
                                     <div class="${this.style.textIndent}">
-                                        The same local-only flow applies to restored chat messages, logger-window rows, and restored forum/thread mounts</br>
-                                        Right-click an item and choose Delete for the confirmed removal path</br>
-                                        Hold Shift while hovering to expose Trash; Shift-click removes the local record immediately without selecting text. If Discord hides Trash because you lack delete permission, the logger adds a matching local-only Shift action</br>
-                                    </div></br>
-                                    RIGHT-CLICK:</br>
+                                        The same local-only flow applies to restored chat messages, logger-window rows, and restored forum/thread mounts.</br>
+                                        Right-click an item and choose Delete for the confirmed removal path.</br>
+                                        Hold Shift while hovering to expose Trash; Shift-click removes the local record immediately without selecting text. If Discord hides Trash because you lack delete permission, the logger adds a matching local-only Shift action.
+                                    </div>
+                                    <strong class="${this.style.helpSubheading}">RIGHT-CLICK:</strong>
                                     <div class="${this.style.textIndent}">
-                                        Right-clicking an edit (darkened text) allows you to delete that edit, or hide edits</br>
+                                        Right-clicking an edit (darkened text) allows you to delete that edit or hide edits.</br>
                                         Right-clicking an edited or deleted message lets you hide the deletion, hide or unhide edits, permanently Delete the saved logger record, or remove its deleted tint.
-                                    </div></br>
+                                    </div>
                                 </div>
                             </div>`
           )
@@ -13441,20 +13484,33 @@ module.exports = class MessageLoggerV2 {
         children: [
           this.tools.createWrappedElement([
             this.parseHTML(
-              `<div class="${this.multiClasses.defaultColor}">"server: <servername or serverid>" - Filter results with the specified server name or id.
-                        "channel: <channelname or channelid>" - Filter results with the specified channel name or id.
-                        "user: <username, nickname or userid>" - Filter results with the specified username, nickname or userid.
-                        "message: <search or messageid>" or "content: <search or messageid>" - Filter results with the specified message content.
-                        "has: <image|link> - Filter results to only images or links
-                        Separate the search tags with commas.
-                        Example: server: tom's bd stuff, message: heck
-                        Shortcut help:
-                        "${this.formatLoggerKeybind(this.settings.openLogsKeybind)}" - Toggle all message logs.
-                        "${this.formatLoggerKeybind(this.settings.openFilteredLogsKeybind)}" - Toggle message logs filtered to the currently selected channel.
-                        "${this.formatLoggerKeybind(this.settings.openServerLogsKeybind)}" - Toggle message logs filtered to the currently selected server.
-                        The server shortcut is unavailable in DMs and group DMs.
-                        A matching logger view closes. A different view or stacked MessageLogger help page closes and reopens in the requested state.
-                        An open Discord media viewer closes first, including one opened from a normal live message; other Discord panels remain open.\n\n</div>`.replaceAll('\n', '</br>')
+              `<div class="${this.multiClasses.defaultColor} ${this.style.helpContent}">
+                 <strong>Search filters:</strong></br>
+                 <div class="${this.style.textIndent}">
+                   <strong>server:</strong> &lt;server name or ID&gt; - Filter by server.</br>
+                   <strong>channel:</strong> &lt;channel name or ID&gt; - Filter by channel.</br>
+                   <strong>user:</strong> &lt;username, nickname, or user ID&gt; - Filter by user.</br>
+                   <strong>message:</strong> or <strong>content:</strong> - Filter results with the specified message content or message ID.</br>
+                   <strong>has:</strong> &lt;image or link&gt; - Show only images or links.
+                 </div>
+                 <strong>Search format:</strong></br>
+                 <div class="${this.style.textIndent}">
+                   Separate search tags with commas.</br>
+                   Example: <strong>server: tom's bd stuff, message: heck</strong>
+                 </div>
+                 <strong>Shortcut help:</strong></br>
+                 <div class="${this.style.textIndent}">
+                   <strong>${this.formatLoggerKeybind(this.settings.openLogsKeybind)}</strong> - Toggle all message logs.</br>
+                   <strong>${this.formatLoggerKeybind(this.settings.openFilteredLogsKeybind)}</strong> - Toggle logs filtered to the selected channel.</br>
+                   <strong>${this.formatLoggerKeybind(this.settings.openServerLogsKeybind)}</strong> - Toggle logs filtered to the selected server.</br>
+                   The server shortcut is unavailable in DMs and group DMs.
+                 </div>
+                 <strong>Window behavior:</strong></br>
+                 <div class="${this.style.textIndent}">
+                   A matching logger view closes. A different view or stacked MessageLogger help page closes and reopens in the requested state.</br>
+                   An open Discord media viewer closes first, including one opened from a normal live message; other Discord panels remain open.
+                 </div>
+               </div>`
             ),
             extraHelp
           ])
