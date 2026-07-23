@@ -7,6 +7,16 @@ Status markers:
 - [ ] Planned or incomplete.
 - [x] Implemented and verified.
 
+## 📎 Cache All Attachment Types Gate
+
+Status: Known limitation in 2.8.2.8; overhaul paused
+
+- [ ] With **Cache media locally** Off, block every attachment type from ordinary Logger attachment capture and local caching, regardless of the saved child value.
+- [ ] With the master On and **Cache all attachment types** Off, preserve established image, embed, sticker, and visual Components V2 handling while blocking every other file type from ordinary attachment history and local caching.
+- [ ] With both switches On, accept any attachment type subject to the existing file-size limit, no-save queue, cache path, and record-based cached-file cleanup.
+- [ ] Keep Anti-Nuke capture independent of ordinary ignores and the child gate while leaving all filesystem writes controlled by the master.
+- [ ] Add deterministic on/off coverage and complete live validation without regressing the established media path.
+
 ## 💾 Preserve Data After No-Save Sessions
 
 Status: Implemented and covered by automated tests; live validation pending

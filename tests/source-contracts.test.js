@@ -304,12 +304,18 @@ test('the BdApi notification setting omits the outdated basic qualifier', () => 
   assert.doesNotMatch(source, /BdApi basic notifications/i);
 });
 
-test('the current changelog covers the polished Help presentation and BdApi wording', () => {
+test('the current changelog covers the release fixes and known attachment limitation', () => {
   assert.match(source, /Filter Help and Logger Help now use clearer nested spacing, visible filter syntax, and consistent On\/Off state labels/);
   assert.match(source, /accurate BdApi notifications wording without the outdated basic qualifier/);
   assert.match(source, /guild-only local-user toast option now uses its correct Guild settings location/);
   assert.match(source, /keeps new additions and eligible media requests memory-only while preserving loaded-archive cleanup/);
   assert.match(source, /save\/media and archive-view transitions briefly lock their controls with a warning-orange pulse/);
+  assert.match(source, /Logging, media, and restoration/);
+  assert.match(source, /Components V2, embeds, removed uploads, and Anti-Nuke media now retain more complete saved content/);
+  assert.match(source, /Ordinary ignores no longer hide saved records or block Anti-Nuke channel snapshots/);
+  assert.match(source, /Restored forum starters no longer disturb Discord-owned cards, and later uploads send as replies/);
+  assert.match(source, /Known limitation: Cache all attachment types remains incomplete for arbitrary non-image files/);
+  assert.match(source, /Known limitation: intended to cache videos, audio, and other files, but arbitrary non-image types may stay CDN-backed when On or remain Logger references when Off/);
 });
 
 test('settings documentation retains audited group order and current UI labels', () => {

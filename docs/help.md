@@ -118,7 +118,7 @@ The same permanent-delete flow applies to restored chat messages, logger rows, f
 - Attachment-only messages retain the same hide, remove, and context-menu actions as text messages.
 - Media added later through a forum post's **Add to Post** action is retained from the message update.
 - Supported image and animated stickers render as media when their source or local cache is available.
-- Embeds show a plain-text reference; voice messages, non-image files, and unsupported stickers show a compact reference.
+- Embeds show a plain-text reference; voice messages, non-image files, and unsupported stickers show a compact reference and may still rely on CDN links in this implementation.
 - Restored channel messages retain their saved payload so Discord can render supported content natively.
 
 ### Clear log
@@ -258,6 +258,7 @@ Enable **Show Hidden tab in logger** under Display settings. Disabling the tab d
 - Remote attachment and sticker URLs can expire or return `403`/`404`. Keep **Cache media locally** enabled when local preservation matters.
 - **Disable saving data** creates no new local media files even if **Cache media locally** remains enabled. Eligible logger media requests wait in memory and download only after a successful primary archive save; reload, plugin stop, or disabling media caching discards the queue.
 - Enable **Only render locally cached attachments** to block CDN fallback. Missing files remain as full-filename placeholders; already-expired content cannot be recovered.
+- **Cache all attachment types** is incomplete in 2.8.2.8. Arbitrary non-image files may remain CDN-backed or uncached when On and may still be logged as attachment references when Off.
 - **Delete cached files with log records** removes related media during permanent record, purge, cap, or thread/forum cleanup. It cannot be undone and reports successful deletion through the console and selected notification mode.
 
 ### Plugin conflicts

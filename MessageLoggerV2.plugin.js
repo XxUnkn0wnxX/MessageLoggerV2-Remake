@@ -537,6 +537,16 @@ module.exports = class MessageLoggerV2 {
         ]
       },
       {
+        title: 'Logging, media, and restoration',
+        type: 'improved',
+        items: [
+          'Components V2, embeds, removed uploads, and Anti-Nuke media now retain more complete saved content.',
+          'Ordinary ignores no longer hide saved records or block Anti-Nuke channel snapshots.',
+          'Restored forum starters no longer disturb Discord-owned cards, and later uploads send as replies.',
+          'Known limitation: Cache all attachment types remains incomplete for arbitrary non-image files.'
+        ]
+      },
+      {
         title: 'Linked settings controls',
         type: 'improved',
         items: [
@@ -4020,7 +4030,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: "Cache all attachment types",
-            note: 'Also cache videos, audio, and other files.',
+            note: 'Known limitation: intended to cache videos, audio, and other files, but arbitrary non-image types may stay CDN-backed when On or remain Logger references when Off.',
             id: 'newSaveAllFileTypes',
             enableWith: 'cacheAllImages',
             type: 'switch',
