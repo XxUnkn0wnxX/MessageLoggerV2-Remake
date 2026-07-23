@@ -29,7 +29,8 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 - `reportMajorSettingChange` covers only broad logging, persistence, media, update, and destructive settings. Enabled states are info; disabled states use the theme-neutral presentation.
 - Per-setting replacement keys discard obsolete alerts after rapid changes.
 - Logging scope combines whitelist, blacklist, muted server/channel, NSFW, selected-channel, and DM rules.
-- Author and local-action gates are intentionally separate: bot, blocked-user, self-author, local-edit, and local-delete rules must remain per message.
+- Author and local-action gates are intentionally separate: the bot gate recognizes bot authors plus webhook, application, and interaction markers; blocked-user, self-author, local-edit, and local-delete rules remain per message.
+- Components V2 is a supported payload format, not an author classifier. Any message carrying Discord's Ephemeral flag bit is excluded before caching or capture, even when Components V2 or other flags are also set.
 - Guild and DM notification lists affect alerts rather than record eligibility.
 
 ## 🗃️ Record Model and Indexes
@@ -54,7 +55,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 - `mlv2RemakeSchemaVersion` marks this fork's additive canonical payload without replacing the standard four logger maps.
   - Current forks can ignore the marker and enhanced fields; their absence after another fork writes the file triggers normalization on the next load.
   - A newer schema is never rewritten automatically. Unknown top-level fork extensions are retained.
-- Forum/thread metadata, saved locations, suppression lists, and locked cache-setting keys are optional compatibility additions.
+- Forum/thread metadata, saved locations, suppression lists, locked cache-setting keys, and canonical webhook/application/interaction fields are optional compatibility additions.
   - Older forks without them remain valid.
   - Legacy `deletedata` and `editHistory` values merge into `delete_data` and `edit_history`; missing enhanced values receive safe empty defaults.
 - `prepareDataPayloadForNormalization` fills only reconstructable derived collections and refuses to invent a missing core `messageRecord`.
@@ -95,14 +96,14 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 - Thread/forum-root, total-message, and attachment caps are separate and apply newest-first.
 - Channel-thread snapshots use the same folded starter/root schema as ordinary thread deletion; Anti-Nuke adds archival markers without changing the captured thread metadata or reply boundaries.
 - Root records bypass the total-message budget but their attachments still consume the attachment budget.
-- Anti-Nuke intentionally overrides normal logging scope and author ignores; only its own enable switch disables the cascade.
+- Anti-Nuke intentionally overrides normal logging scope and unrelated author ignores. It still follows **Ignore bots** for bot/app/webhook messages, and ephemeral messages are always excluded.
 - The Nuked tab is conditional on that switch. Disabling it hides the view only; records and Hidden-tab state remain persisted.
 - Parent channels no longer exist, so Anti-Nuke records do not offer impossible jump actions.
 
 ## 🖼️ Media Lifecycle
 
 - Core message-history caching and the hierarchical server/channel cache layout remain enabled for forum/thread reliability.
-- `cacheMessageImages` and `cacheImage` handle attachments, embed images, stickers, file-type policy, custom paths, and size limits.
+- `cacheMessageImages` and `cacheImage` handle attachments, embed images, Components V2 thumbnails/media galleries, stickers, file-type policy, custom paths, and size limits. Remote Components V2 File entries follow **Cache all attachment types**; unresolved `attachment://` references are not fetched independently.
 - `cacheImage` is the only new-media filesystem writer. During no-save mode, eligible logger-media parameters are de-duplicated in memory; the queue drains only after a successful primary archive commit. Active requests remain tracked through three bounded fetch attempts and retry delays. A terminal media-only failure is reported and drops that item without invalidating the saved archive or otherwise-valid session. Reload, stop, or disabling media caching aborts and discards the queue.
 - A monotonic media-write generation invalidates pre-disable, retrying, and in-flight work across rapid off/on changes and same-instance restarts. No-save startup also avoids creating an absent default cache directory, and stale work is never promoted into the later queue.
 - This write guard does not block intentional deletion of media belonging to a loaded archived record. That cleanup remains part of the deletion-only journal and becomes unavailable only while the archive is detached.
@@ -113,7 +114,8 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 ## 🎨 Rendering, Tinting, and Navigation
 
 - Message-content and message-component patches render saved edits and deletions in live chat.
-- Legacy/Components V2 and message-snapshot payloads use EmbedCopy's `toJS()`/`toJSON()` then JSON-clone contract. Embeds match EmbedCopy's raw-message path by serializing the live embed directly first, then falling back to `toJS()` and restoring Discord's inbound wire aliases such as `title`, `description`, and field `name`/`value`. Unknown serializable fields remain intact instead of being reduced to a fixed allow-list, including in nested embed collections.
+- Legacy/Components V2 and message-snapshot payloads use EmbedCopy's `toJS()`/`toJSON()` then JSON-clone contract. Embeds match EmbedCopy's raw-message path by serializing the live embed directly first, then falling back to `toJS()` and restoring Discord's inbound wire aliases such as `title`, `description`, and field `name`/`value`. Component-model camel aliases are supplemented with the corresponding API wire names before native reconstruction. Unknown serializable fields remain intact instead of being reduced to a fixed allow-list, including in nested embed collections.
+- The Logger-owned viewer gives component-only records a concise text/control/media summary and includes that text in `message:`/`content:` search; its complete read-only Components V2 renderer remains tracked in `TODO.md`.
 - Renderer clones canonicalize URL-only/proxy-only singular and gallery embed media and omit dimension-only image, thumbnail, video, or gallery entries. Discord currently calls `.url.split()` for singular and gallery images and dereferences the first gallery item, so invalid or empty media collections must never reach the native renderer. The canonical archive remains isolated from render-time mutations.
 - Deleted text/background tinting, forum cards, restored thread entries, and logger views share saved record state but use different mounted DOM targets.
 - Discord-rendered saved deletions retain Discord's native context-menu confirmation and Shift-Trash behavior.

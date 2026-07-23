@@ -351,6 +351,18 @@ test('settings documentation retains audited group order and current UI labels',
   assert.match(settingsDocs, /Delete cached files with log records \| Off \|[^\n]*pauses while \*\*Disable loading archived data\*\* is active/);
 });
 
+test('Ignore bots covers automated sources while ephemeral Components V2 stays excluded', () => {
+  assert.match(
+    source,
+    /name: 'Ignore bots',[\s\S]*Also covers app, interaction, and webhook messages, including Anti-Nuke capture\. Ephemeral messages are never logged\./
+  );
+  assert.match(source, /isEphemeralMessage\(message\)[\s\S]*hasMessageFlag\(message, 64\)/);
+  assert.match(source, /isAutomatedMessageAuthor\(message, resolvedAuthor = null\)[\s\S]*webhook_id[\s\S]*application_id[\s\S]*interaction_metadata/);
+  assert.doesNotMatch(source, /flags\s*==\s*64/);
+  assert.doesNotMatch(source, /EMBED_COPY_EPHEMERAL_MENU_NAV_ID|getRestoredEphemeralMessageContext|data-ml2-restored-ephemeral/);
+  assert.match(settingsDocs, /\| Ignore bots \| On \| Skips bot-authored, app\/interaction, and webhook messages/);
+});
+
 test('update-note visibility sits directly below automatic updates', () => {
   const advancedSettings = source.slice(
     source.indexOf("name: 'Advanced'"),
@@ -1300,4 +1312,20 @@ test('backup restoration reports the main-file rebuild through the notification 
   assert.match(source, /this\.notifyUser\('Valid backup loaded\. Rebuilding the main data file\.',[\s\S]*title: 'Message Logger Data Recovery'/);
   assert.match(source, /Message Logger Data Recovery Error[\s\S]*main data file could not be rebuilt[\s\S]*View the console log for more details\./);
   assert.match(source, /Backup loaded and the main data file was rebuilt successfully\./);
+});
+
+test('component-only records receive a visible Logger viewer fallback before empty-row pruning', () => {
+  const viewer = source.slice(
+    source.indexOf('populateParent(parent, messages)'),
+    source.indexOf('sortMessagesByAge(map, useCaptureBatchOrder')
+  );
+  const componentFallback = viewer.indexOf("this.hasMessageFlag(message, 32768) ? 'Components V2' : 'Components'");
+  const emptyRowPruning = viewer.indexOf('if (contentDiv && !contentDiv.childElementCount && !message.content.length && !hasPayloadReference) return;');
+
+  assert.ok(componentFallback >= 0, 'the Logger viewer must identify Components V2 payloads');
+  assert.match(viewer, /appendPayloadReference\([\s\S]*getComponentPayloadSummary\(components\)/);
+  assert.ok(
+    componentFallback < emptyRowPruning,
+    'the component fallback must mark the row as visible before empty-body pruning'
+  );
 });

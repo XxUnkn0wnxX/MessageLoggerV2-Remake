@@ -3727,7 +3727,12 @@ module.exports = class MessageLoggerV2 {
         settings: [
           { name: 'Ignore muted servers', id: 'ignoreMutedGuilds', type: 'switch' },
           { name: 'Ignore muted channels', id: 'ignoreMutedChannels', type: 'switch' },
-          { name: 'Ignore bots', id: 'ignoreBots', type: 'switch' },
+          {
+            name: 'Ignore bots',
+            note: 'Also covers app, interaction, and webhook messages, including Anti-Nuke capture. Ephemeral messages are never logged.',
+            id: 'ignoreBots',
+            type: 'switch'
+          },
           {
             name: 'Ignore messages posted by you',
             note: 'Also applies inside forum posts and threads.',
@@ -4904,6 +4909,10 @@ module.exports = class MessageLoggerV2 {
         starterAuthor: starterMessage.author
           ? this.cloneDataValue(starterMessage.author)
           : metadata.starterAuthor || null,
+        starterAutomated: this.isAutomatedMessageAuthor(
+          starterMessage,
+          starterMessage.author
+        ) || !!metadata.starterAutomated,
         starterTimestamp: starterMessage.timestamp ?? metadata.starterTimestamp ?? null,
         starterFoldedIntoRoot: true
       };
@@ -7354,12 +7363,39 @@ module.exports = class MessageLoggerV2 {
     const authorId = this.getMessageAuthorId(message);
     return !!(authorId && this.localUser?.id && authorId === String(this.localUser.id));
   }
-  shouldIgnoreMessageAuthor(message) {
+  hasMessageFlag(message, flag) {
+    const flags = Number(message?.flags ?? 0);
+    return Number.isFinite(flags) && (flags & flag) === flag;
+  }
+  isEphemeralMessage(message) {
+    return this.hasMessageFlag(message, 64);
+  }
+  hasNonEmptyMessageMarker(value) {
+    return value !== undefined
+      && value !== null
+      && String(value).trim().length > 0;
+  }
+  isAutomatedMessageAuthor(message, resolvedAuthor = null) {
     const author = message?.author;
     const authorId = this.getMessageAuthorId(message);
+    const user = resolvedAuthor || (authorId ? this.tools.getUser(authorId) : null);
+    if (author?.bot === true || user?.bot === true) return true;
+    if (this.hasNonEmptyMessageMarker(message?.webhook_id ?? message?.webhookId)) return true;
+    if (this.hasNonEmptyMessageMarker(
+      message?.application_id
+      ?? message?.applicationId
+      ?? message?.application?.id
+    )) return true;
+    return message?.interaction !== undefined && message.interaction !== null
+      || message?.interaction_metadata !== undefined && message.interaction_metadata !== null
+      || message?.interactionMetadata !== undefined && message.interactionMetadata !== null;
+  }
+  shouldIgnoreMessageAuthor(message, resolvedAuthor = null) {
+    const author = message?.author;
+    const authorId = this.getMessageAuthorId(message);
+    const user = resolvedAuthor || (authorId ? this.tools.getUser(authorId) : null);
+    if (this.settings?.ignoreBots && this.isAutomatedMessageAuthor(message, user)) return true;
     if (!author && !authorId) return false;
-    const user = authorId ? this.tools.getUser(authorId) : null;
-    if (this.settings.ignoreBots && (author?.bot || user?.bot)) return true;
     if (authorId && !this.isLocalAuthorMessage(message) && this.settings.ignoreBlockedUsers && this.tools.isBlocked(authorId)) return true;
     return false;
   }
@@ -7383,6 +7419,7 @@ module.exports = class MessageLoggerV2 {
   shouldPresentSavedMessage(channelId, messageId) {
     const record = this.messageRecord?.[messageId];
     if (!record?.delete_data || record.delete_data.hidden) return false;
+    if (this.isEphemeralMessage(record.message)) return false;
     if (String(record.message?.channel_id ?? '') !== String(channelId ?? '')) return false;
     const deleted = this.shouldPresentDeletedMessages()
       && this.deletedMessageSet?.get(channelId)?.has(messageId);
@@ -7490,6 +7527,9 @@ module.exports = class MessageLoggerV2 {
         if (key) keys.add(`embed:${key}`);
       }
     }
+    for (const { url } of this.getIndexedComponentMedia(message?.components)) {
+      keys.add(`component:${url}`);
+    }
     for (const sticker of this.getMessageStickerItems(message)) {
       const key = sticker?.id || sticker?.url || sticker?.asset_url || sticker?.assetUrl;
       if (key) keys.add(`sticker:${key}`);
@@ -7583,8 +7623,19 @@ module.exports = class MessageLoggerV2 {
       : stickerItems;
     const componentsSource = message.components;
     const snapshotsSource = message.message_snapshots || message.messageSnapshots;
-    const components = this.normalizeSerializableMessageItems(componentsSource, 'message component');
+    const applicationSource = message.application;
+    const interactionSource = message.interaction;
+    const interactionMetadataSource = message.interaction_metadata ?? message.interactionMetadata;
+    const components = this.canonicalizeComponentWireAliases(
+      this.normalizeSerializableMessageItems(componentsSource, 'message component')
+    );
     const messageSnapshots = this.normalizeSerializableMessageItems(snapshotsSource, 'message snapshot');
+    const application = this.normalizeSerializableMessageItem(applicationSource, 'message application');
+    const interaction = this.normalizeSerializableMessageItem(interactionSource, 'message interaction');
+    const interactionMetadata = this.normalizeSerializableMessageItem(
+      interactionMetadataSource,
+      'message interaction metadata'
+    );
     const ret = {
       mention_everyone: mentionEveryone,
       edited_timestamp: message.edited_timestamp || message.editedTimestamp && new Date(message.editedTimestamp).getTime() || null,
@@ -7617,6 +7668,15 @@ module.exports = class MessageLoggerV2 {
     };
     if (components.length || componentsSource !== undefined) ret.components = components;
     if (messageSnapshots.length || snapshotsSource !== undefined) ret.message_snapshots = messageSnapshots;
+    const webhookId = message.webhook_id ?? message.webhookId;
+    const applicationId = message.application_id ?? message.applicationId ?? application?.id;
+    if (this.hasNonEmptyMessageMarker(webhookId)) ret.webhook_id = String(webhookId);
+    if (this.hasNonEmptyMessageMarker(applicationId)) ret.application_id = String(applicationId);
+    if (application) ret.application = this.sanitizeNestedEmbedCollections(application);
+    if (interaction) ret.interaction = this.sanitizeNestedEmbedCollections(interaction);
+    if (interactionMetadata) {
+      ret.interaction_metadata = this.sanitizeNestedEmbedCollections(interactionMetadata);
+    }
     if (ret.type === 19) {
       ret.message_reference = message.message_reference || message.messageReference;
       if (ret.message_reference) {
@@ -9144,6 +9204,7 @@ module.exports = class MessageLoggerV2 {
     });
   }
   _cacheIncomingMessage(message) {
+    if (this.isEphemeralMessage(message)) return true;
     if (this.cachedMessageIds.has(message.id)) return true;
     this.cachedMessageRecord.push(message);
     this.cachedMessageIds.add(message.id);
@@ -9200,8 +9261,8 @@ module.exports = class MessageLoggerV2 {
     const messages = new Map();
     const addMessage = message => {
       if (!message?.id || message.channel_id !== threadId) return;
-      if (message.flags == 64) return;
-      if (message.type !== 0 && message.type !== 19 && (message.type !== 20 || (message.flags & 64) === 64)) return;
+      if (this.isEphemeralMessage(message)) return;
+      if (message.type !== 0 && message.type !== 19 && message.type !== 20) return;
       if (options.ignoreLocalAuthors && this.isLocalAuthorMessage(message)) return;
       if (this.shouldIgnoreMessageAuthor(message) || this.shouldIgnoreSelfMessage(message)) return;
       messages.set(message.id, message);
@@ -9238,7 +9299,7 @@ module.exports = class MessageLoggerV2 {
         || this.purgedMessageSet.get(threadId)?.has(message.id)) continue;
       const existing = this.messageRecord[message.id];
       if (existing?.delete_data?.hidden) continue;
-      this.saveDeletedMessage(message, this.deletedMessageRecord);
+      if (!this.saveDeletedMessage(message, this.deletedMessageRecord)) continue;
       const record = this.messageRecord[message.id];
       if (record?.delete_data) {
         if (parentId) record.delete_data.forum_parent_id = parentId;
@@ -9337,7 +9398,8 @@ module.exports = class MessageLoggerV2 {
     const metadata = this.cacheForumThreadMetadata(channel) || this.forumThreadMetadataCache?.get(threadId) || {};
     const ownerId = metadata.ownerId || channel.owner_id || channel.ownerId;
     const author = metadata.starterAuthor || (ownerId ? this.tools.getUser(ownerId) : null);
-    if (author?.bot && this.settings.ignoreBots) return null;
+    if (this.settings.ignoreBots
+      && (metadata.starterAutomated || this.isAutomatedMessageAuthor({ author }, author))) return null;
     const fallbackAuthor = author || {
       id: ownerId || '0',
       username: ownerId ? 'Unknown User' : 'Unknown',
@@ -9589,6 +9651,9 @@ module.exports = class MessageLoggerV2 {
     const parentName = parent?.name || existing.parentName || null;
     const threadName = channel?.name || existing.name || starterMessage?.thread?.name || null;
     const starterAuthor = forumStarterMessage?.author ? this.cleanupUserObject(forumStarterMessage.author) : existing.starterAuthor || null;
+    const starterAutomated = forumStarterMessage
+      ? this.isAutomatedMessageAuthor(forumStarterMessage, forumStarterMessage.author)
+      : !!existing.starterAutomated;
     const parentPath = guildName && parentName ? `${guildName}, #${parentName}` : existing.parentPath || null;
     const path = parentPath && threadName ? `${parentPath} > ${threadName}` : existing.path || parentPath;
     const metadata = {
@@ -9606,6 +9671,7 @@ module.exports = class MessageLoggerV2 {
       starterMessageId: forumStarterMessage?.id || existing.starterMessageId || null,
       starterContent: forumStarterMessage?.content || existing.starterContent || null,
       starterAuthor,
+      starterAutomated,
       starterTimestamp: forumStarterMessage?.timestamp || existing.starterTimestamp || null,
       appliedTags,
       tags: tags.length ? tags : existing.tags || [],
@@ -9632,8 +9698,8 @@ module.exports = class MessageLoggerV2 {
     const messages = new Map();
     const addMessage = message => {
       if (!message?.id || message.channel_id !== channelId) return;
-      if (message.flags == 64) return;
-      if (message.type !== 0 && message.type !== 19 && (message.type !== 20 || (message.flags & 64) === 64)) return;
+      if (this.isEphemeralMessage(message)) return;
+      if (message.type !== 0 && message.type !== 19 && message.type !== 20) return;
       if (this.isThreadCreatedSystemMessage(message)) return;
       messages.set(message.id, message);
     };
@@ -9721,6 +9787,8 @@ module.exports = class MessageLoggerV2 {
     for (const messageId of candidateIds) {
       const record = this.messageRecord?.[messageId];
       if (!record || !this.isSavedRecordOwnedByDeletedChannel(record, channel)) continue;
+      if (this.isEphemeralMessage(record.message)) continue;
+      if (this.settings.ignoreBots && this.isAutomatedMessageAuthor(record.message)) continue;
       const hidden = this.isSavedRecordHidden(record);
       if (!record.delete_data || typeof record.delete_data !== 'object' || Array.isArray(record.delete_data)) {
         record.delete_data = {
@@ -9823,9 +9891,10 @@ module.exports = class MessageLoggerV2 {
   }
   shouldCaptureDeletedChannelMessage(message) {
     if (!message?.id || !message.channel_id) return false;
-    if (message.flags == 64) return false;
-    if (message.type !== 0 && message.type !== 19 && (message.type !== 20 || (message.flags & 64) === 64)) return false;
+    if (this.isEphemeralMessage(message)) return false;
+    if (message.type !== 0 && message.type !== 19 && message.type !== 20) return false;
     if (this.isThreadCreatedSystemMessage(message)) return false;
+    if (this.settings?.ignoreBots && this.isAutomatedMessageAuthor(message)) return false;
     return true;
   }
   saveDeletedChannelCaptureMessage(message, targetMap, context, options = {}) {
@@ -10144,12 +10213,15 @@ module.exports = class MessageLoggerV2 {
     }
     const isLocalDelete = this.isLocalDeleteEvent(threadId);
     const ignoredLocalStarter = !!deleted && this.shouldIgnoreSelfMessage(deleted);
-    const shouldSaveStarter = deleted && !this.shouldIgnoreMessageAuthor(deleted) && !ignoredLocalStarter;
+    const shouldSaveStarter = deleted
+      && !this.isEphemeralMessage(deleted)
+      && !this.shouldIgnoreMessageAuthor(deleted)
+      && !ignoredLocalStarter;
     const alreadySavedStarterDelete = this.deletedMessageSet.get(threadId)?.has(threadId)
       || this.purgedMessageSet.get(threadId)?.has(threadId);
     let savedThreadMessageCount = 0;
-    if (shouldSaveStarter && !alreadySavedStarterDelete) {
-      this.saveDeletedMessage(deleted, this.deletedMessageRecord);
+    if (shouldSaveStarter && !alreadySavedStarterDelete
+      && this.saveDeletedMessage(deleted, this.deletedMessageRecord)) {
       savedThreadMessageCount++;
     }
     savedThreadMessageCount += this.saveCachedForumThreadMessagesForDelete(threadId, channel, metadata);
@@ -10299,6 +10371,129 @@ module.exports = class MessageLoggerV2 {
       .filter(item => item && typeof item === 'object')
       .map(item => this.sanitizeNestedEmbedCollections(item));
   }
+  canonicalizeComponentWireAliases(value) {
+    if (!value || typeof value !== 'object') return value;
+    if (Array.isArray(value)) {
+      for (const item of value) this.canonicalizeComponentWireAliases(item);
+      return value;
+    }
+    const assignAlias = (target, aliases) => {
+      if (value[target] !== undefined) return;
+      for (const alias of aliases) {
+        if (value[alias] !== undefined) {
+          value[target] = value[alias];
+          return;
+        }
+      }
+    };
+    // Discord's live message models expose several component fields in camelCase while the
+    // raw Message constructor consumes the API wire names. Retain the original fields and add
+    // only missing wire aliases so unknown/future component data still round-trips intact.
+    assignAlias('custom_id', ['customId']);
+    assignAlias('sku_id', ['skuId']);
+    assignAlias('min_values', ['minValues']);
+    assignAlias('max_values', ['maxValues']);
+    assignAlias('default_values', ['defaultValues']);
+    assignAlias('channel_types', ['channelTypes']);
+    assignAlias('accent_color', ['accentColor']);
+    assignAlias('proxy_url', ['proxyUrl', 'proxyURL']);
+    assignAlias('content_type', ['contentType']);
+    assignAlias('placeholder_version', ['placeholderVersion']);
+    assignAlias('attachment_id', ['attachmentId']);
+    assignAlias('loading_state', ['loadingState']);
+    assignAlias('content_scan_metadata', ['contentScanMetadata']);
+    for (const child of Object.values(value)) this.canonicalizeComponentWireAliases(child);
+    return value;
+  }
+  getIndexedComponentMedia(components) {
+    const entries = [];
+    const seenObjects = new Set();
+    const seenMedia = new Set();
+    const addMedia = (media, cacheIndex, fallbackLabel = null) => {
+      if (!media || typeof media !== 'object' || Array.isArray(media)) return;
+      const url = this.getUsableEmbedMediaUrl(
+        media,
+        ['proxy_url', 'proxyURL', 'proxyUrl', 'url', 'src', 'href']
+      );
+      if (!url || !/^https?:\/\//i.test(url)) return;
+      const sourceId = media.attachment_id
+        ?? media.attachmentId
+        ?? media.id
+        ?? this.getEmbedMediaSourceId(url);
+      const duplicateKey = `${String(sourceId ?? '')}\u0000${url}`;
+      if (seenMedia.has(duplicateKey)) return;
+      seenMedia.add(duplicateKey);
+      entries.push({
+        media,
+        url,
+        sourceId,
+        cacheIndex,
+        label: fallbackLabel
+      });
+    };
+    const walk = (value, path) => {
+      if (!value || typeof value !== 'object' || seenObjects.has(value)) return;
+      seenObjects.add(value);
+      if (Array.isArray(value)) {
+        value.forEach((item, index) => walk(item, `${path}:${index}`));
+        return;
+      }
+      const type = Number(value.type);
+      if (type === 11) {
+        addMedia(value.media, `${path}:thumbnail`, value.description);
+      } else if (type === 12 && Array.isArray(value.items)) {
+        value.items.forEach((item, index) => {
+          addMedia(item?.media, `${path}:gallery:${index}`, item?.description);
+        });
+      } else if (type === 13) {
+        addMedia(value.file, `${path}:file`, value.name);
+      }
+      for (const [key, child] of Object.entries(value)) {
+        if (type === 11 && key === 'media') continue;
+        if (type === 12 && key === 'items') continue;
+        if (type === 13 && key === 'file') continue;
+        walk(child, `${path}:${key}`);
+      }
+    };
+    this.toSerializableArray(components).forEach((component, index) => {
+      walk(component, `component:${index}`);
+    });
+    return entries;
+  }
+  isComponentImageMedia(entry) {
+    if (!entry) return false;
+    const contentType = entry.media?.content_type ?? entry.media?.contentType;
+    return this.isImage(entry.url) || /^image\//i.test(String(contentType || ''));
+  }
+  getComponentPayloadSummary(components, maxLength = 240) {
+    const roots = this.toSerializableArray(components);
+    if (!roots.length) return '';
+    const text = [];
+    const labels = [];
+    let componentCount = 0;
+    const seen = new Set();
+    const walk = value => {
+      if (!value || typeof value !== 'object' || seen.has(value)) return;
+      seen.add(value);
+      if (Array.isArray(value)) {
+        value.forEach(walk);
+        return;
+      }
+      if (Number.isFinite(Number(value.type))) componentCount++;
+      if (Number(value.type) === 10 && typeof value.content === 'string' && value.content.trim()) {
+        text.push(value.content.replace(/\s+/g, ' ').trim());
+      }
+      if (typeof value.label === 'string' && value.label.trim()) labels.push(value.label.trim());
+      for (const child of Object.values(value)) walk(child);
+    };
+    walk(roots);
+    const mediaCount = this.getIndexedComponentMedia(components).length;
+    let summary = text.join(' ').trim();
+    if (!summary && labels.length) summary = `Controls: ${Array.from(new Set(labels)).join(', ')}`;
+    if (!summary && mediaCount) summary = `${mediaCount} media item${mediaCount === 1 ? '' : 's'}`;
+    if (!summary) summary = `${componentCount || roots.length} component${componentCount === 1 ? '' : 's'}`;
+    return summary.length > maxLength ? `${summary.slice(0, Math.max(0, maxLength - 3))}...` : summary;
+  }
   getUsableEmbedMediaUrl(media, preferredKeys = ['url', 'proxy_url', 'proxyURL', 'proxyUrl', 'src', 'href']) {
     if (!media || typeof media !== 'object' || Array.isArray(media)) return null;
     for (const key of preferredKeys) {
@@ -10397,6 +10592,10 @@ module.exports = class MessageLoggerV2 {
     for (const [key, child] of Object.entries(value)) {
       if (key === 'embeds') {
         value[key] = this.normalizeMessageEmbeds(child);
+        continue;
+      }
+      if (key === 'components') {
+        value[key] = this.canonicalizeComponentWireAliases(child);
         continue;
       }
       this.sanitizeNestedEmbedCollections(child);
@@ -10792,6 +10991,7 @@ module.exports = class MessageLoggerV2 {
         return;
       }
       if (record.delete_data.hidden) return;
+      if (this.isEphemeralMessage(record.message)) return;
       if (this.shouldIgnoreMessageAuthor(record.message)) return;
       if (this.shouldIgnoreSelfMessage(record.message)) return;
       toInsert.push(getCleanRenderMessage(record));
@@ -10949,6 +11149,10 @@ module.exports = class MessageLoggerV2 {
     return true;
   }
   saveDeletedMessage(message, targetMessageRecord, options = {}) {
+    // Ephemeral is a visibility boundary, not a presentation mode. Reject it again at the
+    // canonical record writer so combined flags (for example Ephemeral + Components V2)
+    // cannot leak through an uncommon capture path.
+    if (this.isEphemeralMessage(message)) return false;
     const result = this.createMiniFormattedData(message);
     result.delete_data = {};
     const id = message.id;
@@ -10989,6 +11193,7 @@ module.exports = class MessageLoggerV2 {
     }
     if (this.settings.cacheAllImages) this.cacheMessageImages(this.messageRecord[id].message);
     this.moveSavedRecordToCategoryIndex(id, targetMessageRecord);
+    return true;
   }
   createButton(label, callback) {
     const classes = this.createButton.classes;
@@ -11316,6 +11521,7 @@ module.exports = class MessageLoggerV2 {
     const processMedia = callback => {
       const attachments = message.attachments || [];
       const embeds = message.embeds || [];
+      const componentMedia = this.getIndexedComponentMedia(message.components);
       const stickers = this.getMessageStickerItems(message);
       for (let i = 0; i < attachments.length; i++) {
         const attachment = attachments[i];
@@ -11335,6 +11541,13 @@ module.exports = class MessageLoggerV2 {
           if (!url) continue;
           callback(url, cacheIndex, this.getEmbedMediaSourceId(url));
         }
+      }
+      for (const { url, cacheIndex, sourceId } of componentMedia) {
+        // Component type 13 is Discord's file component. Treat remote file URLs like
+        // ordinary non-image attachments so the existing all-file-types preference remains
+        // authoritative; thumbnails and media galleries are visual media and always qualify.
+        if (cacheIndex.endsWith(':file') && !this.settings.newSaveAllFileTypes) continue;
+        callback(url, cacheIndex, sourceId);
       }
       for (let i = 0; i < stickers.length; i++) {
         const sticker = this.getStickerMedia(stickers[i]);
@@ -11452,6 +11665,9 @@ module.exports = class MessageLoggerV2 {
         ids.add(this.getMediaCacheFileId(this.getEmbedMediaSourceId(url), cacheIndex, message.id));
       }
     }
+    for (const { sourceId, cacheIndex } of this.getIndexedComponentMedia(message.components)) {
+      ids.add(this.getMediaCacheFileId(sourceId, cacheIndex, message.id));
+    }
     for (const id of record.logged_attachments || []) {
       if (id) ids.add(String(id));
     }
@@ -11503,6 +11719,15 @@ module.exports = class MessageLoggerV2 {
           labels.set(cacheId, filename);
         } catch {}
       }
+    }
+    for (const { url, sourceId, cacheIndex, label } of this.getIndexedComponentMedia(message.components)) {
+      const cacheId = this.getMediaCacheFileId(sourceId, cacheIndex, message.id);
+      let filename = label || 'component media';
+      try {
+        const parts = new URL(url).pathname.split('/').filter(Boolean);
+        filename = decodeURIComponent(parts[parts.length - 1] || '') || filename;
+      } catch {}
+      labels.set(cacheId, filename);
     }
     return labels;
   }
@@ -12413,19 +12638,32 @@ module.exports = class MessageLoggerV2 {
       }
       if (dispatch.ML2 && (dispatch.type === 'MESSAGE_DELETE' || dispatch.type === 'MESSAGE_UPDATE')) return callDefault(...args);
       if (dispatch.type !== 'MESSAGE_CREATE' && dispatch.type !== 'MESSAGE_DELETE' && dispatch.type !== 'MESSAGE_DELETE_BULK' && dispatch.type !== 'MESSAGE_UPDATE' && dispatch.type !== 'LOAD_MESSAGES_SUCCESS' && dispatch.type !== 'THREAD_DELETE') return callDefault(...args);
-      if (dispatch.message && (dispatch.message.type !== 0 && dispatch.message.type !== 19 && (dispatch.message.type !== 20 || (dispatch.message.flags & 64) === 64))) return callDefault(...args);
+      if (dispatch.message && (
+        this.isEphemeralMessage(dispatch.message)
+        || (dispatch.message.type !== 0 && dispatch.message.type !== 19 && dispatch.message.type !== 20)
+      )) return callDefault(...args);
       const channel = dispatch.type === 'THREAD_DELETE' && dispatch.channel ? dispatch.channel : this.tools.getChannel(dispatch.message ? dispatch.message.channel_id : dispatch.channelId);
       if (!channel) return callDefault(...args);
       const guild = channel.guild_id ? this.tools.getServer(channel.guild_id) : false;
-      let author = dispatch.message?.author ? this.tools.getUser(dispatch.message.author.id) : false;
+      const eventMessageId = dispatch.message?.id ?? dispatch.id;
+      const cachedPolicyMessage = eventMessageId
+        ? this.getCachedMessage(eventMessageId, channel.id)
+        : null;
+      const policyMessage = dispatch.message || cachedPolicyMessage;
+      let author = policyMessage?.author
+        ? this.tools.getUser(policyMessage.author.id) || policyMessage.author
+        : false;
       if (!author) author = this.channelMessages[channel.id]?._map?.[dispatch.message?.id ?? dispatch.id]?.author;
-      if (!author) {
-        let message = this.getCachedMessage(dispatch.id);
-        if (message) author = this.tools.getUser(message.author.id);
+      if (!author && cachedPolicyMessage?.author) {
+        author = this.tools.getUser(cachedPolicyMessage.author.id) || cachedPolicyMessage.author;
       }
+      if (this.isEphemeralMessage(cachedPolicyMessage)) return callDefault(...args);
+      const automatedEvent = [dispatch.message, cachedPolicyMessage]
+        .filter(Boolean)
+        .some(message => this.isAutomatedMessageAuthor(message, author));
+      if (this.settings.ignoreBots && automatedEvent) return callDefault(...args);
       if (!author && !(dispatch.type == 'LOAD_MESSAGES_SUCCESS' || dispatch.type == 'MESSAGE_DELETE_BULK' || dispatch.type == 'THREAD_DELETE')) return callDefault(...args);
       const isLocalUser = author && author.id === this.localUser.id;
-      if (author?.bot && this.settings.ignoreBots) return callDefault(...args);
       if (author && isLocalUser && this.settings.ignoreSelf && dispatch.type === 'MESSAGE_CREATE') return callDefault(...args);
       if (author && this.settings.ignoreBlockedUsers && this.tools.isBlocked(author.id) && !isLocalUser) return callDefault(...args);
       if (author?.avatar === 'clyde') return callDefault(...args);
@@ -12473,7 +12711,8 @@ module.exports = class MessageLoggerV2 {
         if (dispatch.type === 'MESSAGE_DELETE') {
           const deleted = this.tempEditedMessageRecord[dispatch.id]?.message || this.getCachedMessage(dispatch.id, dispatch.channelId);
           if (!deleted || (deleted.type !== 0 && deleted.type !== 19 && deleted.type !== 20)) return callDefault(...args);
-          if (deleted.flags == 64) return callDefault(...args);
+          if (this.isEphemeralMessage(deleted)) return callDefault(...args);
+          if (this.shouldIgnoreMessageAuthor(deleted, author)) return callDefault(...args);
           if (this.shouldIgnoreSelfMessage(deleted)) return callDefault(...args);
           if (!this.tools.isMentioned(deleted, this.localUser.id)) return callDefault(...args);
           const record = this.messageRecord[dispatch.id];
@@ -12492,7 +12731,10 @@ module.exports = class MessageLoggerV2 {
           if (!dispatch.message.edited_timestamp) {
             const last = this.getCachedMessage(dispatch.message.id);
             const savedRecord = this.messageRecord[dispatch.message.id];
-            this.syncMessageUpdatePayload(dispatch.message, savedRecord?.message || last, [savedRecord]);
+            const previousMessage = savedRecord?.message || last;
+            if (this.isEphemeralMessage(previousMessage)
+              || this.shouldIgnoreMessageAuthor(previousMessage, author)) return callDefault(...args);
+            this.syncMessageUpdatePayload(dispatch.message, previousMessage, [savedRecord]);
             if (savedRecord) this.saveData();
             return callDefault(...args);
           }
@@ -12500,6 +12742,9 @@ module.exports = class MessageLoggerV2 {
           const last = this.getCachedMessage(dispatch.message.id, channel.id);
           const lastEditedSaved = isSaved || this.tempEditedMessageRecord[dispatch.message.id];
           if (!last && !lastEditedSaved) return callDefault(...args);
+          const previousMessage = lastEditedSaved?.message || last;
+          if (this.isEphemeralMessage(previousMessage)
+            || this.shouldIgnoreMessageAuthor(previousMessage, author)) return callDefault(...args);
           if (isSaved && !lastEditedSaved.local_mentioned) {
             lastEditedSaved.message.content = dispatch.message.content;
             return callDefault(...args);
@@ -12581,13 +12826,14 @@ module.exports = class MessageLoggerV2 {
         this._ensureChannelCached(channel.id);
         if (!deleted) return callDefault(...args);
         if (this.isThreadCreatedSystemMessage(deleted)) return callDefault(...args);
+        if (this.isEphemeralMessage(deleted)) return callDefault(...args);
+        if (this.shouldIgnoreMessageAuthor(deleted, author)) return callDefault(...args);
         if (this.shouldIgnoreSelfMessage(deleted)) return callDefault(...args);
         if (this.deletedMessageSet.get(channel.id)?.has(deleted.id)) {
           if (!shouldPresentDeleted) ret = callDefault(...args);
           return ret;
         }
-        if (deleted.type !== 0 && deleted.type !== 19 && (deleted.type !== 20 || (deleted.flags & 64) === 64)) return callDefault(...args);
-        if (deleted.flags == 64) return callDefault(...args);
+        if (deleted.type !== 0 && deleted.type !== 19 && deleted.type !== 20) return callDefault(...args);
         if (!this.selectedChannel || this.selectedChannel.id != channel.id) {
           this._incrementMessageCount('deleted', channel, guild);
         }
@@ -12624,6 +12870,7 @@ module.exports = class MessageLoggerV2 {
             continue;
           }
           if (this.isThreadCreatedSystemMessage(purged)) continue;
+          if (this.isEphemeralMessage(purged)) continue;
           if (this.shouldIgnoreMessageAuthor(purged)) continue;
           if (this.shouldIgnoreSelfMessage(purged)) continue;
           savedDeleteCount++;
@@ -12658,7 +12905,10 @@ module.exports = class MessageLoggerV2 {
         if (!dispatch.message.edited_timestamp) {
           const last = this.getCachedMessage(dispatch.message.id);
           const savedRecord = this.messageRecord[dispatch.message.id];
-          this.syncMessageUpdatePayload(dispatch.message, savedRecord?.message || last, [savedRecord]);
+          const previousMessage = savedRecord?.message || last;
+          if (this.isEphemeralMessage(previousMessage)
+            || this.shouldIgnoreMessageAuthor(previousMessage, author)) return callDefault(...args);
+          this.syncMessageUpdatePayload(dispatch.message, previousMessage, [savedRecord]);
           if (savedRecord) this.saveData();
           return callDefault(...args);
         }
@@ -12667,6 +12917,8 @@ module.exports = class MessageLoggerV2 {
         const lastEditedSaved = this.getEditedMessage(dispatch.message.id, channel.id);
         if (!last && !lastEditedSaved) return callDefault(...args);
         const previousMessage = lastEditedSaved?.message || last;
+        if (this.isEphemeralMessage(previousMessage)
+          || this.shouldIgnoreMessageAuthor(previousMessage, author)) return callDefault(...args);
         let ghostPinged = false;
         const currentContent = previousMessage.content;
         let loggedAttachmentsToAdd = [];
@@ -12849,6 +13101,7 @@ module.exports = class MessageLoggerV2 {
         : originalElement;
       if (!plugin.shouldPresentEditedMessages()
         || !currentRecord
+        || plugin.isEphemeralMessage(currentRecord.message)
         || !currentRecord.edit_history
         || currentRecord.edits_hidden) {
         return renderOriginal();
@@ -13345,6 +13598,7 @@ module.exports = class MessageLoggerV2 {
         const message = record?.message;
         if (!record?.delete_data?.forum_thread_delete || record.delete_data.hidden || !message) continue;
         if (message.id !== threadId || message.channel_id !== threadId) continue;
+        if (this.isEphemeralMessage(message)) continue;
         if (this.shouldIgnoreMessageAuthor(message) || this.shouldIgnoreSelfMessage(message)) continue;
         const savedParentId = record.delete_data.forum_parent_id;
         if (savedParentId) {
@@ -13367,6 +13621,7 @@ module.exports = class MessageLoggerV2 {
         const metadata = record?.delete_data?.forum_metadata || {};
         if (!record?.delete_data?.forum_thread_delete || record.delete_data.hidden || !message) continue;
         if (message.id !== threadId || message.channel_id !== threadId) continue;
+        if (this.isEphemeralMessage(message)) continue;
         const savedParentType = metadata.parentType ?? record.delete_data.location?.parentType;
         const hasKnownParentKind = !!metadata.isForumParent || savedParentType != null;
         const recordHasForumParent = !!metadata.isForumParent || savedParentType === 15 || savedParentType === 16;
@@ -13460,6 +13715,7 @@ module.exports = class MessageLoggerV2 {
         const saved = this.messageRecord[id];
         const message = saved?.message;
         if (!message || message.channel_id !== threadId) return;
+        if (this.isEphemeralMessage(message)) return;
         if (this.shouldIgnoreMessageAuthor(message) || this.shouldIgnoreSelfMessage(message)) return;
         ids.add(id);
       };
@@ -15012,6 +15268,13 @@ module.exports = class MessageLoggerV2 {
           const text = String(rawText).length > 240 ? `${String(rawText).slice(0, 237)}...` : String(rawText);
           appendPayloadReference('Embed', text);
         }
+        const components = this.toSerializableArray(message.components);
+        if (components.length) {
+          appendPayloadReference(
+            this.hasMessageFlag(message, 32768) ? 'Components V2' : 'Components',
+            this.getComponentPayloadSummary(components)
+          );
+        }
         if (!record) {
           const channel = this.tools.getChannel(message.channel_id);
           const guild = this.tools.getServer(channel?.guild_id);
@@ -15418,7 +15681,12 @@ module.exports = class MessageLoggerV2 {
       if (filterType == 'message' || filterType == 'content')
         messages = messages.filter(x => {
           const message = this.getMessageAny(x);
-          return x == filter || (message?.content.toLowerCase().includes(filter.toLowerCase()));
+          if (!message) return false;
+          const content = [
+            message.content,
+            this.getComponentPayloadSummary(message.components)
+          ].filter(Boolean).join(' ');
+          return x == filter || content.toLowerCase().includes(filter.toLowerCase());
         });
       if (filterType == 'user')
         messages = messages.filter(x => {
@@ -15435,8 +15703,9 @@ module.exports = class MessageLoggerV2 {
               const message = this.getMessageAny(x);
               if (!message) return false;
               if (Array.isArray(message.attachments)) if (message.attachments.some(({ filename }) => this.isImage(filename))) return true;
-              if (Array.isArray(message.embeds)) return message.embeds.some(({ image }) => !!image);
-              return false;
+              if (Array.isArray(message.embeds) && message.embeds.some(({ image }) => !!image)) return true;
+              return this.getIndexedComponentMedia(message.components)
+                .some(entry => this.isComponentImageMedia(entry));
             });
             break;
           case 'link':

@@ -5,7 +5,7 @@ const { createPlugin, resetHarness } = require('./helpers/plugin-harness');
 
 test.beforeEach(resetHarness);
 
-test('author gates are evaluated per message', () => {
+test('author gates distinguish automated captures from rich human messages', () => {
   const plugin = createPlugin({
     localUser: { id: 'local' },
     settings: { ignoreBots: true, ignoreBlockedUsers: true, ignoreSelf: true },
@@ -15,12 +15,44 @@ test('author gates are evaluated per message', () => {
     }
   });
 
-  assert.equal(plugin.shouldIgnoreMessageAuthor({ author: { id: 'bot-inline', bot: true } }), true);
-  assert.equal(plugin.shouldIgnoreMessageAuthor({ author: { id: 'bot-store' } }), true);
+  const automatedMessages = [
+    { author: { id: 'bot-inline', bot: true } },
+    { author: { id: 'bot-store' } },
+    { webhook_id: 'webhook-snake' },
+    { webhookId: 'webhook-camel' },
+    { application_id: 'application-snake' },
+    { applicationId: 'application-camel' },
+    { application: { id: 'application-nested' } },
+    { interaction: { id: 'interaction' } },
+    { interaction_metadata: { id: 'interaction-metadata-snake' } },
+    { interactionMetadata: { id: 'interaction-metadata-camel' } }
+  ];
+
+  for (const message of automatedMessages) {
+    assert.equal(plugin.shouldIgnoreMessageAuthor(message), true, JSON.stringify(message));
+  }
+
   assert.equal(plugin.shouldIgnoreMessageAuthor({ author: { id: 'blocked' } }), true);
-  assert.equal(plugin.shouldIgnoreMessageAuthor({ author: { id: 'normal' } }), false);
+  assert.equal(plugin.shouldIgnoreMessageAuthor({
+    author: { id: 'normal', bot: false },
+    flags: 32768,
+    embeds: [{ title: 'A human embed' }],
+    components: [{ type: 1, components: [{ type: 2, label: 'Human button' }] }]
+  }), false, 'Components V2 and embeds alone must not mark a human author as automated');
   assert.equal(plugin.shouldIgnoreSelfMessage({ author: { id: 'local' } }), true);
   assert.equal(plugin.shouldIgnoreMessageAuthor({ author: { id: 'local' } }), false);
+});
+
+test('Ignore bots only applies the automated-message classifier while enabled', () => {
+  const plugin = createPlugin({
+    settings: { ignoreBots: false, ignoreBlockedUsers: false },
+    tools: { getUser: () => ({ bot: true }), isBlocked: () => false }
+  });
+
+  assert.equal(plugin.shouldIgnoreMessageAuthor({ author: { id: 'bot-store' } }), false);
+  assert.equal(plugin.shouldIgnoreMessageAuthor({ webhook_id: 'webhook' }), false);
+  assert.equal(plugin.shouldIgnoreMessageAuthor({ application: { id: 'application' } }), false);
+  assert.equal(plugin.shouldIgnoreMessageAuthor({ interaction_metadata: { id: 'interaction' } }), false);
 });
 
 test('local deletion tracking handles single and bulk IDs', () => {

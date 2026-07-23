@@ -1584,6 +1584,208 @@ test('message cleanup preserves detached Components V2 trees and snapshot aliase
   assert.equal(snapshots[0].message.id, 'snapshot-message');
 });
 
+test('message cleanup adds Components V2 wire aliases without mutating app-model payloads', () => {
+  const sourceComponent = {
+    type: 17,
+    accentColor: 0xffcc00,
+    components: [{
+      type: 9,
+      components: [{ type: 10, content: '## App component title' }],
+      accessory: {
+        type: 11,
+        media: {
+          url: 'https://external.example/app.png',
+          proxyUrl: 'https://cdn.example/app.png',
+          contentType: 'image/png',
+          placeholderVersion: 1,
+          attachmentId: '123',
+          loadingState: 2,
+          contentScanMetadata: { version: 4, flags: 0 }
+        }
+      }
+    }, {
+      type: 2,
+      customId: 'app-action',
+      label: 'Run'
+    }]
+  };
+  const plugin = createPlugin({
+    ChannelStore: { getChannel: () => null },
+    UserStore: { getUser: () => null },
+    messageStore: { getMessage: () => null },
+    settings: { onlyRenderCachedAttachments: false }
+  });
+  const cleaned = plugin.cleanupMessageObject({
+    id: 'app-components-v2',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    content: '',
+    type: 0,
+    flags: 32768,
+    timestamp: 100,
+    attachments: [],
+    embeds: [],
+    reactions: [],
+    author: { id: 'app', username: 'App', bot: true },
+    mentions: [],
+    components: [sourceComponent]
+  });
+  const savedMedia = cleaned.components[0].components[0].accessory.media;
+
+  assert.equal(cleaned.components[0].accent_color, 0xffcc00);
+  assert.equal(cleaned.components[0].components[1].custom_id, 'app-action');
+  assert.equal(savedMedia.proxy_url, 'https://cdn.example/app.png');
+  assert.equal(savedMedia.content_type, 'image/png');
+  assert.equal(savedMedia.placeholder_version, 1);
+  assert.equal(savedMedia.attachment_id, '123');
+  assert.equal(savedMedia.loading_state, 2);
+  assert.deepEqual(savedMedia.content_scan_metadata, { version: 4, flags: 0 });
+  assert.equal(savedMedia.proxyUrl, 'https://cdn.example/app.png', 'the original compatible alias remains available');
+  assert.equal(sourceComponent.accent_color, undefined);
+  assert.equal(sourceComponent.components[1].custom_id, undefined);
+  assert.equal(sourceComponent.components[0].accessory.media.proxy_url, undefined);
+
+  const rendered = plugin.getCacheOnlyMessage(cleaned);
+  rendered.components[0].components[0].accessory.media.proxy_url = 'https://renderer.invalid/app.png';
+  assert.equal(
+    cleaned.components[0].components[0].accessory.media.proxy_url,
+    'https://cdn.example/app.png',
+    'render-time normalization stays isolated from the canonical record'
+  );
+  assert.match(plugin.getComponentPayloadSummary(cleaned.components), /App component title/);
+});
+
+test('message cleanup canonicalizes and detaches webhook and application metadata', () => {
+  const interactionMetadata = {
+    id: 'interaction-metadata',
+    triggering_interaction_metadata: {
+      id: 'nested-interaction',
+      embeds: [{ image: { proxy_url: 'https://example.invalid/nested-image' } }]
+    }
+  };
+  const application = {
+    id: 'application-from-object',
+    name: 'Example App',
+    future_application_field: { retained: true }
+  };
+  const interaction = {
+    id: 'deprecated-interaction',
+    name: 'command',
+    future_interaction_field: ['retained']
+  };
+  const plugin = createPlugin({
+    settings: { ignoreBots: true, ignoreBlockedUsers: false },
+    ChannelStore: { getChannel: () => null },
+    UserStore: { getUser: () => null },
+    messageStore: { getMessage: () => null },
+    tools: {
+      getUser: () => null,
+      isBlocked: () => false
+    }
+  });
+  const cleaned = plugin.cleanupMessageObject({
+    id: 'automated-message',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    content: '',
+    type: 0,
+    flags: 32768,
+    timestamp: 100,
+    attachments: [],
+    embeds: [{ title: 'App payload' }],
+    reactions: [],
+    author: { id: 'webhook-author', username: 'Webhook', bot: false },
+    mentions: [],
+    components: [{ type: 1, components: [{ type: 2, label: 'Action' }] }],
+    webhookId: 'webhook-camel',
+    application,
+    applicationId: 'application-camel',
+    interaction: {
+      toJSON() {
+        return interaction;
+      }
+    },
+    interactionMetadata: {
+      toJS() {
+        return interactionMetadata;
+      }
+    }
+  });
+
+  assert.equal(cleaned.webhook_id, 'webhook-camel');
+  assert.equal(cleaned.application_id, 'application-camel');
+  assert.deepEqual(cleaned.application, application);
+  assert.deepEqual(cleaned.interaction, interaction);
+  assert.deepEqual(cleaned.interaction_metadata, {
+    ...interactionMetadata,
+    triggering_interaction_metadata: {
+      ...interactionMetadata.triggering_interaction_metadata,
+      embeds: [{
+        image: {
+          proxy_url: 'https://example.invalid/nested-image',
+          url: 'https://example.invalid/nested-image'
+        }
+      }]
+    }
+  });
+  assert.equal(cleaned.webhookId, undefined);
+  assert.equal(cleaned.applicationId, undefined);
+  assert.equal(cleaned.interactionMetadata, undefined);
+  assert.equal(plugin.shouldIgnoreMessageAuthor(cleaned), true);
+
+  cleaned.application.future_application_field.retained = false;
+  cleaned.interaction.future_interaction_field[0] = 'changed';
+  cleaned.interaction_metadata.triggering_interaction_metadata.id = 'changed';
+  assert.equal(application.future_application_field.retained, true);
+  assert.equal(interaction.future_interaction_field[0], 'retained');
+  assert.equal(interactionMetadata.triggering_interaction_metadata.id, 'nested-interaction');
+
+  const human = plugin.cleanupMessageObject({
+    id: 'human-components-v2',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    content: '',
+    type: 0,
+    flags: 32768,
+    timestamp: 101,
+    attachments: [],
+    embeds: [{ title: 'Human embed' }],
+    reactions: [],
+    author: { id: 'human', username: 'Human', bot: false },
+    mentions: [],
+    components: [{ type: 1, components: [{ type: 2, label: 'Human action' }] }],
+    webhook_id: '',
+    application_id: null,
+    interaction: null,
+    interaction_metadata: null
+  });
+  assert.equal(human.webhook_id, undefined);
+  assert.equal(human.application_id, undefined);
+  assert.equal(human.interaction, undefined);
+  assert.equal(human.interaction_metadata, undefined);
+  assert.equal(plugin.shouldIgnoreMessageAuthor(human), false);
+});
+
+test('ephemeral bit 64 is excluded even when Components V2 is also set', () => {
+  const plugin = createPlugin({
+    settings: { cacheAllImages: false },
+    messageRecord: {},
+    messageRecordIds: new Set()
+  });
+  const ephemeralV2 = {
+    id: 'ephemeral-v2',
+    channel_id: 'channel',
+    type: 0,
+    flags: 64 | 32768
+  };
+
+  assert.equal(plugin.isEphemeralMessage({ flags: 64 }), true);
+  assert.equal(plugin.isEphemeralMessage(ephemeralV2), true);
+  assert.equal(plugin.isEphemeralMessage({ flags: 32768 }), false);
+  assert.equal(plugin.saveDeletedMessage(ephemeralV2, {}), false);
+  assert.deepEqual(plugin.messageRecord, {});
+});
+
 test('embed cleanup follows raw JSON export and canonicalizes Discord wire aliases', () => {
   const plugin = createPlugin();
   const wireEmbed = {

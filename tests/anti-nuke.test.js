@@ -83,6 +83,101 @@ test('Anti-Nuke excludes thread-created system and unsupported messages', () => 
   assert.equal(plugin.shouldCaptureDeletedChannelMessage({ id: '3', channel_id: 'c', type: 18 }), false);
   assert.equal(plugin.shouldCaptureDeletedChannelMessage({ id: '4', channel_id: 'c', type: 7 }), false);
   assert.equal(plugin.shouldCaptureDeletedChannelMessage({ id: '5', channel_id: 'c', type: 0, flags: 64 }), false);
+  assert.equal(plugin.shouldCaptureDeletedChannelMessage({ id: '6', channel_id: 'c', type: 0, flags: 64 | 32768 }), false);
+  assert.equal(plugin.shouldCaptureDeletedChannelMessage({ id: '7', channel_id: 'c', type: 0, flags: 32768 }), true);
+});
+
+test('Anti-Nuke ignores automated messages but retains rich human Components V2 captures', () => {
+  const plugin = createPlugin({
+    settings: { ignoreBots: true },
+    tools: {
+      getUser: id => id === 'store-bot' ? { id, bot: true } : { id, bot: false },
+      isBlocked: () => false
+    }
+  });
+  const richPayload = {
+    flags: 32768,
+    embeds: [{ title: 'rich deleted message', fields: [{ name: 'field', value: 'value' }] }],
+    components: [{ type: 1, components: [{ type: 2, label: 'Action' }] }]
+  };
+  const automatedMessages = [
+    { author: { id: 'raw-bot', bot: true } },
+    { author: { id: 'store-bot' } },
+    { webhook_id: 'webhook-snake' },
+    { webhookId: 'webhook-camel' },
+    { application_id: 'application-snake' },
+    { applicationId: 'application-camel' },
+    { application: { id: 'application-nested' } },
+    { interaction: { id: 'interaction' } },
+    { interaction_metadata: { id: 'interaction-metadata-snake' } },
+    { interactionMetadata: { id: 'interaction-metadata-camel' } }
+  ];
+
+  for (const [index, automated] of automatedMessages.entries()) {
+    assert.equal(
+      plugin.shouldCaptureDeletedChannelMessage({ id: `automated-${index}`, channel_id: 'c', type: 0, ...richPayload, ...automated }),
+      false,
+      JSON.stringify(automated)
+    );
+  }
+
+  assert.equal(
+    plugin.shouldCaptureDeletedChannelMessage({
+      id: 'human-rich',
+      channel_id: 'c',
+      type: 0,
+      author: { id: 'human', bot: false },
+      ...richPayload
+    }),
+    true
+  );
+});
+
+test('Anti-Nuke captures automated rich payloads unchanged when Ignore bots is disabled', () => {
+  let savedMessage = null;
+  const plugin = createPlugin({
+    settings: { ignoreBots: false },
+    messageRecord: {},
+    deletedMessageRecord: {},
+    nukedMessageRecord: {},
+    purgedMessageRecord: {},
+    deletedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    getMessageLocationSnapshot: () => null,
+    saveDeletedMessage(message) {
+      savedMessage = structuredClone(message);
+      this.messageRecord[message.id] = {
+        message: structuredClone(message),
+        delete_data: {}
+      };
+    }
+  });
+  const message = {
+    id: 'webhook-rich',
+    channel_id: 'deleted-channel',
+    type: 0,
+    webhook_id: 'webhook',
+    flags: 32768,
+    attachments: [{ id: 'attachment', filename: 'proof.png' }],
+    embeds: [{ title: 'Webhook embed', description: 'must survive capture' }],
+    components: [{ type: 1, components: [{ type: 2, label: 'Still here' }] }]
+  };
+  const context = {
+    captureEnabled: true,
+    remainingMessages: Infinity,
+    remainingAttachments: Infinity,
+    capturedMessages: 0,
+    captured: 0,
+    capturedAttachments: 0,
+    channel: { id: 'deleted-channel' }
+  };
+
+  assert.equal(plugin.saveDeletedChannelCaptureMessage(message, plugin.nukedMessageRecord, context), true);
+  assert.deepEqual(savedMessage, message);
+  assert.deepEqual(plugin.messageRecord[message.id].message.embeds, message.embeds);
+  assert.deepEqual(plugin.messageRecord[message.id].message.components, message.components);
+  assert.deepEqual(plugin.messageRecord[message.id].message.attachments, message.attachments);
 });
 
 test('Anti-Nuke folds the initial thread starter into the root without consuming a reply slot', () => {
@@ -631,4 +726,51 @@ test('deleted-channel capture adopts visible and hidden Deleted/Purged records i
   assert.equal(plugin.nukedMessageSet.get(threadId).has(threadRootId), true);
   assert.equal(plugin.nukedMessageSet.get(threadId).has(threadReplyId), true);
   assert.equal(plugin.deletedMessageSet.get(threadId)?.size || 0, 0);
+});
+
+test('Anti-Nuke adoption follows Ignore bots but never adopts ephemeral records', () => {
+  const parentId = '700';
+  const humanId = '701';
+  const webhookId = '702';
+  const ephemeralId = '703';
+  const records = {
+    [humanId]: {
+      message: { id: humanId, channel_id: parentId, flags: 32768, author: { id: 'human', bot: false } },
+      delete_data: { time: 1 }
+    },
+    [webhookId]: {
+      message: { id: webhookId, channel_id: parentId, flags: 32768, webhook_id: 'webhook' },
+      delete_data: { time: 2 }
+    },
+    [ephemeralId]: {
+      message: { id: ephemeralId, channel_id: parentId, flags: 64 | 32768, application_id: 'application' },
+      delete_data: { time: 3 }
+    }
+  };
+  const plugin = createPlugin({
+    settings: { antiNukeEnabled: true, ignoreBots: true },
+    messageRecord: records,
+    deletedMessageRecord: { [parentId]: [humanId, webhookId, ephemeralId] },
+    editedMessageRecord: {},
+    purgedMessageRecord: {},
+    nukedMessageRecord: {},
+    deletedMessageSet: new Map([[parentId, new Set([humanId, webhookId, ephemeralId])]]),
+    editedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
+    sortedDeletedMessageIds: new Map(),
+    sortedPurgedMessageIds: new Map(),
+    sortedNukedMessageIds: new Map(),
+    tools: { getChannel: () => null, getUser: () => null }
+  });
+
+  assert.equal(plugin.adoptSavedRecordsForDeletedChannel({ id: parentId }), 1);
+  assert.deepEqual(plugin.nukedMessageRecord, { [parentId]: [humanId] });
+  assert.deepEqual(plugin.deletedMessageRecord, { [parentId]: [webhookId, ephemeralId] });
+
+  plugin.settings.ignoreBots = false;
+  assert.equal(plugin.adoptSavedRecordsForDeletedChannel({ id: parentId }), 1);
+  assert.deepEqual(plugin.nukedMessageRecord, { [parentId]: [humanId, webhookId] });
+  assert.deepEqual(plugin.deletedMessageRecord, { [parentId]: [ephemeralId] });
+  assert.equal(records[ephemeralId].delete_data.anti_nuke, undefined);
 });

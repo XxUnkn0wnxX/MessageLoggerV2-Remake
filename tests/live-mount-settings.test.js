@@ -256,6 +256,60 @@ test('master-off bulk purges keep every record but schedule no live presentation
   assert.deepEqual(calls.dispatches, []);
 });
 
+test('dispatch admits non-ephemeral webhooks only when Ignore bots is off', () => {
+  const { addMessage, plugin } = createLiveDeletePlugin({ ignoreBots: false });
+  plugin.cachedMessageRecord = [];
+  plugin.cachedMessageIds = new Set();
+  plugin.cachedMessagesMap = new Map();
+  plugin.tools.getUser = () => null;
+  let nativeCalls = 0;
+  const callDefault = () => {
+    nativeCalls++;
+    return { native: true };
+  };
+
+  const webhook = addMessage('webhook');
+  webhook.webhook_id = 'webhook-id';
+  webhook.flags = 32768;
+  webhook.components = [{ type: 1, components: [{ type: 2, label: 'Action' }] }];
+  plugin.onDispatchEvent([{ type: 'MESSAGE_CREATE', message: webhook }], callDefault);
+  assert.equal(plugin.cachedMessageIds.has(webhook.id), true);
+  plugin.onDispatchEvent([{
+    type: 'MESSAGE_DELETE',
+    id: webhook.id,
+    channelId: webhook.channel_id
+  }], callDefault);
+  assert.ok(plugin.messageRecord[webhook.id], 'allowed non-ephemeral Components V2 webhooks remain loggable');
+
+  plugin.settings.ignoreBots = true;
+  const application = addMessage('application');
+  application.application_id = 'application-id';
+  application.flags = 32768;
+  application.embeds = [{ title: 'App embed' }];
+  plugin.onDispatchEvent([{ type: 'MESSAGE_CREATE', message: application }], callDefault);
+  assert.equal(plugin.cachedMessageIds.has(application.id), false);
+  plugin.onDispatchEvent([{
+    type: 'MESSAGE_DELETE',
+    id: application.id,
+    channelId: application.channel_id
+  }], callDefault);
+  assert.equal(plugin.messageRecord[application.id], undefined);
+
+  plugin.settings.ignoreBots = false;
+  const ephemeralV2 = addMessage('ephemeral');
+  ephemeralV2.flags = 64 | 32768;
+  ephemeralV2.components = [{ type: 1, components: [{ type: 2, label: 'Private action' }] }];
+  plugin.onDispatchEvent([{ type: 'MESSAGE_CREATE', message: ephemeralV2 }], callDefault);
+  assert.equal(plugin.cachedMessageIds.has(ephemeralV2.id), false);
+  plugin.onDispatchEvent([{
+    type: 'MESSAGE_DELETE',
+    id: ephemeralV2.id,
+    channelId: ephemeralV2.channel_id
+  }], callDefault);
+  assert.equal(plugin.messageRecord[ephemeralV2.id], undefined);
+  assert.equal(nativeCalls, 6, 'every ignored Logger event must still continue through Discord');
+});
+
 test('master-off structural thread deletes remain logged and reconcile only for cleanup', () => {
   const threadId = '300';
   const parentId = 'parent';

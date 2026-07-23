@@ -37,7 +37,7 @@ The whitelist and blacklist are managed from the **Message Logger** submenu in s
 | --- | --- | --- |
 | Ignore muted servers | On | Skips muted servers unless another scope rule overrides it. |
 | Ignore muted channels | On | Skips muted channels unless the channel is whitelisted or an override applies. |
-| Ignore bots | On | Skips messages authored by bots. |
+| Ignore bots | On | Skips bot-authored, app/interaction, and webhook messages in ordinary logging and Anti-Nuke capture. Their non-ephemeral embeds and Components V2 payloads remain supported when this is off; ephemeral messages are never logged. |
 | Ignore messages posted by you | Off | Applies author filtering per message, including messages inside forums and threads. |
 | Ignore message edits from you | Off | Skips edit-history logging for your messages while keeping their current deletion baseline updated. |
 | Ignore message deletes from you | Off | Skips deletion actions initiated by the local client. For a locally deleted forum post or thread, the root deletion is not logged. |
@@ -82,9 +82,9 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Disable loading archived data | Off | When both this setting and **Disable saving data** are enabled, the saved archive is skipped or hot-unloaded and only temporary session records remain in memory. Every archive-owned row, live mount, tint, modal, and action is removed while session-owned equivalents remain usable. The archive stays unchanged on disk, archival removals and cached-file deletion are unavailable, and reload/disable discards the temporary session. Disabling this child hot-loads the latest archive and combines it with the session in memory without writing. Its saved preference remains visible on the greyed control but has no effect while its parent is disabled. |
 | Auto backup data (won't fully prevent losing data, just prevent total data loss) | Off | Maintains a fallback copy of the logger data. It reduces, but cannot eliminate, data-loss risk. |
 | Auto backup interval (seconds) | 20 | Waits this many seconds after saved data changes before refreshing the backup. Accepts whole numbers from 10 through 86,400; for example, `300` is five minutes. Blank is valid and saves the 20-second default. Other invalid drafts remain unsaved and are marked with a red field border and inline error instead of a toast. Invalid settings or manual config edits reset to 20 at startup. |
-| Cache media locally | On | Master switch for caching attachments, embed images, and stickers. While **Disable saving data** is on, eligible logger media requests remain in a memory-only queue and no media files are created. The queue drains only after the primary archive save succeeds; disabling media caching or reloading first discards it. Pre-disable in-flight work is cancelled rather than revived. |
+| Cache media locally | On | Master switch for caching attachments, embed images, Components V2 thumbnails/media galleries, and stickers. While **Disable saving data** is on, eligible logger media requests remain in a memory-only queue and no media files are created. The queue drains only after the primary archive save succeeds; disabling media caching or reloading first discards it. Pre-disable in-flight work is cancelled rather than revived. |
 | Add user id to saved media filename | Off | Includes the author ID in hierarchical cache filenames. |
-| Cache all attachment types | Off | Also caches videos, audio, and other non-image files. |
+| Cache all attachment types | Off | Also caches videos, audio, other non-image attachments, and fetchable Components V2 File entries. |
 | Max cache file size (MB, 0 = no limit) | `0` MB | Skips larger attachment files; blank or `0` disables the limit. Embed images and stickers are unaffected. |
 | Media cache path (optional) | Empty | Uses a custom existing directory instead of `MLV2_IMAGE_CACHE`. |
 | Aggresive message caching | On (locked) | Legacy setting retained for compatibility. It must remain enabled on this fork so message history is available for reliable forum and thread restoration. A saved `false` value is reset to `true` at startup. |
@@ -202,7 +202,7 @@ All three caps apply to one parent-channel deletion event:
 - Thread/forum roots, then their replies, then ordinary parent-channel messages are captured newest-first.
 - Anti-Nuke channel-thread roots use the same metadata and starter-body schema as ordinary deleted threads; their dedicated Nuked category and marker keep them separate from ordinary bulk deletes.
 - Attachments count only after their message is admitted. Excluded messages never store attachments; roots remain even if their attachments exceed the budget.
-- Anti Nuke bypasses normal logging ignores and overrides; only its own toggle disables capture.
+- Anti Nuke bypasses normal logging scope and unrelated author ignores, but follows **Ignore bots** for bot/app/webhook messages. Ephemeral messages are always excluded.
 - Hidden Nuked records remain in **Hidden** while Anti Nuke is off. Unhiding one keeps it stored and makes it visible again when Anti Nuke is re-enabled.
 - Blank or `0` is unlimited and can freeze Discord or use substantial disk space on large channels.
 
@@ -232,7 +232,7 @@ Message-history caching and hierarchical media storage are core behavior with no
 | Display update notes | On | Shows the plugin changelog after a version change. |
 | Contextmenu submenu name | Empty | Replaces the **Message Logger** label. Empty values use the built-in label. |
 | Only render locally cached attachments | Off | Prevents uncached attachments from rendering through Discord CDN. The saved record shows a filename placeholder instead. Toggling this reevaluates open logger and channel views immediately. |
-| Delete cached files with log records | Off | Permanently deletes related cached attachments, embeds, and stickers whenever their final log record is removed, including purges and thread/forum cascades. It still runs in ordinary no-save mode, but pauses while **Disable loading archived data** is active because unseen archive records cannot participate in shared-media reference checks. |
+| Delete cached files with log records | Off | Permanently deletes related cached attachments, embeds, Components V2 media, and stickers whenever their final log record is removed, including purges and thread/forum cascades. It still runs in ordinary no-save mode, but pauses while **Disable loading archived data** is active because unseen archive records cannot participate in shared-media reference checks. |
 
 ## 🐞 Debug
 

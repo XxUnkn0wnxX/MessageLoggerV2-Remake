@@ -14,7 +14,7 @@ This fork also restores logged forum posts and channel threads, preserves their 
 - Deleted, edited, purged, Nuked, and ghost-ping history, plus a bounded memory-only **Sent** tab that clears on reload.
 - In-chat restoration of logged deleted and purged messages, saved edit history, configurable tints, and unseen-event counts.
 - Attachment-only messages, embeds, stickers, voice messages, and other file references remain manageable in logger views.
-- Newly captured embeds, message snapshots, and legacy/Components V2 trees retain their complete JSON-serializable payload for native restoration and future full Logger-view rendering.
+- Newly captured embeds, message snapshots, and legacy/Components V2 trees retain their complete JSON-serializable payload for native restoration. Component-only records receive a concise Logger-view summary, and Components V2 thumbnail/gallery media participates in local caching while a full Logger-owned renderer remains future work.
 - Search filters, scoped log views, context-menu actions, double-click-to-jump logger rows, and cross-category Hidden records.
 - Captured toggle keybinds for all logs, the selected channel, and the selected server. Switching views closes any open native media viewer first.
 - One local-only permanent-delete flow across restored messages, logger rows, and forum/thread mounts.
@@ -33,7 +33,7 @@ This fork also restores logged forum posts and channel threads, preserves their 
 
 ### 🛡️ Scope, alerts, media, and reliability
 
-- Server, channel, DM, thread, mute, NSFW, bot, blocked-user, author, and local-action logging controls.
+- Server, channel, DM, thread, mute, NSFW, bot/app/webhook, blocked-user, author, and local-action logging controls.
 - Separate guild/DM alert toggles, notification location lists, selected-location overrides, native BetterDiscord notifications, and custom actionable toasts.
 - One console entry and routed alert per high-impact setting change.
 - Info-blue enabled states, theme-neutral disabled states, warning-colored backup diagnostics, and red errors.

@@ -110,19 +110,98 @@ test('text, attachments, embeds, and sticker-only messages are supported payload
   assert.equal(plugin.hasSupportedMessagePayload({ content: '', attachments: [], embeds: [], sticker_items: [] }), false);
 });
 
-test('media cache keys include attachments, embed images, and stickers without duplicates', () => {
+test('media cache keys include attachments, embeds, Components V2 media, and stickers without duplicates', () => {
   const plugin = createPlugin();
   const keys = plugin.getMessageMediaCacheKeys({
     attachments: [{ id: 'a' }, { id: 'a' }],
     embeds: [{ image: { url: 'https://cdn.example/embed.png' } }],
+    components: [{
+      type: 11,
+      media: {
+        url: 'https://external.example/component.png',
+        proxy_url: 'https://cdn.example/component.png'
+      }
+    }],
     sticker_items: [{ id: 's' }]
   });
 
   assert.deepEqual(keys, new Set([
     'attachment:a',
     'embed:https://cdn.example/embed.png',
+    'component:https://cdn.example/component.png',
     'sticker:s'
   ]));
+});
+
+test('Components V2 media traversal is stable, proxy-first, and skips attachment-only files', () => {
+  const plugin = createPlugin();
+  const components = [{
+    type: 17,
+    components: [
+      {
+        type: 9,
+        accessory: {
+          type: 11,
+          description: 'App thumbnail',
+          media: {
+            url: 'https://external.example/thumbnail.png',
+            proxyUrl: 'https://cdn.example/thumbnail.png',
+            attachmentId: '123'
+          }
+        }
+      },
+      {
+        type: 12,
+        items: [
+          { description: 'Gallery item', media: { url: 'https://cdn.example/gallery.png' } },
+          { media: { url: 'https://cdn.example/gallery.png' } }
+        ]
+      },
+      { type: 13, name: 'Archive', file: { url: 'attachment://archive.zip' } },
+      { type: 13, name: 'Remote file', file: { url: 'https://cdn.example/file.pdf' } }
+    ]
+  }];
+
+  assert.deepEqual(plugin.getIndexedComponentMedia(components), [
+    {
+      media: components[0].components[0].accessory.media,
+      url: 'https://cdn.example/thumbnail.png',
+      sourceId: '123',
+      cacheIndex: 'component:0:components:0:accessory:thumbnail',
+      label: 'App thumbnail'
+    },
+    {
+      media: components[0].components[1].items[0].media,
+      url: 'https://cdn.example/gallery.png',
+      sourceId: null,
+      cacheIndex: 'component:0:components:1:gallery:0',
+      label: 'Gallery item'
+    },
+    {
+      media: components[0].components[3].file,
+      url: 'https://cdn.example/file.pdf',
+      sourceId: null,
+      cacheIndex: 'component:0:components:3:file',
+      label: 'Remote file'
+    }
+  ]);
+});
+
+test('Components V2 image detection accepts image MIME metadata on extensionless proxy URLs', () => {
+  const plugin = createPlugin();
+
+  assert.equal(plugin.isComponentImageMedia({
+    url: 'https://media.discordapp.net/external/component',
+    media: { contentType: 'image/png' }
+  }), true);
+  assert.equal(plugin.isComponentImageMedia({
+    url: 'https://cdn.example/component.webp',
+    media: {}
+  }), true);
+  assert.equal(plugin.isComponentImageMedia({
+    url: 'https://cdn.example/document',
+    media: { content_type: 'application/pdf' }
+  }), false);
 });
 
 test('cache-only rendering preserves cached files and names unavailable files', () => {
@@ -275,7 +354,18 @@ test('media caching skips malformed embed images and uses valid URL or proxy med
           { url: 'https://cdn.example/gallery-url/image.png' }
         ]
       }
-    ]
+    ],
+    components: [{
+      type: 9,
+      accessory: {
+        type: 11,
+        media: {
+          url: 'https://external.example/component-thumbnail.png',
+          proxyUrl: 'https://cdn.example/component-thumbnail.png',
+          attachmentId: '123456'
+        }
+      }
+    }]
   };
 
   plugin.cacheMessageImages(message);
@@ -285,7 +375,57 @@ test('media caching skips malformed embed images and uses valid URL or proxy med
     ['https://cdn.example/valid-url/image.png', 'embed:1', 'valid-url', message.id, message.channel_id, message.guild_id, 0, 0],
     ['https://cdn.example/valid-proxy/image.png', 'embed:2', 'valid-proxy', message.id, message.channel_id, message.guild_id, 0, 0],
     ['https://cdn.example/gallery-proxy/image.png', 'embed:3:gallery:1', 'gallery-proxy', message.id, message.channel_id, message.guild_id, 0, 0],
-    ['https://cdn.example/gallery-url/image.png', 'embed:3:gallery:2', 'gallery-url', message.id, message.channel_id, message.guild_id, 0, 0]
+    ['https://cdn.example/gallery-url/image.png', 'embed:3:gallery:2', 'gallery-url', message.id, message.channel_id, message.guild_id, 0, 0],
+    ['https://cdn.example/component-thumbnail.png', 'component:0:accessory:thumbnail', '123456', message.id, message.channel_id, message.guild_id, 0, 0]
+  ]);
+});
+
+test('remote Components V2 files follow the all-attachment-types setting', async () => {
+  const cached = [];
+  const plugin = createPlugin({
+    __started: true,
+    settings: {
+      cacheAllImages: true,
+      dontSaveData: false,
+      newSaveAllFileTypes: false,
+      maxCacheFileSize: 0
+    },
+    cacheImage(...args) { cached.push(args); }
+  });
+  const message = {
+    id: 'component-file-policy',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    attachments: [],
+    embeds: [],
+    sticker_items: [],
+    components: [
+      {
+        type: 11,
+        media: { url: 'https://cdn.example/thumbnail.png' }
+      },
+      {
+        type: 13,
+        file: { url: 'https://cdn.example/archive.zip' }
+      }
+    ]
+  };
+
+  plugin.cacheMessageImages(message);
+  await waitForQueuedMediaTasks();
+
+  assert.deepEqual(cached.map(args => args.slice(0, 3)), [
+    ['https://cdn.example/thumbnail.png', 'component:0:thumbnail', null]
+  ]);
+
+  plugin.settings.newSaveAllFileTypes = true;
+  plugin.cacheMessageImages(message);
+  await waitForQueuedMediaTasks();
+
+  assert.deepEqual(cached.map(args => args.slice(0, 3)), [
+    ['https://cdn.example/thumbnail.png', 'component:0:thumbnail', null],
+    ['https://cdn.example/thumbnail.png', 'component:0:thumbnail', null],
+    ['https://cdn.example/archive.zip', 'component:1:file', null]
   ]);
 });
 
@@ -332,7 +472,12 @@ test('record media IDs cover messages, attachments, stickers, embeds, and later 
       id: 'message',
       attachments: [{ id: 'attachment' }],
       sticker_items: [{ id: 'sticker' }],
-      embeds: [{ image: { url: 'https://cdn.example/embedded-id/image.png' } }]
+      embeds: [{ image: { url: 'https://cdn.example/embedded-id/image.png' } }],
+      components: [{
+        type: 11,
+        description: 'Component thumbnail',
+        media: { url: 'https://cdn.example/component.png' }
+      }]
     },
     logged_attachments: ['later-attachment']
   };
@@ -342,8 +487,13 @@ test('record media IDs cover messages, attachments, stickers, embeds, and later 
     'attachment',
     'sticker',
     'message-embed-0',
+    'message-component-0-thumbnail',
     'later-attachment'
   ]));
+  assert.equal(
+    plugin.getRecordCachedMediaLabels(record).get('message-component-0-thumbnail'),
+    'component.png'
+  );
 });
 
 test('folded thread roots retain the original starter cache identity', () => {
@@ -393,6 +543,13 @@ test('no-save queues attachment, embed, sticker, and video media without fetchin
         { id: 'video', url: 'https://cdn.example/video.mp4', filename: 'video.mp4' }
       ],
       embeds: [{ image: { url: 'https://cdn.example/embed-id/embed.png' } }],
+      components: [{
+        type: 11,
+        media: {
+          url: 'https://external.example/component.png',
+          proxy_url: 'https://cdn.example/component.png'
+        }
+      }],
       sticker_items: [{ id: 'sticker', name: 'sticker', url: 'https://cdn.example/sticker.png' }]
     };
     const plugin = createMediaCachePlugin(cacheDir, {
@@ -414,7 +571,7 @@ test('no-save queues attachment, embed, sticker, and video media without fetchin
 
     assert.equal(fetches, 0, `no-save ${archiveDetached ? 'detached' : 'attached'} mode must not fetch media`);
     assert.equal(fs.existsSync(cacheDir), false, 'no-save media caching must not create the cache directory');
-    assert.ok(pendingMediaRequestCount(plugin) >= 4, 'eligible logger media must stay queued in memory');
+    assert.ok(pendingMediaRequestCount(plugin) >= 5, 'eligible logger media must stay queued in memory');
   }
 });
 
