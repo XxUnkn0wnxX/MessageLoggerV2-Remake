@@ -480,7 +480,7 @@ test('CSS class mode uses a controlled switch so no-save cancellation changes no
   assert.equal(rerenderedTree.props.value, false);
 });
 
-test('archive loading uses a linked controlled switch with a preserved inactive preference', () => {
+test('archive loading uses a linked controlled switch with a visibly preserved inactive preference', () => {
   const requests = [];
   const plugin = createPlugin({
     settings: { dontSaveData: false, dontLoadArchivedData: true },
@@ -494,7 +494,7 @@ test('archive loading uses a linked controlled switch with a preserved inactive 
   assert.equal(wrapper.type, 'span');
   assert.equal(tree.type, Components.SwitchInput);
   assert.equal(tree.props.id, 'obfuscated-dontLoadArchivedData');
-  assert.equal(tree.props.value, false);
+  assert.equal(tree.props.value, true);
   assert.equal(tree.props.disabled, true);
 
   plugin.settings.dontSaveData = true;

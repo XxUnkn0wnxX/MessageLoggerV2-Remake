@@ -880,6 +880,178 @@ test('archive mode keeps both related controls locked until presentation settles
   assert.ok(failedDetachNotifications.includes('dontLoadArchivedData'));
 });
 
+test('reattach rendering cannot dirty archived live records or retain them on the second detach', t => {
+  const pluginDir = temporaryDirectory(t);
+  const filePath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
+  const savedRecord = record('100', 'channel', {
+    delete_data: { time: 100 },
+    edit_history: [{ time: 101, content: 'archived edit' }]
+  });
+  savedRecord.message.author = {
+    id: 'author',
+    username: 'Archived Author',
+    discriminator: '0001',
+    avatar: 'archived-avatar',
+    public_flags: 1
+  };
+  savedRecord.message.mentions = [{
+    id: 'mention',
+    username: 'Archived Mention',
+    discriminator: '0002',
+    avatar: 'archived-mention-avatar',
+    public_flags: 2
+  }];
+  const purgedRecord = structuredClone(savedRecord);
+  purgedRecord.message.id = '101';
+  purgedRecord.message.content = '101';
+  purgedRecord.message.timestamp = 101;
+  purgedRecord.delete_data.time = 102;
+  purgedRecord.edit_history = null;
+  const archive = payload(
+    { '100': savedRecord, '101': purgedRecord },
+    {
+      deleted: { channel: ['100'] },
+      edited: { channel: ['100'] },
+      purged: { channel: ['101'] }
+    }
+  );
+  fs.writeFileSync(filePath, JSON.stringify({ data: archive }));
+
+  const plugin = createArchiveModePlugin(pluginDir, structuredClone(archive), {
+    settings: {
+      savedMessagesCap: 1000,
+      autoBackup: false,
+      dontSaveData: true,
+      dontLoadArchivedData: false,
+      restoreDeletedMessages: true,
+      showDeletedMessages: true,
+      showPurgedMessages: true,
+      showEditedMessages: true,
+      onlyRenderCachedAttachments: false,
+      useNotificationsInstead: true,
+      deleteCachedFilesWithRecords: false
+    },
+    tools: {
+      getUser(id) {
+        return {
+          id,
+          username: `Live ${id}`,
+          discriminator: '9999',
+          avatar: `live-${id}-avatar`,
+          publicFlags: 64
+        };
+      }
+    },
+    shouldIgnoreMessageAuthor() { return false; },
+    shouldIgnoreSelfMessage() { return false; }
+  });
+
+  assert.equal(plugin.requestArchiveLoadModeChange(true), true);
+  assert.equal(plugin.requestArchiveLoadModeChange(false), true);
+
+  const canonicalBeforeRender = structuredClone(plugin.messageRecord);
+  const mountedMessages = [];
+  plugin.reAddDeletedMessages(mountedMessages, plugin.deletedMessageRecord.channel, true, true);
+  plugin.reAddDeletedMessages(mountedMessages, plugin.purgedMessageRecord.channel, true, true);
+
+  assert.equal(mountedMessages.length, 2);
+  assert.equal(mountedMessages[0].author.username, 'Live author');
+  assert.equal(mountedMessages[0].mentions[0].username, 'Live mention');
+  assert.deepEqual(plugin.messageRecord, canonicalBeforeRender);
+  assert.equal(Object.hasOwn(plugin.messageRecord['100'], '_usersCleaned'), false);
+  assert.equal(Object.hasOwn(plugin.messageRecord['101'], '_usersCleaned'), false);
+
+  assert.equal(plugin.requestArchiveLoadModeChange(true), true);
+  assert.equal(plugin.messageRecord['100'], undefined, 'the second detach must evict the rendered archive record');
+  assert.equal(plugin.messageRecord['101'], undefined, 'the second detach must evict the rendered purge record');
+  assert.equal(plugin._noSaveSessionOverlay.archiveBackedUpsertIds.size, 0);
+  assert.deepEqual(Object.keys(plugin.messageRecord), []);
+});
+
+test('raw embed-only deleted records render from a clone and detach without touching session or disk state', t => {
+  const pluginDir = temporaryDirectory(t);
+  const filePath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
+  const archivedRecord = record('100', 'channel', { delete_data: { time: 100 } });
+  archivedRecord.message.content = '';
+  archivedRecord.message.embeds = [{
+    type: 'rich',
+    title: 'Archive embed',
+    image: {
+      url: 'https://cdn.example/embed-image.png',
+      proxy_url: 'https://media.example/embed-image.png',
+      width: 320,
+      height: 180,
+      unknown_media_metadata: { retained: ['nested', 'value'] }
+    },
+    unknown_embed_metadata: {
+      source: { kind: 'raw-rich-embed', flags: [1, 2] }
+    }
+  }];
+  archivedRecord.message.components = [{
+    type: 1,
+    components: [{
+      type: 2,
+      custom_id: 'archive-component',
+      unknown_component_metadata: { retained: true }
+    }],
+    unknown_container_metadata: { retained: ['nested', 'component'] }
+  }];
+  const archive = payload(
+    { '100': archivedRecord },
+    { deleted: { channel: ['100'] } }
+  );
+  const originalBytes = JSON.stringify({ data: archive });
+  fs.writeFileSync(filePath, originalBytes);
+
+  const runtime = structuredClone(archive);
+  runtime.messageRecord['200'] = record('200', 'channel', { delete_data: { time: 200 } });
+  runtime.deletedMessageRecord.channel.push('200');
+  const deleteEvents = [];
+  const plugin = createArchiveModePlugin(pluginDir, runtime, {
+    settings: {
+      savedMessagesCap: 1000,
+      autoBackup: false,
+      dontSaveData: true,
+      dontLoadArchivedData: false,
+      restoreDeletedMessages: true,
+      showDeletedMessages: true,
+      useNotificationsInstead: true,
+      deleteCachedFilesWithRecords: false
+    },
+    dispatcher: {
+      dispatch(event) {
+        if (event.type === 'MESSAGE_DELETE') deleteEvents.push({ ...event });
+      }
+    },
+    tools: {
+      getUser() { return null; },
+      getChannel(id) { return { id, guild_id: 'guild', type: 0 }; }
+    },
+    shouldIgnoreMessageAuthor() { return false; },
+    shouldIgnoreSelfMessage() { return false; }
+  });
+
+  const canonicalArchiveRecord = structuredClone(plugin.messageRecord['100']);
+  const mountedMessages = [];
+  plugin.reAddDeletedMessages(mountedMessages, plugin.deletedMessageRecord.channel, true, true);
+
+  assert.equal(mountedMessages.length, 2, 'both archive and session records enter the actual saved-message insertion path');
+  const mountedArchive = mountedMessages.find(message => message.id === '100');
+  assert.ok(mountedArchive, 'the archive embed-only record is inserted for rendering');
+  assert.notEqual(mountedArchive, plugin.messageRecord['100'].message, 'the renderer receives a detached message clone');
+  assert.equal(mountedArchive.content, '', 'an embed-only record remains content-empty');
+  assert.deepEqual(mountedArchive.embeds, canonicalArchiveRecord.message.embeds, 'raw rich embed fields survive the render clone');
+  assert.deepEqual(mountedArchive.components, canonicalArchiveRecord.message.components, 'nested message components survive the render clone');
+  assert.deepEqual(plugin.messageRecord['100'], canonicalArchiveRecord, 'render insertion cannot mutate the canonical archive record');
+
+  assert.equal(plugin.requestArchiveLoadModeChange(true), true);
+  assert.equal(plugin._archiveDetached, true);
+  assert.equal(plugin.messageRecord['100'], undefined, 'the archive record is removed from memory');
+  assert.ok(plugin.messageRecord['200'], 'the session record remains active');
+  assert.deepEqual(deleteEvents.map(event => event.id), ['100'], 'only the mounted archive deletion is evicted');
+  assert.equal(fs.readFileSync(filePath, 'utf8'), originalBytes, 'detaching never rewrites the saved archive');
+});
+
 test('repeated archive detach evicts only archive-owned presentation across every saved category', t => {
   const pluginDir = temporaryDirectory(t);
   const filePath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
@@ -1113,7 +1285,7 @@ test('failed archive reattach keeps the temporary detached session and setting u
   assert.equal(fs.readFileSync(filePath, 'utf8'), '{broken');
 });
 
-test('re-enabling saving from detached mode merges archive and session while retaining child preference', async t => {
+test('re-enabling saving from detached mode merges archive and refreshes restored presentation', async t => {
   const pluginDir = temporaryDirectory(t);
   const filePath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
   const archive = payload({
@@ -1123,6 +1295,7 @@ test('re-enabling saving from detached mode merges archive and session while ret
   const session = payload({
     '200': record('200', 'channel', { edit_history: [{ time: 200, content: 'session' }] })
   }, { edited: { channel: ['200'] } });
+  let presentationRefreshes = 0;
   const plugin = createArchiveModePlugin(pluginDir, session, {
     settings: {
       savedMessagesCap: 1000,
@@ -1132,7 +1305,8 @@ test('re-enabling saving from detached mode merges archive and session while ret
       useNotificationsInstead: true,
       deleteCachedFilesWithRecords: false
     },
-    _archiveDetached: true
+    _archiveDetached: true,
+    refreshArchiveLoadPresentation() { presentationRefreshes++; }
   });
   plugin._noSaveSessionOverlay = plugin.createEmptyNoSaveSessionOverlay(session);
 
@@ -1142,6 +1316,7 @@ test('re-enabling saving from detached mode merges archive and session while ret
   assert.equal(plugin.settings.dontLoadArchivedData, true);
   assert.equal(plugin._archiveDetached, false);
   assert.deepEqual(Object.keys(saved.messageRecord).sort(), ['100', '200']);
+  assert.equal(presentationRefreshes, 1, 'restored archive mounts and edit/forum presentation must refresh');
 });
 
 test('failed detached recovery restores session-only memory and leaves archive untouched', async t => {

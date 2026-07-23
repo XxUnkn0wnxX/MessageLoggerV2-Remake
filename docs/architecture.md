@@ -113,6 +113,8 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 ## 🎨 Rendering, Tinting, and Navigation
 
 - Message-content and message-component patches render saved edits and deletions in live chat.
+- Legacy/Components V2 and message-snapshot payloads use EmbedCopy's `toJS()`/`toJSON()` then JSON-clone contract. Embeds match EmbedCopy's raw-message path by serializing the live embed directly first, then falling back to `toJS()` and restoring Discord's inbound wire aliases such as `title`, `description`, and field `name`/`value`. Unknown serializable fields remain intact instead of being reduced to a fixed allow-list, including in nested embed collections.
+- Renderer clones canonicalize URL-only/proxy-only singular and gallery embed media and omit dimension-only image, thumbnail, video, or gallery entries. Discord currently calls `.url.split()` for singular and gallery images and dereferences the first gallery item, so invalid or empty media collections must never reach the native renderer. The canonical archive remains isolated from render-time mutations.
 - Deleted text/background tinting, forum cards, restored thread entries, and logger views share saved record state but use different mounted DOM targets.
 - Discord-rendered saved deletions retain Discord's native context-menu confirmation and Shift-Trash behavior.
   - The final `MessageActions.deleteMessage` becomes local logger **Delete** only when message ID, channel ID, `delete_data`, and deleted/purged indexes all match. Normal and edit-only Discord messages keep Discord's original action.

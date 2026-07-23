@@ -74,6 +74,17 @@ Status: Implemented and live validated
 
 Enhanced metadata that another fork completely removes cannot be reconstructed and remains blank after normalization.
 
+## 🧱 Full Embeds and Components in the Logger Viewer
+
+Status: Backlog; raw serializable source is now preserved for newly captured records
+
+- [ ] Add a MessageLogger-owned render box for complete embeds, message snapshots, and legacy/Components V2 trees.
+- [ ] Reuse the viewer's existing image and media-opening behavior.
+- [ ] Preserve nested layouts, fields, buttons, selects, accessories, and unknown future serializable fields.
+- [ ] Render archived interactive controls as read-only/disabled so they cannot send stale interactions.
+- [ ] Keep safe fallbacks for older records whose embed/component fields were already discarded.
+- [ ] Add deterministic renderer-shape coverage and live checks for classic, ephemeral, nested, and Components V2 examples.
+
 ## 🧩 Multi-Instance Storage Isolation
 
 Status: Backlog

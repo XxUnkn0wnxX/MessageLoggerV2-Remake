@@ -2288,9 +2288,9 @@ module.exports = class MessageLoggerV2 {
           unsubscribeParent();
         };
       }, []);
-      // The stored preference survives while the parent is off, but its displayed/effective
-      // value is Off until Disable saving data makes the child active again.
-      const value = !!plugin.settings.dontSaveData && !!plugin.settings[config.id];
+      // Keep the saved preference visible while the parent is off. The disabled state makes
+      // it inactive without making the child appear to toggle alongside its parent.
+      const value = !!plugin.settings[config.id];
       const disabled = !plugin.settings.dontSaveData
         || !!plugin._noSaveMergeInProgress
         || !!plugin._noSaveMergePromise
@@ -3932,7 +3932,7 @@ module.exports = class MessageLoggerV2 {
                 { style: { color: 'var(--text-warning, var(--status-warning))' } },
                 'Disable saving data'
               ),
-              '. Unloads saved history from memory and keeps only temporary session records; the archive stays unchanged on disk. Both controls briefly pulse warning orange while the archive view settles.'
+              '. The greyed control keeps its saved position while the parent is off. Unloads saved history from memory and keeps only temporary session records; the archive stays unchanged on disk. Both controls briefly pulse warning orange while the archive view settles.'
             ),
             id: 'dontLoadArchivedData',
             enableWith: 'dontSaveData',
@@ -5053,16 +5053,10 @@ module.exports = class MessageLoggerV2 {
       record.logged_attachments = Array.isArray(record.logged_attachments)
         ? Array.from(new Set(record.logged_attachments.filter(id => typeof id === 'string')))
         : [];
-      record.message.embeds.map(embed => {
-        if (embed.image !== undefined) {
-          const hasUrl = embed.image.url !== undefined;
-          const hasProxyUrl = embed.image.proxy_url !== undefined;
-          if (!hasUrl && !hasProxyUrl) delete embed.image;
-          else if (!hasUrl) embed.image.url = embed.image.proxy_url;
-          else if (!hasProxyUrl) embed.image.proxy_url = embed.image.url;
-        }
-        return embed;
-      });
+      // cleanupMessageObject normalizes every raw/nested embed collection before the
+      // record can reach Discord's renderer. In particular, an image object must have
+      // a string URL because Discord's embed renderer calls image.url.split().
+      this.sanitizeNestedEmbedCollections(record.message);
       normalizedRecords[canonicalMessageId] = normalizedRecords[canonicalMessageId]
         ? this.mergeSavedRecords(normalizedRecords[canonicalMessageId], record)
         : record;
@@ -6697,6 +6691,7 @@ module.exports = class MessageLoggerV2 {
       this.saveSettings();
       this.notifySettingDependencyChange('dontSaveData');
       this.notifySettingDependencyChange('dontLoadArchivedData');
+      if (wasArchiveDetached) this.refreshArchiveLoadPresentation();
       this._flushMediaCacheAfterNextDataSave = false;
       this.flushPendingMediaCacheRequests();
       if (this.settings.autoBackup) {
@@ -7419,6 +7414,9 @@ module.exports = class MessageLoggerV2 {
     // camelCase publicFlags field). Always give the renderer a detached copy so viewing a
     // restored record cannot dirty the canonical payload and retrigger migration on reload.
     const renderMessage = structuredClone(message);
+    // Keep the canonical archive byte-for-byte intact while shielding Discord from
+    // legacy or mixed-fork media objects that do not satisfy its render contract.
+    this.sanitizeNestedEmbedCollections(renderMessage);
     if (!this.settings.onlyRenderCachedAttachments || !renderMessage.attachments?.length) return renderMessage;
     const attachments = [];
     const unavailable = [];
@@ -7475,6 +7473,8 @@ module.exports = class MessageLoggerV2 {
       message?.content?.length
       || message?.attachments?.length
       || message?.embeds?.length
+      || this.toSerializableArray(message?.components).length
+      || this.toSerializableArray(message?.message_snapshots || message?.messageSnapshots).length
       || this.getMessageStickerItems(message).length
     );
   }
@@ -7485,8 +7485,10 @@ module.exports = class MessageLoggerV2 {
       if (key) keys.add(`attachment:${key}`);
     }
     for (const embed of message?.embeds || []) {
-      const key = embed?.image?.url || embed?.image?.proxy_url;
-      if (key) keys.add(`embed:${key}`);
+      for (const media of this.getEmbedImageMedia(embed)) {
+        const key = this.getUsableEmbedMediaUrl(media);
+        if (key) keys.add(`embed:${key}`);
+      }
     }
     for (const sticker of this.getMessageStickerItems(message)) {
       const key = sticker?.id || sticker?.url || sticker?.asset_url || sticker?.assetUrl;
@@ -7573,13 +7575,22 @@ module.exports = class MessageLoggerV2 {
     else if (Object.prototype.hasOwnProperty.call(message, 'guildId')) guildId = message.guildId;
     else if (options.resolveGuildFromStore !== false) guildId = this.ChannelStore.getChannel(message.channel_id)?.guild_id;
     if (typeof guildId !== 'string' || !guildId) guildId = null;
-    const stickerItems = this.getMessageStickerItems(message);
+    const attachments = this.normalizeSerializableMessageItems(message.attachments, 'attachment');
+    const reactions = this.normalizeSerializableMessageItems(message.reactions, 'reaction');
+    const stickerItems = this.normalizeSerializableMessageItems(this.getMessageStickerItems(message), 'sticker');
+    const stickers = Array.isArray(message.stickers) && message.stickers.length
+      ? this.normalizeSerializableMessageItems(message.stickers, 'sticker')
+      : stickerItems;
+    const componentsSource = message.components;
+    const snapshotsSource = message.message_snapshots || message.messageSnapshots;
+    const components = this.normalizeSerializableMessageItems(componentsSource, 'message component');
+    const messageSnapshots = this.normalizeSerializableMessageItems(snapshotsSource, 'message snapshot');
     const ret = {
       mention_everyone: mentionEveryone,
       edited_timestamp: message.edited_timestamp || message.editedTimestamp && new Date(message.editedTimestamp).getTime() || null,
-      attachments: message.attachments || [],
+      attachments,
       channel_id: message.channel_id,
-      reactions: (message.reactions || []).map(e => {
+      reactions: reactions.map(e => {
         if (!e.emoji.animated) delete e.emoji.animated;
         if (!e.me) delete e.me;
         return e;
@@ -7587,7 +7598,7 @@ module.exports = class MessageLoggerV2 {
       guild_id: guildId,
       content: message.content,
       type: message.type,
-      embeds: message.embeds || [],
+      embeds: this.normalizeMessageEmbeds(message.embeds),
       author: this.cleanupUserObject(message.author),
       mentions: (message.mentions || []).map(e => {
         if (typeof e === 'string') {
@@ -7600,10 +7611,12 @@ module.exports = class MessageLoggerV2 {
       id: message.id,
       flags: message.flags,
       sticker_items: stickerItems,
-      stickers: Array.isArray(message.stickers) && message.stickers.length ? message.stickers : stickerItems,
+      stickers,
       timestamp: new Date(message.timestamp).getTime(),
       referenced_message: null
     };
+    if (components.length || componentsSource !== undefined) ret.components = components;
+    if (messageSnapshots.length || snapshotsSource !== undefined) ret.message_snapshots = messageSnapshots;
     if (ret.type === 19) {
       ret.message_reference = message.message_reference || message.messageReference;
       if (ret.message_reference) {
@@ -7615,11 +7628,10 @@ module.exports = class MessageLoggerV2 {
         }
       }
     }
-    this.fixEmbeds(ret);
+    this.sanitizeNestedEmbedCollections(ret);
     return ret;
   }
   createMiniFormattedData(message) {
-    message = structuredClone(message);
     const obj = {
       message: this.cleanupMessageObject(message),
       saved_location: this.getMessageLocationSnapshot(message),
@@ -10178,52 +10190,218 @@ module.exports = class MessageLoggerV2 {
   isVideo(url) {
     return this._testUrlPattern(url, /\.(mp4|webm|mov|avi|mkv)$/i);
   }
-  cleanupEmbed(embed) {
-    if (!embed.id) return embed;
-    const retEmbed = {};
-    if (typeof embed.rawTitle === 'string') retEmbed.title = embed.rawTitle;
-    if (typeof embed.rawDescription === 'string') retEmbed.description = embed.rawDescription;
-    if (embed.referenceId !== undefined) retEmbed.reference_id = embed.referenceId;
-    if (typeof embed.color === 'string') retEmbed.color = Number.parseInt(embed.color.replace('#', ''), 16);
-    if (embed.type !== undefined) retEmbed.type = embed.type;
-    if (embed.url !== undefined) retEmbed.url = embed.url;
-    if (typeof embed.provider === 'object') retEmbed.provider = { name: embed.provider.name, url: embed.provider.url };
-    if (typeof embed.footer === 'object') retEmbed.footer = { text: embed.footer.text, icon_url: embed.footer.iconURL, proxy_icon_url: embed.footer.iconProxyURL };
-    if (typeof embed.author === 'object') retEmbed.author = { name: embed.author.name, url: embed.author.url, icon_url: embed.author.iconURL, proxy_icon_url: embed.author.iconProxyURL };
-    if (typeof embed.timestamp === 'object' && embed.timestamp._isAMomentObject) retEmbed.timestamp = embed.timestamp.milliseconds();
-    if (typeof embed.thumbnail === 'object') {
-      if (typeof embed.thumbnail.proxy_url === 'string' || (typeof embed.thumbnail.url === 'string' && !embed.thumbnail.url.endsWith('?format=jpeg'))) {
-        retEmbed.thumbnail = {
-          url: embed.thumbnail.url,
-          proxy_url: typeof embed.thumbnail.proxy_url === 'string' ? embed.thumbnail.proxy_url.split('?format')[0] : undefined,
-          width: embed.thumbnail.width,
-          height: embed.thumbnail.height
-        };
+  toSerializableArray(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.filter(item => item && typeof item === 'object');
+    if (typeof value.toArray === 'function') return this.toSerializableArray(value.toArray());
+    if (typeof value.values === 'function') return this.toSerializableArray(Array.from(value.values()));
+    if (typeof value.length === 'number') {
+      const items = [];
+      for (let index = 0; index < value.length; index++) {
+        const item = value[index];
+        if (item && typeof item === 'object') items.push(item);
+      }
+      return items;
+    }
+    return [];
+  }
+  normalizeSerializableMessageItem(item, label = 'message payload') {
+    if (!item || typeof item !== 'object') return null;
+    try {
+      // Match EmbedCopy's tested component-export contract. Discord collections may expose
+      // either Immutable-style toJS() or record-style toJSON(); JSON cloning then retains
+      // every serializable field without imposing a lossy component allow-list.
+      const source = typeof item.toJS === 'function'
+        ? item.toJS()
+        : typeof item.toJSON === 'function'
+          ? item.toJSON()
+          : item;
+      const json = JSON.stringify(source);
+      if (json === undefined) return null;
+      const normalized = JSON.parse(json);
+      return normalized && typeof normalized === 'object' ? normalized : null;
+    } catch (error) {
+      Logger.warn(`Could not normalize ${label}; the invalid item was omitted.`, error);
+      return null;
+    }
+  }
+  normalizeRawEmbedItem(embed) {
+    if (!embed || typeof embed !== 'object') return null;
+    let directError = null;
+    try {
+      // EmbedCopy's raw-message path gives JSON.stringify the live embed itself, allowing
+      // Discord's native toJSON() to produce the inbound wire shape when it is available.
+      const json = JSON.stringify(embed);
+      if (json !== undefined) {
+        const normalized = JSON.parse(json);
+        if (normalized && typeof normalized === 'object' && !Array.isArray(normalized)
+          && (Object.keys(normalized).length || typeof embed.toJS !== 'function')) {
+          return normalized;
+        }
+      }
+    } catch (error) {
+      directError = error;
+    }
+    if (typeof embed.toJS === 'function') {
+      try {
+        const json = JSON.stringify(embed.toJS());
+        if (json !== undefined) {
+          const normalized = JSON.parse(json);
+          if (normalized && typeof normalized === 'object' && !Array.isArray(normalized)) return normalized;
+        }
+      } catch (error) {
+        directError ||= error;
       }
     }
-    if (typeof embed.image === 'object') {
-      retEmbed.image = {
-        url: embed.image.url,
-        proxy_url: embed.image.proxy_url,
-        width: embed.image.width,
-        height: embed.image.height
-      };
+    Logger.warn('Could not normalize embed; the invalid item was omitted.', directError || new TypeError('Embed did not serialize to an object'));
+    return null;
+  }
+  canonicalizeEmbedWireAliases(embed) {
+    if (!embed || typeof embed !== 'object' || Array.isArray(embed)) return embed;
+    const normalized = { ...embed };
+    const assignAlias = (target, aliases, source = normalized) => {
+      if (source[target] !== undefined) return;
+      for (const alias of aliases) {
+        if (source[alias] !== undefined) {
+          source[target] = source[alias];
+          return;
+        }
+      }
+    };
+    assignAlias('title', ['rawTitle']);
+    assignAlias('description', ['rawDescription']);
+    assignAlias('reference_id', ['referenceId']);
+    if (typeof normalized.color === 'string') {
+      const parsedColor = Number.parseInt(normalized.color.replace(/^#/, ''), 16);
+      if (Number.isFinite(parsedColor)) normalized.color = parsedColor;
     }
-    if (typeof embed.video === 'object') {
-      retEmbed.video = {
-        url: embed.video.url,
-        proxy_url: embed.video.proxy_url,
-        width: embed.video.width,
-        height: embed.video.height
-      };
+    for (const key of ['footer', 'author']) {
+      if (!normalized[key] || typeof normalized[key] !== 'object' || Array.isArray(normalized[key])) continue;
+      normalized[key] = { ...normalized[key] };
+      assignAlias('icon_url', ['iconURL', 'iconUrl'], normalized[key]);
+      assignAlias('proxy_icon_url', ['iconProxyURL', 'iconProxyUrl'], normalized[key]);
     }
-    if (Array.isArray(embed.fields) && embed.fields.length) {
-      retEmbed.fields = embed.fields.map(e => ({ name: e.rawName, value: e.rawValue, inline: e.inline }));
+    if (Array.isArray(normalized.fields)) {
+      normalized.fields = normalized.fields
+        .filter(field => field && typeof field === 'object' && !Array.isArray(field))
+        .map(field => {
+          const normalizedField = { ...field };
+          assignAlias('name', ['rawName'], normalizedField);
+          assignAlias('value', ['rawValue'], normalizedField);
+          return normalizedField;
+        });
     }
-    return retEmbed;
+    return normalized;
+  }
+  normalizeSerializableMessageItems(value, label) {
+    return this.toSerializableArray(value)
+      .map(item => this.normalizeSerializableMessageItem(item, label))
+      .filter(item => item && typeof item === 'object')
+      .map(item => this.sanitizeNestedEmbedCollections(item));
+  }
+  getUsableEmbedMediaUrl(media, preferredKeys = ['url', 'proxy_url', 'proxyURL', 'proxyUrl', 'src', 'href']) {
+    if (!media || typeof media !== 'object' || Array.isArray(media)) return null;
+    for (const key of preferredKeys) {
+      const value = media[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return null;
+  }
+  sanitizeEmbedMediaItem(media) {
+    if (!media || typeof media !== 'object' || Array.isArray(media)) return null;
+    const directUrl = this.getUsableEmbedMediaUrl(media, ['url', 'src', 'href']);
+    const proxyUrl = this.getUsableEmbedMediaUrl(media, ['proxy_url', 'proxyURL', 'proxyUrl']);
+    const renderUrl = directUrl || proxyUrl;
+    if (!renderUrl) return null;
+    return {
+      ...media,
+      url: renderUrl,
+      proxy_url: proxyUrl || renderUrl
+    };
+  }
+  sanitizeEmbedMedia(embed) {
+    if (!embed || typeof embed !== 'object' || Array.isArray(embed)) return embed;
+    const normalized = { ...embed };
+    for (const key of ['image', 'thumbnail', 'video']) {
+      const media = this.sanitizeEmbedMediaItem(normalized[key]);
+      if (media) normalized[key] = media;
+      else if (normalized[key] !== undefined) delete normalized[key];
+    }
+    if (normalized.images !== undefined) {
+      const images = Array.isArray(normalized.images)
+        ? normalized.images.map(media => this.sanitizeEmbedMediaItem(media)).filter(Boolean)
+        : [];
+      // Discord treats any truthy images collection as a gallery, calls .map(), and then
+      // dereferences images[0].url. A non-array or empty gallery must therefore be absent.
+      if (images.length) normalized.images = images;
+      else delete normalized.images;
+    }
+    return normalized;
+  }
+  getEmbedImageMedia(embed) {
+    return this.getIndexedEmbedImageMedia(embed).map(entry => entry.media);
+  }
+  getIndexedEmbedImageMedia(embed, embedIndex = 0) {
+    if (!embed || typeof embed !== 'object') return [];
+    const entries = [];
+    if (embed.image && typeof embed.image === 'object' && !Array.isArray(embed.image)) {
+      entries.push({ media: embed.image, cacheIndex: `embed:${embedIndex}` });
+    }
+    if (Array.isArray(embed.images)) {
+      for (let galleryIndex = 0; galleryIndex < embed.images.length; galleryIndex++) {
+        const media = embed.images[galleryIndex];
+        if (!media || typeof media !== 'object' || Array.isArray(media)) continue;
+        entries.push({ media, cacheIndex: `embed:${embedIndex}:gallery:${galleryIndex}` });
+      }
+    }
+    return entries;
+  }
+  getEmbedMediaSourceId(url) {
+    try {
+      const parts = new URL(url).pathname.split('/').filter(Boolean);
+      return parts[parts.length - 2] || null;
+    } catch {
+      const parts = String(url || '').split('/').filter(Boolean);
+      return parts[parts.length - 2] || null;
+    }
+  }
+  getMediaCacheFileId(attachmentId, attachmentIdx, messageId) {
+    const candidate = String(attachmentId ?? '');
+    if (/^\d+$/.test(candidate)) return candidate;
+    const safeMessageId = String(messageId || 'message').replace(/[^0-9a-z_-]+/gi, '-');
+    const safeIndex = String(attachmentIdx ?? 'media').replace(/[^0-9a-z_-]+/gi, '-');
+    return `${safeMessageId || 'message'}-${safeIndex || 'media'}`;
+  }
+  cleanupEmbed(embed) {
+    const normalized = this.normalizeRawEmbedItem(embed);
+    return normalized
+      ? this.sanitizeEmbedMedia(this.canonicalizeEmbedWireAliases(normalized))
+      : null;
+  }
+  normalizeMessageEmbeds(embeds) {
+    return this.toSerializableArray(embeds)
+      .map(embed => this.cleanupEmbed(embed))
+      .filter(embed => embed && typeof embed === 'object');
   }
   fixEmbeds(message) {
-    message.embeds = message.embeds.map(this.cleanupEmbed);
+    if (!message || typeof message !== 'object') return message;
+    if (message.embeds !== undefined) message.embeds = this.normalizeMessageEmbeds(message.embeds);
+    return message;
+  }
+  sanitizeNestedEmbedCollections(value) {
+    if (!value || typeof value !== 'object') return value;
+    if (Array.isArray(value)) {
+      for (const item of value) this.sanitizeNestedEmbedCollections(item);
+      return value;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (key === 'embeds') {
+        value[key] = this.normalizeMessageEmbeds(child);
+        continue;
+      }
+      this.sanitizeNestedEmbedCollections(child);
+    }
+    return value;
   }
   addOpenLogsButton() {
     if (this.toolbarButtonCleanup) {
@@ -10590,17 +10768,20 @@ module.exports = class MessageLoggerV2 {
     const existingMessageIds = new Set(messages.map(e => e.id));
     const lowestTime = messages.length ? (Number(messages[messages.length - 1].id) / 4194304) + DISCORD_EPOCH : Infinity;
     const highestTime = messages.length ? (Number(messages[0].id) / 4194304) + DISCORD_EPOCH : 0;
-    const ensureUserCleaned = (record) => {
-      if (record._usersCleaned) return;
-      const message = record.message;
-      const author = this.tools.getUser(message.author.id);
+    const getCleanRenderMessage = (record) => {
+      // User cleanup is presentation-only. Mutating the canonical record here makes an
+      // unchanged archive entry look like a session upsert on the next archive detach.
+      const message = this.getCacheOnlyMessage(record.message);
+      const author = message?.author?.id ? this.tools.getUser(message.author.id) : null;
       if (author) message.author = this.cleanupUserObject(author);
-      for (let j = 0; j < message.mentions.length; j++) {
-        const user = message.mentions[j];
-        const realUser = this.tools.getUser(user.id || user);
-        if (realUser) message.mentions[j] = this.cleanupUserObject(realUser);
+      if (Array.isArray(message?.mentions)) {
+        for (let j = 0; j < message.mentions.length; j++) {
+          const user = message.mentions[j];
+          const realUser = this.tools.getUser(user?.id || user);
+          if (realUser) message.mentions[j] = this.cleanupUserObject(realUser);
+        }
       }
-      record._usersCleaned = true;
+      return message;
     };
     const processId = (id, toInsert) => {
       if (existingMessageIds.has(id)) return;
@@ -10613,8 +10794,7 @@ module.exports = class MessageLoggerV2 {
       if (record.delete_data.hidden) return;
       if (this.shouldIgnoreMessageAuthor(record.message)) return;
       if (this.shouldIgnoreSelfMessage(record.message)) return;
-      ensureUserCleaned(record);
-      toInsert.push(this.getCacheOnlyMessage(record.message));
+      toInsert.push(getCleanRenderMessage(record));
     };
     const toInsert = [];
     if (deletedMessages.length >= 100 && !channelStart && !channelEnd) {
@@ -10802,9 +10982,10 @@ module.exports = class MessageLoggerV2 {
     if (this.messageRecord[id].message.embeds) {
       const embeds = this.messageRecord[id].message.embeds;
       for (const embed of embeds) {
-        if (embed.image)
-          embed.image.url = embed.image.proxy_url;
+        const proxyUrl = this.getUsableEmbedMediaUrl(embed?.image, ['proxy_url', 'proxyURL', 'proxyUrl']);
+        if (proxyUrl) embed.image.url = proxyUrl;
       }
+      this.fixEmbeds(this.messageRecord[id].message);
     }
     if (this.settings.cacheAllImages) this.cacheMessageImages(this.messageRecord[id].message);
     this.moveSavedRecordToCategoryIndex(id, targetMessageRecord);
@@ -11091,13 +11272,13 @@ module.exports = class MessageLoggerV2 {
       }
       if (this.cacheDeletionMessageIds.has(messageId)) return;
       if (!this.canCacheMediaLocally(writeEpoch)) return;
-      if (!Number(attachmentId)) attachmentId = messageId;
+      const fileId = this.getMediaCacheFileId(attachmentId, attachmentIdx, messageId);
       const filePath = this.imageCacheServerSimulator.resolveNewCachePath({ channelId: channelId, serverId: serverId });
       this.nodeModules.fs.mkdirSync(filePath, { recursive: true });
       const authorId = this.messageRecord[messageId]?.message?.author?.id || this.cachedMessagesMap.get(messageId)?.author?.id;
-      this.nodeModules.fs.writeFileSync(filePath + `/${attachmentId} (${messageId}${(this.settings.addUserIdToSavedMediaFilename && authorId) ? (" by " + authorId) : ""
+      this.nodeModules.fs.writeFileSync(filePath + `/${fileId} (${messageId}${(this.settings.addUserIdToSavedMediaFilename && authorId) ? (" by " + authorId) : ""
       })${fileExtension}`, finalData, { encoding: null });
-      Logger.log(`Cached image: ${attachmentId}${fileExtension}`);
+      Logger.log(`Cached image: ${fileId}${fileExtension}`);
     } catch (e) {
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       attempts++;
@@ -11148,9 +11329,12 @@ module.exports = class MessageLoggerV2 {
         }
       }
       for (let i = 0; i < embeds.length; i++) {
-        if (!embeds[i].image) continue;
-        const embed = embeds[i].image;
-        callback(embed.url, i, embed.url.split("/")[embed.url.split("/").length - 2]);
+        const embed = embeds[i];
+        for (const { media, cacheIndex } of this.getIndexedEmbedImageMedia(embed, i)) {
+          const url = this.getUsableEmbedMediaUrl(media);
+          if (!url) continue;
+          callback(url, cacheIndex, this.getEmbedMediaSourceId(url));
+        }
       }
       for (let i = 0; i < stickers.length; i++) {
         const sticker = this.getStickerMedia(stickers[i]);
@@ -11260,14 +11444,13 @@ module.exports = class MessageLoggerV2 {
     for (const sticker of this.getMessageStickerItems(message)) {
       if (sticker?.id) ids.add(String(sticker.id));
     }
-    for (const embed of message.embeds || []) {
-      const url = embed?.image?.url || embed?.image?.proxy_url;
-      if (!url) continue;
-      try {
-        const parts = new URL(url).pathname.split('/').filter(Boolean);
-        const cacheId = parts[parts.length - 2];
-        if (cacheId) ids.add(String(cacheId));
-      } catch {}
+    for (let embedIndex = 0; embedIndex < (message.embeds || []).length; embedIndex++) {
+      const embed = message.embeds[embedIndex];
+      for (const { media, cacheIndex } of this.getIndexedEmbedImageMedia(embed, embedIndex)) {
+        const url = this.getUsableEmbedMediaUrl(media);
+        if (!url) continue;
+        ids.add(this.getMediaCacheFileId(this.getEmbedMediaSourceId(url), cacheIndex, message.id));
+      }
     }
     for (const id of record.logged_attachments || []) {
       if (id) ids.add(String(id));
@@ -11307,17 +11490,19 @@ module.exports = class MessageLoggerV2 {
       const media = this.getStickerMedia(sticker);
       labels.set(String(sticker.id), media?.filename || sticker.name || String(sticker.id));
     }
-    for (const embed of message.embeds || []) {
-      const url = embed?.image?.url || embed?.image?.proxy_url;
-      if (!url) continue;
-      try {
-        const parsed = new URL(url);
-        const parts = parsed.pathname.split('/').filter(Boolean);
-        const cacheId = parts[parts.length - 2];
-        const filename = decodeURIComponent(parts[parts.length - 1] || '') || embed.title || 'embedded media';
-        if (cacheId) labels.set(String(cacheId), filename);
-        if (!Number(cacheId)) labels.set(String(message.id), filename);
-      } catch {}
+    for (let embedIndex = 0; embedIndex < (message.embeds || []).length; embedIndex++) {
+      const embed = message.embeds[embedIndex];
+      for (const { media, cacheIndex } of this.getIndexedEmbedImageMedia(embed, embedIndex)) {
+        const url = this.getUsableEmbedMediaUrl(media);
+        if (!url) continue;
+        try {
+          const parsed = new URL(url);
+          const parts = parsed.pathname.split('/').filter(Boolean);
+          const cacheId = this.getMediaCacheFileId(parts[parts.length - 2], cacheIndex, message.id);
+          const filename = decodeURIComponent(parts[parts.length - 1] || '') || embed.title || 'embedded media';
+          labels.set(cacheId, filename);
+        } catch {}
+      }
     }
     return labels;
   }

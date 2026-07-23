@@ -50,6 +50,18 @@ function waitForQueuedMediaTasks() {
   return new Promise(resolve => setTimeout(resolve, 10));
 }
 
+async function waitForDeferredMediaToSettle(plugin, timeoutMs = 500) {
+  const deadline = Date.now() + timeoutMs;
+  while (plugin._activeDeferredMediaCacheRequests?.size && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.equal(
+    plugin._activeDeferredMediaCacheRequests?.size || 0,
+    0,
+    'deferred media requests must settle before the test timeout'
+  );
+}
+
 function pendingMediaRequestCount(plugin) {
   const queue = plugin._pendingMediaCacheRequests;
   assert.ok(queue, 'no-save media requests must be retained in an in-memory queue');
@@ -155,6 +167,164 @@ test('rendered message copies cannot mutate canonical saved records', () => {
   assert.equal(saved.content, 'body');
 });
 
+test('cache-only rendering sanitizes malformed embed media in an isolated render clone', () => {
+  const plugin = createPlugin({ settings: { onlyRenderCachedAttachments: false } });
+  const saved = {
+    id: 'embed-only',
+    channel_id: 'channel',
+    content: '',
+    attachments: [],
+    embeds: [
+      {
+        type: 'rich',
+        title: 'A valid embed shell',
+        fields: [{ name: 'Field', value: 'Value', inline: false }],
+        image: { url: '', proxy_url: '', width: 10, height: 20 },
+        thumbnail: { url: 'https://cdn.example/thumb.png', proxy_url: '', width: 30, height: 40 },
+        video: { proxy_url: 'https://cdn.example/video.mp4', width: 50, height: 60 },
+        images: [
+          { width: 1, height: 2 },
+          { proxy_url: 'https://cdn.example/gallery-one.png', width: 70, height: 80 },
+          { url: 'https://cdn.example/gallery-two.png', width: 90, height: 100 }
+        ]
+      },
+      {
+        title: 'All media entries are malformed',
+        image: { width: 1, height: 2 },
+        thumbnail: { url: null, proxy_url: '' },
+        video: { url: '', proxy_url: undefined },
+        images: [{ width: 3, height: 4 }]
+      }
+    ]
+  };
+  const canonicalBeforeRender = structuredClone(saved);
+
+  const rendered = plugin.getCacheOnlyMessage(saved);
+
+  assert.notEqual(rendered, saved);
+  assert.notEqual(rendered.embeds, saved.embeds);
+  assert.notEqual(rendered.embeds[0].thumbnail, saved.embeds[0].thumbnail);
+  assert.notEqual(rendered.embeds[0].video, saved.embeds[0].video);
+  assert.deepEqual(rendered.embeds, [
+    {
+      type: 'rich',
+      title: 'A valid embed shell',
+      fields: [{ name: 'Field', value: 'Value', inline: false }],
+      thumbnail: {
+        url: 'https://cdn.example/thumb.png',
+        proxy_url: 'https://cdn.example/thumb.png',
+        width: 30,
+        height: 40
+      },
+      video: {
+        url: 'https://cdn.example/video.mp4',
+        proxy_url: 'https://cdn.example/video.mp4',
+        width: 50,
+        height: 60
+      },
+      images: [
+        {
+          proxy_url: 'https://cdn.example/gallery-one.png',
+          url: 'https://cdn.example/gallery-one.png',
+          width: 70,
+          height: 80
+        },
+        {
+          url: 'https://cdn.example/gallery-two.png',
+          proxy_url: 'https://cdn.example/gallery-two.png',
+          width: 90,
+          height: 100
+        }
+      ]
+    },
+    { title: 'All media entries are malformed' }
+  ]);
+
+  rendered.embeds[0].thumbnail.url = 'https://renderer.invalid/thumb.png';
+  rendered.embeds[0].video.width = 999;
+  rendered.embeds[0].fields[0].value = 'Renderer-only value';
+  assert.deepEqual(saved, canonicalBeforeRender);
+});
+
+test('media caching skips malformed embed images and uses valid URL or proxy media', async () => {
+  const cached = [];
+  const plugin = createPlugin({
+    __started: true,
+    settings: {
+      cacheAllImages: true,
+      dontSaveData: false,
+      newSaveAllFileTypes: true,
+      maxCacheFileSize: 0
+    },
+    cacheImage(...args) { cached.push(args); }
+  });
+  const message = {
+    id: 'embed-media-message',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    attachments: [],
+    sticker_items: [],
+    embeds: [
+      { image: { width: 1, height: 2 } },
+      { image: { url: 'https://cdn.example/valid-url/image.png' } },
+      { image: { proxy_url: 'https://cdn.example/valid-proxy/image.png' } },
+      {
+        images: [
+          { width: 3, height: 4 },
+          { proxy_url: 'https://cdn.example/gallery-proxy/image.png' },
+          { url: 'https://cdn.example/gallery-url/image.png' }
+        ]
+      }
+    ]
+  };
+
+  plugin.cacheMessageImages(message);
+  await waitForQueuedMediaTasks();
+
+  assert.deepEqual(cached, [
+    ['https://cdn.example/valid-url/image.png', 'embed:1', 'valid-url', message.id, message.channel_id, message.guild_id, 0, 0],
+    ['https://cdn.example/valid-proxy/image.png', 'embed:2', 'valid-proxy', message.id, message.channel_id, message.guild_id, 0, 0],
+    ['https://cdn.example/gallery-proxy/image.png', 'embed:3:gallery:1', 'gallery-proxy', message.id, message.channel_id, message.guild_id, 0, 0],
+    ['https://cdn.example/gallery-url/image.png', 'embed:3:gallery:2', 'gallery-url', message.id, message.channel_id, message.guild_id, 0, 0]
+  ]);
+});
+
+test('external gallery media uses distinct fallback filenames at the final cache write', async t => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  global.fetch = async () => successfulMediaResponse();
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-gallery-media-'));
+  t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
+  const messageId = '123456789';
+  const plugin = createMediaCachePlugin(cacheDir, {
+    messageRecord: { [messageId]: { message: { id: messageId, author: { id: 'author' } } } }
+  });
+
+  await Promise.all([
+    plugin.cacheImage(
+      'https://external.example/first/image.png',
+      'embed:0:gallery:0',
+      'first',
+      messageId,
+      'channel',
+      'guild'
+    ),
+    plugin.cacheImage(
+      'https://external.example/second/image.png',
+      'embed:0:gallery:1',
+      'second',
+      messageId,
+      'channel',
+      'guild'
+    )
+  ]);
+
+  assert.deepEqual(fs.readdirSync(cacheDir).sort(), [
+    `${messageId}-embed-0-gallery-0 (${messageId}).png`,
+    `${messageId}-embed-0-gallery-1 (${messageId}).png`
+  ]);
+});
+
 test('record media IDs cover messages, attachments, stickers, embeds, and later updates', () => {
   const plugin = createPlugin();
   const record = {
@@ -171,7 +341,7 @@ test('record media IDs cover messages, attachments, stickers, embeds, and later 
     'message',
     'attachment',
     'sticker',
-    'embedded-id',
+    'message-embed-0',
     'later-attachment'
   ]));
 });
@@ -513,7 +683,7 @@ test('a timed-out deferred media request releases the switch and reports only th
   plugin.queuePendingMediaCacheRequest(url, 0, 37, messageId, 'channel', 'guild');
 
   assert.equal(plugin.flushPendingMediaCacheRequests(), 1);
-  await waitForQueuedMediaTasks();
+  await waitForDeferredMediaToSettle(plugin);
 
   assert.equal(fetches, 3);
   assert.equal(mediaErrors.length, 1);

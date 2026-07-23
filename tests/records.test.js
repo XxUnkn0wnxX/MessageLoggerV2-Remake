@@ -1485,6 +1485,227 @@ test('newly captured records already match the canonical persisted shape', () =>
   assert.equal(JSON.stringify(normalized), JSON.stringify(payload));
 });
 
+test('message cleanup preserves detached Components V2 trees and snapshot aliases', () => {
+  const componentFromJs = {
+    type: 1,
+    components: [{ type: 2, custom_id: 'nested-js' }]
+  };
+  const componentFromJson = {
+    type: 17,
+    accessory: { type: 2, custom_id: 'nested-json' }
+  };
+  const snapshots = [{
+    message: {
+      id: 'snapshot-message',
+      components: [{ type: 9, components: [{ type: 10, content: 'snapshot' }] }],
+      embeds: [{
+        type: 'rich',
+        future_embed_data: { retained: true },
+        image: { proxy_url: 'https://example.invalid/snapshot-image', width: 42, height: 24 }
+      }]
+    }
+  }];
+  const plugin = createPlugin({
+    ChannelStore: { getChannel: () => null },
+    UserStore: { getUser: () => null },
+    messageStore: { getMessage: () => null }
+  });
+  const cleaned = plugin.cleanupMessageObject({
+    id: 'components-v2',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    content: '',
+    type: 0,
+    flags: 32768,
+    timestamp: 100,
+    attachments: [],
+    embeds: [],
+    reactions: [],
+    author: { id: 'author', username: 'Author' },
+    mentions: [],
+    components: [
+      {
+        toJS() { return componentFromJs; },
+        toJSON() { throw new Error('toJS must take precedence'); }
+      },
+      {
+        toJSON() { return componentFromJson; }
+      }
+    ],
+    messageSnapshots: snapshots
+  });
+
+  assert.deepEqual(cleaned.components, [componentFromJs, componentFromJson]);
+  assert.deepEqual(cleaned.message_snapshots, [{
+    message: {
+      id: 'snapshot-message',
+      components: [{ type: 9, components: [{ type: 10, content: 'snapshot' }] }],
+      embeds: [{
+        type: 'rich',
+        future_embed_data: { retained: true },
+        image: {
+          proxy_url: 'https://example.invalid/snapshot-image',
+          url: 'https://example.invalid/snapshot-image',
+          width: 42,
+          height: 24
+        }
+      }]
+    }
+  }], 'camel-case snapshots retain raw nested embeds under the canonical persisted key');
+  assert.equal(cleaned.messageSnapshots, undefined);
+
+  cleaned.components[0].components[0].custom_id = 'changed';
+  cleaned.components[1].accessory.custom_id = 'changed';
+  cleaned.message_snapshots[0].message.components[0].components[0].content = 'changed';
+  assert.equal(componentFromJs.components[0].custom_id, 'nested-js', 'serialized components must not retain a source reference');
+  assert.equal(componentFromJson.accessory.custom_id, 'nested-json', 'toJSON component data must also be detached');
+  assert.equal(snapshots[0].message.components[0].components[0].content, 'snapshot', 'saved snapshots must not retain a source reference');
+  assert.equal(snapshots[0].message.embeds[0].image.url, undefined, 'nested embed URL repair must stay isolated from the source snapshot');
+
+  const snakeCase = plugin.cleanupMessageObject({
+    id: 'components-v2-snake',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    content: '',
+    type: 0,
+    flags: 32768,
+    timestamp: 101,
+    attachments: [],
+    embeds: [],
+    reactions: [],
+    author: { id: 'author', username: 'Author' },
+    mentions: [],
+    components: [],
+    message_snapshots: snapshots
+  });
+  assert.equal(snakeCase.message_snapshots[0].message.embeds[0].future_embed_data.retained, true, 'snake-case snapshots retain unknown embed fields');
+  assert.equal(snakeCase.message_snapshots[0].message.embeds[0].image.url, 'https://example.invalid/snapshot-image');
+  snakeCase.message_snapshots[0].message.id = 'changed';
+  assert.equal(snapshots[0].message.id, 'snapshot-message');
+});
+
+test('embed cleanup follows raw JSON export and canonicalizes Discord wire aliases', () => {
+  const plugin = createPlugin();
+  const wireEmbed = {
+    title: 'Wire title',
+    description: 'Wire description',
+    fields: [{ name: 'Wire name', value: 'Wire value', inline: true }],
+    unknown_embed_data: { retained: ['from', 'toJSON'] }
+  };
+  const model = {
+    toJS() {
+      return {
+        rawTitle: 'Wrong toJS title',
+        rawDescription: 'Wrong toJS description',
+        fields: [{ rawName: 'Wrong name', rawValue: 'Wrong value' }]
+      };
+    },
+    toJSON() { return wireEmbed; }
+  };
+  const rawAliasEmbed = {
+    rawTitle: 'Raw title',
+    rawDescription: 'Raw description',
+    referenceId: 'reference',
+    color: '#112233',
+    fields: [{ rawName: 'Raw name', rawValue: 'Raw value', unknown_field_data: true }],
+    author: { name: 'Author', iconURL: 'https://example.invalid/author.png' },
+    footer: { text: 'Footer', iconProxyURL: 'https://example.invalid/footer.png' },
+    image: { proxyURL: 'https://example.invalid/image.png', unknown_media_data: 7 },
+    unknown_embed_data: { retained: ['raw', 'alias'] }
+  };
+
+  const normalized = plugin.normalizeMessageEmbeds([model, rawAliasEmbed]);
+
+  assert.deepEqual(normalized[0], wireEmbed, 'direct JSON/toJSON export must win over the component-style toJS path');
+  assert.equal(normalized[1].title, 'Raw title');
+  assert.equal(normalized[1].description, 'Raw description');
+  assert.equal(normalized[1].reference_id, 'reference');
+  assert.equal(normalized[1].color, 0x112233);
+  assert.equal(normalized[1].fields[0].name, 'Raw name');
+  assert.equal(normalized[1].fields[0].value, 'Raw value');
+  assert.equal(normalized[1].fields[0].unknown_field_data, true);
+  assert.equal(normalized[1].author.icon_url, 'https://example.invalid/author.png');
+  assert.equal(normalized[1].footer.proxy_icon_url, 'https://example.invalid/footer.png');
+  assert.equal(normalized[1].image.url, 'https://example.invalid/image.png');
+  assert.equal(normalized[1].image.proxy_url, 'https://example.invalid/image.png');
+  assert.equal(normalized[1].image.unknown_media_data, 7);
+  assert.deepEqual(normalized[1].unknown_embed_data, { retained: ['raw', 'alias'] });
+
+  normalized[0].unknown_embed_data.retained[0] = 'changed';
+  normalized[1].unknown_embed_data.retained[0] = 'changed';
+  assert.equal(wireEmbed.unknown_embed_data.retained[0], 'from');
+  assert.equal(rawAliasEmbed.unknown_embed_data.retained[0], 'raw');
+});
+
+test('message cleanup drops malformed embed media and canonicalizes usable URL forms', () => {
+  const plugin = createPlugin({
+    ChannelStore: { getChannel: () => null },
+    UserStore: { getUser: () => null },
+    messageStore: { getMessage: () => null }
+  });
+  const cleaned = plugin.cleanupMessageObject({
+    id: 'embed-media',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    content: '',
+    type: 0,
+    flags: 0,
+    timestamp: 100,
+    attachments: [],
+    reactions: [],
+    author: { id: 'author', username: 'Author' },
+    mentions: [],
+    embeds: [
+      {
+        id: 'missing-media',
+        type: 'rich',
+        image: { width: 12, height: 34 },
+        thumbnail: { width: 56, height: 78 },
+        video: { width: 90, height: 12 },
+        images: [{ width: 11, height: 22 }]
+      },
+      {
+        id: 'url-only',
+        type: 'rich',
+        image: { url: 'https://example.invalid/image' },
+        thumbnail: { url: 'https://example.invalid/thumbnail' },
+        video: { url: 'https://example.invalid/video' }
+      },
+      {
+        id: 'proxy-only',
+        type: 'rich',
+        image: { proxy_url: 'https://example.invalid/proxy-image' },
+        thumbnail: { proxy_url: 'https://example.invalid/proxy-thumbnail' },
+        video: { proxy_url: 'https://example.invalid/proxy-video' },
+        images: [
+          { width: 33, height: 44 },
+          { proxy_url: 'https://example.invalid/proxy-gallery' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(cleaned.embeds[0].image, undefined);
+  assert.equal(cleaned.embeds[0].thumbnail, undefined);
+  assert.equal(cleaned.embeds[0].video, undefined);
+  assert.equal(cleaned.embeds[0].images, undefined, 'an empty sanitized gallery must be removed entirely');
+  for (const key of ['image', 'thumbnail', 'video']) {
+    assert.equal(cleaned.embeds[1][key].url, `https://example.invalid/${key === 'image' ? 'image' : key}`);
+    assert.equal(cleaned.embeds[1][key].proxy_url, cleaned.embeds[1][key].url);
+    assert.equal(cleaned.embeds[2][key].url, cleaned.embeds[2][key].proxy_url);
+  }
+  assert.deepEqual(cleaned.embeds[2].images, [{
+    proxy_url: 'https://example.invalid/proxy-gallery',
+    url: 'https://example.invalid/proxy-gallery'
+  }]);
+});
+
+test('components-only messages are supported payloads', () => {
+  const plugin = createPlugin();
+  assert.equal(plugin.hasSupportedMessagePayload({ flags: 32768, components: [{ type: 1 }] }), true);
+  assert.equal(plugin.hasSupportedMessagePayload({ flags: 32768, components: [] }), false);
+});
+
 function createNativeDeletePlugin() {
   const messageId = '200';
   const channelId = '20';
