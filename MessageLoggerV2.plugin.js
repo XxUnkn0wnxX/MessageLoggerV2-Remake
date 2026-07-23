@@ -43,6 +43,14 @@ const LOGGER_KEYBIND_SETTING_IDS = Object.freeze([
   'openServerLogsKeybind'
 ]);
 const LOGGER_KEYBIND_MODIFIERS = Object.freeze(['Control', 'Shift', 'Alt', 'Meta']);
+const FORUM_UPLOAD_ROUTER_SOURCE_MARKERS = Object.freeze([
+  'castChannelIdAsMessageId',
+  '.isForumPost()',
+  '.ownerId',
+  '.getCount('
+]);
+const FORUM_UPLOAD_AS_REPLY_BYPASS_TTL_MS = 4000;
+const FORUM_CHANNEL_TYPES = Object.freeze([10, 11, 12]);
 const { React, ReactDOM, Webpack, UI, Plugins, DOM, Patcher, Components, ContextMenu, Utils, Hooks, ReactUtils, Logger } = new BdApi('MessageLoggerV2');
 const { Data } = BdApi;
 const { Filters } = Webpack;
@@ -286,6 +294,12 @@ module.exports = class MessageLoggerV2 {
     // Startup failures can occur before settings and the queued native-notification runtime
     // exist. The global router uses this flag to select its safe pre-initialization path.
     this._notificationRouterReady = false;
+    this._forumUploadAsReplyPatchGeneration = 0;
+    this._forumUploadAsReplyPatchInstalled = false;
+    this._forumUploadAsReplySendPatchInstalled = false;
+    this._forumUploadAsReplyAbortController = null;
+    this._forumUploadAsReplyBypassGeneration = 0;
+    this._forumUploadAsReplyBypassTokens = new Map();
     // Keep this generation monotonic for the lifetime of the plugin instance. A completed
     // fetch from an earlier settings state or same-instance restart must never become eligible
     // to write merely because media caching was enabled again before the fetch settled.
@@ -366,6 +380,15 @@ module.exports = class MessageLoggerV2 {
     this._activeNoSaveMergeRollbackContext = null;
     this._noSaveMergePromise = null;
     this._discardNoSaveSessionOnResume = false;
+    this._forumUploadAsReplyPatchGeneration += 1;
+    this._forumUploadAsReplyPatchInstalled = false;
+    this._forumUploadAsReplySendPatchInstalled = false;
+    this._forumUploadAsReplyBypassGeneration += 1;
+    this._forumUploadAsReplyBypassTokens?.clear?.();
+    if (this._forumUploadAsReplyAbortController?.abort) {
+      this._forumUploadAsReplyAbortController.abort();
+    }
+    this._forumUploadAsReplyAbortController = null;
     if (this._archiveLoadModeSettleTimer) clearTimeout(this._archiveLoadModeSettleTimer);
     this._archiveLoadModeSettleTimer = 0;
     this._archiveLoadModeTransitionInProgress = false;
@@ -1963,6 +1986,8 @@ module.exports = class MessageLoggerV2 {
     this.updateCSS();
     this.patchMessages();
     this.patchModal();
+    this._patchForumUploadAsReplySendMessageForModule(DiscordModules.MessageActions);
+    this.patchForumUploadAsReplyRoute();
     this.dataManagerInterval = setInterval(() => {
       this.handleMessagesCap();
     }, 60 * 1000 * 5);
@@ -7614,6 +7639,26 @@ module.exports = class MessageLoggerV2 {
       && this.purgedMessageSet?.get(channelId)?.has(messageId);
     return !!(deleted || purged);
   }
+  shouldRouteForumUploadAsReply(threadId) {
+    const normalizedThreadId = String(threadId ?? '').trim();
+    if (!normalizedThreadId) return false;
+    if (!/^[0-9]+$/.test(normalizedThreadId)) return false;
+    const channel = this.tools?.getChannel?.(normalizedThreadId);
+    if (!FORUM_CHANNEL_TYPES.includes(Number(channel?.type))) return false;
+    const record = this.messageRecord?.[normalizedThreadId];
+    if (!record?.message || !record.delete_data) return false;
+    if (String(record.message.id) !== normalizedThreadId
+      || String(record.message.channel_id) !== normalizedThreadId
+    ) return false;
+    if (!record.delete_data?.forum_thread_message_delete || record.delete_data.forum_thread_delete) return false;
+    if (!this.shouldPresentSavedMessage(normalizedThreadId, normalizedThreadId)) return false;
+    const rootMessage = this.messageStore?.getMessage?.(normalizedThreadId, normalizedThreadId);
+    if (!rootMessage) return false;
+    if (String(rootMessage.id) !== normalizedThreadId
+      || String(rootMessage.channel_id) !== normalizedThreadId
+    ) return false;
+    return true;
+  }
   isThreadCreatedSystemMessage(message) {
     return Number(message?.type) === 18;
   }
@@ -9438,6 +9483,186 @@ module.exports = class MessageLoggerV2 {
       if (String(method).toUpperCase() !== 'DELETE') return;
       this.rememberLocalDeleteFromRequest(url);
     });
+  }
+  _forumUploadAsReplyFunctionHasSignature(value) {
+    const source = typeof value === 'function' ? value.toString() : '';
+    return FORUM_UPLOAD_ROUTER_SOURCE_MARKERS.every(token => source.includes(token));
+  }
+  _findForumUploadAsReplyExport(module) {
+    if (!module || typeof module !== 'object') return null;
+    let match;
+    for (const [key, value] of Object.entries(module)) {
+      if (typeof value !== 'function') continue;
+      if (!this._forumUploadAsReplyFunctionHasSignature(value)) continue;
+      if (match) return null;
+      match = { key, fn: value };
+    }
+    return match || null;
+  }
+  _cleanupForumUploadAsReplyBypassTokens() {
+    if (!this._forumUploadAsReplyBypassTokens || !this._forumUploadAsReplyBypassTokens.size) return;
+    const now = Date.now();
+    for (const [threadId, token] of this._forumUploadAsReplyBypassTokens.entries()) {
+      if (!token
+        || token.generation !== this._forumUploadAsReplyBypassGeneration
+        || token.expiresAt <= now
+      ) {
+        this._forumUploadAsReplyBypassTokens.delete(threadId);
+      }
+    }
+  }
+  _armForumUploadAsReplyBypassToken(threadId) {
+    const normalizedThreadId = String(threadId ?? '').trim();
+    if (!normalizedThreadId) return;
+    this._cleanupForumUploadAsReplyBypassTokens();
+    this._forumUploadAsReplyBypassTokens.set(normalizedThreadId, {
+      generation: this._forumUploadAsReplyBypassGeneration,
+      expiresAt: Date.now() + FORUM_UPLOAD_AS_REPLY_BYPASS_TTL_MS
+    });
+  }
+  _consumeForumUploadAsReplyBypassToken(threadId) {
+    const normalizedThreadId = String(threadId ?? '').trim();
+    if (!normalizedThreadId) return false;
+    this._cleanupForumUploadAsReplyBypassTokens();
+    const token = this._forumUploadAsReplyBypassTokens.get(normalizedThreadId);
+    if (!token || token.generation !== this._forumUploadAsReplyBypassGeneration) return false;
+    this._forumUploadAsReplyBypassTokens.delete(normalizedThreadId);
+    return true;
+  }
+  _patchForumUploadAsReplyRouteForModule(module, patchGeneration) {
+    if (this._forumUploadAsReplyPatchInstalled
+      || !this._forumUploadAsReplySendPatchInstalled
+      || !this.__started
+      || patchGeneration !== this._forumUploadAsReplyPatchGeneration
+    ) return;
+    const exportInfo = this._findForumUploadAsReplyExport(module);
+    if (!exportInfo?.key) return;
+    const functionName = exportInfo.key;
+    try {
+      const unpatch = Patcher.instead(module, functionName, (_this, args, original) => {
+        const result = original.apply(_this, args);
+        if (!result) return result;
+        const threadId = args?.[1];
+        try {
+          if (threadId && this.__started
+            && this._forumUploadAsReplySendPatchInstalled
+            && this.shouldRouteForumUploadAsReply(threadId)
+            && patchGeneration === this._forumUploadAsReplyPatchGeneration) {
+            this._armForumUploadAsReplyBypassToken(threadId);
+            Logger.log(`Routing media as a reply beneath restored deleted forum starter ${threadId}`);
+            return false;
+          }
+        } catch (error) {
+          Logger.error('Forum upload route check failed, allowing default behavior:', error);
+        }
+        return result;
+      });
+      if (typeof unpatch !== 'function') {
+        Logger.warn('Forum upload route patch did not return a cleanup function; default Discord behavior remains active.');
+        return;
+      }
+      this.unpatches.push(unpatch);
+      this._forumUploadAsReplyPatchInstalled = true;
+    } catch (error) {
+      Logger.error('Could not patch the restored forum upload route; default Discord behavior remains active:', error);
+    }
+  }
+  _patchForumUploadAsReplySendMessageForModule(module) {
+    if (!module || typeof module !== 'object' || typeof module.sendMessage !== 'function') {
+      Logger.warn('Forum upload sendMessage patch skipped because MessageActions.sendMessage is unavailable.');
+      this._forumUploadAsReplySendPatchInstalled = false;
+      return false;
+    }
+    if (this._forumUploadAsReplySendPatchInstalled) return true;
+    try {
+      const unpatch = Patcher.instead(module, 'sendMessage', (_this, args, original) => {
+        const threadId = args?.[0];
+        const attachmentsToUpload = args?.[3]?.attachmentsToUpload;
+        if (
+          threadId
+          && Array.isArray(attachmentsToUpload)
+          && attachmentsToUpload.length > 0
+          && this._consumeForumUploadAsReplyBypassToken(threadId)
+        ) {
+          Logger.log(`Bypassing native media channel-ready flow for restored forum starter ${threadId}`);
+          args[2] = false;
+        }
+        return original.apply(_this, args);
+      });
+      if (typeof unpatch !== 'function') {
+        Logger.warn('Forum upload sendMessage patch did not return a cleanup function; default Discord behavior remains active.');
+        return false;
+      }
+      this.unpatches.push(unpatch);
+      this._forumUploadAsReplySendPatchInstalled = true;
+      return true;
+    } catch (error) {
+      Logger.error('Could not patch forum upload sendMessage bypass logic:', error);
+      this._forumUploadAsReplySendPatchInstalled = false;
+      return false;
+    }
+  }
+  patchForumUploadAsReplyRoute() {
+    if (!this._forumUploadAsReplySendPatchInstalled) {
+      Logger.warn('Forum upload route patch skipped because the sendMessage bypass hook is unavailable; native media-add behavior remains active.');
+      return;
+    }
+    if (this._forumUploadAsReplyPatchInstalled) return;
+    const patchGeneration = this._forumUploadAsReplyPatchGeneration + 1;
+    this._forumUploadAsReplyPatchGeneration = patchGeneration;
+    if (this._forumUploadAsReplyAbortController?.abort) {
+      this._forumUploadAsReplyAbortController.abort();
+    }
+    this._forumUploadAsReplyAbortController = null;
+    const findModule = (mod) => !!this._findForumUploadAsReplyExport(mod);
+    const immediate = Webpack.getModule(findModule, { searchExports: false });
+    if (immediate) {
+      this._patchForumUploadAsReplyRouteForModule(immediate, patchGeneration);
+      return;
+    }
+    if (typeof Webpack.waitForModule !== 'function') {
+      Logger.warn('Forum upload route patch skipped because waitForModule is unavailable.');
+      return;
+    }
+    const AbortControllerClass = globalThis.AbortController;
+    if (typeof AbortControllerClass !== 'function') {
+      Logger.warn('Forum upload route patch skipped because AbortController is unavailable.');
+      return;
+    }
+    const controller = new AbortControllerClass();
+    this._forumUploadAsReplyAbortController = controller;
+    const waitOptions = { searchExports: false, signal: controller.signal };
+    try {
+      Promise.resolve(Webpack.waitForModule(findModule, waitOptions))
+        .then(module => {
+          if (this._forumUploadAsReplyAbortController === controller) {
+            this._forumUploadAsReplyAbortController = null;
+          }
+          if (!module
+            || controller.signal?.aborted
+            || !this.__started
+            || patchGeneration !== this._forumUploadAsReplyPatchGeneration
+          ) return;
+          this._patchForumUploadAsReplyRouteForModule(module, patchGeneration);
+        })
+        .catch(error => {
+          if (this._forumUploadAsReplyAbortController === controller) {
+            this._forumUploadAsReplyAbortController = null;
+          }
+          if (controller.signal?.aborted
+            || !this.__started
+            || patchGeneration !== this._forumUploadAsReplyPatchGeneration
+          ) return;
+          Logger.error('Could not install the restored forum upload route patch:', error);
+        });
+    } catch (error) {
+      if (this._forumUploadAsReplyAbortController === controller) {
+        this._forumUploadAsReplyAbortController = null;
+      }
+      if (!controller.signal?.aborted) {
+        Logger.error('Could not wait for the restored forum upload route module:', error);
+      }
+    }
   }
   _cacheIncomingMessage(message) {
     if (this.isEphemeralMessage(message)) return true;

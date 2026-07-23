@@ -5,8 +5,10 @@ const {
   confirmationEvents,
   createPlugin,
   loggerEvents,
+  Patcher,
   ReactDOM,
-  resetHarness
+  resetHarness,
+  Webpack
 } = require('./helpers/plugin-harness');
 
 function recordState() {
@@ -50,6 +52,58 @@ function createRecordPlugin() {
     _showNotification(...args) { notifications.push(args); }
   });
   return { ...state, dispatches, notifications, plugin };
+}
+
+function createForumUploadAsReplyPlugin(overrides = {}) {
+  const threadId = overrides.threadId ?? '901';
+  const channelType = overrides.channelType ?? 11;
+  const baseMessage = {
+    message: { id: threadId, channel_id: threadId },
+    delete_data: { forum_thread_message_delete: true, hidden: false }
+  };
+  const messageStoreMessage = overrides.messageStoreMessage
+    ?? { id: threadId, channel_id: threadId };
+  return createPlugin({
+    settings: {
+      restoreDeletedMessages: true,
+      showDeletedMessages: true,
+      ...(overrides.settings || {})
+    },
+    messageRecord: { [threadId]: overrides.record ?? baseMessage },
+    deletedMessageRecord: {},
+    editedMessageRecord: {},
+    purgedMessageRecord: {},
+    nukedMessageRecord: {},
+    deletedMessageSet: new Map([[threadId, new Set([threadId])]]),
+    editedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
+    tools: {
+      getChannel: id => ({ id, type: channelType })
+    },
+    messageStore: {
+      getMessage: (...args) => {
+        const channelId = String(args?.[0] ?? '');
+        const messageId = String(args?.[1] ?? '');
+        if (String(channelId) !== threadId || String(messageId) !== threadId) return null;
+        return overrides.getMessage?.(channelId, messageId) ?? messageStoreMessage;
+      }
+    },
+    ...overrides.pluginOverrides
+  });
+}
+
+function createSignedForumUploadPredicate(result = true) {
+  const predicate = function forumUploadPredicate() {
+    return result;
+  };
+  predicate.toString = () => [
+    'castChannelIdAsMessageId',
+    '.isForumPost()',
+    '.ownerId',
+    '.getCount('
+  ].join(' ');
+  return predicate;
 }
 
 test.beforeEach(resetHarness);
@@ -183,6 +237,391 @@ test('logger viewer marks only jumpable saved-message authors', () => {
   assert.equal(plugin.markLoggerViewerJumpAvailableAuthor(author, unavailable), false);
   assert.equal(plugin.markLoggerViewerJumpAvailableAuthor(null, valid), false);
   assert.deepEqual(added, ['jump-available']);
+});
+
+test('should route forum upload as reply only for eligible forum thread self-keys', () => {
+  const plugin = createForumUploadAsReplyPlugin();
+  assert.equal(plugin.shouldRouteForumUploadAsReply('901'), true);
+});
+
+test('shouldRouteForumUploadAsReply false when required forum-thread routing guards fail', () => {
+  const invalidThreadId = createForumUploadAsReplyPlugin({
+    threadId: 'bad-thread',
+    channelType: 10
+  });
+  assert.equal(invalidThreadId.shouldRouteForumUploadAsReply('bad-thread'), false);
+
+  const nonForumChannel = createForumUploadAsReplyPlugin({
+    threadId: '909',
+    channelType: 0
+  });
+  assert.equal(nonForumChannel.shouldRouteForumUploadAsReply('909'), false);
+
+  const hiddenBySettings = createForumUploadAsReplyPlugin({
+    threadId: '902',
+    settings: { showDeletedMessages: false, restoreDeletedMessages: true }
+  });
+  assert.equal(hiddenBySettings.shouldRouteForumUploadAsReply('902'), false);
+
+  const hiddenRecord = createForumUploadAsReplyPlugin({
+    threadId: '910',
+    record: {
+      message: { id: '910', channel_id: '910' },
+      delete_data: { forum_thread_message_delete: true, hidden: true }
+    }
+  });
+  assert.equal(hiddenRecord.shouldRouteForumUploadAsReply('910'), false);
+
+  const restoreDisabled = createForumUploadAsReplyPlugin({
+    threadId: '911',
+    settings: { showDeletedMessages: true, restoreDeletedMessages: false }
+  });
+  assert.equal(restoreDisabled.shouldRouteForumUploadAsReply('911'), false);
+
+  const missingUploadMarker = createForumUploadAsReplyPlugin({
+    threadId: '903',
+    record: {
+      message: { id: '903', channel_id: '903' },
+      delete_data: { forum_thread_message_delete: false, hidden: false }
+    }
+  });
+  assert.equal(missingUploadMarker.shouldRouteForumUploadAsReply('903'), false);
+
+  const threadDeleteMarker = createForumUploadAsReplyPlugin({
+    threadId: '904',
+    record: {
+      message: { id: '904', channel_id: '904' },
+      delete_data: { forum_thread_message_delete: true, forum_thread_delete: true, hidden: false }
+    }
+  });
+  assert.equal(threadDeleteMarker.shouldRouteForumUploadAsReply('904'), false);
+
+  const missingCacheRoot = createForumUploadAsReplyPlugin({
+    threadId: '905',
+    pluginOverrides: {
+      messageStore: { getMessage: () => null }
+    }
+  });
+  assert.equal(missingCacheRoot.shouldRouteForumUploadAsReply('905'), false);
+
+  const cacheMismatch = createForumUploadAsReplyPlugin({
+    threadId: '906',
+    messageStoreMessage: { id: '905', channel_id: '906' }
+  });
+  assert.equal(cacheMismatch.shouldRouteForumUploadAsReply('906'), false);
+
+  const messageRecordMismatch = createForumUploadAsReplyPlugin({
+    threadId: '907',
+    record: {
+      message: { id: '908', channel_id: '908' },
+      delete_data: { forum_thread_message_delete: true, hidden: false }
+    }
+  });
+  assert.equal(messageRecordMismatch.shouldRouteForumUploadAsReply('907'), false);
+});
+
+test('forum upload predicate discovery requires one exact signed export', () => {
+  const plugin = createPlugin();
+  const signed = createSignedForumUploadPredicate();
+
+  assert.deepEqual(plugin._findForumUploadAsReplyExport({ xz: signed }), {
+    key: 'xz',
+    fn: signed
+  });
+  assert.equal(plugin._findForumUploadAsReplyExport({
+    first: signed,
+    second: createSignedForumUploadPredicate()
+  }), null);
+  assert.equal(plugin._findForumUploadAsReplyExport({
+    xz() {
+      return 'castChannelIdAsMessageId .isForumPost() ownerId .getCount(';
+    }
+  }), null);
+});
+
+test('forum upload route patch preserves native results and suppresses only eligible restored starters', () => {
+  const plugin = createForumUploadAsReplyPlugin();
+  const targetModule = { xz: createSignedForumUploadPredicate() };
+  let patchCallback;
+  Patcher.instead = (module, key, callback) => {
+    assert.equal(module, targetModule);
+    assert.equal(key, 'xz');
+    patchCallback = callback;
+    return () => {};
+  };
+  plugin.__started = true;
+  plugin.unpatches = [];
+  plugin._forumUploadAsReplyPatchGeneration = 3;
+  plugin._forumUploadAsReplySendPatchInstalled = true;
+  plugin.shouldRouteForumUploadAsReply = threadId => threadId === '901';
+
+  plugin._patchForumUploadAsReplyRouteForModule(targetModule, 3);
+
+  assert.equal(plugin._forumUploadAsReplyPatchInstalled, true);
+  assert.equal(plugin.unpatches.length, 1);
+  assert.equal(typeof patchCallback, 'function');
+
+  const thisValue = { marker: 'native-this' };
+  const nativeResults = [];
+  const original = function originalPredicate(value) {
+    nativeResults.push({ thisValue: this, value });
+    return value;
+  };
+  assert.equal(patchCallback(thisValue, [false, '901'], original), false);
+  assert.equal(patchCallback(thisValue, [true, '902'], original), true);
+  assert.equal(patchCallback(thisValue, [true, '901'], original), false);
+  plugin._forumUploadAsReplySendPatchInstalled = false;
+  assert.equal(patchCallback(thisValue, [true, '901'], original), true);
+  assert.deepEqual(nativeResults, [
+    { thisValue, value: false },
+    { thisValue, value: true },
+    { thisValue, value: true },
+    { thisValue, value: true }
+  ]);
+});
+
+test('forum upload route patch sets a one-shot sendMessage bypass token', () => {
+  const plugin = createForumUploadAsReplyPlugin();
+  const targetModule = { xz: createSignedForumUploadPredicate() };
+  let patchCallback;
+  Patcher.instead = (module, key, callback) => {
+    assert.equal(module, targetModule);
+    assert.equal(key, 'xz');
+    patchCallback = callback;
+    return () => {};
+  };
+  plugin.__started = true;
+  plugin.unpatches = [];
+  plugin._forumUploadAsReplyBypassGeneration = 0;
+  plugin._forumUploadAsReplyPatchGeneration = 3;
+  plugin._forumUploadAsReplySendPatchInstalled = true;
+  plugin.shouldRouteForumUploadAsReply = threadId => threadId === '901';
+
+  plugin._patchForumUploadAsReplyRouteForModule(targetModule, 3);
+  assert.equal(plugin._forumUploadAsReplyBypassTokens.size, 0);
+  assert.equal(plugin._consumeForumUploadAsReplyBypassToken('901'), false);
+
+  const original = value => value;
+  assert.equal(patchCallback({}, [true, '901'], original), false);
+  assert.equal(plugin._forumUploadAsReplyBypassTokens.has('901'), true);
+  assert.equal(plugin._consumeForumUploadAsReplyBypassToken('901'), true);
+  assert.equal(plugin._forumUploadAsReplyBypassTokens.size, 0);
+});
+
+test('forum upload sendMessage bypass uses one-shot token only for matching media uploads', () => {
+  const plugin = createPlugin();
+  plugin.unpatches = [];
+  plugin._forumUploadAsReplyBypassGeneration = 0;
+  plugin._forumUploadAsReplyBypassTokens = new Map();
+
+  let sendMessagePatch;
+  const sendModule = { sendMessage: () => {} };
+  Patcher.instead = (module, key, callback) => {
+    if (module === sendModule && key === 'sendMessage') {
+      sendMessagePatch = callback;
+    }
+    return () => {};
+  };
+
+  plugin._patchForumUploadAsReplySendMessageForModule(sendModule);
+  assert.equal(typeof sendMessagePatch, 'function');
+
+  plugin._forumUploadAsReplyBypassTokens.set('901', {
+    generation: 0,
+    expiresAt: Date.now() + 100000
+  });
+
+  let result;
+  result = sendMessagePatch({}, ['901', 'body', true, { attachmentsToUpload: ['media-a'] }], (...args) => args);
+  assert.deepEqual(result, ['901', 'body', false, { attachmentsToUpload: ['media-a'] }]);
+  assert.equal(plugin._forumUploadAsReplyBypassTokens.size, 0);
+  assert.equal(plugin._consumeForumUploadAsReplyBypassToken('901'), false);
+
+  result = sendMessagePatch({}, ['901', 'body', true, { attachmentsToUpload: ['media-b'] }], (...args) => args);
+  assert.deepEqual(result, ['901', 'body', true, { attachmentsToUpload: ['media-b'] }]);
+});
+
+test('forum upload sendMessage bypass token is not consumed by wrong-thread or text-only sends', () => {
+  const plugin = createPlugin();
+  plugin.unpatches = [];
+  plugin._forumUploadAsReplyBypassGeneration = 0;
+  plugin._forumUploadAsReplyBypassTokens = new Map();
+
+  let sendMessagePatch;
+  const sendModule = { sendMessage: () => {} };
+  Patcher.instead = (module, key, callback) => {
+    if (module === sendModule && key === 'sendMessage') {
+      sendMessagePatch = callback;
+    }
+    return () => {};
+  };
+
+  plugin._patchForumUploadAsReplySendMessageForModule(sendModule);
+  plugin._forumUploadAsReplyBypassTokens.set('901', {
+    generation: 0,
+    expiresAt: Date.now() + 100000
+  });
+
+  const wrongThread = sendMessagePatch({}, ['902', 'body', true, { attachmentsToUpload: ['media-a'] }], (...args) => args);
+  assert.deepEqual(wrongThread, ['902', 'body', true, { attachmentsToUpload: ['media-a'] }]);
+  assert.equal(plugin._forumUploadAsReplyBypassTokens.has('901'), true);
+  const textOnly = sendMessagePatch({}, ['901', 'body', true, {}], (...args) => args);
+  assert.deepEqual(textOnly, ['901', 'body', true, {}]);
+  assert.equal(plugin._forumUploadAsReplyBypassTokens.has('901'), true);
+  const media = sendMessagePatch({}, ['901', 'body', true, { attachmentsToUpload: ['media-b'] }], (...args) => args);
+  assert.deepEqual(media, ['901', 'body', false, { attachmentsToUpload: ['media-b'] }]);
+  assert.equal(plugin._forumUploadAsReplyBypassTokens.size, 0);
+});
+
+test('forum upload sendMessage bypass token ignores stale entries', () => {
+  const plugin = createPlugin();
+  plugin._forumUploadAsReplyBypassGeneration = 0;
+  plugin._forumUploadAsReplyBypassTokens = new Map([
+    ['901', { generation: 0, expiresAt: Date.now() - 1 }]
+  ]);
+
+  assert.equal(plugin._consumeForumUploadAsReplyBypassToken('901'), false);
+  assert.equal(plugin._forumUploadAsReplyBypassTokens.has('901'), false);
+});
+
+test('forum upload route patch failure leaves native behavior active', () => {
+  const plugin = createPlugin();
+  const targetModule = { xz: createSignedForumUploadPredicate() };
+  Patcher.instead = () => {
+    throw new Error('read-only export');
+  };
+  plugin.__started = true;
+  plugin.unpatches = [];
+  plugin._forumUploadAsReplyPatchGeneration = 4;
+  plugin._forumUploadAsReplySendPatchInstalled = true;
+
+  assert.doesNotThrow(() => {
+    plugin._patchForumUploadAsReplyRouteForModule(targetModule, 4);
+  });
+  assert.equal(plugin._forumUploadAsReplyPatchInstalled, false);
+  assert.deepEqual(plugin.unpatches, []);
+  assert.equal(
+    loggerEvents.some(event => event[0] === 'error'
+      && String(event[1]).includes('default Discord behavior remains active')),
+    true
+  );
+});
+
+test('forum upload route lazy discovery follows BetterDiscord waitForModule promise API', async () => {
+  const plugin = createPlugin();
+  const targetModule = { xz: createSignedForumUploadPredicate() };
+  let resolveModule;
+  let waitArguments;
+  const patched = [];
+  Webpack.getModule = (filter, options) => {
+    assert.equal(typeof filter, 'function');
+    assert.deepEqual(options, { searchExports: false });
+    return null;
+  };
+  Webpack.waitForModule = function waitForModule(...args) {
+    waitArguments = args;
+    return new Promise(resolve => {
+      resolveModule = resolve;
+    });
+  };
+  plugin.__started = true;
+  plugin._forumUploadAsReplySendPatchInstalled = true;
+  plugin._patchForumUploadAsReplyRouteForModule = (...args) => patched.push(args);
+
+  plugin.patchForumUploadAsReplyRoute();
+
+  assert.equal(waitArguments.length, 2);
+  assert.equal(typeof waitArguments[0], 'function');
+  assert.equal(waitArguments[1].searchExports, false);
+  assert.equal(waitArguments[1].signal instanceof AbortSignal, true);
+  const patchGeneration = plugin._forumUploadAsReplyPatchGeneration;
+  resolveModule(targetModule);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(patched, [[targetModule, patchGeneration]]);
+  assert.equal(plugin._forumUploadAsReplyAbortController, null);
+});
+
+test('forum upload sendMessage patch returns false when MessageActions is missing or not patchable', () => {
+  const plugin = createPlugin();
+  plugin.unpatches = [];
+
+  assert.equal(
+    plugin._patchForumUploadAsReplySendMessageForModule({}),
+    false
+  );
+  assert.equal(plugin._forumUploadAsReplySendPatchInstalled, false);
+
+  Patcher.instead = () => {
+    throw new Error('read-only export');
+  };
+  assert.equal(
+    plugin._patchForumUploadAsReplySendMessageForModule({ sendMessage: () => {} }),
+    false
+  );
+  assert.equal(plugin._forumUploadAsReplySendPatchInstalled, false);
+  assert.equal(
+    loggerEvents.some(event => event[0] === 'error'
+      && String(event[1]).includes('Could not patch forum upload sendMessage bypass logic')),
+    true
+  );
+});
+
+test('forum upload sendMessage patch is idempotent once installed', () => {
+  const plugin = createPlugin();
+  plugin.unpatches = [];
+  const sendModule = { sendMessage: () => {} };
+  let callCount = 0;
+  Patcher.instead = () => {
+    callCount += 1;
+    return () => {};
+  };
+
+  assert.equal(
+    plugin._patchForumUploadAsReplySendMessageForModule(sendModule),
+    true
+  );
+  assert.equal(
+    plugin._patchForumUploadAsReplySendMessageForModule(sendModule),
+    true
+  );
+  assert.equal(callCount, 1);
+  assert.equal(plugin._forumUploadAsReplySendPatchInstalled, true);
+});
+
+test('forum upload sendMessage prerequisite installs before route discovery during startup', () => {
+  const source = createPlugin().initialize.toString();
+  const sendPatchIndex = source.indexOf(
+    'this._patchForumUploadAsReplySendMessageForModule(DiscordModules.MessageActions)'
+  );
+  const routePatchIndex = source.indexOf('this.patchForumUploadAsReplyRoute()');
+
+  assert.notEqual(sendPatchIndex, -1);
+  assert.notEqual(routePatchIndex, -1);
+  assert.equal(sendPatchIndex < routePatchIndex, true);
+});
+
+test('forum upload state resets during stop', () => {
+  const plugin = createPlugin();
+  plugin._forumUploadAsReplyPatchInstalled = true;
+  plugin._forumUploadAsReplySendPatchInstalled = true;
+  plugin._forumUploadAsReplyPatchGeneration = 10;
+  plugin._forumUploadAsReplyBypassGeneration = 10;
+  plugin._forumUploadAsReplyBypassTokens = new Map([
+    ['901', { generation: 10, expiresAt: Date.now() + 100000 }]
+  ]);
+  let aborted = false;
+  plugin._forumUploadAsReplyAbortController = { abort: () => aborted = true };
+
+  plugin.stop();
+
+  assert.equal(plugin._forumUploadAsReplyPatchInstalled, false);
+  assert.equal(plugin._forumUploadAsReplySendPatchInstalled, false);
+  assert.equal(plugin._forumUploadAsReplyPatchGeneration, 11);
+  assert.equal(plugin._forumUploadAsReplyBypassGeneration, 11);
+  assert.equal(plugin._forumUploadAsReplyBypassTokens.size, 0);
+  assert.equal(aborted, true);
+  assert.equal(plugin._forumUploadAsReplyAbortController, null);
 });
 
 test('hidden records and unanchored deleted forum or thread roots have no jump mount point', t => {
