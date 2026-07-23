@@ -8617,13 +8617,34 @@ module.exports = class MessageLoggerV2 {
     const message = record?.message;
     if (!record?.delete_data || !message?.id || record.delete_data.hidden) return false;
     if (record.delete_data.forum_thread_delete) return this.setSavedThreadHidden(record, true);
+    const savedChannelId = String(message.channel_id ?? '');
+    const liveSavedChannel = savedChannelId
+      ? this.tools?.getChannel?.(savedChannelId)
+      : null;
+    const keepsDiscordOwnedThreadMount = [10, 11, 12].includes(Number(liveSavedChannel?.type))
+      && (
+        !!record.delete_data.forum_thread_message_delete
+        || String(message.id) === savedChannelId
+      );
     this.setSavedRecordHiddenState(record, true);
-    this.dispatcher.dispatch({
-      type: 'MESSAGE_DELETE',
-      id: message.id,
-      channelId: message.channel_id,
-      ML2: true
-    });
+    // Discord owns the mounted React tree for a surviving forum/thread. Sending it a synthetic
+    // MESSAGE_DELETE while hiding Logger's saved copy races the native deleted-starter
+    // placeholder and can make React remove a node that Discord has already replaced.
+    if (keepsDiscordOwnedThreadMount) {
+      if (this.channelMessages?.[savedChannelId]) {
+        this.invalidateChannelCache(savedChannelId);
+        this.cacheChannelMessages(savedChannelId);
+      }
+      this._tintSweep?.();
+      this.scheduleForumListRefresh?.();
+    } else {
+      this.dispatcher.dispatch({
+        type: 'MESSAGE_DELETE',
+        id: message.id,
+        channelId: message.channel_id,
+        ML2: true
+      });
+    }
     this.saveData();
     this.scheduleLoggerMenuRefresh();
     this.refreshForumThreadLogModal(message.channel_id);
@@ -11259,6 +11280,19 @@ module.exports = class MessageLoggerV2 {
     messages.push(...toInsert);
     this._sortMessagesById(messages);
   }
+  restoredMessagesIncludeDiscordOwnedThreadStarter(channel, messages) {
+    const channelId = String(channel?.id ?? '');
+    if (!channelId || ![10, 11, 12].includes(Number(channel?.type)) || !Array.isArray(messages)) return false;
+    return messages.some(message => {
+      const messageId = String(message?.id ?? '');
+      if (messageId !== channelId || String(message?.channel_id ?? '') !== channelId) return false;
+      const record = this.messageRecord?.[messageId];
+      return !!record?.delete_data?.forum_thread_message_delete
+        && !record.delete_data.hidden
+        && String(record.message?.id ?? '') === channelId
+        && String(record.message?.channel_id ?? '') === channelId;
+    });
+  }
   getLiteralName(guildId, channelId, useTags = false) {
     const guild = this.tools.getServer(guildId);
     const channel = this.tools.getChannel(channelId);
@@ -13115,7 +13149,13 @@ module.exports = class MessageLoggerV2 {
         const wasEmpty = dispatch.messages.length === 0;
         if (this.shouldPresentDeletedMessages() && deletedMessages) this.reAddDeletedMessages(dispatch.messages, deletedMessages, !dispatch.hasMoreAfter && !dispatch.isBefore, !dispatch.hasMoreBefore && !dispatch.isAfter);
         if (this.shouldPresentPurgedMessages() && purgedMessages) this.reAddDeletedMessages(dispatch.messages, purgedMessages, !dispatch.hasMoreAfter && !dispatch.isBefore, !dispatch.hasMoreBefore && !dispatch.isAfter);
-        if (wasEmpty && dispatch.messages.length > 0) {
+        // An empty server response is Discord's normal state after it replaces a deleted
+        // self-keyed starter with "Original message was deleted". Logger has just restored that
+        // starter into this response; forcing the legacy second fetch immediately races the same
+        // native React placeholder. Other restored empty channels keep the one-time refresh.
+        const restoredDiscordOwnedThreadStarter = wasEmpty
+          && this.restoredMessagesIncludeDiscordOwnedThreadStarter(channel, dispatch.messages);
+        if (wasEmpty && dispatch.messages.length > 0 && !restoredDiscordOwnedThreadStarter) {
           if (!this._refreshedEmptyChannels) this._refreshedEmptyChannels = new Set();
           if (!this._refreshedEmptyChannels.has(channel.id)) {
             this._refreshedEmptyChannels.add(channel.id);

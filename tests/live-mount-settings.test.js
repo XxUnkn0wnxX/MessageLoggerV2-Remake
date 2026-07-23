@@ -165,6 +165,156 @@ test('saved-message presentation helpers require their matching display switches
   assert.equal(plugin.shouldPresentSavedMessage('channel', 'purged'), false);
 });
 
+test('empty loads do not immediately refetch a restored Discord-owned thread starter', async () => {
+  const runRestore = async ({ channelId, channelType, messageId, starterDelete }) => {
+    const guild = { id: 'guild', name: 'Guild' };
+    const channel = { id: channelId, guild_id: guild.id, name: 'location', type: channelType };
+    const message = {
+      id: messageId,
+      channel_id: channelId,
+      guild_id: guild.id,
+      content: starterDelete ? '' : 'ordinary restored deletion',
+      type: 0,
+      attachments: starterDelete ? [{ id: 'image', filename: 'image.png' }] : [],
+      author: { id: 'author', username: 'Author' }
+    };
+    const invalidations = [];
+    const cacheRefreshes = [];
+    const plugin = createPlugin({
+      settings: {
+        restoreDeletedMessages: true,
+        showDeletedMessages: true,
+        showPurgedMessages: true,
+        ignoreBots: false,
+        ignoreSelf: false,
+        ignoreBlockedUsers: false,
+        ignoreNSFW: false,
+        ignoreLocalEdits: false,
+        ignoreLocalDeletes: false,
+        ignoreMutedGuilds: false,
+        ignoreMutedChannels: false,
+        alwaysLogGhostPings: false,
+        alwaysLogSelected: false,
+        alwaysLogDM: false,
+        onlyLogWhitelist: false,
+        whitelist: [],
+        blacklist: [],
+        antiNukeEnabled: false,
+        cacheAllImages: false,
+        onlyRenderCachedAttachments: false
+      },
+      localUser: { id: 'local' },
+      selectedChannel: channel,
+      localDeletes: [],
+      messageRecord: {
+        [messageId]: {
+          message,
+          delete_data: {
+            time: 1,
+            hidden: false,
+            ...(starterDelete ? { forum_thread_message_delete: true } : {})
+          }
+        }
+      },
+      messageRecordIds: new Set([messageId]),
+      deletedMessageRecord: { [channelId]: [messageId] },
+      purgedMessageRecord: {},
+      editedMessageRecord: {},
+      deletedMessageSet: new Map([[channelId, new Set([messageId])]]),
+      purgedMessageSet: new Map(),
+      editedMessageSet: new Map(),
+      tempEditedMessageRecord: {},
+      channelMessages: {},
+      _refreshedEmptyChannels: new Set(),
+      tools: {
+        getChannel: id => id === channelId ? channel : null,
+        getServer: id => id === guild.id ? guild : null,
+        getUser: id => id === 'author' ? message.author : null,
+        isBlocked: () => false,
+        isMentioned: () => false
+      },
+      getCachedMessage: () => null,
+      isAutomatedMessageAuthor: () => false,
+      invalidateChannelCache: id => invalidations.push(id),
+      cacheChannelMessages: id => cacheRefreshes.push(id),
+      _tintSweep() {}
+    });
+    const dispatchMessages = [];
+    let nativeCalls = 0;
+    const previousRequestAnimationFrame = global.requestAnimationFrame;
+    global.requestAnimationFrame = callback => callback();
+    try {
+      const result = plugin.onDispatchEvent([{
+        type: 'LOAD_MESSAGES_SUCCESS',
+        channelId,
+        messages: dispatchMessages,
+        hasMoreAfter: false,
+        isBefore: false,
+        hasMoreBefore: false,
+        isAfter: false
+      }], () => {
+        nativeCalls++;
+        return 'native';
+      });
+      await new Promise(resolve => setImmediate(resolve));
+      return {
+        cacheRefreshes,
+        dispatchMessages,
+        invalidations,
+        nativeCalls,
+        refreshed: plugin._refreshedEmptyChannels.has(channelId),
+        result
+      };
+    } finally {
+      if (previousRequestAnimationFrame === undefined) delete global.requestAnimationFrame;
+      else global.requestAnimationFrame = previousRequestAnimationFrame;
+    }
+  };
+
+  const starterId = '1529765766105137234';
+  const starter = await runRestore({
+    channelId: starterId,
+    channelType: 11,
+    messageId: starterId,
+    starterDelete: true
+  });
+  assert.equal(starter.result, 'native');
+  assert.equal(starter.nativeCalls, 1);
+  assert.deepEqual(starter.dispatchMessages.map(message => message.id), [starterId]);
+  assert.equal(starter.refreshed, false);
+  assert.deepEqual(starter.invalidations, []);
+  assert.deepEqual(starter.cacheRefreshes, []);
+
+  const ordinary = await runRestore({
+    channelId: '1529765766105137000',
+    channelType: 0,
+    messageId: '1529765766105137001',
+    starterDelete: false
+  });
+  assert.equal(ordinary.result, 'native');
+  assert.equal(ordinary.nativeCalls, 1);
+  assert.deepEqual(ordinary.dispatchMessages.map(message => message.id), ['1529765766105137001']);
+  assert.equal(ordinary.refreshed, true);
+  assert.deepEqual(ordinary.invalidations, ['1529765766105137000']);
+  assert.deepEqual(ordinary.cacheRefreshes, ['1529765766105137000']);
+
+  const ordinaryThreadReply = await runRestore({
+    channelId: '1529765766105137100',
+    channelType: 11,
+    messageId: '1529765766105137101',
+    starterDelete: false
+  });
+  assert.equal(ordinaryThreadReply.result, 'native');
+  assert.equal(ordinaryThreadReply.nativeCalls, 1);
+  assert.deepEqual(
+    ordinaryThreadReply.dispatchMessages.map(message => message.id),
+    ['1529765766105137101']
+  );
+  assert.equal(ordinaryThreadReply.refreshed, true);
+  assert.deepEqual(ordinaryThreadReply.invalidations, ['1529765766105137100']);
+  assert.deepEqual(ordinaryThreadReply.cacheRefreshes, ['1529765766105137100']);
+});
+
 test('display-off future edits stay logged while Discord renders only the current message', () => {
   const { addMessage, calls, channel, guild, plugin } = createLiveDeletePlugin({
     showEditedMessages: false

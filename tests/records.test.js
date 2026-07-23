@@ -982,6 +982,94 @@ test('removing a mounted self-keyed forum starter does not cascade into its repl
   assert.equal(forumListRefreshes, 1);
 });
 
+test('hiding a saved message preserves Discord-owned live thread mounts only', () => {
+  const starterId = '684';
+  const ordinaryId = '685';
+  const ordinaryChannelId = '686';
+  const ordinaryThreadReplyId = '687';
+  const ordinaryThreadChannelId = '688';
+  const starter = {
+    message: {
+      id: starterId,
+      channel_id: starterId,
+      content: '',
+      attachments: [{ id: 'starter-image', filename: 'starter.png' }]
+    },
+    delete_data: { forum_thread_message_delete: true, hidden: false }
+  };
+  const ordinary = {
+    message: { id: ordinaryId, channel_id: ordinaryChannelId, content: 'ordinary deleted message' },
+    delete_data: { hidden: false }
+  };
+  const ordinaryThreadReply = {
+    message: {
+      id: ordinaryThreadReplyId,
+      channel_id: ordinaryThreadChannelId,
+      content: 'ordinary thread reply without surviving-thread metadata'
+    },
+    delete_data: { hidden: false }
+  };
+  const dispatches = [];
+  const invalidations = [];
+  const cacheRefreshes = [];
+  let forumListRefreshes = 0;
+  let tintSweeps = 0;
+  const plugin = createPlugin({
+    messageRecord: {
+      [starterId]: starter,
+      [ordinaryId]: ordinary,
+      [ordinaryThreadReplyId]: ordinaryThreadReply
+    },
+    channelMessages: { [starterId]: { ready: true } },
+    tools: {
+      getChannel: id => id === starterId
+        ? { id, type: 11, parent_id: 'forum-parent' }
+        : id === ordinaryChannelId
+          ? { id, type: 0 }
+          : id === ordinaryThreadChannelId ? { id, type: 11 } : null
+    },
+    dispatcher: { dispatch: event => dispatches.push(event) },
+    invalidateChannelCache: id => invalidations.push(id),
+    cacheChannelMessages: id => cacheRefreshes.push(id),
+    _tintSweep: () => { tintSweeps++; },
+    scheduleForumListRefresh: () => { forumListRefreshes++; },
+    saveData() {},
+    scheduleLoggerMenuRefresh() {},
+    refreshForumThreadLogModal() {},
+    notifyUser() {}
+  });
+
+  assert.equal(plugin.hideSavedDeletedRecord(starter), true);
+  assert.equal(starter.delete_data.hidden, true);
+  assert.deepEqual(dispatches, [], 'hiding a live starter must not synthesize a Discord deletion');
+  assert.deepEqual(invalidations, [starterId]);
+  assert.deepEqual(cacheRefreshes, [starterId]);
+  assert.equal(tintSweeps, 1);
+  assert.equal(forumListRefreshes, 1);
+
+  assert.equal(plugin.hideSavedDeletedRecord(ordinary), true);
+  assert.equal(ordinary.delete_data.hidden, true);
+  assert.deepEqual(dispatches, [{
+    type: 'MESSAGE_DELETE',
+    id: ordinaryId,
+    channelId: ordinaryChannelId,
+    ML2: true
+  }], 'ordinary saved messages retain their synthetic live unmount');
+  assert.deepEqual(invalidations, [starterId]);
+  assert.deepEqual(cacheRefreshes, [starterId]);
+
+  assert.equal(plugin.hideSavedDeletedRecord(ordinaryThreadReply), true);
+  assert.equal(ordinaryThreadReply.delete_data.hidden, true);
+  assert.deepEqual(dispatches.at(-1), {
+    type: 'MESSAGE_DELETE',
+    id: ordinaryThreadReplyId,
+    channelId: ordinaryThreadChannelId,
+    ML2: true
+  }, 'channel type alone must not suppress an ordinary thread reply unmount');
+  assert.deepEqual(invalidations, [starterId]);
+  assert.deepEqual(cacheRefreshes, [starterId]);
+});
+
 test('a full deleted root promotes the absolute oldest saved context regardless of category or visibility', () => {
   const rootId = '690';
   const oldestId = '691';
