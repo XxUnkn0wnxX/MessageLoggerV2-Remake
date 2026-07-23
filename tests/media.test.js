@@ -361,6 +361,171 @@ test('has:image includes removed image uploads but excludes removed non-image fi
   assert.deepEqual(plugin.getFilteredMessages(), [imageId]);
 });
 
+test('edit-history marker lookup matches removed attachments by exact url/id and avoids reusing matches in one edit', () => {
+  const plugin = createPlugin({
+    settings: { antiNukeEnabled: true, reverseOrder: false },
+    messageRecord: {
+      100: {
+        message: { id: '100', channel_id: 'channel', content: 'current' },
+        removed_attachments: [
+          {
+            id: '111111111111111111',
+            filename: 'first.gif',
+            url: 'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif?token=a'
+          },
+          {
+            id: '222222222222222222',
+            filename: 'second.mp4',
+            url: 'https://cdn.discordapp.com/attachments/channel/222222222222222222/second.mp4'
+          },
+          {
+            id: '333333333333333333',
+            filename: 'third.pdf',
+            url: 'https://cdn.discordapp.com/attachments/channel/333333333333333333/third.pdf'
+          }
+        ],
+        edit_history: []
+      }
+    }
+  });
+
+  const removed = plugin.messageRecord['100'].removed_attachments;
+  const used = new Set();
+  const first = plugin.getRemovedAttachmentFromEditHistoryMarker(
+    'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif?download=1',
+    removed,
+    used
+  );
+  if (first?.id) used.add(plugin.getRemovedAttachmentIdentity(first));
+  const second = plugin.getRemovedAttachmentFromEditHistoryMarker(
+    'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif?download=2',
+    removed,
+    used
+  );
+  const third = plugin.getRemovedAttachmentFromEditHistoryMarker(
+    'https://media.discordapp.net/attachments/channel/222222222222222222/second.mp4',
+    removed,
+    used
+  );
+  const unmatched = plugin.getRemovedAttachmentFromEditHistoryMarker(
+    'https://cdn.discordapp.com/attachments/channel/111111111111111112/missing.gif',
+    removed,
+    used
+  );
+
+  assert.equal(first?.id, '111111111111111111');
+  assert.equal(second, null);
+  assert.equal(third?.id, '222222222222222222');
+  assert.equal(unmatched, null);
+  assert.equal(plugin.getRemovedAttachmentFromEditHistoryMarker(
+    'https://media.discordapp.net/attachments/channel/111111111111111111/first.gif?query=2',
+    [
+      { id: '111111111111111111', filename: 'first.gif', url: 'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif' }
+    ],
+    null
+  )?.id, '111111111111111111');
+  assert.equal(plugin.getRemovedAttachmentFromEditHistoryMarker(
+    'https://cdn.discordapp.com/attachments/channel/444444444444444444/first.gif',
+    [
+      { id: '111111111111111111', filename: 'first.gif', url: 'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif' }
+    ],
+    null
+  ), null);
+  assert.equal(plugin.getRemovedAttachmentFromEditHistoryMarker(
+    'https://example.com/attachments/channel/111111111111111111/first.gif',
+    removed,
+    null
+  ), null);
+});
+
+test('edit-history inline segments keep uncached or non-media markers as text and preserve source record', () => {
+  const record = {
+    message: { id: '100', channel_id: 'channel', content: 'current' },
+    removed_attachments: [
+      {
+        id: '111111111111111111',
+        filename: 'first.gif',
+        url: 'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif'
+      },
+      {
+        id: '222222222222222222',
+        filename: 'second.mp4',
+        url: 'https://cdn.discordapp.com/attachments/channel/222222222222222222/second.mp4'
+      },
+      {
+        id: '333333333333333333',
+        filename: 'third.pdf',
+        url: 'https://cdn.discordapp.com/attachments/channel/333333333333333333/third.pdf'
+      },
+      {
+        id: '444444444444444444',
+        filename: 'fourth.png',
+        url: 'https://cdn.discordapp.com/attachments/channel/444444444444444444/fourth.png'
+      }
+    ],
+    edit_history: []
+  };
+  const plugin = createPlugin({
+    settings: { antiNukeEnabled: true, reverseOrder: false },
+    messageRecord: { 100: record }
+  });
+  const before = structuredClone(record);
+  plugin.isAttachmentLocallyCached = attachment => attachment.id !== '444444444444444444';
+  const segments = plugin.getEditHistoryContentSegments(
+    '`Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif'
+    + '` `Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/333333333333333333/third.pdf'
+    + '` `Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/444444444444444444/fourth.png'
+    + '` `Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/555555555555555555/missing.png'
+    + '` `Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/222222222222222222/second.mp4',
+    plugin.messageRecord[100].removed_attachments,
+    record.message
+  );
+
+  assert.equal(segments.filter(segment => segment.kind === 'removedAttachment').length, 2);
+  const removedSegments = segments.filter(segment => segment.kind === 'removedAttachment');
+  assert.equal(removedSegments[0]?.attachment?.id, '111111111111111111');
+  assert.equal(removedSegments[1]?.attachment?.id, '222222222222222222');
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('third.pdf')), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('fourth.png')), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('missing.png')), true);
+  assert.equal(removedSegments.every(segment => segment.value.includes('`Attachment Deleted: `')), true);
+  assert.deepEqual(record, before);
+});
+
+test('edit-history inline segment planning is per-edit and reused markers stay deterministic per pass', () => {
+  const removed = [
+    { id: '111111111111111111', filename: 'first.gif', url: 'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif' },
+    { id: '222222222222222222', filename: 'second.gif', url: 'https://cdn.discordapp.com/attachments/channel/222222222222222222/second.gif' }
+  ];
+  const plugin = createPlugin({
+    settings: { antiNukeEnabled: true, reverseOrder: false }
+  });
+  plugin.isAttachmentLocallyCached = () => true;
+  const firstEdit = plugin.getEditHistoryContentSegments(
+    '`Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif',
+    removed,
+    { id: '100', channel_id: 'channel' }
+  );
+  const secondEdit = plugin.getEditHistoryContentSegments(
+    '`Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/222222222222222222/second.gif',
+    removed,
+    { id: '100', channel_id: 'channel' }
+  );
+  const duplicateInOneEdit = plugin.getEditHistoryContentSegments(
+    '`Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif '
+    + '`Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif',
+    removed,
+    { id: '100', channel_id: 'channel' }
+  );
+
+  assert.equal(firstEdit.filter(segment => segment.kind === 'removedAttachment').length, 1);
+  assert.equal(secondEdit.filter(segment => segment.kind === 'removedAttachment').length, 1);
+  assert.equal(firstEdit[0]?.attachment?.id, '111111111111111111');
+  assert.equal(secondEdit[0]?.attachment?.id, '222222222222222222');
+  assert.equal(duplicateInOneEdit.filter(segment => segment.kind === 'removedAttachment').length, 1);
+  assert.equal(duplicateInOneEdit.some(segment => segment.kind === 'text' && segment.value.includes('first.gif')), true);
+});
+
 test('cache-only rendering preserves cached files and names unavailable files', () => {
   const plugin = createPlugin({
     settings: { onlyRenderCachedAttachments: true },

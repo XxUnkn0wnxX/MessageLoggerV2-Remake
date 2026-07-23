@@ -532,6 +532,11 @@ test('date order applies to optional timestamps and forced logger dates', () => 
   assert.match(editHistoryGate, /shouldPresentEditedMessages\(\)[\s\S]*return renderOriginal\(\)/);
   assert.match(editHistoryGate, /renderOriginal[\s\S]*DeletedContentTooltip[\s\S]*originalElement/);
   assert.match(editHistoryGate, /renderEdited[\s\S]*React\.cloneElement\([\s\S]*originalElement/);
+  assert.match(editHistoryGate, /const parseEditHistoryContent = \([\s\S]*getEditHistoryContentSegments\(content, removedAttachments, currentRecord\.message\)/);
+  assert.match(editHistoryGate, /renderEditHistoryAttachment[\s\S]*removedAttachment/);
+  assert.match(editHistoryGate, /const \[errored, setErrored\] = React\.useState\(false\)/);
+  assert.doesNotMatch(editHistoryGate, /Hooks\.useState/);
+  assert.doesNotMatch(editHistoryGate, /currentRecord\.message\.(attachments|embeds|components)\s*=/);
   assert.match(source, /if \(record\?\.edit_history && Array\.isArray\(ret\.props\.children\)\)[\s\S]*return React\.createElement\(EditHistoryContent,[\s\S]*originalElement: ret/);
   assert.doesNotMatch(source, /if \(showEditHistory\)/);
   assert.doesNotMatch(source, /const deletedChildren = ret\.props\.children\.slice\(\)/);

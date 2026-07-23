@@ -4853,6 +4853,103 @@ module.exports = class MessageLoggerV2 {
       record.removed_attachments
     );
   }
+  getRemovedAttachmentFromEditHistoryMarker(markerUrl, removedAttachments, usedAttachmentIds = null) {
+    if (typeof markerUrl !== 'string' || !Array.isArray(removedAttachments)) return null;
+    const used = usedAttachmentIds && typeof usedAttachmentIds.has === 'function'
+      ? usedAttachmentIds
+      : null;
+    let markerParsed;
+    try {
+      markerParsed = new URL(markerUrl);
+    } catch {
+      return null;
+    }
+    if (!['cdn.discordapp.com', 'media.discordapp.net'].includes(markerParsed.hostname)) return null;
+    const normalize = (value) => {
+      if (typeof value !== 'string') return '';
+      try {
+        const parsed = new URL(value);
+        return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '');
+      } catch {
+        return String(value).replace(/[\?#].*$/, '').replace(/\/+$/, '');
+      }
+    };
+    const markerNormalizedUrl = normalize(markerUrl);
+    const markerParts = markerParsed.pathname.split('/').filter(Boolean);
+    const markerAttachmentIndex = markerParts.indexOf('attachments');
+    const markerAttachmentId = markerAttachmentIndex >= 0
+      ? markerParts[markerAttachmentIndex + 2]
+      : null;
+
+    for (const attachment of removedAttachments) {
+      if (!attachment || typeof attachment !== 'object') continue;
+      const identity = this.getRemovedAttachmentIdentity(attachment);
+      if (!identity || (used && used.has(identity))) continue;
+      const attachmentNormalizedUrls = [
+        normalize(attachment.url),
+        normalize(attachment.proxy_url),
+        normalize(attachment.proxyUrl)
+      ];
+      if (attachmentNormalizedUrls.some(url => url && url === markerNormalizedUrl)) return attachment;
+    }
+    if (markerAttachmentId && /^\d+$/.test(String(markerAttachmentId))) {
+      for (const attachment of removedAttachments) {
+        if (!attachment || typeof attachment !== 'object') continue;
+        const identity = this.getRemovedAttachmentIdentity(attachment);
+        if (!identity || (used && used.has(identity))) continue;
+        if (String(attachment.id) === String(markerAttachmentId)) return attachment;
+      }
+    }
+    return null;
+  }
+  getEditHistoryContentSegments(content, removedAttachments, message) {
+    if (typeof content !== 'string') return [{ kind: 'text', value: String(content) }];
+    const attachments = Array.isArray(removedAttachments)
+      ? removedAttachments
+      : [];
+    const attachmentMarker = /`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g;
+    const attachmentIds = new Set();
+    const segments = [];
+    let cursor = 0;
+    let match;
+    attachmentMarker.lastIndex = 0;
+    while ((match = attachmentMarker.exec(content))) {
+      if (match.index > cursor) {
+        segments.push({ kind: 'text', value: content.slice(cursor, match.index) });
+      }
+      const attachment = this.getRemovedAttachmentFromEditHistoryMarker(
+        match[1],
+        attachments,
+        attachmentIds
+      );
+      if (attachment && this.isAttachmentLocallyCached(attachment, message)) {
+        const path = (() => {
+          const value = attachment?.filename || attachment?.url || attachment?.proxy_url || attachment?.proxyUrl || '';
+          try {
+            return decodeURIComponent(new URL(value).pathname || value);
+          } catch {
+            return String(value);
+          }
+        })();
+        const contentType = attachment?.content_type || attachment?.contentType || '';
+        if (this.isImage(path) || /^image\//i.test(String(contentType || '')) || this.isVideo(path) || /^video\//i.test(String(contentType || ''))) {
+          const identity = this.getRemovedAttachmentIdentity(attachment);
+          if (identity) attachmentIds.add(identity);
+          segments.push({ kind: 'removedAttachment', attachment, value: match[0] });
+        } else {
+          segments.push({ kind: 'text', value: match[0] });
+        }
+      } else {
+        segments.push({ kind: 'text', value: match[0] });
+      }
+      cursor = attachmentMarker.lastIndex;
+    }
+    if (!segments.length) return [{ kind: 'text', value: content }];
+    if (cursor < content.length) {
+      segments.push({ kind: 'text', value: content.slice(cursor) });
+    }
+    return segments;
+  }
   repairAntiNukeChannelThreadStarterMetadata(data, onlyThreadIds = null) {
     const records = data?.messageRecord;
     if (!records || typeof records !== 'object' || Array.isArray(records)) return [];
@@ -13335,6 +13432,180 @@ module.exports = class MessageLoggerV2 {
       }
       const originalChildren = originalElement?.props?.children;
       if (!Array.isArray(originalChildren)) return renderOriginal();
+      const parseContent = content => plugin.tools.parserNew
+        ? plugin.tools.parserNew(content)
+        : String(content);
+      const getEditableAttachmentSource = (attachment) => {
+        const path = (() => {
+          const value = attachment?.filename || attachment?.url || attachment?.proxy_url || attachment?.proxyUrl || '';
+          try {
+            return decodeURIComponent(new URL(value).pathname || value);
+          } catch {
+            return String(value);
+          }
+        })();
+        const contentType = attachment?.content_type || attachment?.contentType || '';
+        return {
+          isImage: plugin.isImage(path) || /^image\//i.test(String(contentType || '')),
+          isVideo: plugin.isVideo(path) || /^video\//i.test(String(contentType || ''))
+        };
+      };
+      const getAttachmentDisplayUrl = (attachment) => {
+        const message = currentRecord?.message || {};
+        const attachmentUrl = attachment?.url || attachment?.proxy_url || attachment?.proxyUrl || '';
+        if (!attachmentUrl || !message?.channel_id || !message?.id || !attachment?.id || attachment?.hidden) {
+          return {
+            url: attachment?.hidden ? `https://i.clouds.tf/q2vy/r8q6.png#${message.channel_id || ''},${attachment?.id || ''}` : attachmentUrl,
+            cached: false,
+            hidden: !!attachment?.hidden
+          };
+        }
+        if (!plugin.isAttachmentLocallyCached(attachment, message)) {
+          return {
+            url: attachmentUrl,
+            cached: false,
+            hidden: false
+          };
+        }
+        let extension = '';
+        try {
+          extension = new URL(attachmentUrl).pathname.match(/\.[0-9a-z]+$/i)?.[0] || '';
+        } catch {
+          extension = String(attachmentUrl).match(/\.[0-9a-z]+$/i)?.[0] || '';
+        }
+        const mediaServer = plugin.imageCacheServerSimulator;
+        const cachedUrl = mediaServer?.get
+          ? mediaServer.get(`http://localhost:7474/${attachment.id}${extension}#${message.channel_id},${attachment.id},${message.id}`)
+          : null;
+        return {
+          url: cachedUrl || attachmentUrl,
+          cached: !!cachedUrl && cachedUrl !== plugin.errorImage,
+          hidden: false
+        };
+      };
+      const EditHistoryMedia = ({
+        attachment,
+        mediaType,
+        display,
+        onClick,
+        fallback
+      }) => {
+        const [errored, setErrored] = React.useState(false);
+        if (errored) return fallback;
+        if (mediaType.isVideo) {
+          return React.createElement(
+            'video',
+            {
+              className: DiscordModules.ClickableClasses?.clickable || '',
+              src: display.url,
+              controls: true,
+              preload: 'metadata',
+              width: attachment?.width || 256,
+              style: {
+                display: 'inline-block',
+                borderRadius: '8px',
+                marginTop: '4px',
+                marginRight: '4px',
+                maxWidth: '100%',
+                height: 'auto',
+                background: '#111'
+              },
+              onDoubleClick: onClick,
+              onError: () => setErrored(true)
+            }
+          );
+        }
+        return React.createElement(
+          'img',
+          {
+            className: DiscordModules.ClickableClasses?.clickable || '',
+            src: display.url,
+            alt: attachment?.filename || 'removed attachment',
+            width: attachment?.width || 256,
+            style: {
+              display: 'inline-block',
+              borderRadius: '4px',
+              marginTop: '4px',
+              marginRight: '4px',
+              maxWidth: '100%',
+              height: 'auto'
+            },
+            onClick,
+            onError: () => setErrored(true)
+          }
+        );
+      };
+      EditHistoryMedia.displayName = 'EditHistoryMedia';
+      const renderEditHistoryAttachment = (attachment, key, fallback) => {
+        const mediaType = getEditableAttachmentSource(attachment);
+        const display = getAttachmentDisplayUrl(attachment);
+        const onClick = () => {
+          plugin.createModal(
+            {
+              items: [
+                {
+                  type: mediaType.isVideo ? 'VIDEO' : 'IMAGE',
+                  url: display.url,
+                  placeholder: display.url,
+                  original: attachment?.url || attachment?.proxy_url || attachment?.proxyUrl || '',
+                  width: attachment?.width,
+                  height: attachment?.height,
+                  trigger: 'CLICK',
+                  animated: false,
+                  srcIsAnimated: false
+                }
+              ],
+              className: plugin.style.imageRoot
+            },
+            !mediaType.isVideo
+          );
+        };
+        if (!display.cached || (!mediaType.isImage && !mediaType.isVideo)) {
+          return null;
+        }
+        return React.createElement(EditHistoryMedia, {
+          key,
+          attachment,
+          mediaType,
+          display,
+          onClick,
+          fallback
+        });
+      };
+      const parseEditHistoryContent = (content, editNum) => {
+        if (typeof content !== 'string') return parseContent(content);
+        const removedAttachments = plugin.getRecordRemovedAttachments(currentRecord);
+        const segments = plugin.getEditHistoryContentSegments(content, removedAttachments, currentRecord.message);
+        if (!Array.isArray(segments)) return parseContent(content);
+        if (!segments.length) return parseContent(content);
+        const children = [];
+        let markerIndex = 0;
+        for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
+          const segment = segments[segmentIndex];
+          if (segment?.kind === 'removedAttachment') {
+            const fallback = parseContent(segment?.value || '');
+            const mediaKey = `${editNum}-media-${markerIndex++}`;
+            children.push(renderEditHistoryAttachment(
+              segment?.attachment,
+              mediaKey,
+              fallback
+            ) || React.createElement(
+              React.Fragment,
+              { key: `${mediaKey}-fallback` },
+              fallback
+            ));
+          } else {
+            children.push(React.createElement(
+              React.Fragment,
+              { key: `${editNum}-text-${segmentIndex}` },
+              parseContent(segment?.value || '')
+            ));
+          }
+        }
+        return children.length === 1
+          ? children[0]
+          : React.createElement(React.Fragment, {}, children);
+      };
       const renderEdited = children => React.cloneElement(
         originalElement,
         {
@@ -13364,7 +13635,7 @@ module.exports = class MessageLoggerV2 {
                 ].filter(Boolean).join(' '),
                 editNum
               },
-              plugin.tools.parserNew(edit.content),
+              parseEditHistoryContent(edit.content, editNum),
               noSuffix
                 ? null
                 : React.createElement(SuffixEdited, {
