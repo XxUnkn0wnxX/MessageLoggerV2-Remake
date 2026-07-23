@@ -982,6 +982,46 @@ test('removing a mounted self-keyed forum starter does not cascade into its repl
   assert.equal(forumListRefreshes, 1);
 });
 
+test('forum card author normalization only applies to logger-owned restored cards', () => {
+  const threadId = '900';
+  const createAuthorNode = initialText => {
+    const attributes = new Map();
+    return {
+      textContent: initialText,
+      getAttribute(name) { return attributes.get(name) ?? null; },
+      setAttribute(name, value) { attributes.set(name, String(value)); }
+    };
+  };
+  const makeCard = (isRestored, author) => ({
+    hasAttribute(name) { return isRestored && name === 'data-ml2-restored-forum-card'; },
+    querySelector() { return author; }
+  });
+  const plugin = createPlugin({
+    messageRecord: {
+      [threadId]: {
+        message: {
+          id: threadId,
+          channel_id: threadId,
+          author: { id: 'author', username: 'RecoveredAuthor' }
+        },
+        delete_data: { forum_thread_message_delete: true }
+      }
+    }
+  });
+
+  const nativeAuthor = createAuthorNode('System placeholder: ');
+  const nativeCard = makeCard(false, nativeAuthor);
+  assert.equal(plugin.normalizeDeletedForumCardAuthor(nativeCard, threadId), false);
+  assert.equal(nativeAuthor.textContent, 'System placeholder: ');
+  assert.equal(nativeAuthor.getAttribute('data-ml2-plain-forum-author'), null);
+
+  const restoredAuthor = createAuthorNode('System placeholder: ');
+  const restoredCard = makeCard(true, restoredAuthor);
+  assert.equal(plugin.normalizeDeletedForumCardAuthor(restoredCard, threadId), true);
+  assert.equal(restoredAuthor.textContent, 'RecoveredAuthor: ');
+  assert.equal(restoredAuthor.getAttribute('data-ml2-plain-forum-author'), 'true');
+});
+
 test('hiding a saved message preserves Discord-owned live thread mounts only', () => {
   const starterId = '684';
   const ordinaryId = '685';

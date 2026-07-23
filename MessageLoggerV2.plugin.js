@@ -8550,6 +8550,20 @@ module.exports = class MessageLoggerV2 {
     this.invalidateChannelCache(channelId);
     this.cacheChannelMessages(channelId);
   }
+  normalizeDeletedForumCardAuthor(card, threadId) {
+    if (!card?.querySelector || !threadId) return false;
+    if (!card.hasAttribute?.('data-ml2-restored-forum-card')) return false;
+    const record = this.messageRecord?.[threadId];
+    const username = record?.message?.author?.username;
+    if (!record?.delete_data || !username) return false;
+    const author = card.querySelector('.message_faa96b > span[class*="author"], [class*="message_"] > span[class*="author"], span[class*="author"]');
+    if (!author) return false;
+    const plainText = `${username}: `;
+    if (author.textContent === plainText && author.getAttribute('data-ml2-plain-forum-author') === 'true') return false;
+    author.textContent = plainText;
+    author.setAttribute('data-ml2-plain-forum-author', 'true');
+    return true;
+  }
   getSavedThreadRootTypeLabel(record) {
     const deleteData = record?.delete_data || {};
     const metadata = deleteData.forum_metadata || {};
@@ -13975,18 +13989,7 @@ module.exports = class MessageLoggerV2 {
       const threadId = cardNode?.getAttribute?.('data-item-id') || cardNode?.getAttribute?.('data-ml2-restored-forum-card');
       return threadId && /^\d+$/.test(threadId) ? threadId : null;
     };
-    const normalizeDeletedForumCardAuthor = (card, threadId) => {
-      if (!card || !threadId) return;
-      const record = this.messageRecord?.[threadId];
-      const username = record?.message?.author?.username;
-      if (!record?.delete_data || !username) return;
-      const author = card.querySelector('.message_faa96b > span[class*="author"], [class*="message_"] > span[class*="author"], span[class*="author"]');
-      if (!author) return;
-      const plainText = `${username}: `;
-      if (author.textContent === plainText && author.getAttribute('data-ml2-plain-forum-author') === 'true') return;
-      author.textContent = plainText;
-      author.setAttribute('data-ml2-plain-forum-author', 'true');
-    };
+    const normalizeDeletedForumCardAuthor = (card, threadId) => this.normalizeDeletedForumCardAuthor(card, threadId);
     const getMessageTintTarget = (node) => {
       if (!node || node.nodeType !== 1) return null;
       if (node.matches?.('[role="article"]')) return node;
