@@ -489,19 +489,55 @@ test('archive loading uses a linked controlled switch with a preserved inactive 
   });
 
   const element = plugin.createControlledArchiveLoadSwitch({ id: 'dontLoadArchivedData' });
-  let tree = element.type();
+  let wrapper = element.type();
+  let tree = wrapper.props.children[0];
+  assert.equal(wrapper.type, 'span');
   assert.equal(tree.type, Components.SwitchInput);
   assert.equal(tree.props.id, 'obfuscated-dontLoadArchivedData');
   assert.equal(tree.props.value, false);
   assert.equal(tree.props.disabled, true);
 
   plugin.settings.dontSaveData = true;
-  tree = element.type();
+  wrapper = element.type();
+  tree = wrapper.props.children[0];
   assert.equal(tree.props.value, true);
   assert.equal(tree.props.disabled, false);
   tree.props.onChange(false);
   assert.deepEqual(requests, [false]);
   assert.equal(plugin.settings.dontLoadArchivedData, true);
+});
+
+test('large settings transitions use a controlled disabled switch with the warning pulse only while busy', () => {
+  const plugin = createPlugin({
+    settings: { dontSaveData: true, dontLoadArchivedData: false },
+    style: { settingTransitionActive: 'warning-pulse' },
+    obfuscatedClass: id => `obfuscated-${id}`
+  });
+
+  const saveElement = plugin.createControlledDataSavingSwitch({ id: 'dontSaveData' });
+  let wrapper = saveElement.type();
+  assert.equal(wrapper.type, 'span');
+  assert.equal(wrapper.props.className, undefined);
+  assert.equal(wrapper.props.children[0].props.disabled, false);
+
+  plugin._dataSavePrimaryFlushInProgress = true;
+  wrapper = saveElement.type();
+  assert.equal(wrapper.props.className, 'warning-pulse');
+  assert.equal(wrapper.props['aria-busy'], true);
+  assert.equal(wrapper.props.children[0].props.disabled, true);
+
+  const archiveElement = plugin.createControlledArchiveLoadSwitch({ id: 'dontLoadArchivedData' });
+  plugin._dataSavePrimaryFlushInProgress = false;
+  plugin._archiveLoadModeTransitionInProgress = true;
+  wrapper = archiveElement.type();
+  assert.equal(wrapper.props.className, 'warning-pulse');
+  assert.equal(wrapper.props.children[0].props.disabled, true);
+
+  plugin._archiveLoadModeTransitionInProgress = false;
+  plugin.settings.dontSaveData = false;
+  wrapper = archiveElement.type();
+  assert.equal(wrapper.props.className, undefined, 'an inactive linked child remains normally grey without the operation pulse');
+  assert.equal(wrapper.props.children[0].props.disabled, true);
 });
 
 test('archive loading commits its saved child value only after a successful transition', () => {

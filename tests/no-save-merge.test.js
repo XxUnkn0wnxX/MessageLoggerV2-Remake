@@ -55,8 +55,17 @@ function createMergePlugin(overrides = {}) {
       dontSaveData: true,
       useNotificationsInstead: true
     },
+    // Recovery retry tests must stay deterministic and should not spend real time waiting
+    // between failed primary-write attempts. Individual tests may still override this.
+    _dataSaveRetryDelayMs: 0,
     ...overrides
   });
+}
+
+function defer() {
+  let resolve;
+  const promise = new Promise(nextResolve => { resolve = nextResolve; });
+  return { promise, resolve };
 }
 
 function createNormalizationPlugin(overrides = {}) {
@@ -119,6 +128,9 @@ function createArchiveModePlugin(pluginDir, runtimeData, overrides = {}) {
     },
     _archiveDetached: false,
     _archiveLoadModeTransitionInProgress: false,
+    // Archive-mode tests exercise synchronous data transitions unless they explicitly cover
+    // the short UI-settling lock below. Keep the ordinary persistence fixtures deterministic.
+    _archiveLoadModeSettleDelayMs: 0,
     _needsNoSaveDataMerge: true,
     _noSaveMergeInProgress: false,
     _noSaveMergeDirty: false,
@@ -781,6 +793,293 @@ test('hot detach and reattach preserve session records without writing archive b
   assert.deepEqual(Object.keys(plugin.messageRecord).sort(), ['100', '200', '300']);
   assert.equal(plugin._savedUserRecord['archive-user'].username, 'Archived');
   assert.deepEqual(Object.keys(Data.load('MessageLoggerV2Data', 'data').messageRecord).sort(), ['100', '200', '300']);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), originalBytes);
+});
+
+test('archive mode keeps both related controls locked until presentation settles', async t => {
+  const pluginDir = temporaryDirectory(t);
+  const filePath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
+  const archive = payload({
+    '100': record('100', 'channel', { delete_data: { time: 100 } })
+  }, { deleted: { channel: ['100'] } });
+  fs.writeFileSync(filePath, JSON.stringify({ data: archive }));
+
+  const dependencyNotifications = [];
+  const plugin = createArchiveModePlugin(pluginDir, structuredClone(archive), {
+    _archiveLoadModeSettleDelayMs: 30,
+    notifySettingDependencyChange(settingId) {
+      dependencyNotifications.push(settingId);
+    }
+  });
+
+  assert.equal(plugin.requestArchiveLoadModeChange(true), true);
+  assert.equal(plugin.settings.dontLoadArchivedData, true);
+  assert.equal(plugin._archiveDetached, true);
+  assert.equal(plugin._archiveLoadModeTransitionInProgress, true);
+  assert.equal(plugin.isDataSaveModeTransitionBusy(), true);
+  assert.ok(dependencyNotifications.includes('dontSaveData'));
+  assert.ok(dependencyNotifications.includes('dontLoadArchivedData'));
+
+  assert.equal(plugin.requestArchiveLoadModeChange(false), false, 'an immediate archive reversal is rejected');
+  assert.equal(plugin.requestDataSaveModeChange(false), false, 'the parent data-saving switch is locked too');
+  assert.equal(plugin.settings.dontSaveData, true);
+  assert.equal(plugin.settings.dontLoadArchivedData, true);
+  assert.equal(plugin._archiveDetached, true);
+
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(plugin._archiveLoadModeTransitionInProgress, false);
+  assert.equal(plugin.isDataSaveModeTransitionBusy(), false);
+  assert.equal(plugin.requestArchiveLoadModeChange(false), true, 'archive requests resume after settling');
+  assert.equal(plugin.settings.dontLoadArchivedData, false);
+  assert.equal(plugin._archiveDetached, false);
+
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(plugin._archiveLoadModeTransitionInProgress, false);
+  assert.equal(plugin.isDataSaveModeTransitionBusy(), false);
+
+  const failedAttachNotifications = [];
+  fs.writeFileSync(filePath, '{broken');
+  const failedAttach = createArchiveModePlugin(pluginDir, payload({
+    '200': record('200', 'channel', { delete_data: { time: 200 } })
+  }, { deleted: { channel: ['200'] } }), {
+    settings: {
+      savedMessagesCap: 1000,
+      autoBackup: false,
+      dontSaveData: true,
+      dontLoadArchivedData: true,
+      useNotificationsInstead: true,
+      deleteCachedFilesWithRecords: false
+    },
+    _archiveDetached: true,
+    _archiveLoadModeSettleDelayMs: 30,
+    notifySettingDependencyChange(settingId) {
+      failedAttachNotifications.push(settingId);
+    },
+    reportArchiveLoadModeError() {}
+  });
+  assert.equal(failedAttach.requestArchiveLoadModeChange(false), false);
+  assert.equal(failedAttach.settings.dontLoadArchivedData, true);
+  assert.equal(failedAttach._archiveLoadModeTransitionInProgress, false, 'failed attach does not wait to unlock');
+  assert.equal(failedAttach.isDataSaveModeTransitionBusy(), false);
+  assert.ok(failedAttachNotifications.includes('dontSaveData'));
+  assert.ok(failedAttachNotifications.includes('dontLoadArchivedData'));
+
+  const failedDetachNotifications = [];
+  const failedDetach = createArchiveModePlugin(pluginDir, structuredClone(archive), {
+    _archiveLoadModeSettleDelayMs: 30,
+    flushNoSavePersistedRemovals() { return { ok: false }; },
+    notifySettingDependencyChange(settingId) {
+      failedDetachNotifications.push(settingId);
+    }
+  });
+  assert.equal(failedDetach.requestArchiveLoadModeChange(true), false);
+  assert.equal(failedDetach.settings.dontLoadArchivedData, false);
+  assert.equal(failedDetach._archiveLoadModeTransitionInProgress, false, 'failed detach does not wait to unlock');
+  assert.equal(failedDetach.isDataSaveModeTransitionBusy(), false);
+  assert.ok(failedDetachNotifications.includes('dontSaveData'));
+  assert.ok(failedDetachNotifications.includes('dontLoadArchivedData'));
+});
+
+test('repeated archive detach evicts only archive-owned presentation across every saved category', t => {
+  const pluginDir = temporaryDirectory(t);
+  const filePath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
+  const archive = payload({
+    '100': record('100', 'channel-deleted', { delete_data: { time: 100 } }),
+    '101': record('101', 'channel-purged', { delete_data: { time: 101 } }),
+    '102': record('102', 'channel-edited', { edit_history: [{ time: 102, content: 'archived edit' }] }),
+    '103': record('103', 'channel-ghost-delete', {
+      delete_data: { time: 103 },
+      edit_history: [{ time: 103, content: 'archived ghost edit' }]
+    }),
+    '104': record('104', 'channel-ghost-edit', { edit_history: [{ time: 104, content: 'archived ghost edit' }] }),
+    '105': record('105', 'channel-nuked', { delete_data: { time: 105, anti_nuke: true } }),
+    '106': record('106', 'channel-hidden', { delete_data: { time: 106, hidden: true } }),
+    '200': record('200', '200', {
+      delete_data: { time: 200, forum_thread_delete: true, forum_parent_id: 'forum-parent' }
+    }),
+    '201': record('201', '201', {
+      delete_data: { time: 201, forum_thread_delete: true, forum_parent_id: 'thread-parent' }
+    }),
+    '202': record('202', '202', {
+      delete_data: { time: 202, forum_thread_message_delete: true, forum_parent_id: 'forum-parent' }
+    })
+  }, {
+    deleted: {
+      'channel-deleted': ['100'],
+      'channel-ghost-delete': ['103'],
+      'channel-hidden': ['106'],
+      '200': ['200'],
+      '202': ['202']
+    },
+    edited: {
+      'channel-edited': ['102'],
+      'channel-ghost-delete': ['103'],
+      'channel-ghost-edit': ['104']
+    },
+    purged: {
+      'channel-purged': ['101'],
+      '201': ['201']
+    },
+    nuked: { 'channel-nuked': ['105'] }
+  });
+  archive.messageRecord['103'].ghost_pinged = true;
+  archive.messageRecord['104'].ghost_pinged = true;
+  const originalBytes = JSON.stringify({ data: archive });
+  fs.writeFileSync(filePath, originalBytes);
+
+  const runtime = structuredClone(archive);
+  runtime.messageRecord['900'] = record('900', 'channel-session-deleted', { delete_data: { time: 900 } });
+  runtime.messageRecord['901'] = record('901', 'channel-session-edited', {
+    edit_history: [{ time: 901, content: 'session edit' }]
+  });
+  runtime.messageRecord['902'] = record('902', '902', {
+    delete_data: { time: 902, forum_thread_delete: true, forum_parent_id: 'session-parent' }
+  });
+  runtime.messageRecord['903'] = record('903', '202', {
+    edit_history: [{ time: 903, content: 'session reply edit' }]
+  });
+  runtime.deletedMessageRecord['channel-session-deleted'] = ['900'];
+  runtime.deletedMessageRecord['902'] = ['902'];
+  runtime.editedMessageRecord['channel-session-edited'] = ['901'];
+  runtime.editedMessageRecord['202'] = ['903'];
+
+  const deleteEvents = [];
+  const removedRestoredRoots = [];
+  const closedThreadLogs = [];
+  const recachedLiveThreads = [];
+  const plugin = createArchiveModePlugin(pluginDir, runtime, {
+    settings: {
+      savedMessagesCap: 1000,
+      autoBackup: false,
+      dontSaveData: true,
+      dontLoadArchivedData: false,
+      restoreDeletedMessages: true,
+      showDeletedMessages: true,
+      showPurgedMessages: true,
+      showEditedMessages: true,
+      useNotificationsInstead: true,
+      deleteCachedFilesWithRecords: false
+    },
+    dispatcher: {
+      dispatch(event) {
+        if (event.type === 'MESSAGE_DELETE') deleteEvents.push({ ...event });
+      }
+    },
+    tools: {
+      getChannel(id) { return { id, guild_id: 'guild', type: String(id) === '202' ? 11 : 0 }; },
+      getUser() { return null; }
+    },
+    _invalidateAndRecache(channelId) {
+      recachedLiveThreads.push(String(channelId));
+    },
+    removeRestoredForumThreadMountsFromDom(threadId) {
+      removedRestoredRoots.push(String(threadId));
+    },
+    closeForumThreadLogModal(threadId) {
+      closedThreadLogs.push(String(threadId));
+      this._forumThreadLogRefreshers?.delete(String(threadId));
+    }
+  });
+  plugin._forumThreadLogRefreshers = new Map([
+    ['200', () => {}],
+    ['201', () => {}],
+    ['202', () => {}],
+    ['902', () => {}]
+  ]);
+
+  const archiveIds = Object.keys(archive.messageRecord).sort();
+  const sessionIds = ['900', '901', '902', '903'];
+  const expectedDeletedMounts = ['100', '101', '103', '200', '201'];
+  const assertDetachedPresentation = cycle => {
+    assert.equal(plugin._archiveDetached, true, `${cycle}: archive is detached`);
+    assert.deepEqual(Object.keys(plugin.messageRecord).sort(), sessionIds, `${cycle}: only session records remain`);
+    for (const id of archiveIds) {
+      assert.equal(plugin.messageRecord[id], undefined, `${cycle}: archived record ${id} is absent`);
+      assert.equal(plugin.messageRecordIds.has(id), false, `${cycle}: archived ID ${id} is absent`);
+      for (const setMap of [plugin.deletedMessageSet, plugin.editedMessageSet, plugin.purgedMessageSet, plugin.nukedMessageSet]) {
+        assert.equal(Array.from(setMap.values()).some(ids => ids.has(id)), false, `${cycle}: archived index ${id} is absent`);
+      }
+    }
+    for (const id of sessionIds) assert.ok(plugin.messageRecord[id], `${cycle}: session record ${id} remains`);
+    assert.equal(plugin.deletedMessageSet.get('channel-session-deleted').has('900'), true);
+    assert.equal(plugin.editedMessageSet.get('channel-session-edited').has('901'), true);
+    assert.equal(plugin.deletedMessageSet.get('902').has('902'), true);
+    assert.equal(plugin.editedMessageSet.get('202').has('903'), true);
+    assert.equal(plugin.canJumpToSavedRecord(plugin.messageRecord['901']), true, `${cycle}: session edit remains jumpable`);
+    assert.equal(plugin.canJumpToSavedRecord(archive.messageRecord['102']), false, `${cycle}: stale archive edit cannot jump`);
+    assert.equal(fs.readFileSync(filePath, 'utf8'), originalBytes, `${cycle}: archive bytes stay unchanged`);
+  };
+  const assertCycleCleanup = cycle => {
+    assert.deepEqual(
+      deleteEvents.map(event => event.id).sort(),
+      expectedDeletedMounts,
+      `${cycle}: only former archive live-deletion mounts are evicted`
+    );
+    assert.ok(deleteEvents.every(event => event.type === 'MESSAGE_DELETE' && event.ML2 === true));
+    assert.equal(deleteEvents.some(event => sessionIds.includes(event.id)), false, `${cycle}: session mounts are untouched`);
+    assert.deepEqual(removedRestoredRoots.sort(), ['200', '201'], `${cycle}: only structural archive clones are removed`);
+    assert.deepEqual(closedThreadLogs.sort(), ['200', '201', '202'], `${cycle}: only archive thread-log views close`);
+    assert.deepEqual(recachedLiveThreads, ['202'], `${cycle}: a surviving native thread is reconciled without deleting its card`);
+    assert.equal(plugin._forumThreadLogRefreshers.has('902'), true, `${cycle}: session thread-log view stays open`);
+  };
+
+  assert.equal(plugin.requestArchiveLoadModeChange(true), true);
+  assertDetachedPresentation('first detach');
+  assertCycleCleanup('first detach');
+
+  assert.equal(plugin.requestArchiveLoadModeChange(false), true);
+  assert.equal(plugin._archiveDetached, false);
+  assert.deepEqual(Object.keys(plugin.messageRecord).sort(), [...archiveIds, ...sessionIds].sort());
+  plugin._forumThreadLogRefreshers = new Map([
+    ['200', () => {}],
+    ['201', () => {}],
+    ['202', () => {}],
+    ['902', () => {}]
+  ]);
+  deleteEvents.length = 0;
+  removedRestoredRoots.length = 0;
+  closedThreadLogs.length = 0;
+  recachedLiveThreads.length = 0;
+
+  assert.equal(plugin.requestArchiveLoadModeChange(true), true);
+  assertDetachedPresentation('second detach');
+  assertCycleCleanup('second detach');
+});
+
+test('archive detach closes stale same-ID forum views while retaining session-only roots', t => {
+  const pluginDir = temporaryDirectory(t);
+  const filePath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
+  const archive = payload({
+    '300': record('300', '300', {
+      delete_data: { time: 300, forum_thread_delete: true, forum_parent_id: 'archive-parent' }
+    })
+  }, { deleted: { 300: ['300'] } });
+  const originalBytes = JSON.stringify({ data: archive });
+  fs.writeFileSync(filePath, originalBytes);
+
+  const runtime = structuredClone(archive);
+  runtime.messageRecord['300'].message.content = 'session-updated archive root';
+  runtime.messageRecord['400'] = record('400', '400', {
+    delete_data: { time: 400, forum_thread_delete: true, forum_parent_id: 'session-parent' }
+  });
+  runtime.deletedMessageRecord['400'] = ['400'];
+  const closed = [];
+  const plugin = createArchiveModePlugin(pluginDir, runtime, {
+    closeForumThreadLogModal(threadId) {
+      closed.push(String(threadId));
+      this._forumThreadLogRefreshers?.delete(String(threadId));
+    }
+  });
+  plugin._forumThreadLogRefreshers = new Map([
+    ['300', () => {}],
+    ['400', () => {}]
+  ]);
+
+  assert.equal(plugin.requestArchiveLoadModeChange(true), true);
+  assert.equal(plugin.messageRecord['300'].message.content, 'session-updated archive root');
+  assert.ok(plugin.messageRecord['400']);
+  assert.deepEqual(closed, ['300']);
+  assert.equal(plugin._forumThreadLogRefreshers.has('400'), true);
   assert.equal(fs.readFileSync(filePath, 'utf8'), originalBytes);
 });
 
@@ -1451,6 +1750,7 @@ test('a newer primary schema blocks no-save fallback and leaves both files untou
 
   assert.equal(await plugin.mergeNoSaveSessionIntoPersistedData(), false);
   assert.equal(plugin.settings.dontSaveData, true);
+  assert.equal(plugin._discardNoSaveSessionOnResume, false, 'archive validation failures must remain retryable and never arm the discard bypass');
   assert.equal(fs.readFileSync(primaryPath, 'utf8'), primaryBefore);
   assert.equal(fs.readFileSync(backupPath, 'utf8'), backupBefore);
   assert.equal(errors[0].error.code, 'MLV2_NEWER_DATA_SCHEMA');
@@ -1642,6 +1942,115 @@ test('backup failure after primary success leaves saving enabled and primary int
   assert.equal(errors[0].savingRemainsDisabled, false);
 });
 
+test('no-save primary recovery retries failed writes through the third attempt', async () => {
+  const archived = payload({
+    '100': record('100', 'channel', { delete_data: { time: 100 } })
+  }, { deleted: { channel: ['100'] } });
+  const session = payload({
+    '200': record('200', 'channel', { delete_data: { time: 200 } })
+  }, { deleted: { channel: ['200'] } });
+  let writes = 0;
+  const plugin = createMergePlugin({
+    ...session,
+    messageRecordIds: new Set(['200']),
+    suppressedForumThreadIds: new Set(),
+    _needsNoSaveDataMerge: true,
+    _dataWriteEpoch: 0,
+    _dataSaveMaxAttempts: 3,
+    loadPersistedDataForNoSaveMerge() {
+      return { data: structuredClone(archived), source: 'primary' };
+    },
+    flushNoSavePersistedRemovals() { return { ok: true, changed: false }; },
+    writeDataPayloadAtomic() {
+      writes++;
+      return Promise.resolve(writes === 3
+        ? { ok: true }
+        : { ok: false, error: new Error(`simulated primary failure ${writes}`) });
+    },
+    saveSettings() {},
+    notifySettingDependencyChange() {},
+    flushPendingMediaCacheRequests() {}
+  });
+
+  assert.equal(await plugin.mergeNoSaveSessionIntoPersistedData(), true);
+  assert.equal(writes, 3, 'recovery must make the bounded third primary-write attempt');
+  assert.equal(plugin.settings.dontSaveData, false);
+  assert.equal(plugin._discardNoSaveSessionOnResume, false);
+});
+
+test('a timed-out no-save recovery latches bypass, ignores stale completion, and next resume reloads the archive without writing', async () => {
+  const archived = payload({
+    '100': record('100', 'channel', { delete_data: { time: 100 } })
+  }, { deleted: { channel: ['100'] } });
+  const session = payload({
+    '200': record('200', 'channel', { delete_data: { time: 200 } })
+  }, { deleted: { channel: ['200'] } });
+  const primaryWrite = defer();
+  let writes = 0;
+  let presentationReconciliations = 0;
+  let presentationRefreshes = 0;
+  const plugin = createMergePlugin({
+    ...session,
+    messageRecordIds: new Set(['200']),
+    suppressedForumThreadIds: new Set(),
+    _needsNoSaveDataMerge: true,
+    _dataWriteEpoch: 0,
+    _dataSaveTransitionTimeoutMs: 5,
+    __started: true,
+    loadPersistedDataForNoSaveMerge() {
+      return { data: structuredClone(archived), source: 'primary' };
+    },
+    flushNoSavePersistedRemovals() { return { ok: true, changed: false }; },
+    writeDataPayloadAtomic() {
+      writes++;
+      return primaryWrite.promise;
+    },
+    saveSettings() {},
+    reportNoSaveDataError() {},
+    reportSettingState() {},
+    notifySettingDependencyChange() {},
+    notifyDataSaveModeTransitionChange() {},
+    replaceBetterDiscordDataCache() { return true; },
+    captureArchiveLoadPresentationState() { return { recordIds: new Set(Object.keys(this.messageRecord)) }; },
+    reconcileDetachedArchivePresentation() { presentationReconciliations++; },
+    refreshArchiveLoadPresentation() { presentationRefreshes++; }
+  });
+  plugin._pendingMediaCacheRequests.set('session-media', { messageId: '200' });
+
+  assert.equal(plugin.requestDataSaveModeChange(false), true);
+  await plugin._noSaveMergePromise;
+
+  assert.equal(writes, 1);
+  assert.equal(plugin.settings.dontSaveData, true);
+  assert.equal(plugin._discardNoSaveSessionOnResume, true);
+  assert.equal(plugin._noSaveMergeInProgress, false);
+  assert.equal(plugin._noSaveMergePromise, null);
+  assert.equal(plugin._noSaveMergeTimeoutTimer, 0);
+  assert.equal(plugin._dataSavePrimaryFlushInProgress, false);
+  assert.equal(plugin.isDataSaveModeTransitionBusy(), false, 'timeout must release every transition lock');
+
+  const stateAfterTimeout = structuredClone(plugin._getDataPayload());
+  primaryWrite.resolve({ ok: true });
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(plugin.settings.dontSaveData, true, 'a stale completion cannot re-enable saving');
+  assert.deepEqual(plugin._getDataPayload(), stateAfterTimeout, 'a stale completion cannot mutate post-timeout session state');
+  assert.equal(plugin._discardNoSaveSessionOnResume, true);
+
+  assert.equal(plugin.requestDataSaveModeChange(false), true);
+  assert.equal(writes, 1, 'the recovery-bypass resume must skip every archive write');
+  assert.deepEqual(Object.keys(plugin.messageRecord), ['100']);
+  assert.equal(plugin.messageRecord['200'], undefined, 'the failed temporary session is discarded');
+  assert.equal(plugin._pendingMediaCacheRequests.size, 0, 'the failed session media queue is discarded');
+  assert.equal(plugin._needsNoSaveDataMerge, false);
+  assert.equal(plugin._discardNoSaveSessionOnResume, false);
+  assert.equal(plugin.settings.dontSaveData, false);
+  assert.equal(plugin.isDataSaveModeTransitionBusy(), false);
+  assert.equal(presentationReconciliations, 1);
+  assert.equal(presentationRefreshes, 1);
+});
+
 test('the public setting handler completes the guarded reload merge', async t => {
   const pluginDir = temporaryDirectory(t);
   const filePath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');
@@ -1700,7 +2109,7 @@ test('stale in-flight writes are cancelled before atomic rename', async t => {
   assert.deepEqual(fs.readdirSync(pluginDir).filter(name => name.includes('.tmp-')), []);
 });
 
-test('no-reload disable and re-enable keeps the existing save behavior', () => {
+test('no-reload resume requests the primary first and leaves backup scheduling to its successful callback', () => {
   let primarySaves = 0;
   let backupSaves = 0;
   const notifications = [];
@@ -1722,12 +2131,13 @@ test('no-reload disable and re-enable keeps the existing save behavior', () => {
   plugin.handleDataSaveSetting(false);
 
   assert.equal(primarySaves, 1);
-  assert.equal(backupSaves, 1);
+  assert.equal(backupSaves, 0, 'backup scheduling belongs to the successful primary-save callback');
   assert.ok(loggerEvents.some(event => event[0] === 'log'
     && String(event[1]).includes('queued current in-memory logger changes')));
   assert.equal(notifications[1][0], 'Message Logger Data Saving');
   assert.match(notifications[1][1], /in-memory logger changes are queued to save/i);
   assert.equal(notifications[1][2], 'info');
+  plugin.finishDataSavePrimaryFlush(plugin._dataSavePrimaryFlushGeneration, true);
 });
 
 test('merge failures log details and use the configured notification router', () => {

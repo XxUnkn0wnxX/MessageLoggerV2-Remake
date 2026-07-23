@@ -208,11 +208,11 @@ Notification settings affect alerts only. Logging scope is controlled separately
 
 After a no-save reload:
 
-1. **Disable saving data** normally keeps the saved archive visible while new records and edits stay in a temporary in-memory session. Loaded archival removals still commit deletion-only changes.
-2. Its linked **Disable loading archived data** setting skips or hot-unloads the archive and keeps only temporary session activity. Turning the child back off hot-loads and combines the archive in memory without writing. Archive removal and cached-file deletion are unavailable while detached.
+1. **Disable saving data** normally keeps the saved archive visible while every new record, edit, counter, attachment reference, and eligible media request stays in a temporary in-memory session. No new media file is created. Loaded archival removals and related cached-file cleanup still commit deletion-only changes.
+2. Its linked **Disable loading archived data** setting skips or hot-unloads the archive and keeps only temporary session activity. Turning the child back off hot-loads and combines the archive in memory without writing. Every archive-owned live mount, tint, logger row, modal, and action follows the archive out of memory; session-owned equivalents remain usable. Archive removal and cached-file deletion are unavailable while detached.
 3. Re-enabling saving validates and merges disk and eligible session records, de-duplicates indexes, preserves exact saved state, applies caps, then atomically writes the primary before the backup. A failed validation or primary write leaves saving disabled, restores detached session memory when needed, and keeps existing files untouched.
 
-The child preference remains saved but displays and behaves as Off while **Disable saving data** is disabled. Plugin or Discord reload still discards temporary session activity. State and failure messages use the selected notification mode and include console detail.
+The child preference remains saved but displays and behaves as Off while **Disable saving data** is disabled. Loaded archive and temporary records retain their normal View, Hide, Delete, and eligible Jump actions. Plugin or Discord reload still discards temporary session activity and its media queue. Re-enabling saving downloads queued media only after the primary archive save succeeds. During these larger save/media and archive-view transitions, the affected controls grey out and pulse warning orange until the operation settles. Primary recovery gets three attempts within a 30-second bound; final failure leaves saving disabled and shows a persistent error. Turning **Disable saving data** **Off** again bypasses the failed flush, discards temporary records/media, reloads the last valid archive, and makes later activity save normally. A media-only failure drops and reports only that item. State and failure messages use the selected notification mode and include console detail.
 
 Changing **Obfuscate CSS classes** restarts MessageLogger by temporarily disabling and re-enabling it. With data saving active, the normal shutdown flush runs first. With **Disable saving data** enabled, a danger confirmation appears because memory-only session activity cannot survive the restart; **No** leaves the CSS-class setting unchanged.
 
@@ -256,6 +256,7 @@ Enable **Show Hidden tab in logger** under Display settings. Disabling the tab d
 ### Attachments are unavailable
 
 - Remote attachment and sticker URLs can expire or return `403`/`404`. Keep **Cache media locally** enabled when local preservation matters.
+- **Disable saving data** creates no new local media files even if **Cache media locally** remains enabled. Eligible logger media requests wait in memory and download only after a successful primary archive save; reload, plugin stop, or disabling media caching discards the queue.
 - Enable **Only render locally cached attachments** to block CDN fallback. Missing files remain as full-filename placeholders; already-expired content cannot be recovered.
 - **Delete cached files with log records** removes related media during permanent record, purge, cap, or thread/forum cleanup. It cannot be undone and reports successful deletion through the console and selected notification mode.
 

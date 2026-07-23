@@ -69,6 +69,8 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 - `mergeDataPayloads` handles ordinary no-save union recovery. `buildNoSaveSessionOverlay` and `applyNoSaveSessionOverlay` preserve exact detached-session record/category/removal state. `applySavedMessagesCapToPayload` caps either recovered result before persistence and cascades removed forum/thread roots to children.
 - Recovery cap cleanup does not delete local media while the transaction can still fail; a harmless orphaned cache file is safer than irreversible pre-commit deletion.
 - `mergeNoSaveSessionIntoPersistedData` is a transaction ordered as load, validate, merge, cap, install, primary write, then backup. Primary failure keeps saving disabled and leaves both files untouched.
+- `requestDataSaveModeChange` serializes the save-mode transition. A generation-owned primary flush and active deferred-media map keep the control disabled until the primary callback and every queued media request settle; stale callbacks cannot unlock a newer operation. Primary recovery gets three attempts inside a 30-second transition bound. A final write failure or timeout fails closed and arms `_discardNoSaveSessionOnResume`; the next resume skips persistence, discards temporary state/media, reloads the last valid archive, and returns to normal saving.
+- `requestArchiveLoadModeChange` serializes archive attach/detach. Successful swaps retain a short bounded presentation-settle lock so Discord's message, forum/thread, logger, tint, modal, and context-menu surfaces cannot overlap a second swap.
 - `cancelPendingDataWrites` clears queued timers and increments a write epoch. Async writers check that epoch before rename.
 - Recovery failures always log detailed stage, path, cause, and state information, then route a concise alert through `notifyUser` so the selected native-notification/custom-toast mode is respected.
 
@@ -101,6 +103,9 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 
 - Core message-history caching and the hierarchical server/channel cache layout remain enabled for forum/thread reliability.
 - `cacheMessageImages` and `cacheImage` handle attachments, embed images, stickers, file-type policy, custom paths, and size limits.
+- `cacheImage` is the only new-media filesystem writer. During no-save mode, eligible logger-media parameters are de-duplicated in memory; the queue drains only after a successful primary archive commit. Active requests remain tracked through three bounded fetch attempts and retry delays. A terminal media-only failure is reported and drops that item without invalidating the saved archive or otherwise-valid session. Reload, stop, or disabling media caching aborts and discards the queue.
+- A monotonic media-write generation invalidates pre-disable, retrying, and in-flight work across rapid off/on changes and same-instance restarts. No-save startup also avoids creating an absent default cache directory, and stale work is never promoted into the later queue.
+- This write guard does not block intentional deletion of media belonging to a loaded archived record. That cleanup remains part of the deletion-only journal and becomes unavailable only while the archive is detached.
 - Legacy flat-cache paths remain readable even though new files use hierarchical paths.
 - Cache-only rendering replaces unavailable remote media with manageable filename placeholders.
 - Optional cached-file deletion is record-aware and must never scan or delete outside configured cache roots.

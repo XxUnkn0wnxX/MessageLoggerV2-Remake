@@ -308,7 +308,8 @@ test('the current changelog covers the polished Help presentation and BdApi word
   assert.match(source, /Filter Help and Logger Help now use clearer nested spacing, visible filter syntax, and consistent On\/Off state labels/);
   assert.match(source, /accurate BdApi notifications wording without the outdated basic qualifier/);
   assert.match(source, /guild-only local-user toast option now uses its correct Guild settings location/);
-  assert.match(source, /always loads saved history, keeps new additions memory-only, and writes archival record, edit, clear-log, cap, and thread\/forum removals through/);
+  assert.match(source, /keeps new additions and eligible media requests memory-only while preserving loaded-archive cleanup/);
+  assert.match(source, /save\/media and archive-view transitions briefly lock their controls with a warning-orange pulse/);
 });
 
 test('settings documentation retains audited group order and current UI labels', () => {
@@ -1218,7 +1219,10 @@ test('no-save recovery remains guarded and ordered before backup persistence', (
   assert.match(noSaveFeedback, /new logger additions will remain in memory/);
   assert.match(noSaveFeedback, /Archival removals still commit deletion-only updates/);
   assert.match(noSaveFeedback, /'neutral'/);
-  const recovery = source.slice(source.indexOf('async mergeNoSaveSessionIntoPersistedData()'), source.indexOf('handleDataSaveSetting(disabled)'));
+  const recovery = source.slice(
+    source.indexOf('async mergeNoSaveSessionIntoPersistedData('),
+    source.indexOf('handleDataSaveSetting(disabled, options = {})')
+  );
   assert.ok(recovery.indexOf("this.getName() + 'Data'") < recovery.indexOf("this.getName() + 'DataBackup'"));
 });
 

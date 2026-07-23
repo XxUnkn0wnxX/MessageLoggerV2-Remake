@@ -36,8 +36,8 @@ This fork also restores logged forum posts and channel threads, preserves their 
 - Separate guild/DM alert toggles, notification location lists, selected-location overrides, native BetterDiscord notifications, and custom actionable toasts.
 - One console entry and routed alert per high-impact setting change.
 - Info-blue enabled states, theme-neutral disabled states, warning-colored backup diagnostics, and red errors.
-- Optional local media caching, cache-size/type controls, local-only rendering, CDN fallback, custom cache paths, and cached-file cleanup when records are removed.
-- Safe no-save sessions: keep saved history visible or use the linked archive control to hot-detach it, retain temporary activity in memory, and validate/merge before an atomic primary-file replacement when saving resumes.
+- Optional local media caching, cache-size/type controls, local-only rendering, CDN fallback, custom cache paths, cached-file cleanup, and a memory-only no-save media queue.
+- Safe no-save sessions: keep saved history visible or hot-detach every archive-owned mount, retain temporary activity and actions in memory, and validate/merge before an atomic primary-file replacement. The two large state controls grey out with a warning-orange pulse while their save/media or archive-view transition settles; a failed three-attempt/timeout recovery can be bypassed on the next resume by discarding the temporary session and reloading the last valid archive.
 - Atomic legacy/mixed-fork normalization and recoverable settings-config repair.
 - Clearly reported valid-backup recovery, configurable bounded backup timing, optional queue/write diagnostics, additive metadata, and fail-closed newer-schema protection.
 - Built-in settings/help pages, update notes, automatic update checks, and compatibility with legacy flat media caches.

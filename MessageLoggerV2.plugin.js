@@ -21,6 +21,13 @@ const MAX_AUTO_BACKUP_INTERVAL_SECONDS = 86400;
 const DEFAULT_EDIT_SPAM_THRESHOLD = 10;
 const EDIT_SPAM_COOLDOWN_MS = 60 * 1000;
 const EDIT_SPAM_DEBUG_WARNING_MS = 10 * 1000;
+const ARCHIVE_LOAD_MODE_SETTLE_MS = 350;
+const MEDIA_CACHE_FETCH_TIMEOUT_MS = 15 * 1000;
+const MEDIA_CACHE_RETRY_DELAY_MS = 1000;
+const MEDIA_CACHE_MAX_ATTEMPTS = 3;
+const DATA_SAVE_TRANSITION_TIMEOUT_MS = 30 * 1000;
+const DATA_SAVE_MAX_ATTEMPTS = 3;
+const DATA_SAVE_RETRY_DELAY_MS = 500;
 const FALLBACK_DATE_FORMAT = 'M/D/YYYY';
 const LEGACY_DATE_FORMATS = Object.freeze({
   DMY: 'D/M/YYYY',
@@ -279,6 +286,25 @@ module.exports = class MessageLoggerV2 {
     // Startup failures can occur before settings and the queued native-notification runtime
     // exist. The global router uses this flag to select its safe pre-initialization path.
     this._notificationRouterReady = false;
+    // Keep this generation monotonic for the lifetime of the plugin instance. A completed
+    // fetch from an earlier settings state or same-instance restart must never become eligible
+    // to write merely because media caching was enabled again before the fetch settled.
+    this._mediaCacheWriteEpoch = 0;
+    this._pendingMediaCacheRequests = new Map();
+    this._activeDeferredMediaCacheRequests = new Map();
+    this._mediaCacheAbortControllers = new Set();
+    this._flushMediaCacheAfterNextDataSave = false;
+    this._dataSavePrimaryFlushInProgress = false;
+    this._dataSavePrimaryFlushGeneration = 0;
+    this._dataSavePrimaryFlushAttempts = 0;
+    this._dataSavePrimaryFlushTimer = 0;
+    this._dataSavePrimaryRetryTimer = 0;
+    this._noSaveMergeGeneration = 0;
+    this._noSaveMergeTimeoutTimer = 0;
+    this._activeNoSaveMergeRollbackContext = null;
+    this._noSaveMergePromise = null;
+    this._discardNoSaveSessionOnResume = false;
+    this._archiveLoadModeSettleTimer = 0;
   }
   getName() {
     return this.meta.name;
@@ -322,6 +348,27 @@ module.exports = class MessageLoggerV2 {
   stop() {
     this._startupGeneration = (this._startupGeneration || 0) + 1;
     this._startupPending = false;
+    this.cancelPendingMediaCacheWrites?.();
+    this._pendingMediaCacheRequests?.clear?.();
+    this._activeDeferredMediaCacheRequests?.clear?.();
+    this._mediaCacheAbortControllers?.clear?.();
+    this._flushMediaCacheAfterNextDataSave = false;
+    this._dataSavePrimaryFlushInProgress = false;
+    this._dataSavePrimaryFlushGeneration = (this._dataSavePrimaryFlushGeneration || 0) + 1;
+    this._dataSavePrimaryFlushAttempts = 0;
+    if (this._dataSavePrimaryFlushTimer) clearTimeout(this._dataSavePrimaryFlushTimer);
+    if (this._dataSavePrimaryRetryTimer) clearTimeout(this._dataSavePrimaryRetryTimer);
+    this._dataSavePrimaryFlushTimer = 0;
+    this._dataSavePrimaryRetryTimer = 0;
+    this._noSaveMergeGeneration = (this._noSaveMergeGeneration || 0) + 1;
+    if (this._noSaveMergeTimeoutTimer) clearTimeout(this._noSaveMergeTimeoutTimer);
+    this._noSaveMergeTimeoutTimer = 0;
+    this._activeNoSaveMergeRollbackContext = null;
+    this._noSaveMergePromise = null;
+    this._discardNoSaveSessionOnResume = false;
+    if (this._archiveLoadModeSettleTimer) clearTimeout(this._archiveLoadModeSettleTimer);
+    this._archiveLoadModeSettleTimer = 0;
+    this._archiveLoadModeTransitionInProgress = false;
     // A CSS-class mode restart uses BetterDiscord's disable/enable lifecycle on this same
     // instance. Its settings panel remains mounted, so retain the controlled/custom-input
     // listeners only for that one stop/start. Every ordinary stop still tears them down.
@@ -462,7 +509,8 @@ module.exports = class MessageLoggerV2 {
         type: 'fixed',
         items: [
           'Disabling saved-message or edit display now prevents future live mounts across chats, forums, and threads without stopping logging.',
-          'Mount-dependent Jump actions stay hidden while View in Log remains available.'
+          'Mount-dependent Jump actions stay hidden while View in Log remains available.',
+          'Hot-unloading the saved archive now removes every archive-owned mount while preserving temporary session records.'
         ]
       },
       {
@@ -481,7 +529,7 @@ module.exports = class MessageLoggerV2 {
           'Related controls stay grouped, while Filter Help and Logger Help now use clearer nested spacing, visible filter syntax, and consistent On/Off state labels.',
           'The notification-mode setting now uses the accurate BdApi notifications wording without the outdated basic qualifier.',
           'The guild-only local-user toast option now uses its correct Guild settings location and migrates its misplaced legacy DM value.',
-          'Disable saving data now always loads saved history, keeps new additions memory-only, and writes archival record, edit, clear-log, cap, and thread/forum removals through.'
+          'Disable saving data now keeps new additions and eligible media requests memory-only while preserving loaded-archive cleanup; save/media and archive-view transitions briefly lock their controls with a warning-orange pulse.'
         ]
       }
     ];
@@ -1063,6 +1111,8 @@ module.exports = class MessageLoggerV2 {
     this._noSaveMergeDirty = false;
     this._pendingNoSavePersistedRemovals = [];
     this._noSavePersistedRemovalTimer = 0;
+    if (this._archiveLoadModeSettleTimer) clearTimeout(this._archiveLoadModeSettleTimer);
+    this._archiveLoadModeSettleTimer = 0;
     this._archiveLoadModeTransitionInProgress = false;
     this._archiveDetached = !!(this.settings.dontSaveData && this.settings.dontLoadArchivedData);
     this._noSaveSessionOverlay = null;
@@ -1172,7 +1222,9 @@ module.exports = class MessageLoggerV2 {
         type: 'error'
       });
     };
-    if (this.settings.cacheAllImages && !this.nodeModules.fs.existsSync(this.settings.imageCacheDir)) {
+    if (this.settings.cacheAllImages
+      && !this.settings.dontSaveData
+      && !this.nodeModules.fs.existsSync(this.settings.imageCacheDir)) {
       try {
         this.nodeModules.fs.mkdirSync(this.settings.imageCacheDir);
       } catch {
@@ -1401,6 +1453,8 @@ module.exports = class MessageLoggerV2 {
     this.style.startupHelpModal = this.obfuscatedClass('ml2-startup-help-modal');
     this.style.cachedFilesModal = this.obfuscatedClass('ml2-cached-files-modal');
     this.style.cssClassRestartWarning = this.obfuscatedClass('ml2-css-class-restart-warning');
+    this.style.settingTransitionActive = this.obfuscatedClass('ml2-setting-transition-active');
+    this.style.settingTransitionPulse = this.obfuscatedClass('ml2-setting-transition-pulse');
     this.style.menu = this.obfuscatedClass('ML2-MENU');
     this.loggerHelpModalKey = `${this.style.menu}-logger-help`;
     this.filterHelpModalKey = `${this.style.menu}-filter-help`;
@@ -1752,6 +1806,29 @@ module.exports = class MessageLoggerV2 {
                       box-sizing: border-box;
                       margin-inline: auto;
                     }
+                    @keyframes ${this.style.settingTransitionPulse} {
+                      0%, 100% {
+                        box-shadow: 0 0 0 1px var(--text-warning, var(--status-warning));
+                      }
+                      50% {
+                        box-shadow:
+                          0 0 0 2px var(--text-warning, var(--status-warning)),
+                          0 0 10px 2px var(--text-warning, var(--status-warning));
+                      }
+                    }
+                    .${this.style.settingTransitionActive} {
+                      display: inline-flex;
+                      border-radius: 999px;
+                      padding: 3px;
+                      margin: -3px;
+                      animation: ${this.style.settingTransitionPulse} 1.1s ease-in-out infinite;
+                    }
+                    @media (prefers-reduced-motion: reduce) {
+                      .${this.style.settingTransitionActive} {
+                        animation: none;
+                        box-shadow: 0 0 0 2px var(--text-warning, var(--status-warning));
+                      }
+                    }
                     .${this.style.imageRoot} {
                       pointer-events: all;
                     }
@@ -2060,7 +2137,7 @@ module.exports = class MessageLoggerV2 {
     const color = enabled ? 'var(--status-positive)' : 'var(--status-danger)';
     return `<strong style="color: ${color};">${label}</strong>`;
   }
-  createLinkedSettingNote(onText, offText) {
+  createLinkedSettingNote(onText, offText, ...extra) {
     return React.createElement(
       'span',
       null,
@@ -2070,7 +2147,8 @@ module.exports = class MessageLoggerV2 {
       ' ',
       this.createSettingStateLabel(false),
       ': ',
-      offText
+      offText,
+      ...extra
     );
   }
   subscribeSettingDependency(settingId, listener) {
@@ -2125,6 +2203,77 @@ module.exports = class MessageLoggerV2 {
     }
     return React.createElement(ConfirmedCssClassModeSwitch);
   }
+  isDataSaveModeTransitionBusy() {
+    return !!(
+      this._dataSavePrimaryFlushInProgress
+      || this._noSaveMergeInProgress
+      || this._noSaveMergePromise
+      || this._archiveLoadModeTransitionInProgress
+      || this._activeDeferredMediaCacheRequests?.size
+    );
+  }
+  wrapTransitioningSettingControl(control, active) {
+    return React.createElement(
+      'span',
+      {
+        className: active
+          ? (this.style?.settingTransitionActive || 'mlv2-setting-transition-active')
+          : undefined,
+        'aria-busy': active || undefined
+      },
+      control
+    );
+  }
+  notifyDataSaveModeTransitionChange() {
+    this.notifySettingDependencyChange('dontSaveData');
+    this.notifySettingDependencyChange('dontLoadArchivedData');
+  }
+  createControlledDataSavingSwitch(config) {
+    const plugin = this;
+    const switchId = this.obfuscatedClass(config.id);
+    function ControlledDataSavingSwitch() {
+      const [, refresh] = React.useState(0);
+      React.useEffect(() => plugin.subscribeSettingDependency(config.id, () => {
+        refresh(value => value + 1);
+      }), []);
+      const value = !!plugin.settings[config.id];
+      const disabled = plugin.isDataSaveModeTransitionBusy();
+      const onChange = nextValue => plugin.requestDataSaveModeChange(!!nextValue);
+      if (typeof Components.SwitchInput === 'function') {
+        return plugin.wrapTransitioningSettingControl(React.createElement(Components.SwitchInput, {
+          id: switchId,
+          value,
+          disabled,
+          internalState: false,
+          onChange
+        }), disabled);
+      }
+      return plugin.wrapTransitioningSettingControl(React.createElement('input', {
+        id: switchId,
+        type: 'checkbox',
+        checked: value,
+        disabled,
+        onChange: event => onChange(event.currentTarget.checked)
+      }), disabled);
+    }
+    return React.createElement(ControlledDataSavingSwitch);
+  }
+  requestDataSaveModeChange(nextValue) {
+    const requestedValue = !!nextValue;
+    if (this.isDataSaveModeTransitionBusy()) {
+      this.notifyDataSaveModeTransitionChange();
+      return false;
+    }
+    if (requestedValue === !!this.settings.dontSaveData) return true;
+    this.settings.dontSaveData = requestedValue;
+    const accepted = this.handleDataSaveSetting(requestedValue, { acceptedTransition: true });
+    // The recovery path deliberately restores the setting to On until its primary write
+    // succeeds. Persist whichever state the handler accepted, never the optimistic click.
+    this.saveSettings();
+    this.notifySettingDependencyChange('dontSaveData');
+    this.notifySettingDependencyChange('dontLoadArchivedData');
+    return accepted !== false;
+  }
   createControlledArchiveLoadSwitch(config) {
     const plugin = this;
     const switchId = this.obfuscatedClass(config.id);
@@ -2146,23 +2295,24 @@ module.exports = class MessageLoggerV2 {
         || !!plugin._noSaveMergeInProgress
         || !!plugin._noSaveMergePromise
         || !!plugin._archiveLoadModeTransitionInProgress;
+      const archiveTransitionActive = !!plugin._archiveLoadModeTransitionInProgress;
       const onChange = nextValue => plugin.requestArchiveLoadModeChange(!!nextValue);
       if (typeof Components.SwitchInput === 'function') {
-        return React.createElement(Components.SwitchInput, {
+        return plugin.wrapTransitioningSettingControl(React.createElement(Components.SwitchInput, {
           id: switchId,
           value,
           disabled,
           internalState: false,
           onChange
-        });
+        }), archiveTransitionActive);
       }
-      return React.createElement('input', {
+      return plugin.wrapTransitioningSettingControl(React.createElement('input', {
         id: switchId,
         type: 'checkbox',
         checked: value,
         disabled,
         onChange: event => onChange(event.currentTarget.checked)
-      });
+      }), archiveTransitionActive);
     }
     return React.createElement(ControlledArchiveLoadSwitch);
   }
@@ -2171,7 +2321,10 @@ module.exports = class MessageLoggerV2 {
     if (!this.settings.dontSaveData
       || this._noSaveMergeInProgress
       || this._noSaveMergePromise
-      || this._archiveLoadModeTransitionInProgress) return false;
+      || this._archiveLoadModeTransitionInProgress) {
+      this.notifyDataSaveModeTransitionChange();
+      return false;
+    }
     if (requestedValue === !!this.settings.dontLoadArchivedData) return true;
     const accepted = requestedValue
       ? this.detachArchivedDataFromMemory()
@@ -3757,10 +3910,16 @@ module.exports = class MessageLoggerV2 {
         settings: [
           {
             name: 'Disable saving data',
-            note: 'New logs stay memory-only and additions/backups pause. Saved history stays loaded unless the linked archive setting is enabled.',
+            note: React.createElement(
+              'span',
+              null,
+              'New logs and eligible media requests stay memory-only. The switch pulses warning orange while flushing. If all retries fail, turning it ',
+              this.createSettingStateLabel(false),
+              ' again discards that temporary session and reloads saved history.'
+            ),
             id: 'dontSaveData',
             type: 'switch',
-            action: 'handleDataSave'
+            controlledDataSaving: true
           },
           {
             name: 'Disable loading archived data',
@@ -3773,7 +3932,7 @@ module.exports = class MessageLoggerV2 {
                 { style: { color: 'var(--text-warning, var(--status-warning))' } },
                 'Disable saving data'
               ),
-              '. Unloads saved history from memory and keeps only temporary session records; the archive stays unchanged on disk.'
+              '. Unloads saved history from memory and keeps only temporary session records; the archive stays unchanged on disk. Both controls briefly pulse warning orange while the archive view settles.'
             ),
             id: 'dontLoadArchivedData',
             enableWith: 'dontSaveData',
@@ -3807,7 +3966,16 @@ module.exports = class MessageLoggerV2 {
             name: 'Cache media locally',
             note: this.createLinkedSettingNote(
               'Caches media and enables its three linked controls.',
-              'Disables them; child values stay saved.'
+              'Disables them; child values stay saved.',
+              ' New downloads pause while ',
+              React.createElement(
+                'span',
+                { style: { color: 'var(--text-warning, var(--status-warning))' } },
+                'Disable saving data'
+              ),
+              ' is ',
+              this.createSettingStateLabel(true),
+              '; eligible logger media stays queued in memory until saving succeeds.'
             ),
             id: 'cacheAllImages',
             type: 'switch',
@@ -4210,10 +4378,9 @@ module.exports = class MessageLoggerV2 {
       forceUpdateContent: () => this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' }),
       forceUpdateMessage: () => this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE' }),
       notificationModeChange: (val) => this.handleNotificationModeChange(val),
-      handleDataSave: (val) => this.handleDataSaveSetting(val),
       handleBackup: (val) => this.handleAutoBackupSetting(val),
       reportLoggingScope: (val) => this.reportMajorSettingChange('onlyLogWhitelist', val),
-      reportMediaCaching: (val) => this.reportMajorSettingChange('cacheAllImages', val),
+      reportMediaCaching: (val) => this.handleMediaCachingSetting(val),
       reportAntiNuke: (val) => this.reportMajorSettingChange('antiNukeEnabled', val),
       reportCachedFileDeletion: (val) => this.reportMajorSettingChange('deleteCachedFilesWithRecords', val),
       resetEditSpamState: () => this._handleEditSpamThresholdChange(),
@@ -4251,6 +4418,12 @@ module.exports = class MessageLoggerV2 {
         setting.children = this.createConfirmedCssClassModeSwitch(config);
         setting.onChange = () => {};
         delete setting.confirmedCssClassRestart;
+      }
+      else if (config.controlledDataSaving) {
+        setting.type = 'custom';
+        setting.children = this.createControlledDataSavingSwitch(config);
+        setting.onChange = () => {};
+        delete setting.controlledDataSaving;
       }
       else if (config.controlledArchiveLoad) {
         setting.type = 'custom';
@@ -5522,6 +5695,124 @@ module.exports = class MessageLoggerV2 {
     archive.suppressedForumThreadIds = Array.from(suppressed);
     return this.sanitizeDataPayload(archive);
   }
+  captureArchiveLoadPresentationState() {
+    const recordIds = new Set(Object.keys(this.messageRecord || {}));
+    const visibleDeletionMounts = [];
+    const seen = new Set();
+    const collect = map => {
+      for (const [channelId, ids] of Object.entries(map || {})) {
+        for (const rawId of ids || []) {
+          const id = String(rawId);
+          const key = `${channelId}:${id}`;
+          if (seen.has(key) || !this.shouldPresentSavedMessage(channelId, id)) continue;
+          const record = this.messageRecord?.[id];
+          if (!record?.delete_data) continue;
+          seen.add(key);
+          visibleDeletionMounts.push({
+            id,
+            channelId: String(channelId),
+            structuralRoot: !!record.delete_data.forum_thread_delete,
+            survivingThreadMessage: !!record.delete_data.forum_thread_message_delete
+          });
+        }
+      }
+    };
+    collect(this.deletedMessageRecord);
+    collect(this.purgedMessageRecord);
+    return {
+      recordIds,
+      recordRefs: new Map(Object.entries(this.messageRecord || {})),
+      visibleDeletionMounts,
+      openForumThreadLogIds: new Set(this._forumThreadLogRefreshers?.keys?.() || [])
+    };
+  }
+  removeRestoredForumThreadMountsFromDom(threadId) {
+    const id = String(threadId || '');
+    if (!/^\d+$/.test(id) || typeof document === 'undefined') return;
+    const removeNode = node => {
+      if (!node) return;
+      this.cleanupCopiedNativeDeleteControls?.(node);
+      node.remove?.();
+    };
+    document.querySelectorAll(`[data-ml2-restored-forum-thread="${id}"]`)
+      .forEach(removeNode);
+    document.querySelectorAll(`[data-ml2-restored-forum-card="${id}"]`)
+      .forEach(node => removeNode(node.closest?.(`[data-ml2-restored-forum-thread="${id}"]`) || node));
+    document.querySelectorAll(`[data-ml2-restored-thread-entry="${id}"]`)
+      .forEach(removeNode);
+    document.querySelectorAll(`[data-ml2-restored-thread-browser-card="${id}"]`)
+      .forEach(removeNode);
+  }
+  removeDetachedArchiveDeleteControls(messageIds) {
+    if (!messageIds?.size || typeof document === 'undefined') return;
+    document.querySelectorAll('[data-ml2-native-delete-host="true"]').forEach(host => {
+      const messageId = String(host.getAttribute?.('data-ml2-message-id') || '');
+      if (!messageIds.has(messageId)) return;
+      this.cleanupCopiedNativeDeleteControls?.(host);
+      host.remove?.();
+    });
+  }
+  reconcileDetachedArchivePresentation(previousState, overlay = null) {
+    if (!previousState) return;
+    try {
+      const currentRecordIds = new Set(Object.keys(this.messageRecord || {}));
+      const removedRecordIds = new Set(
+        Array.from(previousState.recordIds || []).filter(id => !currentRecordIds.has(String(id)))
+      );
+      const staleDeletionMountIds = new Set();
+      for (const mount of previousState.visibleDeletionMounts || []) {
+        if (this.shouldPresentSavedMessage(mount.channelId, mount.id)) continue;
+        staleDeletionMountIds.add(mount.id);
+        const channel = this.tools?.getChannel?.(mount.channelId);
+        const keepsNativeThreadCard = !mount.structuralRoot
+          && [10, 11, 12].includes(Number(channel?.type))
+          && (mount.survivingThreadMessage || mount.id === mount.channelId);
+        if (keepsNativeThreadCard) {
+          this._invalidateAndRecache?.(mount.channelId);
+        } else {
+          try {
+            this.dispatcher?.dispatch?.({
+              type: 'MESSAGE_DELETE',
+              id: mount.id,
+              channelId: mount.channelId,
+              ML2: true
+            });
+          } catch (error) {
+            Logger.warn(`Could not evict detached archive message mount ${mount.id}.`, error);
+          }
+        }
+        if (mount.structuralRoot) this.removeRestoredForumThreadMountsFromDom(mount.id);
+      }
+      this.removeDetachedArchiveDeleteControls(new Set([
+        ...staleDeletionMountIds,
+        ...removedRecordIds
+      ]));
+      for (const threadId of previousState.openForumThreadLogIds || []) {
+        // This modal's header and fallback close over the root record that opened it. A
+        // surviving session reply or archive-backed same-ID upsert is not enough to make the
+        // old archive-owned root view safe.
+        if (!this.messageRecord?.[String(threadId)]
+          || (overlay?.closeChangedRecordViews
+            && previousState.recordRefs?.get?.(String(threadId)) !== this.messageRecord?.[String(threadId)])
+          || overlay?.archiveBackedUpsertIds?.has?.(String(threadId))) {
+          this.closeForumThreadLogModal?.(threadId);
+        }
+      }
+      for (const id of previousState.recordIds || []) {
+        const modifier = this.editModifiers?.[id];
+        if (!modifier) continue;
+        const edit = this.messageRecord?.[id]?.edit_history?.[modifier.editNum];
+        if (!edit) delete this.editModifiers[id];
+      }
+      // Context-menu callbacks close over record objects. Installing the overlay replaces
+      // canonical ownership even when a session upsert keeps the same message ID.
+      try { ContextMenu.close?.(); } catch {}
+    } catch (error) {
+      // Presentation cleanup is best-effort. Archive/session ownership is already installed and
+      // must not be rolled back merely because Discord replaced a DOM or Flux surface mid-sweep.
+      Logger.warn('Could not fully evict detached archive presentation.', error);
+    }
+  }
   refreshArchiveLoadPresentation() {
     try {
       this.invalidateAllChannelCache?.();
@@ -5546,6 +5837,27 @@ module.exports = class MessageLoggerV2 {
       replaceKey: 'system:archive-load-mode-error'
     });
   }
+  finishArchiveLoadModeTransition(settlePresentation = false) {
+    if (this._archiveLoadModeSettleTimer) clearTimeout(this._archiveLoadModeSettleTimer);
+    this._archiveLoadModeSettleTimer = 0;
+    const finish = () => {
+      this._archiveLoadModeSettleTimer = 0;
+      this._archiveLoadModeTransitionInProgress = false;
+      this.notifyDataSaveModeTransitionChange();
+    };
+    const configuredDelay = Number(this._archiveLoadModeSettleDelayMs);
+    const delay = Number.isFinite(configuredDelay)
+      ? Math.max(0, configuredDelay)
+      : ARCHIVE_LOAD_MODE_SETTLE_MS;
+    if (!settlePresentation || delay === 0 || this.__started === false) {
+      finish();
+      return;
+    }
+    // The data swap is synchronous, but Discord's message/forum surfaces reconcile over the
+    // next few paint turns. Keep both related controls locked until that presentation work has
+    // had a small, bounded window to settle.
+    this._archiveLoadModeSettleTimer = setTimeout(finish, delay);
+  }
   detachArchivedDataFromMemory() {
     if (this._archiveDetached) return true;
     if (!this.settings.dontSaveData
@@ -5553,11 +5865,13 @@ module.exports = class MessageLoggerV2 {
       || this._noSaveMergeInProgress
       || this._noSaveMergePromise) return false;
     this._archiveLoadModeTransitionInProgress = true;
-    this.notifySettingDependencyChange('dontLoadArchivedData');
+    this.notifyDataSaveModeTransitionChange();
+    let completed = false;
     try {
       const removalFlush = this.flushNoSavePersistedRemovals();
       if (!removalFlush.ok) return false;
       this.cancelPendingDataWrites();
+      const presentationState = this.captureArchiveLoadPresentationState();
       const loaded = this.loadPersistedDataForNoSaveMerge();
       const overlay = this.buildNoSaveSessionOverlay(loaded.data, this._getDataPayload());
       this.installDataPayload(overlay.payload);
@@ -5565,6 +5879,7 @@ module.exports = class MessageLoggerV2 {
       this._archiveDetached = true;
       this._needsNoSaveDataMerge = true;
       this._pendingNoSavePersistedRemovals = [];
+      this.reconcileDetachedArchivePresentation(presentationState, overlay);
       this.clearBetterDiscordArchiveDataCache();
       this.refreshArchiveLoadPresentation();
       this.reportSettingState(
@@ -5575,13 +5890,13 @@ module.exports = class MessageLoggerV2 {
         5000,
         'setting:dontLoadArchivedData'
       );
+      completed = true;
       return true;
     } catch (error) {
       this.reportArchiveLoadModeError('detach', error);
       return false;
     } finally {
-      this._archiveLoadModeTransitionInProgress = false;
-      this.notifySettingDependencyChange('dontLoadArchivedData');
+      this.finishArchiveLoadModeTransition(completed);
     }
   }
   attachArchivedDataToMemory() {
@@ -5591,7 +5906,8 @@ module.exports = class MessageLoggerV2 {
       || this._noSaveMergeInProgress
       || this._noSaveMergePromise) return false;
     this._archiveLoadModeTransitionInProgress = true;
-    this.notifySettingDependencyChange('dontLoadArchivedData');
+    this.notifyDataSaveModeTransitionChange();
+    let completed = false;
     try {
       const overlay = this.captureDetachedNoSaveSessionOverlay();
       const loaded = this.loadPersistedDataForNoSaveMerge();
@@ -5614,13 +5930,13 @@ module.exports = class MessageLoggerV2 {
         5000,
         'setting:dontLoadArchivedData'
       );
+      completed = true;
       return true;
     } catch (error) {
       this.reportArchiveLoadModeError('attach', error);
       return false;
     } finally {
-      this._archiveLoadModeTransitionInProgress = false;
-      this.notifySettingDependencyChange('dontLoadArchivedData');
+      this.finishArchiveLoadModeTransition(completed);
     }
   }
   applySavedMessagesCapToPayload(data, cap = this.settings.savedMessagesCap) {
@@ -5935,14 +6251,70 @@ module.exports = class MessageLoggerV2 {
       error,
       cause: error?.cause
     });
-    const status = savingRemainsDisabled
-      ? 'Saving remains disabled. Reopen settings to retry.'
+    const status = savingRemainsDisabled && this._discardNoSaveSessionOnResume
+      ? 'Saving remains disabled. Turn Disable saving data Off again to discard the failed temporary session and resume from the saved archive.'
+      : savingRemainsDisabled
+        ? 'Saving remains disabled. Reopen settings to retry.'
       : 'The primary data was saved, but a later recovery step failed.';
     this.notifyUser(`${status} View the console log for more details.`, {
       title: 'Message Logger Data Recovery Error',
       type: 'error',
-      timeout: 0
+      timeout: 0,
+      replaceKey: 'system:no-save-flush-error'
     });
+  }
+  markNoSaveSessionForDiscard(stage, error, notify = true) {
+    this._discardNoSaveSessionOnResume = true;
+    this.settings.dontSaveData = true;
+    try { this.saveSettings(); } catch (settingsError) {
+      Logger.error('Could not persist Disable saving data after a failed session flush.', settingsError);
+    }
+    if (notify) this.reportNoSaveDataError(stage, error, true);
+  }
+  discardNoSaveSessionAndResumeSaving() {
+    const presentationState = this.captureArchiveLoadPresentationState();
+    try {
+      this.cancelPendingDataWrites();
+      this.cancelPendingMediaCacheWrites();
+      this._pendingMediaCacheRequests?.clear?.();
+      this._activeDeferredMediaCacheRequests?.clear?.();
+      this._flushMediaCacheAfterNextDataSave = false;
+      const loaded = this.loadPersistedDataForNoSaveMerge();
+      this.installDataPayload(loaded.data);
+      this._archiveDetached = false;
+      this._noSaveSessionOverlay = null;
+      this._pendingNoSavePersistedRemovals = [];
+      this._needsNoSaveDataMerge = false;
+      this._discardNoSaveSessionOnResume = false;
+      this.settings.dontSaveData = false;
+      if (loaded.source === 'primary') {
+        this.replaceBetterDiscordDataCache(this.getName() + 'Data', loaded.data);
+      } else if (loaded.source === 'backup') {
+        this.replaceBetterDiscordDataCache(this.getName() + 'DataBackup', loaded.data);
+      }
+      this.reconcileDetachedArchivePresentation(presentationState, {
+        archiveBackedUpsertIds: new Set(),
+        closeChangedRecordViews: true
+      });
+      this.refreshArchiveLoadPresentation();
+      this.reportSettingState(
+        'Message Logger Recovery Bypass',
+        `Discarded the failed temporary no-save session and resumed normal saving from ${loaded.source} persisted data.`,
+        'The failed temporary session was discarded. Saved history was reloaded and new activity will save normally.',
+        'warning',
+        8000,
+        'system:no-save-flush-error'
+      );
+      this.notifyDataSaveModeTransitionChange();
+      return true;
+    } catch (error) {
+      this.settings.dontSaveData = true;
+      this._discardNoSaveSessionOnResume = true;
+      try { this.saveSettings(); } catch {}
+      this.reportNoSaveDataError('reloading the saved archive for the recovery bypass', error, true);
+      this.notifyDataSaveModeTransitionChange();
+      return false;
+    }
   }
   reportSettingState(title, consoleMessage, notificationMessage, type = 'info', timeout = 5000, replaceKey = null) {
     // High-impact settings use one routing point so console detail and the user's selected
@@ -6052,8 +6424,8 @@ module.exports = class MessageLoggerV2 {
         };
     this.reportSettingState(
       'Message Logger Data Saving',
-      `Data saving disabled; new logger additions will remain in memory and will not be written to disk. ${archiveBehavior.console} Pending ordinary primary and backup writes were cancelled.`,
-      `Data saving disabled. New additions stay in memory. ${archiveBehavior.notification}`,
+      `Data saving disabled; new logger additions will remain in memory, along with eligible media requests, and will not be written to disk. ${archiveBehavior.console} Pending ordinary primary, backup, and media writes were cancelled.`,
+      `Data saving disabled. New additions stay in memory; eligible media requests stay queued. ${archiveBehavior.notification}`,
       'neutral',
       5000,
       'setting:dontSaveData'
@@ -6096,7 +6468,9 @@ module.exports = class MessageLoggerV2 {
     };
     const state = feedback[settingId];
     if (!state) return;
-    const message = enabled ? state.enabled : state.disabled;
+    const message = settingId === 'cacheAllImages' && enabled && this.settings?.dontSaveData
+      ? 'Local media caching is enabled but paused while Disable saving data is On. Eligible logger media stays queued in memory until the primary archive save succeeds.'
+      : enabled ? state.enabled : state.disabled;
     this.reportSettingState(
       state.title,
       `High-impact setting changed (${settingId}=${enabled}): ${message}`,
@@ -6200,7 +6574,7 @@ module.exports = class MessageLoggerV2 {
     this.refreshArchiveLoadPresentation();
     return true;
   }
-  async mergeNoSaveSessionIntoPersistedData() {
+  async mergeNoSaveSessionIntoPersistedData(mergeGeneration = 0) {
     // Transaction order is intentional: load -> merge -> cap -> install -> primary -> backup.
     // The setting stays logically disabled until at least one complete primary write succeeds.
     if (!this._needsNoSaveDataMerge) return true;
@@ -6214,10 +6588,14 @@ module.exports = class MessageLoggerV2 {
     const writeEpoch = this._dataWriteEpoch;
     this._noSaveMergeInProgress = true;
     this._noSaveMergeDirty = false;
+    this.notifyDataSaveModeTransitionChange();
     const wasArchiveDetached = !!this._archiveDetached;
     let detachedOverlay = null;
     let loaded = null;
+    let primaryCommitted = false;
     let stage = 'loading persisted data';
+    const isCurrentMerge = () => !mergeGeneration
+      || mergeGeneration === (this._noSaveMergeGeneration || 0);
     try {
       if (wasArchiveDetached) {
         stage = 'capturing the temporary detached session';
@@ -6232,17 +6610,49 @@ module.exports = class MessageLoggerV2 {
           : this.mergeDataPayloads(loaded.data, this._getDataPayload())
       );
       this.installDataPayload(merged);
-      const shouldCommit = () => this.__started !== false && this._noSaveMergeInProgress && this._dataWriteEpoch === writeEpoch;
+      this._activeNoSaveMergeRollbackContext = {
+        mergeGeneration,
+        wasArchiveDetached,
+        archiveData: loaded.data,
+        detachedOverlay
+      };
+      const shouldCommit = () => this.__started !== false
+        && isCurrentMerge()
+        && this._noSaveMergeInProgress
+        && this._dataWriteEpoch === writeEpoch;
+      const writePrimaryWithRetries = async (data, options = {}) => {
+        const configuredAttempts = Number(this._dataSaveMaxAttempts);
+        const maxAttempts = Number.isInteger(configuredAttempts) && configuredAttempts > 0
+          ? configuredAttempts
+          : DATA_SAVE_MAX_ATTEMPTS;
+        const configuredDelay = Number(this._dataSaveRetryDelayMs);
+        const retryDelay = Number.isFinite(configuredDelay)
+          ? Math.max(0, configuredDelay)
+          : DATA_SAVE_RETRY_DELAY_MS;
+        let result = null;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          if (!isCurrentMerge()) return { ok: false, cancelled: true };
+          result = await this.writeDataPayloadAtomic(
+            this.getName() + 'Data',
+            data,
+            { ...options, notifyError: false, shouldCommit }
+          );
+          if (result.ok || result.cancelled || attempt === maxAttempts) return result;
+          Logger.warn(`No-save primary recovery write failed; retrying (${attempt}/${maxAttempts}).`, result.error);
+          if (retryDelay) await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
+        return result || { ok: false, error: new Error('Primary recovery write did not complete') };
+      };
       let attempts = 0;
       do {
         this._noSaveMergeDirty = false;
         stage = attempts ? 'saving session changes captured during recovery' : 'saving merged primary data';
-        const result = await this.writeDataPayloadAtomic(
-          this.getName() + 'Data',
+        const result = await writePrimaryWithRetries(
           this.cloneDataValue(this._getDataPayload()),
-          { notifyError: false, shouldCommit }
+          {}
         );
         if (result.cancelled) {
+          if (!isCurrentMerge()) return false;
           Logger.log('No-save data recovery was cancelled because saving was disabled again.');
           this._noSaveMergeInProgress = false;
           this.settings.dontSaveData = true;
@@ -6258,12 +6668,12 @@ module.exports = class MessageLoggerV2 {
       if (this._noSaveMergeDirty) {
         stage = 'final synchronous primary data write';
         this._noSaveMergeDirty = false;
-        const result = await this.writeDataPayloadAtomic(
-          this.getName() + 'Data',
+        const result = await writePrimaryWithRetries(
           this.cloneDataValue(this._getDataPayload()),
-          { synchronous: true, notifyError: false, shouldCommit }
+          { synchronous: true }
         );
         if (result.cancelled) {
+          if (!isCurrentMerge()) return false;
           this._noSaveMergeInProgress = false;
           this.settings.dontSaveData = true;
           if (wasArchiveDetached) this.restoreDetachedNoSaveAfterRecovery(loaded?.data, detachedOverlay);
@@ -6274,8 +6684,12 @@ module.exports = class MessageLoggerV2 {
         }
         if (!result.ok) throw result.error || new Error('Final atomic primary data write failed');
       }
+      if (!isCurrentMerge()) return false;
+      primaryCommitted = true;
       this._needsNoSaveDataMerge = false;
       this._noSaveMergeInProgress = false;
+      this._activeNoSaveMergeRollbackContext = null;
+      this._discardNoSaveSessionOnResume = false;
       this._archiveDetached = false;
       this._noSaveSessionOverlay = null;
       this._pendingNoSavePersistedRemovals = [];
@@ -6283,6 +6697,8 @@ module.exports = class MessageLoggerV2 {
       this.saveSettings();
       this.notifySettingDependencyChange('dontSaveData');
       this.notifySettingDependencyChange('dontLoadArchivedData');
+      this._flushMediaCacheAfterNextDataSave = false;
+      this.flushPendingMediaCacheRequests();
       if (this.settings.autoBackup) {
         stage = 'saving merged backup data';
         const backupResult = await this.writeDataPayloadAtomic(
@@ -6290,7 +6706,10 @@ module.exports = class MessageLoggerV2 {
           this.cloneDataValue(this._getDataPayload()),
           {
             notifyError: false,
-            shouldCommit: () => this.__started !== false && !this.settings.dontSaveData && this._dataWriteEpoch === writeEpoch
+            shouldCommit: () => this.__started !== false
+              && isCurrentMerge()
+              && !this.settings.dontSaveData
+              && this._dataWriteEpoch === writeEpoch
           }
         );
         if (backupResult.cancelled) {
@@ -6309,9 +6728,17 @@ module.exports = class MessageLoggerV2 {
       });
       return true;
     } catch (error) {
+      if (!isCurrentMerge()) return false;
       this._noSaveMergeInProgress = false;
-      this.settings.dontSaveData = true;
-      if (wasArchiveDetached) this.restoreDetachedNoSaveAfterRecovery(loaded?.data, detachedOverlay);
+      this.settings.dontSaveData = !primaryCommitted;
+      if (!primaryCommitted && wasArchiveDetached) {
+        this.restoreDetachedNoSaveAfterRecovery(loaded?.data, detachedOverlay);
+      }
+      this._activeNoSaveMergeRollbackContext = null;
+      if (!primaryCommitted
+        && /^saving (?:merged primary data|session changes captured during recovery)|^final synchronous primary data write/.test(stage)) {
+        this._discardNoSaveSessionOnResume = true;
+      }
       try {
         this.saveSettings();
       } catch (settingsError) {
@@ -6319,13 +6746,67 @@ module.exports = class MessageLoggerV2 {
       }
       this.notifySettingDependencyChange('dontSaveData');
       this.notifySettingDependencyChange('dontLoadArchivedData');
-      this.reportNoSaveDataError(stage, error, true);
+      this.reportNoSaveDataError(stage, error, !primaryCommitted);
       return false;
     }
   }
-  handleDataSaveSetting(disabled) {
+  beginDataSavePrimaryFlush() {
+    this._dataSavePrimaryFlushGeneration = (this._dataSavePrimaryFlushGeneration || 0) + 1;
+    this._dataSavePrimaryFlushInProgress = true;
+    this._dataSavePrimaryFlushAttempts = 0;
+    if (this._dataSavePrimaryFlushTimer) clearTimeout(this._dataSavePrimaryFlushTimer);
+    if (this._dataSavePrimaryRetryTimer) clearTimeout(this._dataSavePrimaryRetryTimer);
+    this._dataSavePrimaryRetryTimer = 0;
+    const generation = this._dataSavePrimaryFlushGeneration;
+    const configuredTimeout = Number(this._dataSaveTransitionTimeoutMs);
+    const timeout = Number.isFinite(configuredTimeout)
+      ? Math.max(1, configuredTimeout)
+      : DATA_SAVE_TRANSITION_TIMEOUT_MS;
+    this._dataSavePrimaryFlushTimer = setTimeout(() => {
+      if (!this._dataSavePrimaryFlushInProgress
+        || generation !== this._dataSavePrimaryFlushGeneration) return;
+      const error = new Error(`Primary session flush timed out after ${timeout}ms`);
+      error.code = 'MLV2_DATA_SAVE_TIMEOUT';
+      this.cancelPendingDataWrites();
+      this.finishDataSavePrimaryFlush(generation, false, error);
+    }, timeout);
+    this.notifyDataSaveModeTransitionChange();
+    return generation;
+  }
+  finishDataSavePrimaryFlush(generation, succeeded, error = null) {
+    if (!generation
+      || !this._dataSavePrimaryFlushInProgress
+      || generation !== this._dataSavePrimaryFlushGeneration) return false;
+    if (this._dataSavePrimaryFlushTimer) clearTimeout(this._dataSavePrimaryFlushTimer);
+    if (this._dataSavePrimaryRetryTimer) clearTimeout(this._dataSavePrimaryRetryTimer);
+    this._dataSavePrimaryFlushTimer = 0;
+    this._dataSavePrimaryRetryTimer = 0;
+    if (!succeeded && this.__started !== false) {
+      // Fail closed, but do not trap the user in a session that repeatedly refuses to commit.
+      // The next Off request uses the explicit archive-reload bypass instead of flushing again.
+      this.markNoSaveSessionForDiscard(
+        error?.code === 'MLV2_DATA_SAVE_TIMEOUT'
+          ? 'waiting for the primary session flush to finish'
+          : 'saving the primary session data',
+        error || new Error('Primary session flush was cancelled'),
+        true
+      );
+    } else if (succeeded) {
+      this._discardNoSaveSessionOnResume = false;
+    }
+    this._dataSavePrimaryFlushInProgress = false;
+    this._dataSavePrimaryFlushAttempts = 0;
+    this.notifyDataSaveModeTransitionChange();
+    return true;
+  }
+  handleDataSaveSetting(disabled, options = {}) {
+    if (!options.acceptedTransition && this.isDataSaveModeTransitionBusy()) {
+      this.notifyDataSaveModeTransitionChange();
+      return false;
+    }
     if (disabled) {
       const hadPendingBackup = !!this.saveBackupTimeout;
+      this.cancelPendingMediaCacheWrites();
       this.cancelPendingDataWrites();
       if (this.settings.dontLoadArchivedData && !this.detachArchivedDataFromMemory()) {
         // The parent transition remains safely in no-save mode. Roll back only the child so its
@@ -6338,7 +6819,10 @@ module.exports = class MessageLoggerV2 {
       if (hadPendingBackup) {
         this.reportDebugEvent('Pending automatic backup cancelled because data saving was disabled.');
       }
-      return;
+      return true;
+    }
+    if (this._discardNoSaveSessionOnResume) {
+      return this.discardNoSaveSessionAndResumeSaving();
     }
     const removalFlush = this.flushNoSavePersistedRemovals();
     if (!removalFlush.ok) {
@@ -6346,13 +6830,14 @@ module.exports = class MessageLoggerV2 {
       // remains queued, saving stays disabled, and the routed error explains how to retry.
       this.settings.dontSaveData = true;
       this.saveSettings();
-      return;
+      return false;
     }
     if (!this._needsNoSaveDataMerge) {
       this.reportDataSavingResume(false);
+      this._flushMediaCacheAfterNextDataSave = true;
+      this.beginDataSavePrimaryFlush();
       this.saveData();
-      if (this.settings.autoBackup) this.saveBackup();
-      return;
+      return true;
     }
     this.settings.dontSaveData = true;
     this.saveSettings();
@@ -6360,9 +6845,141 @@ module.exports = class MessageLoggerV2 {
     this.notifySettingDependencyChange('dontLoadArchivedData');
     if (!this._noSaveMergePromise) {
       this.reportDataSavingResume(true);
-      this._noSaveMergePromise = this.mergeNoSaveSessionIntoPersistedData()
-        .finally(() => { this._noSaveMergePromise = null; });
+      const mergeGeneration = (this._noSaveMergeGeneration || 0) + 1;
+      this._noSaveMergeGeneration = mergeGeneration;
+      const configuredTimeout = Number(this._dataSaveTransitionTimeoutMs);
+      const timeout = Number.isFinite(configuredTimeout)
+        ? Math.max(1, configuredTimeout)
+        : DATA_SAVE_TRANSITION_TIMEOUT_MS;
+      const operation = this.mergeNoSaveSessionIntoPersistedData(mergeGeneration);
+      let mergeTimeoutTimer = 0;
+      const timed = new Promise(resolve => {
+        mergeTimeoutTimer = setTimeout(() => {
+          if (mergeGeneration !== this._noSaveMergeGeneration || !this._noSaveMergeInProgress) {
+            resolve(false);
+            return;
+          }
+          const error = new Error(`No-save recovery timed out after ${timeout}ms`);
+          error.code = 'MLV2_DATA_SAVE_TIMEOUT';
+          const rollback = this._activeNoSaveMergeRollbackContext;
+          this._noSaveMergeGeneration++;
+          this._noSaveMergeInProgress = false;
+          this.cancelPendingDataWrites();
+          if (rollback?.wasArchiveDetached) {
+            this.restoreDetachedNoSaveAfterRecovery(rollback.archiveData, rollback.detachedOverlay);
+          }
+          this._activeNoSaveMergeRollbackContext = null;
+          this.markNoSaveSessionForDiscard('waiting for no-save recovery to finish', error, true);
+          this.notifyDataSaveModeTransitionChange();
+          resolve(false);
+        }, timeout);
+        this._noSaveMergeTimeoutTimer = mergeTimeoutTimer;
+      });
+      const trackedPromise = Promise.race([operation, timed])
+        .finally(() => {
+          if (mergeTimeoutTimer) clearTimeout(mergeTimeoutTimer);
+          if (this._noSaveMergeTimeoutTimer === mergeTimeoutTimer) {
+            this._noSaveMergeTimeoutTimer = 0;
+          }
+          if (this._noSaveMergePromise === trackedPromise) this._noSaveMergePromise = null;
+          this.notifyDataSaveModeTransitionChange();
+        });
+      this._noSaveMergePromise = trackedPromise;
     }
+    return true;
+  }
+  cancelPendingMediaCacheWrites() {
+    this._mediaCacheWriteEpoch = (this._mediaCacheWriteEpoch || 0) + 1;
+    for (const controller of this._mediaCacheAbortControllers || []) {
+      try { controller.abort(); } catch {}
+    }
+    this._mediaCacheAbortControllers?.clear?.();
+  }
+  canCacheMediaLocally(writeEpoch = this._mediaCacheWriteEpoch || 0) {
+    return this.__started !== false
+      && !this.settings?.dontSaveData
+      && !!this.settings?.cacheAllImages
+      && writeEpoch === (this._mediaCacheWriteEpoch || 0);
+  }
+  handleMediaCachingSetting(enabled) {
+    if (!enabled) {
+      this.cancelPendingMediaCacheWrites();
+      this._pendingMediaCacheRequests?.clear?.();
+      this._activeDeferredMediaCacheRequests?.clear?.();
+      this._flushMediaCacheAfterNextDataSave = false;
+      this.notifyDataSaveModeTransitionChange();
+    }
+    this.reportMajorSettingChange('cacheAllImages', enabled);
+  }
+  getMediaCacheRequestKey(request) {
+    return JSON.stringify([String(request.messageId), request.attachmentId, String(request.url)]);
+  }
+  isDeferredMediaCacheRequestActive(url, attachmentId, messageId) {
+    return !!this._activeDeferredMediaCacheRequests?.has?.(this.getMediaCacheRequestKey({
+      url,
+      attachmentId,
+      messageId
+    }));
+  }
+  reportDeferredMediaCacheFailure(attachmentId, reason) {
+    Logger.error(`Deferred media cache request ${attachmentId} could not be completed.`, reason);
+    this.notifyUser?.(
+      'Saved logger data is safe, but one queued media file could not be cached after its retries completed.',
+      {
+        title: 'Message Logger Media Cache Error',
+        type: 'error',
+        timeout: 8000,
+        replaceKey: 'system:deferred-media-cache-error'
+      }
+    );
+  }
+  queuePendingMediaCacheRequest(url, attachmentIdx, attachmentId, messageId, channelId, serverId) {
+    if (!this.settings?.cacheAllImages || !url || !messageId) return false;
+    const request = {
+      url: String(url),
+      attachmentIdx,
+      attachmentId,
+      messageId: String(messageId),
+      channelId,
+      serverId
+    };
+    const key = this.getMediaCacheRequestKey(request);
+    (this._pendingMediaCacheRequests ||= new Map()).set(key, request);
+    return true;
+  }
+  flushPendingMediaCacheRequests() {
+    if (!this.canCacheMediaLocally() || !this._pendingMediaCacheRequests?.size) return 0;
+    const writeEpoch = this._mediaCacheWriteEpoch || 0;
+    let started = 0;
+    for (const [key, request] of Array.from(this._pendingMediaCacheRequests.entries())) {
+      this._pendingMediaCacheRequests.delete(key);
+      // A session record removed before the successful primary commit must not leave an
+      // orphaned file behind. Every replayable queue entry belongs to a current logger record.
+      if (!this.messageRecord?.[request.messageId]) continue;
+      if (this._activeDeferredMediaCacheRequests?.has?.(key)) continue;
+      started++;
+      const activeRequest = { request, writeEpoch };
+      (this._activeDeferredMediaCacheRequests ||= new Map()).set(key, activeRequest);
+      Promise.resolve(this.cacheImage(
+        request.url,
+        request.attachmentIdx,
+        request.attachmentId,
+        request.messageId,
+        request.channelId,
+        request.serverId,
+        0,
+        writeEpoch
+      )).catch(error => {
+        Logger.error(`Deferred media cache request failed for ${request.attachmentId}:`, error);
+      }).finally(() => {
+        if (this._activeDeferredMediaCacheRequests?.get?.(key) === activeRequest) {
+          this._activeDeferredMediaCacheRequests.delete(key);
+          this.notifyDataSaveModeTransitionChange();
+        }
+      });
+    }
+    if (started) this.notifyDataSaveModeTransitionChange();
+    return started;
   }
   cleanUpStaleDataTempFiles() {
     try {
@@ -6398,31 +7015,75 @@ module.exports = class MessageLoggerV2 {
     }
   }
   handleDataSaving(scheduleBackup = true, synchronous = false) {
+    const primaryFlushGeneration = this._dataSavePrimaryFlushInProgress
+      ? this._dataSavePrimaryFlushGeneration
+      : 0;
     if (!this.handleDataSaving.errorPageClass) {
       const errorPageModule = DiscordModules.ErrorPageClasses;
       this.handleDataSaving.errorPageClass = errorPageModule?.errorPage ? ('.' + errorPageModule.errorPage) : '.error-page-not-found';
     }
     if (this.settings.dontSaveData && !this._noSaveMergeInProgress) {
       this.requestedDataSave = 0;
+      this.finishDataSavePrimaryFlush(
+        primaryFlushGeneration,
+        false,
+        new Error('Primary session flush was cancelled because saving became disabled')
+      );
       return;
     }
-    if (!this.messageRecord || document.querySelector(this.handleDataSaving.errorPageClass)) return;
+    if (!this.messageRecord || document.querySelector(this.handleDataSaving.errorPageClass)) {
+      this.requestedDataSave = 0;
+      this.finishDataSavePrimaryFlush(
+        primaryFlushGeneration,
+        false,
+        new Error('Primary session flush could not run while the logger data view was unavailable')
+      );
+      return;
+    }
     // Empty state uses the same complete-payload atomic path instead of BdApi.Data.delete(),
     // so clearing the last record cannot reintroduce a non-atomic persistence branch.
     const payload = !Object.keys(this.messageRecord).length && !this.suppressedForumThreadIds?.size
       ? this.createDefaultDataPayload()
       : this._getDataPayload();
     const writeEpoch = this._dataWriteEpoch || 0;
+    if (primaryFlushGeneration) this._dataSavePrimaryFlushAttempts++;
     const callback = (err, cancelled = false) => {
+      const ownsPrimaryFlush = !primaryFlushGeneration || (
+        this._dataSavePrimaryFlushInProgress
+        && primaryFlushGeneration === this._dataSavePrimaryFlushGeneration
+      );
+      // An old callback can arrive after a timeout or lifecycle cancellation. It owns neither
+      // the newer transition nor its debounce handle, media queue, or saved setting.
+      if (!ownsPrimaryFlush) return;
       if (err) {
-        this.notifyUser('There has been an error saving the data file. View the console log for details.', {
-          title: 'Message Logger Data Saving Error',
-          type: 'error',
-          replaceKey: 'system:data-save-error'
-        });
         Logger.error('There has been an error saving the data file', err);
+        const configuredAttempts = Number(this._dataSaveMaxAttempts);
+        const maxAttempts = Number.isInteger(configuredAttempts) && configuredAttempts > 0
+          ? configuredAttempts
+          : DATA_SAVE_MAX_ATTEMPTS;
+        if (primaryFlushGeneration && this._dataSavePrimaryFlushAttempts < maxAttempts) {
+          const configuredDelay = Number(this._dataSaveRetryDelayMs);
+          const retryDelay = Number.isFinite(configuredDelay)
+            ? Math.max(0, configuredDelay)
+            : DATA_SAVE_RETRY_DELAY_MS;
+          this.requestedDataSave = 0;
+          this._dataSavePrimaryRetryTimer = setTimeout(() => {
+            this._dataSavePrimaryRetryTimer = 0;
+            if (!this._dataSavePrimaryFlushInProgress
+              || primaryFlushGeneration !== this._dataSavePrimaryFlushGeneration) return;
+            this.handleDataSaving(scheduleBackup, synchronous);
+          }, retryDelay);
+          return;
+        }
+        if (!primaryFlushGeneration) {
+          this.notifyUser('There has been an error saving the data file. View the console log for details.', {
+            title: 'Message Logger Data Saving Error',
+            type: 'error',
+            replaceKey: 'system:data-save-error'
+          });
+        }
       }
-      if (!cancelled && scheduleBackup && this.settings.autoBackup) {
+      if (!err && !cancelled && scheduleBackup && this.settings.autoBackup) {
         const hadPendingBackup = !!this.saveBackupTimeout;
         if (hadPendingBackup) this.autoBackupSaveInterupts++;
         if (this.autoBackupSaveInterupts < 4) {
@@ -6433,7 +7094,19 @@ module.exports = class MessageLoggerV2 {
           );
         }
       }
+      if (!err
+        && !cancelled
+        && this._flushMediaCacheAfterNextDataSave
+        && !this.settings.dontSaveData) {
+        this._flushMediaCacheAfterNextDataSave = false;
+        this.flushPendingMediaCacheRequests();
+      }
       this.requestedDataSave = 0;
+      this.finishDataSavePrimaryFlush(
+        primaryFlushGeneration,
+        !err && !cancelled,
+        err || (cancelled ? new Error('Primary session flush was cancelled') : null)
+      );
     };
     this.efficientlySaveData(
       this.getName() + 'Data',
@@ -6838,7 +7511,11 @@ module.exports = class MessageLoggerV2 {
       record.message = structuredClone(current);
     }
     const hasNewMedia = Array.from(this.getMessageMediaCacheKeys(current)).some(key => !previousMediaKeys.has(key));
-    if (hasNewMedia && this.settings.cacheAllImages) this.cacheMessageImages(current);
+    if (hasNewMedia && this.settings.cacheAllImages) {
+      this.cacheMessageImages(current, {
+        queueWhileNoSave: records.some(Boolean) || !!this.messageRecord?.[current.id]
+      });
+    }
     return current;
   }
   getStickerMedia(sticker) {
@@ -8290,6 +8967,12 @@ module.exports = class MessageLoggerV2 {
   canJumpToSavedRecord(record, presentationCategory = null) {
     const message = record?.message;
     if (!message?.channel_id || record?.delete_data?.anti_nuke || this.isSavedRecordHidden(record)) return false;
+    const hasSavedArchiveState = !!(record.delete_data || record.edit_history || record.ghost_pinged);
+    // Logger rows, attachment menus, and context menus can hold a record object across a hot
+    // archive detach. Reject that stale object unless it is still this runtime's canonical
+    // record. Pending event alerts and Sent history use lightweight non-archive fallbacks and
+    // keep their existing click-time behavior.
+    if (hasSavedArchiveState && this.messageRecord?.[message.id] !== record) return false;
     // Every Jump affordance funnels through this method, including logger rows, injected
     // context menus, attachment menus, event notifications, and the final click handler.
     // Keep records in Logger while their corresponding live presentation is disabled.
@@ -9708,9 +10391,12 @@ module.exports = class MessageLoggerV2 {
                                 </div>
                                 <strong>No-save archive:</strong></br>
                                 <div class="${this.style.textIndent}">
-                                    <span style="color: var(--text-warning, var(--status-warning));"><strong>Disable saving data</strong></span> keeps new activity temporary. Its linked <strong>Disable loading archived data</strong> setting can hot-unload saved history while leaving the archive unchanged on disk.</br>
+                                    <span style="color: var(--text-warning, var(--status-warning));"><strong>Disable saving data</strong></span> keeps every new log addition and eligible media request in memory without writing files. Loaded archive cleanup still writes through.</br>
+                                    Its linked <strong>Disable loading archived data</strong> setting can hot-unload saved history while leaving the archive unchanged on disk.</br>
                                     While the parent is ${this.formatHelpStateLabel(false)}, the child also displays ${this.formatHelpStateLabel(false)} but keeps its saved preference.</br>
-                                    Disabling the child reloads and combines the archive in memory without writing. Re-enabling saving merges the temporary session into the archive; reload or plugin disable discards temporary activity.
+                                    Disabling the child reloads and combines the archive in memory without writing. Archive and temporary records keep their normal View, Hide, Delete, and eligible Jump actions while loaded.</br>
+                                    Re-enabling saving merges the temporary session into the archive, then downloads queued media only after the primary save succeeds. The affected controls grey out and pulse warning orange until save/media or archive-view work settles. Reload or plugin disable discards temporary activity and its media queue.</br>
+                                    If the primary flush exhausts three attempts or its timeout, a persistent error appears. Turning Disable saving data ${this.formatHelpStateLabel(false)} again bypasses that failed session, reloads the last valid archive, and resumes normal saving.
                                 </div>
                                 <strong>Toasts:</strong></br>
                                 <div class="${this.style.textIndent}">
@@ -10297,23 +10983,96 @@ module.exports = class MessageLoggerV2 {
     if (!record) return this.cachedMessageRecord.find(m => m.id == id);
     return record.message;
   }
-  async cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts = 0) {
-    if (this.cacheDeletionMessageIds.has(messageId)) return;
+  async fetchMediaCacheResponse(url) {
+    const configuredTimeout = Number(this._mediaCacheFetchTimeoutMs);
+    const timeoutMs = Number.isFinite(configuredTimeout)
+      ? Math.max(1, configuredTimeout)
+      : MEDIA_CACHE_FETCH_TIMEOUT_MS;
+    const AbortControllerClass = globalThis.AbortController;
+    if (typeof AbortControllerClass !== 'function') {
+      let timeout;
+      try {
+        return await Promise.race([
+          fetch(url),
+          new Promise((_, reject) => {
+            timeout = setTimeout(() => {
+              const error = new Error('Media cache request timed out');
+              error.name = 'AbortError';
+              reject(error);
+            }, timeoutMs);
+          })
+        ]);
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    const controller = new AbortControllerClass();
+    (this._mediaCacheAbortControllers ||= new Set()).add(controller);
+    let timeout;
+    let rejectAborted;
+    const aborted = new Promise((_, reject) => { rejectAborted = reject; });
+    const onAbort = () => {
+      const error = new Error('Media cache request was cancelled');
+      error.name = 'AbortError';
+      rejectAborted(error);
+    };
+    controller.signal.addEventListener('abort', onAbort, { once: true });
+    timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(url);
+      return await Promise.race([fetch(url, { signal: controller.signal }), aborted]);
+    } finally {
+      clearTimeout(timeout);
+      controller.signal.removeEventListener('abort', onAbort);
+      this._mediaCacheAbortControllers?.delete?.(controller);
+    }
+  }
+  async cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts = 0, writeEpoch = this._mediaCacheWriteEpoch || 0) {
+    if (this.settings?.dontSaveData) {
+      if (writeEpoch === (this._mediaCacheWriteEpoch || 0)) {
+        this.queuePendingMediaCacheRequest(url, attachmentIdx, attachmentId, messageId, channelId, serverId);
+      }
+      return;
+    }
+    if (!this.canCacheMediaLocally(writeEpoch)) return;
+    if (this.cacheDeletionMessageIds.has(messageId)) return;
+    const configuredAttempts = Number(this._mediaCacheMaxAttempts);
+    const maxAttempts = Number.isInteger(configuredAttempts) && configuredAttempts > 0
+      ? configuredAttempts
+      : MEDIA_CACHE_MAX_ATTEMPTS;
+    const configuredRetryDelay = Number(this._mediaCacheRetryDelayMs);
+    const retryDelay = Number.isFinite(configuredRetryDelay)
+      ? Math.max(0, configuredRetryDelay)
+      : MEDIA_CACHE_RETRY_DELAY_MS;
+    try {
+      const response = await this.fetchMediaCacheResponse(url);
+      if (!this.canCacheMediaLocally(writeEpoch)) return;
       if (!response.ok) {
         if (response.status === 404 || response.status === 403) {
           Logger.warn(`Image ${attachmentId} unavailable (${response.status}), skipping cache`);
+          if (this.isDeferredMediaCacheRequestActive(url, attachmentId, messageId)) {
+            this.reportDeferredMediaCacheFailure(
+              attachmentId,
+              new Error(`Remote media returned HTTP ${response.status}`)
+            );
+          }
           return;
         }
         attempts++;
-        if (attempts > 3) {
+        if (attempts >= maxAttempts) {
           Logger.warn(`Failed to get image ${attachmentId} for caching, error code ${response.status}`);
+          if (this.isDeferredMediaCacheRequestActive(url, attachmentId, messageId)) {
+            this.reportDeferredMediaCacheFailure(
+              attachmentId,
+              new Error(`Remote media returned HTTP ${response.status}`)
+            );
+          }
           return;
         }
-        return setTimeout(() => this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts), 1000);
+        if (retryDelay) await new Promise(resolve => setTimeout(resolve, retryDelay));
+        return this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts, writeEpoch);
       }
       const arrayBuffer = await response.arrayBuffer();
+      if (!this.canCacheMediaLocally(writeEpoch)) return;
       const finalData = new Uint8Array(arrayBuffer);
       let match = /\.[0-9a-z]+$/i.exec(new URL(url).pathname);
       if (match == null) {
@@ -10322,9 +11081,16 @@ module.exports = class MessageLoggerV2 {
       const fileExtension = match[0];
       if (!fileExtension) {
         Logger.warn(`Could not determine file extension for ${attachmentId}, skipping cache`);
+        if (this.isDeferredMediaCacheRequestActive(url, attachmentId, messageId)) {
+          this.reportDeferredMediaCacheFailure(
+            attachmentId,
+            new Error('The media file type could not be determined')
+          );
+        }
         return;
       }
       if (this.cacheDeletionMessageIds.has(messageId)) return;
+      if (!this.canCacheMediaLocally(writeEpoch)) return;
       if (!Number(attachmentId)) attachmentId = messageId;
       const filePath = this.imageCacheServerSimulator.resolveNewCachePath({ channelId: channelId, serverId: serverId });
       this.nodeModules.fs.mkdirSync(filePath, { recursive: true });
@@ -10333,12 +11099,17 @@ module.exports = class MessageLoggerV2 {
       })${fileExtension}`, finalData, { encoding: null });
       Logger.log(`Cached image: ${attachmentId}${fileExtension}`);
     } catch (e) {
+      if (!this.canCacheMediaLocally(writeEpoch)) return;
       attempts++;
-      if (attempts > 3) {
+      if (attempts >= maxAttempts) {
         Logger.error(`Failed to cache image ${attachmentId}:`, e.message);
+        if (this.isDeferredMediaCacheRequestActive(url, attachmentId, messageId)) {
+          this.reportDeferredMediaCacheFailure(attachmentId, e);
+        }
         return;
       }
-      setTimeout(() => this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts), 1000);
+      if (retryDelay) await new Promise(resolve => setTimeout(resolve, retryDelay));
+      return this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts, writeEpoch);
     }
   }
   contentTypeToExtension(contentType) {
@@ -10359,8 +11130,9 @@ module.exports = class MessageLoggerV2 {
     }
     return '';
   }
-  cacheMessageImages(message) {
-    setTimeout(() => {
+  cacheMessageImages(message, options = {}) {
+    const writeEpoch = this._mediaCacheWriteEpoch || 0;
+    const processMedia = callback => {
       const attachments = message.attachments || [];
       const embeds = message.embeds || [];
       const stickers = this.getMessageStickerItems(message);
@@ -10372,19 +11144,49 @@ module.exports = class MessageLoggerV2 {
           continue;
         }
         if (this.isImage(attachment.url) || this.settings.newSaveAllFileTypes) {
-          this.cacheImage(attachment.url, i, attachment.id, message.id, message.channel_id, message.guild_id);
+          callback(attachment.url, i, attachment.id);
         }
       }
       for (let i = 0; i < embeds.length; i++) {
         if (!embeds[i].image) continue;
         const embed = embeds[i].image;
-        this.cacheImage(embed.url, i, embed.url.split("/")[embed.url.split("/").length - 2], message.id, message.channel_id, message.guild_id);
+        callback(embed.url, i, embed.url.split("/")[embed.url.split("/").length - 2]);
       }
       for (let i = 0; i < stickers.length; i++) {
         const sticker = this.getStickerMedia(stickers[i]);
         if (!sticker) continue;
-        this.cacheImage(sticker.url, i, sticker.id, message.id, message.channel_id, message.guild_id);
+        callback(sticker.url, i, sticker.id);
       }
+    };
+    if (this.settings?.dontSaveData) {
+      if (options.queueWhileNoSave === false || !this.settings.cacheAllImages) return;
+      processMedia((url, attachmentIdx, attachmentId) => {
+        this.queuePendingMediaCacheRequest(
+          url,
+          attachmentIdx,
+          attachmentId,
+          message.id,
+          message.channel_id,
+          message.guild_id
+        );
+      });
+      return;
+    }
+    if (!this.canCacheMediaLocally(writeEpoch)) return;
+    setTimeout(() => {
+      if (!this.canCacheMediaLocally(writeEpoch)) return;
+      processMedia((url, attachmentIdx, attachmentId) => {
+        this.cacheImage(
+          url,
+          attachmentIdx,
+          attachmentId,
+          message.id,
+          message.channel_id,
+          message.guild_id,
+          0,
+          writeEpoch
+        );
+      });
     }, 0);
   }
   getForumThreadRecordIds(threadId) {
@@ -11771,7 +12573,7 @@ module.exports = class MessageLoggerV2 {
         return callDefault(...args);
       } else if (dispatch.type == 'MESSAGE_CREATE' && this.hasSupportedMessagePayload(dispatch.message) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20)) {
         if (this._cacheIncomingMessage(dispatch.message)) return callDefault(...args);
-        if (this.settings.cacheAllImages) this.cacheMessageImages(dispatch.message);
+        if (this.settings.cacheAllImages) this.cacheMessageImages(dispatch.message, { queueWhileNoSave: false });
         this._ensureChannelCached(channel.id);
         if (this._shouldShowToast(channel, guild, 'sent', isLocalUser)) {
           this._notifyEventOnce('sent', 'sent', [dispatch.message.id], channel, guild, dispatch.message.id);
