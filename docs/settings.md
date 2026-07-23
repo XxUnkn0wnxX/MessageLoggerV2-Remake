@@ -37,7 +37,7 @@ The whitelist and blacklist are managed from the **Message Logger** submenu in s
 | --- | --- | --- |
 | Ignore muted servers | On | Skips muted servers unless another scope rule overrides it. |
 | Ignore muted channels | On | Skips muted channels unless the channel is whitelisted or an override applies. |
-| Ignore bots | On | Skips bot-authored, app/interaction, and webhook messages in ordinary logging and Anti-Nuke capture. Their non-ephemeral embeds and Components V2 payloads remain supported when this is off; ephemeral messages are never logged. |
+| Ignore bots | On | Skips future ordinary captures of bot-authored, app/interaction, and webhook messages. It never hides saved records or affects Anti-Nuke; non-ephemeral embeds and Components V2 remain supported. |
 | Ignore messages posted by you | Off | Applies author filtering per message, including messages inside forums and threads. |
 | Ignore message edits from you | Off | Skips edit-history logging for your messages while keeping their current deletion baseline updated. |
 | Ignore message deletes from you | Off | Skips deletion actions initiated by the local client. For a locally deleted forum post or thread, the root deletion is not logged. |
@@ -47,6 +47,8 @@ The whitelist and blacklist are managed from the **Message Logger** submenu in s
 | Always log selected channel | On | Logs the selected channel regardless of normal scope rules. Selecting a parent channel also covers its child threads. |
 | Always log DMs | On | Logs DMs regardless of normal scope rules. |
 | Always log ghost pings | Off | Watches ignored locations for ghost pings from edits or individual deletes and only persists the message if it becomes a ghost ping. Bulk purges are not covered. |
+
+Ordinary author ignores are capture-time filters. Enabling **Ignore bots**, **Ignore messages posted by you**, or **Ignore blocked users** affects future ordinary events only; it never hides, unmounts, or removes records that are already saved. The display switches and each record's **Hidden** state control saved-record presentation. Anti Nuke bypasses all ordinary ignores.
 
 `Ignore messages posted by you` and `Ignore message deletes from you` answer different questions: the first checks who authored each message; the second checks whether the deletion was initiated locally.
 
@@ -202,7 +204,7 @@ All three caps apply to one parent-channel deletion event:
 - Thread/forum roots, then their replies, then ordinary parent-channel messages are captured newest-first.
 - Anti-Nuke channel-thread roots use the same metadata and starter-body schema as ordinary deleted threads; their dedicated Nuked category and marker keep them separate from ordinary bulk deletes.
 - Attachments count only after their message is admitted. Excluded messages never store attachments; roots remain even if their attachments exceed the budget.
-- Anti Nuke bypasses normal logging scope and unrelated author ignores, but follows **Ignore bots** for bot/app/webhook messages. Ephemeral messages are always excluded.
+- Anti Nuke bypasses normal logging scope and unrelated author ignores. Ordinarily ignored bot/app/webhook messages and hidden records are still eligible for Anti-Nuke capture when present in deleted-channel history. Ephemeral messages are always excluded.
 - Hidden Nuked records remain in **Hidden** while Anti Nuke is off. Unhiding one keeps it stored and makes it visible again when Anti Nuke is re-enabled.
 - Blank or `0` is unlimited and can freeze Discord or use substantial disk space on large channels.
 

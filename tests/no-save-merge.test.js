@@ -968,6 +968,48 @@ test('reattach rendering cannot dirty archived live records or retain them on th
   assert.deepEqual(Object.keys(plugin.messageRecord), []);
 });
 
+test('saved Deleted and Purged records stay mounted after ordinary author ignores are enabled', () => {
+  const botId = '100';
+  const selfId = '101';
+  const blockedId = '102';
+  const botRecord = record(botId, 'channel', { delete_data: { time: 100 } });
+  botRecord.message.author = { id: 'bot', bot: true };
+  botRecord.message.webhook_id = 'webhook';
+  const selfRecord = record(selfId, 'channel', { delete_data: { time: 101 } });
+  selfRecord.message.author = { id: 'local' };
+  const blockedRecord = record(blockedId, 'channel', { delete_data: { time: 102 } });
+  blockedRecord.message.author = { id: 'blocked' };
+
+  const plugin = createPlugin({
+    settings: {
+      ignoreBots: true,
+      ignoreSelf: true,
+      ignoreBlockedUsers: true,
+      onlyRenderCachedAttachments: false
+    },
+    messageRecord: {
+      [botId]: botRecord,
+      [selfId]: selfRecord,
+      [blockedId]: blockedRecord
+    },
+    deletedMessageRecord: { channel: [botId, selfId] },
+    purgedMessageRecord: { channel: [blockedId] },
+    tools: { getUser: () => null },
+    shouldIgnoreMessageAuthor() {
+      throw new Error('saved-record presentation must not apply ordinary author ignores');
+    },
+    shouldIgnoreSelfMessage() {
+      throw new Error('saved-record presentation must not apply the local-author ignore');
+    }
+  });
+
+  const mountedMessages = [];
+  plugin.reAddDeletedMessages(mountedMessages, plugin.deletedMessageRecord.channel, true, true);
+  plugin.reAddDeletedMessages(mountedMessages, plugin.purgedMessageRecord.channel, true, true);
+
+  assert.deepEqual(mountedMessages.map(message => message.id), [blockedId, selfId, botId]);
+});
+
 test('raw embed-only deleted records render from a clone and detach without touching session or disk state', t => {
   const pluginDir = temporaryDirectory(t);
   const filePath = path.join(pluginDir, 'MessageLoggerV2Data.config.json');

@@ -96,7 +96,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 - Thread/forum-root, total-message, and attachment caps are separate and apply newest-first.
 - Channel-thread snapshots use the same folded starter/root schema as ordinary thread deletion; Anti-Nuke adds archival markers without changing the captured thread metadata or reply boundaries.
 - Root records bypass the total-message budget but their attachments still consume the attachment budget.
-- Anti-Nuke intentionally overrides normal logging scope and unrelated author ignores. It still follows **Ignore bots** for bot/app/webhook messages, and ephemeral messages are always excluded.
+- Anti-Nuke intentionally overrides normal logging scope and unrelated author ignores. Ordinary ignores do not apply to adopted or captured channel-deletion snapshots, while ephemeral messages are always excluded.
 - The Nuked tab is conditional on that switch. Disabling it hides the view only; records and Hidden-tab state remain persisted.
 - Parent channels no longer exist, so Anti-Nuke records do not offer impossible jump actions.
 

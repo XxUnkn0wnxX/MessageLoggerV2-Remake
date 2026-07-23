@@ -87,7 +87,7 @@ test('Anti-Nuke excludes thread-created system and unsupported messages', () => 
   assert.equal(plugin.shouldCaptureDeletedChannelMessage({ id: '7', channel_id: 'c', type: 0, flags: 32768 }), true);
 });
 
-test('Anti-Nuke ignores automated messages but retains rich human Components V2 captures', () => {
+test('Anti-Nuke ignores ordinary Ignore bots gates for channel snapshots', () => {
   const plugin = createPlugin({
     settings: { ignoreBots: true },
     tools: {
@@ -116,7 +116,7 @@ test('Anti-Nuke ignores automated messages but retains rich human Components V2 
   for (const [index, automated] of automatedMessages.entries()) {
     assert.equal(
       plugin.shouldCaptureDeletedChannelMessage({ id: `automated-${index}`, channel_id: 'c', type: 0, ...richPayload, ...automated }),
-      false,
+      true,
       JSON.stringify(automated)
     );
   }
@@ -133,10 +133,10 @@ test('Anti-Nuke ignores automated messages but retains rich human Components V2 
   );
 });
 
-test('Anti-Nuke captures automated rich payloads unchanged when Ignore bots is disabled', () => {
+test('Anti-Nuke captures automated rich payloads unchanged', () => {
   let savedMessage = null;
   const plugin = createPlugin({
-    settings: { ignoreBots: false },
+    settings: { ignoreBots: true },
     messageRecord: {},
     deletedMessageRecord: {},
     nukedMessageRecord: {},
@@ -728,7 +728,7 @@ test('deleted-channel capture adopts visible and hidden Deleted/Purged records i
   assert.equal(plugin.deletedMessageSet.get(threadId)?.size || 0, 0);
 });
 
-test('Anti-Nuke adoption follows Ignore bots but never adopts ephemeral records', () => {
+test('Anti-Nuke adoption ignores Ignore bots gates but never adopts ephemeral records', () => {
   const parentId = '700';
   const humanId = '701';
   const webhookId = '702';
@@ -764,12 +764,12 @@ test('Anti-Nuke adoption follows Ignore bots but never adopts ephemeral records'
     tools: { getChannel: () => null, getUser: () => null }
   });
 
-  assert.equal(plugin.adoptSavedRecordsForDeletedChannel({ id: parentId }), 1);
-  assert.deepEqual(plugin.nukedMessageRecord, { [parentId]: [humanId] });
-  assert.deepEqual(plugin.deletedMessageRecord, { [parentId]: [webhookId, ephemeralId] });
+  assert.equal(plugin.adoptSavedRecordsForDeletedChannel({ id: parentId }), 2);
+  assert.deepEqual(plugin.nukedMessageRecord, { [parentId]: [humanId, webhookId] });
+  assert.deepEqual(plugin.deletedMessageRecord, { [parentId]: [ephemeralId] });
 
   plugin.settings.ignoreBots = false;
-  assert.equal(plugin.adoptSavedRecordsForDeletedChannel({ id: parentId }), 1);
+  assert.equal(plugin.adoptSavedRecordsForDeletedChannel({ id: parentId }), 0);
   assert.deepEqual(plugin.nukedMessageRecord, { [parentId]: [humanId, webhookId] });
   assert.deepEqual(plugin.deletedMessageRecord, { [parentId]: [ephemeralId] });
   assert.equal(records[ephemeralId].delete_data.anti_nuke, undefined);

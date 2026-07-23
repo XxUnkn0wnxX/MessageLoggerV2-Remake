@@ -3730,7 +3730,7 @@ module.exports = class MessageLoggerV2 {
           { name: 'Ignore muted channels', id: 'ignoreMutedChannels', type: 'switch' },
           {
             name: 'Ignore bots',
-            note: 'Also covers app, interaction, and webhook messages, including Anti-Nuke capture. Ephemeral messages are never logged.',
+            note: 'Affects future ordinary logging only, including app, interaction, and webhook messages. It never hides saved records or affects Anti-Nuke; ephemeral messages are never logged.',
             id: 'ignoreBots',
             type: 'switch'
           },
@@ -9795,7 +9795,6 @@ module.exports = class MessageLoggerV2 {
       const record = this.messageRecord?.[messageId];
       if (!record || !this.isSavedRecordOwnedByDeletedChannel(record, channel)) continue;
       if (this.isEphemeralMessage(record.message)) continue;
-      if (this.settings.ignoreBots && this.isAutomatedMessageAuthor(record.message)) continue;
       const hidden = this.isSavedRecordHidden(record);
       if (!record.delete_data || typeof record.delete_data !== 'object' || Array.isArray(record.delete_data)) {
         record.delete_data = {
@@ -9901,7 +9900,6 @@ module.exports = class MessageLoggerV2 {
     if (this.isEphemeralMessage(message)) return false;
     if (message.type !== 0 && message.type !== 19 && message.type !== 20) return false;
     if (this.isThreadCreatedSystemMessage(message)) return false;
-    if (this.settings?.ignoreBots && this.isAutomatedMessageAuthor(message)) return false;
     return true;
   }
   saveDeletedChannelCaptureMessage(message, targetMap, context, options = {}) {
@@ -11035,8 +11033,6 @@ module.exports = class MessageLoggerV2 {
       }
       if (record.delete_data.hidden) return;
       if (this.isEphemeralMessage(record.message)) return;
-      if (this.shouldIgnoreMessageAuthor(record.message)) return;
-      if (this.shouldIgnoreSelfMessage(record.message)) return;
       toInsert.push(getCleanRenderMessage(record));
     };
     const toInsert = [];
@@ -13646,7 +13642,6 @@ module.exports = class MessageLoggerV2 {
         if (!record?.delete_data?.forum_thread_delete || record.delete_data.hidden || !message) continue;
         if (message.id !== threadId || message.channel_id !== threadId) continue;
         if (this.isEphemeralMessage(message)) continue;
-        if (this.shouldIgnoreMessageAuthor(message) || this.shouldIgnoreSelfMessage(message)) continue;
         const savedParentId = record.delete_data.forum_parent_id;
         if (savedParentId) {
           if (savedParentId !== parentChannel.id) continue;
@@ -13673,7 +13668,6 @@ module.exports = class MessageLoggerV2 {
         const hasKnownParentKind = !!metadata.isForumParent || savedParentType != null;
         const recordHasForumParent = !!metadata.isForumParent || savedParentType === 15 || savedParentType === 16;
         if (hasKnownParentKind && recordHasForumParent !== forumParent) continue;
-        if (this.shouldIgnoreMessageAuthor(message) || this.shouldIgnoreSelfMessage(message)) continue;
         const savedParentId = record.delete_data.forum_parent_id || metadata.parentId;
         if (savedParentId !== parentChannel.id) continue;
         out.push(record);
@@ -13763,7 +13757,6 @@ module.exports = class MessageLoggerV2 {
         const message = saved?.message;
         if (!message || message.channel_id !== threadId) return;
         if (this.isEphemeralMessage(message)) return;
-        if (this.shouldIgnoreMessageAuthor(message) || this.shouldIgnoreSelfMessage(message)) return;
         ids.add(id);
       };
       if (!hasDistinctStarter) addId(threadId);

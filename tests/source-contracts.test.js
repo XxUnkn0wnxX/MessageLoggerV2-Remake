@@ -354,13 +354,13 @@ test('settings documentation retains audited group order and current UI labels',
 test('Ignore bots covers automated sources while ephemeral Components V2 stays excluded', () => {
   assert.match(
     source,
-    /name: 'Ignore bots',[\s\S]*Also covers app, interaction, and webhook messages, including Anti-Nuke capture\. Ephemeral messages are never logged\./
+    /name: 'Ignore bots',[\s\S]*Affects future ordinary logging only, including app, interaction, and webhook messages\. It never hides saved records or affects Anti-Nuke; ephemeral messages are never logged\./
   );
   assert.match(source, /isEphemeralMessage\(message\)[\s\S]*hasMessageFlag\(message, 64\)/);
   assert.match(source, /isAutomatedMessageAuthor\(message, resolvedAuthor = null\)[\s\S]*webhook_id[\s\S]*application_id[\s\S]*interaction_metadata/);
   assert.doesNotMatch(source, /flags\s*==\s*64/);
   assert.doesNotMatch(source, /EMBED_COPY_EPHEMERAL_MENU_NAV_ID|getRestoredEphemeralMessageContext|data-ml2-restored-ephemeral/);
-  assert.match(settingsDocs, /\| Ignore bots \| On \| Skips bot-authored, app\/interaction, and webhook messages/);
+  assert.match(settingsDocs, /\| Ignore bots \| On \| Skips future ordinary captures of bot-authored, app\/interaction, and webhook messages/);
 });
 
 test('update-note visibility sits directly below automatic updates', () => {
@@ -686,6 +686,12 @@ test('restored forum cards and compact threads mount from visible Deleted or Pur
   assert.match(rootSelection, /getRestorableForumRecordsForChannel[\s\S]*getVisibleRestorableThreadRootIds\(\)/);
   assert.match(rootSelection, /getRestorableCompactThreadRecords[\s\S]*getVisibleRestorableThreadRootIds\(\)/);
   assert.match(rootSelection, /forum_thread_delete \|\| record\.delete_data\.hidden \|\| !message/);
+  assert.doesNotMatch(rootSelection, /shouldIgnoreMessageAuthor|shouldIgnoreSelfMessage/);
+  const savedThreadMessages = source.slice(
+    source.indexOf('const getSavedForumThreadMessageIds ='),
+    source.indexOf('const openDeletedForumPostView =')
+  );
+  assert.doesNotMatch(savedThreadMessages, /shouldIgnoreMessageAuthor|shouldIgnoreSelfMessage/);
   assert.match(source, /canRestoreVisibleThreadRoots[\s\S]*shouldPresentAnySavedDeletion\(\)/);
   assert.match(source, /restoreDeletedForumCards[\s\S]*desiredIds[\s\S]*data-ml2-restored-forum-card[\s\S]*target\.remove\?\.\(\)/);
   assert.match(source, /restoreDeletedSidebarThreads[\s\S]*getRestorableCompactThreadRecords\(parent\)/);
