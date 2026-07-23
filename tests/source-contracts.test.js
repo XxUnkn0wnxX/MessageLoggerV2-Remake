@@ -719,6 +719,22 @@ test('surviving forum and thread cards tint only their deleted preview body', ()
   assert.match(source, /createRestoredThreadBrowserCard[\s\S]*card\.classList\.add\(this\.style\.deleted\)/);
 });
 
+test('deleted markdown tint excludes Components V2 markdown containers', () => {
+  const deletedTint = source.slice(
+    source.indexOf('this.style.css,'),
+    source.indexOf('html #app-mount [data-item-id].${this.style.deleted}')
+  );
+  assert.match(
+    deletedTint,
+    /\.\$\{this\.style\.deleted\} \.\$\{this\.classes\.markup\}:not\(\[class\*="markdownContainer"\]\),\s*\.\$\{this\.style\.deleted\} \.\$\{this\.classes\.markup\}:not\(\[class\*="markdownContainer"\]\) \.hljs \{\s*color: \$\{this\.settings\.deletedMessageColor \|\| "#f04747"\} !important;\s*\}/
+  );
+  assert.equal(
+    deletedTint.includes('.${this.style.deleted} .${this.classes.markup},'),
+    false
+  );
+  assert.equal(deletedTint.includes('.${this.classes.container} *'), false);
+});
+
 test('logger location titles reserve warning color for structurally deleted roots', () => {
   const createGroup = source.slice(
     source.indexOf('createMessageGroup(message, isStart)'),

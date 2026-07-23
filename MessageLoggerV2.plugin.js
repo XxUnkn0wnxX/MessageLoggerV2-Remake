@@ -1515,7 +1515,8 @@ module.exports = class MessageLoggerV2 {
       DOM.addStyle(
         this.style.css,
         `
-                    .${this.style.deleted} .${this.classes.markup}, .${this.style.deleted} .${this.classes.markup} .hljs, .${this.style.deleted} .${this.classes.container} *{
+                    .${this.style.deleted} .${this.classes.markup}:not([class*="markdownContainer"]),
+                    .${this.style.deleted} .${this.classes.markup}:not([class*="markdownContainer"]) .hljs {
                         color: ${this.settings.deletedMessageColor || "#f04747"} !important;
                     }
                     html #app-mount [data-item-id].${this.style.deleted} {
