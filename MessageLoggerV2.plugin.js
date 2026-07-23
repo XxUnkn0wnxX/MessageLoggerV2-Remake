@@ -4788,6 +4788,71 @@ module.exports = class MessageLoggerV2 {
     if (!record.edit_history.length) record.edit_history = null;
     delete record.editHistory;
   }
+  getRemovedAttachmentIdentity(attachment) {
+    if (!attachment || typeof attachment !== 'object') return null;
+    const identity = attachment.id || attachment.url || attachment.proxy_url || attachment.proxyUrl;
+    return identity === undefined || identity === null || identity === '' ? null : String(identity);
+  }
+  normalizeRemovedAttachments(...collections) {
+    const normalized = new Map();
+    for (const collection of collections) {
+      for (const attachment of this.normalizeSerializableMessageItems(collection, 'removed attachment')) {
+        const identity = this.getRemovedAttachmentIdentity(attachment);
+        if (!identity) continue;
+        const existing = normalized.get(identity);
+        normalized.set(
+          identity,
+          existing ? this.mergePlainDataObjects(existing, attachment) : attachment
+        );
+      }
+    }
+    return Array.from(normalized.values());
+  }
+  getLegacyRemovedAttachments(record) {
+    const loggedIds = new Set(
+      (record?.logged_attachments || [])
+        .filter(id => typeof id === 'string' && id)
+        .map(String)
+    );
+    if (!loggedIds.size) return [];
+    const contents = [
+      record?.message?.content,
+      ...(record?.edit_history || []).map(edit => edit?.content)
+    ].filter(content => typeof content === 'string' && content.includes('`Attachment Deleted: `'));
+    const removed = [];
+    const marker = /`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g;
+    for (const content of contents) {
+      marker.lastIndex = 0;
+      let match;
+      while ((match = marker.exec(content))) {
+        try {
+          const parsed = new URL(match[1]);
+          if (parsed.hostname !== 'cdn.discordapp.com' && parsed.hostname !== 'media.discordapp.net') continue;
+          const parts = parsed.pathname.split('/').filter(Boolean);
+          const attachmentsIndex = parts.indexOf('attachments');
+          if (attachmentsIndex === -1 || parts.length < attachmentsIndex + 4) continue;
+          const attachmentId = parts[attachmentsIndex + 2];
+          if (!/^\d+$/.test(attachmentId) || !loggedIds.has(attachmentId)) continue;
+          const filename = decodeURIComponent(parts[attachmentsIndex + 3] || '');
+          if (!filename) continue;
+          removed.push({
+            id: attachmentId,
+            filename,
+            url: parsed.href,
+            proxy_url: parsed.href
+          });
+        } catch {}
+      }
+    }
+    return this.normalizeRemovedAttachments(removed);
+  }
+  getRecordRemovedAttachments(record) {
+    if (!record || typeof record !== 'object') return [];
+    return this.normalizeRemovedAttachments(
+      this.getLegacyRemovedAttachments(record),
+      record.removed_attachments
+    );
+  }
   repairAntiNukeChannelThreadStarterMetadata(data, onlyThreadIds = null) {
     const records = data?.messageRecord;
     if (!records || typeof records !== 'object' || Array.isArray(records)) return [];
@@ -5005,6 +5070,15 @@ module.exports = class MessageLoggerV2 {
       if (record.edit_history !== null && record.edit_history !== undefined && !Array.isArray(record.edit_history)) {
         errors.push(`messageRecord.${messageId}.edit_history is not an array`);
       }
+      if (record.removed_attachments !== null && record.removed_attachments !== undefined) {
+        if (!Array.isArray(record.removed_attachments)) {
+          errors.push(`messageRecord.${messageId}.removed_attachments is not an array`);
+        } else if (record.removed_attachments.some(attachment =>
+          !attachment || typeof attachment !== 'object' || Array.isArray(attachment)
+        )) {
+          errors.push(`messageRecord.${messageId}.removed_attachments contains an invalid attachment`);
+        }
+      }
       if (record.delete_data !== null && record.delete_data !== undefined
         && (typeof record.delete_data !== 'object' || Array.isArray(record.delete_data))) {
         errors.push(`messageRecord.${messageId}.delete_data is not an object`);
@@ -5063,6 +5137,9 @@ module.exports = class MessageLoggerV2 {
       record.logged_attachments = Array.isArray(record.logged_attachments)
         ? Array.from(new Set(record.logged_attachments.filter(id => typeof id === 'string')))
         : [];
+      const removedAttachments = this.getRecordRemovedAttachments(record);
+      if (removedAttachments.length) record.removed_attachments = removedAttachments;
+      else delete record.removed_attachments;
       // cleanupMessageObject normalizes every raw/nested embed collection before the
       // record can reach Discord's renderer. In particular, an image object must have
       // a string URL because Discord's embed renderer calls image.url.split().
@@ -5330,6 +5407,12 @@ module.exports = class MessageLoggerV2 {
       ...(session.logged_attachments || [])
     ]));
     if (loggedAttachments.length) merged.logged_attachments = loggedAttachments;
+    const removedAttachments = this.normalizeRemovedAttachments(
+      this.getRecordRemovedAttachments(persisted),
+      this.getRecordRemovedAttachments(session)
+    );
+    if (removedAttachments.length) merged.removed_attachments = removedAttachments;
+    else delete merged.removed_attachments;
     return merged;
   }
   mergeCategoryIndexes(persistedMap, sessionMap, messageRecord) {
@@ -7548,7 +7631,7 @@ module.exports = class MessageLoggerV2 {
     const incoming = structuredClone(update || {});
     return this.cleanupMessageObject({ ...base, ...incoming });
   }
-  syncMessageUpdatePayload(update, previous, records = []) {
+  syncMessageUpdatePayload(update, previous, records = [], options = {}) {
     const previousMediaKeys = this.getMessageMediaCacheKeys(previous);
     const current = this.createMessageUpdateSnapshot(previous, update);
     const cacheIndex = this.cachedMessageRecord.findIndex(message => message.id === current.id);
@@ -7560,7 +7643,7 @@ module.exports = class MessageLoggerV2 {
       record.message = structuredClone(current);
     }
     const hasNewMedia = Array.from(this.getMessageMediaCacheKeys(current)).some(key => !previousMediaKeys.has(key));
-    if (hasNewMedia && this.settings.cacheAllImages) {
+    if (hasNewMedia && this.settings.cacheAllImages && !options.skipMediaCache) {
       this.cacheMessageImages(current, {
         queueWhileNoSave: records.some(Boolean) || !!this.messageRecord?.[current.id]
       });
@@ -8331,20 +8414,34 @@ module.exports = class MessageLoggerV2 {
     });
   }
   _getChangedAttachments(oldAttachments, newAttachments, messageId, channelId, guildId) {
-    const logged = this.messageRecord[messageId]?.logged_attachments ?? [];
+    const record = this.messageRecord[messageId];
+    const logged = Array.from(new Set(
+      (record?.logged_attachments || []).filter(id => typeof id === 'string')
+    ));
+    let removedAttachments = this.getRecordRemovedAttachments(record);
     const changed = oldAttachments.filter(item =>
       !newAttachments.some(mod => mod.id === item.id)
     );
     let content = "";
     for (let i = 0; i < changed.length; i++) {
-      if (logged.includes(changed[i].id)) continue;
-      content += "`Attachment Deleted: `" + changed[i].url + "\n";
-      if (this.settings.cacheAllImages) {
-        this.cacheImage(changed[i].url, i, changed[i].id, messageId, channelId, guildId);
+      const attachment = this.normalizeRemovedAttachments([changed[i]])[0];
+      if (attachment) {
+        removedAttachments = this.normalizeRemovedAttachments(removedAttachments, [attachment]);
       }
-      logged.push(changed[i].id);
+      const attachmentId = String(attachment?.id || changed[i]?.id || '');
+      const url = attachment?.url || changed[i]?.url;
+      if (!attachmentId || !url || logged.includes(attachmentId)) continue;
+      content += "`Attachment Deleted: `" + url + "\n";
+      if (this.settings.cacheAllImages) {
+        this.cacheImage(url, i, attachmentId, messageId, channelId, guildId);
+      }
+      logged.push(attachmentId);
     }
-    return { content, logged_attachments: logged };
+    return {
+      content,
+      logged_attachments: logged,
+      removed_attachments: removedAttachments
+    };
   }
   _ensureChannelCached(channelId) {
     const channelMessages = this.channelMessages[channelId];
@@ -11691,6 +11788,9 @@ module.exports = class MessageLoggerV2 {
     for (const attachment of message.attachments || []) {
       if (attachment?.id) ids.add(String(attachment.id));
     }
+    for (const attachment of this.getRecordRemovedAttachments(record)) {
+      if (attachment?.id) ids.add(String(attachment.id));
+    }
     for (const sticker of this.getMessageStickerItems(message)) {
       if (sticker?.id) ids.add(String(sticker.id));
     }
@@ -11729,10 +11829,18 @@ module.exports = class MessageLoggerV2 {
     }
     return false;
   }
-  hasImageMedia(message) {
+  hasImageMedia(message, removedAttachments = []) {
     if (!message || typeof message !== 'object') return false;
-    if (Array.isArray(message.attachments)) {
-      if (message.attachments.some(({ filename }) => this.isImage(filename))) return true;
+    const attachments = [
+      ...(Array.isArray(message.attachments) ? message.attachments : []),
+      ...(Array.isArray(removedAttachments) ? removedAttachments : [])
+    ];
+    if (attachments.some(attachment => {
+      const contentType = attachment?.content_type || attachment?.contentType;
+      return this.isImage(attachment?.filename || attachment?.url || attachment?.proxy_url || '')
+        || (typeof contentType === 'string' && contentType.toLowerCase().startsWith('image/'));
+    })) {
+      return true;
     }
     if (Array.isArray(message.embeds)) {
       if (message.embeds.some(embed => this.getIndexedEmbedImageMedia(embed).length)) return true;
@@ -11744,6 +11852,9 @@ module.exports = class MessageLoggerV2 {
     const labels = new Map();
     if (!message?.id) return labels;
     for (const attachment of message.attachments || []) {
+      if (attachment?.id) labels.set(String(attachment.id), attachment.filename || String(attachment.id));
+    }
+    for (const attachment of this.getRecordRemovedAttachments(record)) {
       if (attachment?.id) labels.set(String(attachment.id), attachment.filename || String(attachment.id));
     }
     for (const sticker of this.getMessageStickerItems(message)) {
@@ -12657,6 +12768,7 @@ module.exports = class MessageLoggerV2 {
   onDispatchEvent(args, callDefault) {
     const dispatch = args[0];
     let ret = Promise.resolve();
+    let preCachedMessageImages = false;
     if (!dispatch) return callDefault(...args);
     try {
       if (dispatch.type === 'CHANNEL_SELECT') {
@@ -12693,6 +12805,45 @@ module.exports = class MessageLoggerV2 {
         ? this.getCachedMessage(eventMessageId, channel.id)
         : null;
       const policyMessage = dispatch.message || cachedPolicyMessage;
+      // Anti-Nuke deliberately captures guild messages that ordinary author/location policy
+      // ignores. Cache each final create or media-bearing update before those policy returns:
+      // waiting for CHANNEL_DELETE is too late because Discord can invalidate attachment URLs
+      // as soon as the parent disappears. The existing deleted-channel thread snapshot loop
+      // remains sequential; this only closes its pre-delete media-ingestion gap.
+      const cacheSupportedMessageMediaForAntiNuke = message => {
+        let cacheMessage = dispatch.type === 'MESSAGE_UPDATE'
+          // Partial Discord update payloads can legitimately omit author. The canonical
+          // snapshot helper requires one, but pre-caching only needs a detached top-level
+          // view of IDs and media; do not let a missing author swallow the native dispatch.
+          ? { ...(cachedPolicyMessage || {}), ...(message || {}) }
+          : message;
+        if (cacheMessage && (!cacheMessage.channel_id || !cacheMessage.guild_id)) {
+          cacheMessage = {
+            ...cacheMessage,
+            channel_id: cacheMessage.channel_id || channel.id,
+            guild_id: cacheMessage.guild_id || channel.guild_id
+          };
+        }
+        const hasIncomingMedia = this.getMessageMediaCacheKeys(message).size > 0;
+        if (
+          preCachedMessageImages
+          || !this.settings.antiNukeEnabled
+          || !this.settings.cacheAllImages
+          || !channel.guild_id
+          || !cacheMessage
+          || !hasIncomingMedia
+          || this.isEphemeralMessage(cacheMessage)
+          || this.isEphemeralMessage(cachedPolicyMessage)
+          || !this.hasSupportedMessagePayload(cacheMessage)
+          || cacheMessage.state == 'SENDING'
+          || dispatch.optimistic
+          || (cacheMessage.type !== 0 && cacheMessage.type !== 19 && cacheMessage.type !== 20)
+        ) return false;
+        this.cacheMessageImages(cacheMessage, { queueWhileNoSave: false });
+        preCachedMessageImages = true;
+        return true;
+      };
+      if (dispatch.type === 'MESSAGE_CREATE') cacheSupportedMessageMediaForAntiNuke(dispatch.message);
       let author = policyMessage?.author
         ? this.tools.getUser(policyMessage.author.id) || policyMessage.author
         : false;
@@ -12704,19 +12855,31 @@ module.exports = class MessageLoggerV2 {
       const automatedEvent = [dispatch.message, cachedPolicyMessage]
         .filter(Boolean)
         .some(message => this.isAutomatedMessageAuthor(message, author));
-      if (this.settings.ignoreBots && automatedEvent) return callDefault(...args);
-      if (!author && !(dispatch.type == 'LOAD_MESSAGES_SUCCESS' || dispatch.type == 'MESSAGE_DELETE_BULK' || dispatch.type == 'THREAD_DELETE')) return callDefault(...args);
+      if (this.settings.ignoreBots && automatedEvent) {
+        if (dispatch.type === 'MESSAGE_UPDATE' && dispatch.message) cacheSupportedMessageMediaForAntiNuke(dispatch.message);
+        return callDefault(...args);
+      }
+      if (!author && !(dispatch.type == 'LOAD_MESSAGES_SUCCESS' || dispatch.type == 'MESSAGE_DELETE_BULK' || dispatch.type == 'THREAD_DELETE')) {
+        if (dispatch.type === 'MESSAGE_UPDATE' && dispatch.message) cacheSupportedMessageMediaForAntiNuke(dispatch.message);
+        return callDefault(...args);
+      }
       const isLocalUser = author && author.id === this.localUser.id;
       if (author && isLocalUser && this.settings.ignoreSelf && dispatch.type === 'MESSAGE_CREATE') return callDefault(...args);
-      if (author && this.settings.ignoreBlockedUsers && this.tools.isBlocked(author.id) && !isLocalUser) return callDefault(...args);
-      if (author?.avatar === 'clyde') return callDefault(...args);
+      if (author && this.settings.ignoreBlockedUsers && this.tools.isBlocked(author.id) && !isLocalUser) {
+        if (dispatch.message) cacheSupportedMessageMediaForAntiNuke(dispatch.message);
+        return callDefault(...args);
+      }
+      if (author?.avatar === 'clyde') {
+        if (dispatch.type === 'MESSAGE_UPDATE' && dispatch.message) cacheSupportedMessageMediaForAntiNuke(dispatch.message);
+        return callDefault(...args);
+      }
       if ((this.settings.ignoreLocalEdits || this.settings.ignoreSelf) && dispatch.type === 'MESSAGE_UPDATE' && isLocalUser) {
         const last = this.getCachedMessage(dispatch.message.id, channel.id);
         const savedRecord = this.messageRecord[dispatch.message.id];
         if (last || savedRecord) {
           this.syncMessageUpdatePayload(dispatch.message, savedRecord?.message || last, [savedRecord]);
           if (savedRecord) this.saveData();
-        }
+        } else if (dispatch.message) cacheSupportedMessageMediaForAntiNuke(dispatch.message);
         return callDefault(...args);
       }
       if (this.settings.ignoreLocalDeletes && dispatch.type === 'MESSAGE_DELETE' && this.localDeletes.includes(dispatch.id)) return callDefault(...args);
@@ -12750,6 +12913,9 @@ module.exports = class MessageLoggerV2 {
           if (!channelWhitelisted) doReturn = true;
         }
       }
+      if (doReturn && dispatch.type === 'MESSAGE_UPDATE' && dispatch.message) {
+        cacheSupportedMessageMediaForAntiNuke(dispatch.message);
+      }
       if (doReturn && this.settings.alwaysLogGhostPings) {
         if (dispatch.type === 'MESSAGE_DELETE') {
           const deleted = this.tempEditedMessageRecord[dispatch.id]?.message || this.getCachedMessage(dispatch.id, dispatch.channelId);
@@ -12777,7 +12943,12 @@ module.exports = class MessageLoggerV2 {
             const previousMessage = savedRecord?.message || last;
             if (this.isEphemeralMessage(previousMessage)
               || this.shouldIgnoreMessageAuthor(previousMessage, author)) return callDefault(...args);
-            this.syncMessageUpdatePayload(dispatch.message, previousMessage, [savedRecord]);
+            this.syncMessageUpdatePayload(
+              dispatch.message,
+              previousMessage,
+              [savedRecord],
+              { skipMediaCache: preCachedMessageImages }
+            );
             if (savedRecord) this.saveData();
             return callDefault(...args);
           }
@@ -12965,6 +13136,7 @@ module.exports = class MessageLoggerV2 {
         let ghostPinged = false;
         const currentContent = previousMessage.content;
         let loggedAttachmentsToAdd = [];
+        let removedAttachmentsToKeep = [];
         if (currentContent === dispatch.message.content) {
           const previousAttachments = previousMessage.attachments || [];
           const updatedAttachments = dispatch.message.attachments || previousAttachments;
@@ -12981,12 +13153,20 @@ module.exports = class MessageLoggerV2 {
             return callDefault(...args);
           }
           else {
-            const { content: generatedContent, logged_attachments } = this._getChangedAttachments(
+            const {
+              content: generatedContent,
+              logged_attachments,
+              removed_attachments
+            } = this._getChangedAttachments(
               previousAttachments, updatedAttachments,
               dispatch.message.id, dispatch.message.channel_id, dispatch.message.guild_id
             );
+            removedAttachmentsToKeep = removed_attachments;
             if (!generatedContent) {
               const currentSavedRecord = this.messageRecord[dispatch.message.id];
+              if (currentSavedRecord && removedAttachmentsToKeep.length) {
+                currentSavedRecord.removed_attachments = removedAttachmentsToKeep;
+              }
               this.syncMessageUpdatePayload(
                 dispatch.message,
                 previousMessage,
@@ -13010,6 +13190,8 @@ module.exports = class MessageLoggerV2 {
           });
           if (loggedAttachmentsToAdd.length > 0)
             lastEditedSaved.logged_attachments = loggedAttachmentsToAdd;
+          if (removedAttachmentsToKeep.length > 0)
+            lastEditedSaved.removed_attachments = removedAttachmentsToKeep;
           lastEditedSaved.message.content = dispatch.message.content;
           ghostPinged = !lastEditedSaved.ghost_pinged && lastEditedSaved.local_mentioned && !this.tools.isMentioned(dispatch.message, this.localUser.id);
           if (ghostPinged) lastEditedSaved.ghost_pinged = true;
@@ -13023,6 +13205,8 @@ module.exports = class MessageLoggerV2 {
           ];
           if (loggedAttachmentsToAdd.length > 0)
             data.logged_attachments = loggedAttachmentsToAdd;
+          if (removedAttachmentsToKeep.length > 0)
+            data.removed_attachments = removedAttachmentsToKeep;
           ghostPinged = this.tools.isMentioned(last, this.localUser.id) && !this.tools.isMentioned(dispatch.message, this.localUser.id);
           data.message.content = dispatch.message.content;
           if (ghostPinged) data.ghost_pinged = true;
@@ -13053,7 +13237,7 @@ module.exports = class MessageLoggerV2 {
         return callDefault(...args);
       } else if (dispatch.type == 'MESSAGE_CREATE' && this.hasSupportedMessagePayload(dispatch.message) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20)) {
         if (this._cacheIncomingMessage(dispatch.message)) return callDefault(...args);
-        if (this.settings.cacheAllImages) this.cacheMessageImages(dispatch.message, { queueWhileNoSave: false });
+        if (this.settings.cacheAllImages && !preCachedMessageImages) this.cacheMessageImages(dispatch.message, { queueWhileNoSave: false });
         this._ensureChannelCached(channel.id);
         if (this._shouldShowToast(channel, guild, 'sent', isLocalUser)) {
           this._notifyEventOnce('sent', 'sent', [dispatch.message.id], channel, guild, dispatch.message.id);
@@ -15249,7 +15433,7 @@ module.exports = class MessageLoggerV2 {
           parent.appendChild(messageGroup);
           return;
         }
-        const contentDiv = messageGroup.getElementsByClassName(this.getSingleDiscordClass('giftCodeContainer container'))[0];
+        let contentDiv = messageGroup.getElementsByClassName(this.getSingleDiscordClass('giftCodeContainer container'))[0];
         const formatContent = (content, channelId) => {
           try {
             return this.formatMarkup(content, channelId);
@@ -15298,10 +15482,28 @@ module.exports = class MessageLoggerV2 {
           markup.appendChild(line);
           hasPayloadReference = true;
         };
+        const removedAttachments = record ? this.getRecordRemovedAttachments(record) : [];
+        const currentAttachmentIdentities = new Set(
+          (message.attachments || [])
+            .map(attachment => this.getRemovedAttachmentIdentity(attachment))
+            .filter(Boolean)
+        );
+        const removedAttachmentsForRender = removedAttachments.filter(attachment =>
+          !currentAttachmentIdentities.has(this.getRemovedAttachmentIdentity(attachment))
+        );
         for (const attachment of message.attachments || []) {
           if (this.isImage(attachment.filename || attachment.url) || this.isVideo(attachment.filename || attachment.url)) continue;
           const isVoiceMessage = (Number(message.flags) & 8192) === 8192;
           appendPayloadReference(isVoiceMessage ? 'Voice message' : 'Attachment', attachment.filename, attachment.url);
+        }
+        for (const attachment of removedAttachmentsForRender) {
+          const mediaName = attachment.filename || attachment.url || attachment.proxy_url;
+          if (this.isImage(mediaName) || this.isVideo(mediaName)) continue;
+          appendPayloadReference(
+            'Removed attachment',
+            attachment.filename || 'unknown file',
+            attachment.url || attachment.proxy_url
+          );
         }
         for (const embed of message.embeds || []) {
           const rawText = embed.title || embed.description || embed.url || embed.type || 'Embedded content';
@@ -15321,7 +15523,17 @@ module.exports = class MessageLoggerV2 {
           markup.addEventListener('click', () => this.jumpToMessage(message.channel_id, message.id, guild?.id));
         }
         const stickerMedia = this.getMessageStickerItems(message).map(sticker => this.getStickerMedia(sticker)).filter(Boolean);
-        const renderedMedia = [...(message.attachments || []), ...stickerMedia];
+        const renderedMedia = [
+          ...(message.attachments || []),
+          ...removedAttachmentsForRender,
+          ...stickerMedia
+        ];
+        if (!contentDiv && renderedMedia.length) {
+          contentDiv = document.createElement('div');
+          contentDiv.dataset.ml2RemovedAttachmentHost = 'true';
+          contentDiv.style.marginTop = '8px';
+          (markup.parentElement || messageGroup).appendChild(contentDiv);
+        }
         if (contentDiv && renderedMedia.length) {
           contentDiv.dataset.ml2AttachmentMessageId = messageId;
           const createUnavailableAttachmentPlaceholder = filename => {
@@ -15742,7 +15954,10 @@ module.exports = class MessageLoggerV2 {
             messages = messages.filter(x => {
               const message = this.getMessageAny(x);
               if (!message) return false;
-              return this.hasImageMedia(message);
+              return this.hasImageMedia(
+                message,
+                this.getRecordRemovedAttachments(this.getSavedMessage(x))
+              );
             });
             break;
           case 'link':

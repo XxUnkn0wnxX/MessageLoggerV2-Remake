@@ -319,6 +319,48 @@ test('Components V2 image detection accepts image MIME metadata on extensionless
   }), false);
 });
 
+test('has:image includes removed image uploads but excludes removed non-image files', () => {
+  const imageId = 'removed-image';
+  const documentId = 'removed-document';
+  const channelId = 'channel';
+  const saved = (id, removedAttachment, timestamp) => ({
+    message: {
+      id,
+      channel_id: channelId,
+      content: 'current content',
+      attachments: [],
+      embeds: [],
+      components: [],
+      timestamp
+    },
+    edit_history: [{ content: 'before removal', time: 300 }],
+    removed_attachments: [removedAttachment]
+  });
+  const plugin = createPlugin({
+    settings: { antiNukeEnabled: true, reverseOrder: false },
+    messageRecord: {
+      [imageId]: saved(imageId, {
+        id: 'image-attachment',
+        filename: 'removed.gif',
+        url: 'https://cdn.example/removed.gif'
+      }, 100),
+      [documentId]: saved(documentId, {
+        id: 'document-attachment',
+        filename: 'removed.pdf',
+        url: 'https://cdn.example/removed.pdf',
+        content_type: 'application/pdf'
+      }, 200)
+    },
+    editedMessageRecord: { [channelId]: [imageId, documentId] },
+    deletedMessageRecord: {},
+    purgedMessageRecord: {},
+    nukedMessageRecord: {},
+    menu: { selectedTab: 'edited', filter: 'has:image' }
+  });
+
+  assert.deepEqual(plugin.getFilteredMessages(), [imageId]);
+});
+
 test('cache-only rendering preserves cached files and names unavailable files', () => {
   const plugin = createPlugin({
     settings: { onlyRenderCachedAttachments: true },
@@ -655,7 +697,12 @@ test('record media IDs cover messages, attachments, stickers, embeds, and later 
         media: { url: 'https://cdn.example/component.png' }
       }]
     },
-    logged_attachments: ['later-attachment']
+    logged_attachments: ['later-attachment'],
+    removed_attachments: [{
+      id: 'removed-attachment',
+      filename: 'removed.gif',
+      url: 'https://cdn.example/removed.gif'
+    }]
   };
 
   assert.deepEqual(plugin.getRecordCachedMediaIds(record), new Set([
@@ -668,8 +715,10 @@ test('record media IDs cover messages, attachments, stickers, embeds, and later 
     'message-embed-0-footer-icon',
     'message-embed-0-gallery-0',
     'message-component-0-thumbnail',
-    'later-attachment'
+    'later-attachment',
+    'removed-attachment'
   ]));
+  assert.equal(plugin.getRecordCachedMediaLabels(record).get('removed-attachment'), 'removed.gif');
   assert.equal(
     plugin.getRecordCachedMediaLabels(record).get('message-component-0-thumbnail'),
     'component.png'

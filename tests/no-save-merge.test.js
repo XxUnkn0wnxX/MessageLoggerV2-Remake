@@ -18,7 +18,7 @@ function temporaryDirectory(t) {
 }
 
 function record(id, channelId, options = {}) {
-  return {
+  const saved = {
     message: {
       id,
       channel_id: channelId,
@@ -34,6 +34,10 @@ function record(id, channelId, options = {}) {
     edits_hidden: options.edits_hidden || false,
     logged_attachments: options.logged_attachments || []
   };
+  if (options.removed_attachments !== undefined) {
+    saved.removed_attachments = options.removed_attachments;
+  }
+  return saved;
 }
 
 function payload(records = {}, indexes = {}, suppressedForumThreadIds = []) {
@@ -153,7 +157,12 @@ test('disk and no-save session payloads merge without duplicate indexes', () => 
       content: 'old',
       delete_data: { time: 100, hidden: true, forum_metadata: { parentId: 'forum', name: 'saved' } },
       edit_history: [{ time: 10, content: 'first' }],
-      logged_attachments: ['old-file']
+      logged_attachments: ['old-file'],
+      removed_attachments: [{
+        id: 'old-file',
+        filename: 'old.png',
+        url: 'https://cdn.discordapp.com/attachments/channel/old-file/old.png'
+      }]
     })
   }, {
     deleted: { channel: ['100', '100'] },
@@ -164,7 +173,12 @@ test('disk and no-save session payloads merge without duplicate indexes', () => 
       content: 'new',
       delete_data: { time: 200, hidden: false, forum_metadata: { name: 'session' } },
       edit_history: [{ time: 10, content: 'first' }, { time: 20, content: 'second' }],
-      logged_attachments: ['new-file']
+      logged_attachments: ['new-file'],
+      removed_attachments: [{
+        id: 'new-file',
+        filename: 'new.gif',
+        url: 'https://cdn.discordapp.com/attachments/channel/new-file/new.gif'
+      }]
     }),
     '200': record('200', 'channel', { delete_data: { time: 300 } })
   }, {
@@ -184,6 +198,10 @@ test('disk and no-save session payloads merge without duplicate indexes', () => 
   assert.equal(merged.messageRecord['100'].delete_data.forum_metadata.name, 'session');
   assert.deepEqual(merged.messageRecord['100'].edit_history.map(edit => edit.content), ['first', 'second']);
   assert.deepEqual(merged.messageRecord['100'].logged_attachments, ['old-file', 'new-file']);
+  assert.deepEqual(
+    merged.messageRecord['100'].removed_attachments.map(attachment => attachment.id),
+    ['old-file', 'new-file']
+  );
 });
 
 test('legacy fork payloads without forum metadata or suppression migrate before merging', () => {
@@ -273,6 +291,68 @@ test('mixed legacy and enhanced fields normalize without discarding surviving me
   assert.deepEqual(normalized.purgedMessageRecord, {});
   assert.deepEqual(normalized.nukedMessageRecord, {});
   assert.deepEqual(normalized.suppressedForumThreadIds, []);
+});
+
+test('removed upload metadata normalizes and legacy markers backfill only matching Discord attachments', () => {
+  const plugin = createNormalizationPlugin();
+  const channelId = '111111111111111111';
+  const attachmentId = '222222222222222222';
+  const unmatchedId = '333333333333333333';
+  const attachmentUrl = `https://cdn.discordapp.com/attachments/${channelId}/${attachmentId}/removed.gif?token=test`;
+  const normalized = plugin.normalizePersistedDataPayload(payload({
+    '100': record('100', channelId, {
+      content: 'current content',
+      edit_history: [{
+        content: [
+          'current content',
+          `\`Attachment Deleted: \`${attachmentUrl}`,
+          `\`Attachment Deleted: \`https://cdn.discordapp.com/attachments/${channelId}/${unmatchedId}/unmatched.png`,
+          `\`Attachment Deleted: \`https://example.com/attachments/${channelId}/${attachmentId}/external.png`,
+          'https://cdn.discordapp.com/attachments/ordinary/link-preview.png'
+        ].join('\n'),
+        time: 200
+      }],
+      logged_attachments: [attachmentId]
+    })
+  }, { edited: { [channelId]: ['100'] } }));
+
+  assert.deepEqual(normalized.messageRecord['100'].message.attachments, []);
+  assert.deepEqual(normalized.messageRecord['100'].removed_attachments, [{
+    id: attachmentId,
+    filename: 'removed.gif',
+    url: attachmentUrl,
+    proxy_url: attachmentUrl
+  }]);
+});
+
+test('removed upload normalization de-duplicates objects and omits an empty optional field', () => {
+  const plugin = createNormalizationPlugin();
+  const normalized = plugin.normalizePersistedDataPayload(payload({
+    '100': record('100', 'channel', {
+      removed_attachments: [
+        {
+          id: 'attachment',
+          filename: 'removed.png',
+          url: 'https://cdn.example/removed.png'
+        },
+        {
+          id: 'attachment',
+          content_type: 'image/png',
+          width: 320
+        }
+      ]
+    }),
+    '101': record('101', 'channel', { removed_attachments: [] })
+  }, { edited: { channel: ['100', '101'] } }));
+
+  assert.deepEqual(normalized.messageRecord['100'].removed_attachments, [{
+    id: 'attachment',
+    filename: 'removed.png',
+    url: 'https://cdn.example/removed.png',
+    content_type: 'image/png',
+    width: 320
+  }]);
+  assert.equal(Object.hasOwn(normalized.messageRecord['101'], 'removed_attachments'), false);
 });
 
 test('data rewritten by a legacy fork can round-trip back into the enhanced schema', () => {

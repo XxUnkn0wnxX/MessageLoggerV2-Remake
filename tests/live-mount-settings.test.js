@@ -197,6 +197,45 @@ test('display-off future edits stay logged while Discord renders only the curren
   assert.deepEqual(calls.dispatches, []);
 });
 
+test('message updates retain removed uploads without retaining vanished link embeds', () => {
+  const { addMessage, plugin } = createLiveDeletePlugin();
+  const original = addMessage('151');
+  const removedUpload = {
+    id: '251',
+    filename: 'removed.gif',
+    url: 'https://cdn.discordapp.com/attachments/channel/251/removed.gif',
+    proxy_url: 'https://media.discordapp.net/attachments/channel/251/removed.gif',
+    content_type: 'image/gif',
+    width: 320,
+    height: 240
+  };
+  original.attachments = [removedUpload];
+  original.embeds = [{
+    type: 'link',
+    url: 'https://example.com/article',
+    thumbnail: { url: 'https://example.com/preview.png' }
+  }];
+  const updated = {
+    ...structuredClone(original),
+    attachments: [],
+    embeds: [],
+    edited_timestamp: '2026-07-23T00:00:00.000Z'
+  };
+  plugin._shouldShowToast = () => false;
+
+  plugin.onDispatchEvent([
+    { type: 'MESSAGE_UPDATE', message: updated }
+  ], () => ({ native: true }));
+
+  const saved = plugin.messageRecord[original.id];
+  assert.deepEqual(saved.message.attachments, [], 'Discord current attachment state remains authoritative');
+  assert.deepEqual(saved.message.embeds, [], 'a vanished Discord link preview is not retained as history');
+  assert.deepEqual(saved.removed_attachments, [removedUpload], 'only the explicit upload gains historical metadata');
+  assert.deepEqual(saved.logged_attachments, [removedUpload.id]);
+  assert.match(saved.edit_history[0].content, /`Attachment Deleted: `https:\/\/cdn\.discordapp\.com\/attachments\/channel\/251\/removed\.gif/);
+  assert.equal(Object.hasOwn(saved, 'removed_embeds'), false);
+});
+
 test('master-off single deletes keep logging but follow Discord native removal', () => {
   const { addMessage, calls, channel, guild, plugin } = createLiveDeletePlugin();
   const message = addMessage('100');

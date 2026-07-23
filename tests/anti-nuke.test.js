@@ -774,3 +774,381 @@ test('Anti-Nuke adoption ignores Ignore bots gates but never adopts ephemeral re
   assert.deepEqual(plugin.deletedMessageRecord, { [parentId]: [ephemeralId] });
   assert.equal(records[ephemeralId].delete_data.anti_nuke, undefined);
 });
+
+function createDispatchMessagePlugin(overrides = {}) {
+  const guild = { id: 'guild', name: 'Guild' };
+  const channel = { id: 'channel', guild_id: guild.id, name: 'general', type: 0 };
+  const { settings = {}, ...rest } = overrides;
+  const plugin = createPlugin({
+    settings: {
+      restoreDeletedMessages: false,
+      showDeletedMessages: false,
+      showPurgedMessages: false,
+      restoreDeletedAndPurgedMessages: false,
+      ignoreBots: false,
+      ignoreSelf: false,
+      ignoreBlockedUsers: false,
+      ignoreNSFW: false,
+      ignoreLocalEdits: false,
+      ignoreLocalDeletes: false,
+      ignoreMutedGuilds: false,
+      ignoreMutedChannels: false,
+      alwaysLogGhostPings: false,
+      alwaysLogSelected: false,
+      alwaysLogDM: false,
+      onlyLogWhitelist: false,
+      whitelist: [],
+      blacklist: [],
+      antiNukeEnabled: false,
+      cacheAllImages: true,
+      antiNukeThreadCap: 0,
+      antiNukeMessageCap: 0,
+      antiNukeAttachmentCap: 0,
+      ...settings
+    },
+    localUser: { id: 'local' },
+    selectedChannel: { id: 'selected', guild_id: guild.id },
+    localDeletes: [],
+    messageRecord: {},
+    messageRecordIds: new Set(),
+    deletedMessageRecord: {},
+    purgedMessageRecord: {},
+    editedMessageRecord: {},
+    deletedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    editedMessageSet: new Map(),
+    tempEditedMessageRecord: {},
+    channelMessages: {},
+    tools: {
+      getChannel: id => id === channel.id ? channel : null,
+      getServer: id => id === guild.id ? guild : null,
+      getUser: id => ({ id, username: `User ${id}` }),
+      isBlocked: () => false,
+      isMentioned: () => false
+    },
+    getCachedMessage: () => null,
+    _cacheIncomingMessage: () => false,
+    _ensureChannelCached() {},
+    _shouldShowToast: () => false,
+    _notifyEventOnce() {},
+    _notifyEvent() {},
+    _incrementMessageCount() {},
+    annotateSavedForumThreadMessage() {},
+    refreshCacheOnlyMessage() {},
+    _scheduleTintForMessage() {},
+    dispatcher: { dispatch() {} },
+    syncMessageUpdatePayload() {},
+    isForumThreadChannel: () => false,
+    shouldIgnoreMessageAuthor: () => false,
+    shouldIgnoreSelfMessage: () => false,
+    isAutomatedMessageAuthor: () => false,
+    cacheChannelMessages() {},
+    isLocalDeleteEvent: () => false,
+    _refreshedEmptyChannels: new Set(),
+    saveData() {},
+    createMiniFormattedData(message) {
+      return {
+        message: structuredClone(message),
+        saved_location: { channelId: message.channel_id },
+        local_mentioned: false,
+        ghost_pinged: false,
+        logged_attachments: [],
+        edit_history: []
+      };
+    },
+    ...rest
+  });
+
+  return { plugin, channel, guild };
+}
+
+test('Anti-Nuke pre-caches the final attachment-only reply after IgnoreSelf skips its optimistic create', () => {
+  const cacheCalls = [];
+  const pluginState = createDispatchMessagePlugin({
+    settings: {
+      antiNukeEnabled: true,
+      cacheAllImages: true,
+      ignoreSelf: true
+    },
+    cacheMessageImages(message, options) {
+      cacheCalls.push({ messageId: message.id, options });
+    }
+  });
+  const message = {
+    id: 'ignore-self-message',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    type: 0,
+    content: 'hello',
+    attachments: [{ id: 'a', url: 'https://cdn.example/ignore-self-message.png' }],
+    author: { id: 'local', username: 'Local' }
+  };
+  let nativeCalls = 0;
+  const callDefault = () => {
+    nativeCalls++;
+    return { native: true };
+  };
+  pluginState.plugin.onDispatchEvent([
+    { type: 'MESSAGE_CREATE', message, optimistic: true }
+  ], callDefault);
+  const result = pluginState.plugin.onDispatchEvent([
+    { type: 'MESSAGE_CREATE', message, optimistic: false }
+  ], callDefault);
+
+  assert.equal(nativeCalls, 2);
+  assert.deepEqual(result, { native: true });
+  assert.equal(cacheCalls.length, 1);
+  assert.deepEqual(cacheCalls[0], {
+    messageId: 'ignore-self-message',
+    options: { queueWhileNoSave: false }
+  });
+  assert.deepEqual(pluginState.plugin.messageRecord, {}, 'ordinary IgnoreSelf capture remains suppressed');
+});
+
+test('Anti-Nuke pre-caches media on ignored MESSAGE_UPDATE events with new attachments', () => {
+  const cacheCalls = [];
+  const pluginState = createDispatchMessagePlugin({
+    settings: {
+      antiNukeEnabled: true,
+      cacheAllImages: true,
+      ignoreSelf: true,
+      ignoreLocalEdits: true
+    },
+    cacheMessageImages(message, options) {
+      cacheCalls.push({ messageId: message.id, options });
+    }
+  });
+  const message = {
+    id: 'ignored-update-message',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    type: 0,
+    content: 'updated',
+    edited_timestamp: '2026-07-23T00:00:00.000Z',
+    attachments: [{ id: 'c', url: 'https://cdn.example/ignored-update-message.png' }],
+    author: { id: 'local', username: 'Local' }
+  };
+  let nativeCalls = 0;
+  const result = pluginState.plugin.onDispatchEvent([
+    { type: 'MESSAGE_UPDATE', message }
+  ], () => {
+    nativeCalls++;
+    return { native: true };
+  });
+
+  assert.equal(nativeCalls, 1);
+  assert.deepEqual(result, { native: true });
+  assert.equal(cacheCalls.length, 1);
+  assert.deepEqual(cacheCalls[0], {
+    messageId: 'ignored-update-message',
+    options: { queueWhileNoSave: false }
+  });
+  assert.deepEqual(pluginState.plugin.messageRecord, {}, 'the ignored media update is not logged as edit history');
+});
+
+test('Anti-Nuke pre-caches an author-less partial media update without swallowing native dispatch', () => {
+  const cacheCalls = [];
+  const pluginState = createDispatchMessagePlugin({
+    settings: {
+      antiNukeEnabled: true,
+      cacheAllImages: true
+    },
+    cacheMessageImages(message, options) {
+      cacheCalls.push({
+        messageId: message.id,
+        attachmentIds: message.attachments.map(attachment => attachment.id),
+        options
+      });
+    }
+  });
+  const message = {
+    id: 'partial-update-message',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    type: 0,
+    attachments: [{
+      id: 'later-partial',
+      url: 'https://cdn.example/later-partial.png'
+    }]
+  };
+  let nativeCalls = 0;
+  const result = pluginState.plugin.onDispatchEvent([
+    { type: 'MESSAGE_UPDATE', message }
+  ], () => {
+    nativeCalls++;
+    return { native: true };
+  });
+
+  assert.equal(nativeCalls, 1);
+  assert.deepEqual(result, { native: true });
+  assert.deepEqual(cacheCalls, [{
+    messageId: 'partial-update-message',
+    attachmentIds: ['later-partial'],
+    options: { queueWhileNoSave: false }
+  }]);
+  assert.deepEqual(pluginState.plugin.messageRecord, {});
+});
+
+test('IgnoreSelf update reconciliation retains its existing single cache path when a prior message exists', () => {
+  const cacheCalls = [];
+  const previous = {
+    id: 'existing-update-message',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    type: 0,
+    content: 'before',
+    attachments: [],
+    embeds: [],
+    components: [],
+    author: { id: 'local', username: 'Local' }
+  };
+  const pluginState = createDispatchMessagePlugin({
+    settings: {
+      antiNukeEnabled: true,
+      cacheAllImages: true,
+      ignoreSelf: true,
+      ignoreLocalEdits: true
+    },
+    getCachedMessage: () => previous,
+    syncMessageUpdatePayload(message) {
+      this.cacheMessageImages(message, { queueWhileNoSave: false });
+    },
+    cacheMessageImages(message, options) {
+      cacheCalls.push({ messageId: message.id, options });
+    }
+  });
+  const message = {
+    ...previous,
+    content: 'after',
+    edited_timestamp: '2026-07-23T00:00:00.000Z',
+    attachments: [{ id: 'later', url: 'https://cdn.example/later.png' }]
+  };
+
+  pluginState.plugin.onDispatchEvent([
+    { type: 'MESSAGE_UPDATE', message }
+  ], () => ({ native: true }));
+
+  assert.deepEqual(cacheCalls, [{
+    messageId: 'existing-update-message',
+    options: { queueWhileNoSave: false }
+  }]);
+});
+
+test('Anti-Nuke still caches MESSAGE_CREATE media only once when message would otherwise be recorded', () => {
+  const cacheCalls = [];
+  const pluginState = createDispatchMessagePlugin({
+    settings: {
+      antiNukeEnabled: true,
+      cacheAllImages: true,
+      ignoreSelf: false
+    },
+    _cacheIncomingMessage(message) {
+      this.messageRecord[message.id] = {
+        message: structuredClone(message),
+        delete_data: { time: 1, hidden: false }
+      };
+      return false;
+    },
+    cacheMessageImages(message, options) {
+      cacheCalls.push({ messageId: message.id, options });
+    },
+    _shouldShowToast: () => false
+  });
+  const message = {
+    id: 'regular-message',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    type: 0,
+    content: 'normal',
+    attachments: [{ id: 'b', url: 'https://cdn.example/regular-message.png' }],
+    author: { id: 'remote', username: 'Remote' }
+  };
+  let nativeCalls = 0;
+  pluginState.plugin.onDispatchEvent([{ type: 'MESSAGE_CREATE', message }], () => {
+    nativeCalls++;
+    return { native: true };
+  });
+
+  assert.equal(nativeCalls, 1);
+  assert.equal(cacheCalls.length, 1);
+  assert.deepEqual(cacheCalls[0], {
+    messageId: 'regular-message',
+    options: { queueWhileNoSave: false }
+  });
+});
+
+test('Anti-Nuke disabled keeps IgnoreSelf behavior with no media pre-cache', () => {
+  const cacheCalls = [];
+  const pluginState = createDispatchMessagePlugin({
+    settings: {
+      antiNukeEnabled: false,
+      cacheAllImages: true,
+      ignoreSelf: true
+    },
+    cacheMessageImages(message, options) {
+      cacheCalls.push({ messageId: message.id, options });
+    }
+  });
+  const message = {
+    id: 'ignore-self-message-no-anti-nuke',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    type: 0,
+    content: 'hello',
+    attachments: [{ id: 'a', url: 'https://cdn.example/ignore-self-no-anti-nuke.png' }],
+    author: { id: 'local', username: 'Local' }
+  };
+  let nativeCalls = 0;
+  pluginState.plugin.onDispatchEvent([
+    { type: 'MESSAGE_CREATE', message }
+  ], () => {
+    nativeCalls++;
+    return { native: true };
+  });
+
+  assert.equal(nativeCalls, 1);
+  assert.equal(cacheCalls.length, 0);
+});
+
+test('Anti-Nuke ignored media never writes or queues while no-save is active', () => {
+  const cacheCalls = [];
+  const queuedRequests = [];
+  const pluginState = createDispatchMessagePlugin({
+    settings: {
+      antiNukeEnabled: true,
+      cacheAllImages: true,
+      dontSaveData: true,
+      ignoreSelf: true
+    },
+    cacheMessageImages(message, options) {
+      cacheCalls.push({ messageId: message.id, options });
+      return Object.getPrototypeOf(this).cacheMessageImages.call(this, message, options);
+    },
+    queuePendingMediaCacheRequest(...args) {
+      queuedRequests.push(args);
+    }
+  });
+  const message = {
+    id: 'ignored-no-save-message',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    type: 0,
+    content: '',
+    attachments: [{
+      id: 'no-save-attachment',
+      url: 'https://cdn.example/ignored-no-save-message.png'
+    }],
+    author: { id: 'local', username: 'Local' }
+  };
+
+  pluginState.plugin.onDispatchEvent([
+    { type: 'MESSAGE_CREATE', message }
+  ], () => ({ native: true }));
+
+  assert.deepEqual(cacheCalls, [{
+    messageId: 'ignored-no-save-message',
+    options: { queueWhileNoSave: false }
+  }]);
+  assert.deepEqual(queuedRequests, []);
+  assert.deepEqual(pluginState.plugin.messageRecord, {});
+});

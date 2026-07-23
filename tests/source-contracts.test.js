@@ -1336,6 +1336,31 @@ test('backup restoration reports the main-file rebuild through the notification 
   assert.match(source, /Backup loaded and the main data file was rebuilt successfully\./);
 });
 
+test('removed explicit uploads remain logger-only and never become embed history', () => {
+  const attachmentDiff = source.slice(
+    source.indexOf('_getChangedAttachments(oldAttachments'),
+    source.indexOf('_ensureChannelCached(channelId)')
+  );
+  const cacheOnlyMessage = source.slice(
+    source.indexOf('getCacheOnlyMessage(message)'),
+    source.indexOf('refreshCacheOnlyMessage(message)')
+  );
+  const viewer = source.slice(
+    source.indexOf('populateParent(parent, messages)'),
+    source.indexOf('sortMessagesByAge(map, useCaptureBatchOrder')
+  );
+
+  assert.match(attachmentDiff, /removed_attachments: removedAttachments/);
+  assert.doesNotMatch(attachmentDiff, /embeds|components/);
+  assert.doesNotMatch(cacheOnlyMessage, /removed_attachments|removedAttachments/);
+  assert.match(viewer, /getRecordRemovedAttachments\(record\)/);
+  assert.match(viewer, /removedAttachmentsForRender/);
+  assert.match(viewer, /ml2RemovedAttachmentHost/);
+  assert.match(viewer, /'Removed attachment'/);
+  assert.match(source, /hasImageMedia\([\s\S]*getRecordRemovedAttachments\(this\.getSavedMessage\(x\)\)/);
+  assert.doesNotMatch(source, /removed_embeds|removedEmbeds/);
+});
+
 test('component-only records receive a visible Logger viewer fallback before empty-row pruning', () => {
   const viewer = source.slice(
     source.indexOf('populateParent(parent, messages)'),
