@@ -6917,11 +6917,17 @@ module.exports = class MessageLoggerV2 {
     this.reportMajorSettingChange('cacheAllImages', enabled);
   }
   getMediaCacheRequestKey(request) {
-    return JSON.stringify([String(request.messageId), request.attachmentId, String(request.url)]);
+    return JSON.stringify([
+      String(request.messageId),
+      request.attachmentId,
+      String(request.attachmentIdx ?? ''),
+      String(request.url)
+    ]);
   }
-  isDeferredMediaCacheRequestActive(url, attachmentId, messageId) {
+  isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId) {
     return !!this._activeDeferredMediaCacheRequests?.has?.(this.getMediaCacheRequestKey({
       url,
+      attachmentIdx,
       attachmentId,
       messageId
     }));
@@ -7522,14 +7528,14 @@ module.exports = class MessageLoggerV2 {
       const key = attachment?.id || attachment?.url || attachment?.proxy_url;
       if (key) keys.add(`attachment:${key}`);
     }
-    for (const embed of message?.embeds || []) {
-      for (const media of this.getEmbedImageMedia(embed)) {
-        const key = this.getUsableEmbedMediaUrl(media);
-        if (key) keys.add(`embed:${key}`);
+    for (let embedIndex = 0; embedIndex < (message?.embeds || []).length; embedIndex++) {
+      const embed = message.embeds[embedIndex];
+      for (const { cacheIndex, url } of this.getIndexedEmbedImageMedia(embed, embedIndex)) {
+        if (url) keys.add(`${cacheIndex}:${url}`);
       }
     }
-    for (const { url } of this.getIndexedComponentMedia(message?.components)) {
-      keys.add(`component:${url}`);
+    for (const { cacheIndex, url } of this.getIndexedComponentMedia(message?.components)) {
+      if (url) keys.add(`${cacheIndex}:${url}`);
     }
     for (const sticker of this.getMessageStickerItems(message)) {
       const key = sticker?.id || sticker?.url || sticker?.asset_url || sticker?.assetUrl;
@@ -10538,16 +10544,52 @@ module.exports = class MessageLoggerV2 {
     return this.getIndexedEmbedImageMedia(embed).map(entry => entry.media);
   }
   getIndexedEmbedImageMedia(embed, embedIndex = 0) {
-    if (!embed || typeof embed !== 'object') return [];
+    if (!embed || typeof embed !== 'object' || Array.isArray(embed)) return [];
     const entries = [];
-    if (embed.image && typeof embed.image === 'object' && !Array.isArray(embed.image)) {
-      entries.push({ media: embed.image, cacheIndex: `embed:${embedIndex}` });
+    const addMedia = (media, cacheIndex, fallbackLabel = null, preferredKeys = ['url', 'proxy_url', 'proxyURL', 'proxyUrl', 'src', 'href']) => {
+      const url = this.getUsableEmbedMediaUrl(media, preferredKeys);
+      if (!url || !/^https?:\/\//i.test(url)) return;
+      entries.push({
+        media,
+        url,
+        sourceId: media.attachment_id ?? media.attachmentId ?? media.id ?? this.getEmbedMediaSourceId(url),
+        cacheIndex,
+        label: fallbackLabel
+      });
+    };
+    addMedia(
+      embed.image,
+      `embed:${embedIndex}`,
+      null,
+      ['url', 'proxy_url', 'proxyURL', 'proxyUrl', 'src', 'href']
+    );
+    addMedia(
+      embed.thumbnail,
+      `embed:${embedIndex}:thumbnail`,
+      null,
+      ['url', 'proxy_url', 'proxyURL', 'proxyUrl', 'src', 'href']
+    );
+    if (embed.author && typeof embed.author === 'object' && !Array.isArray(embed.author)) {
+      addMedia(
+        embed.author,
+        `embed:${embedIndex}:author-icon`,
+        null,
+        ['icon_url', 'iconUrl', 'iconURL', 'iconProxyURL', 'iconProxyUrl', 'icon_proxy_url', 'proxy_icon_url', 'proxyIconUrl', 'proxyIconURL']
+      );
+    }
+    if (embed.footer && typeof embed.footer === 'object' && !Array.isArray(embed.footer)) {
+      addMedia(
+        embed.footer,
+        `embed:${embedIndex}:footer-icon`,
+        null,
+        ['icon_url', 'iconUrl', 'iconURL', 'iconProxyURL', 'iconProxyUrl', 'icon_proxy_url', 'proxy_icon_url', 'proxyIconUrl', 'proxyIconURL']
+      );
     }
     if (Array.isArray(embed.images)) {
       for (let galleryIndex = 0; galleryIndex < embed.images.length; galleryIndex++) {
         const media = embed.images[galleryIndex];
         if (!media || typeof media !== 'object' || Array.isArray(media)) continue;
-        entries.push({ media, cacheIndex: `embed:${embedIndex}:gallery:${galleryIndex}` });
+        addMedia(media, `embed:${embedIndex}:gallery:${galleryIndex}`);
       }
     }
     return entries;
@@ -11436,7 +11478,7 @@ module.exports = class MessageLoggerV2 {
       if (!response.ok) {
         if (response.status === 404 || response.status === 403) {
           Logger.warn(`Image ${attachmentId} unavailable (${response.status}), skipping cache`);
-          if (this.isDeferredMediaCacheRequestActive(url, attachmentId, messageId)) {
+          if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
             this.reportDeferredMediaCacheFailure(
               attachmentId,
               new Error(`Remote media returned HTTP ${response.status}`)
@@ -11447,7 +11489,7 @@ module.exports = class MessageLoggerV2 {
         attempts++;
         if (attempts >= maxAttempts) {
           Logger.warn(`Failed to get image ${attachmentId} for caching, error code ${response.status}`);
-          if (this.isDeferredMediaCacheRequestActive(url, attachmentId, messageId)) {
+          if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
             this.reportDeferredMediaCacheFailure(
               attachmentId,
               new Error(`Remote media returned HTTP ${response.status}`)
@@ -11468,7 +11510,7 @@ module.exports = class MessageLoggerV2 {
       const fileExtension = match[0];
       if (!fileExtension) {
         Logger.warn(`Could not determine file extension for ${attachmentId}, skipping cache`);
-        if (this.isDeferredMediaCacheRequestActive(url, attachmentId, messageId)) {
+        if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
           this.reportDeferredMediaCacheFailure(
             attachmentId,
             new Error('The media file type could not be determined')
@@ -11490,7 +11532,7 @@ module.exports = class MessageLoggerV2 {
       attempts++;
       if (attempts >= maxAttempts) {
         Logger.error(`Failed to cache image ${attachmentId}:`, e.message);
-        if (this.isDeferredMediaCacheRequestActive(url, attachmentId, messageId)) {
+        if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
           this.reportDeferredMediaCacheFailure(attachmentId, e);
         }
         return;
@@ -11537,10 +11579,8 @@ module.exports = class MessageLoggerV2 {
       }
       for (let i = 0; i < embeds.length; i++) {
         const embed = embeds[i];
-        for (const { media, cacheIndex } of this.getIndexedEmbedImageMedia(embed, i)) {
-          const url = this.getUsableEmbedMediaUrl(media);
-          if (!url) continue;
-          callback(url, cacheIndex, this.getEmbedMediaSourceId(url));
+        for (const { url, cacheIndex, sourceId } of this.getIndexedEmbedImageMedia(embed, i)) {
+          callback(url, cacheIndex, sourceId);
         }
       }
       for (const { url, cacheIndex, sourceId } of componentMedia) {
@@ -11660,10 +11700,8 @@ module.exports = class MessageLoggerV2 {
     }
     for (let embedIndex = 0; embedIndex < (message.embeds || []).length; embedIndex++) {
       const embed = message.embeds[embedIndex];
-      for (const { media, cacheIndex } of this.getIndexedEmbedImageMedia(embed, embedIndex)) {
-        const url = this.getUsableEmbedMediaUrl(media);
-        if (!url) continue;
-        ids.add(this.getMediaCacheFileId(this.getEmbedMediaSourceId(url), cacheIndex, message.id));
+      for (const { sourceId, cacheIndex } of this.getIndexedEmbedImageMedia(embed, embedIndex)) {
+        ids.add(this.getMediaCacheFileId(sourceId, cacheIndex, message.id));
       }
     }
     for (const { sourceId, cacheIndex } of this.getIndexedComponentMedia(message.components)) {
@@ -11695,6 +11733,16 @@ module.exports = class MessageLoggerV2 {
     }
     return false;
   }
+  hasImageMedia(message) {
+    if (!message || typeof message !== 'object') return false;
+    if (Array.isArray(message.attachments)) {
+      if (message.attachments.some(({ filename }) => this.isImage(filename))) return true;
+    }
+    if (Array.isArray(message.embeds)) {
+      if (message.embeds.some(embed => this.getIndexedEmbedImageMedia(embed).length)) return true;
+    }
+    return this.getIndexedComponentMedia(message.components).some(entry => this.isComponentImageMedia(entry));
+  }
   getRecordCachedMediaLabels(record) {
     const message = record?.message;
     const labels = new Map();
@@ -11709,13 +11757,11 @@ module.exports = class MessageLoggerV2 {
     }
     for (let embedIndex = 0; embedIndex < (message.embeds || []).length; embedIndex++) {
       const embed = message.embeds[embedIndex];
-      for (const { media, cacheIndex } of this.getIndexedEmbedImageMedia(embed, embedIndex)) {
-        const url = this.getUsableEmbedMediaUrl(media);
-        if (!url) continue;
+      for (const { url, sourceId, cacheIndex } of this.getIndexedEmbedImageMedia(embed, embedIndex)) {
         try {
           const parsed = new URL(url);
           const parts = parsed.pathname.split('/').filter(Boolean);
-          const cacheId = this.getMediaCacheFileId(parts[parts.length - 2], cacheIndex, message.id);
+          const cacheId = this.getMediaCacheFileId(sourceId, cacheIndex, message.id);
           const filename = decodeURIComponent(parts[parts.length - 1] || '') || embed.title || 'embedded media';
           labels.set(cacheId, filename);
         } catch {}
@@ -15703,10 +15749,7 @@ module.exports = class MessageLoggerV2 {
             messages = messages.filter(x => {
               const message = this.getMessageAny(x);
               if (!message) return false;
-              if (Array.isArray(message.attachments)) if (message.attachments.some(({ filename }) => this.isImage(filename))) return true;
-              if (Array.isArray(message.embeds) && message.embeds.some(({ image }) => !!image)) return true;
-              return this.getIndexedComponentMedia(message.components)
-                .some(entry => this.isComponentImageMedia(entry));
+              return this.hasImageMedia(message);
             });
             break;
           case 'link':

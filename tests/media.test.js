@@ -114,7 +114,13 @@ test('media cache keys include attachments, embeds, Components V2 media, and sti
   const plugin = createPlugin();
   const keys = plugin.getMessageMediaCacheKeys({
     attachments: [{ id: 'a' }, { id: 'a' }],
-    embeds: [{ image: { url: 'https://cdn.example/embed.png' } }],
+    embeds: [{
+      image: { url: 'https://cdn.example/embed-image.png' },
+      thumbnail: { url: 'https://cdn.example/embed-thumb.png' },
+      author: { iconURL: 'https://cdn.example/author-icon.png' },
+      footer: { iconProxyURL: 'https://cdn.example/footer-icon.png' },
+      images: [{ url: 'https://cdn.example/gallery-image.png' }]
+    }],
     components: [{
       type: 11,
       media: {
@@ -127,10 +133,57 @@ test('media cache keys include attachments, embeds, Components V2 media, and sti
 
   assert.deepEqual(keys, new Set([
     'attachment:a',
-    'embed:https://cdn.example/embed.png',
-    'component:https://cdn.example/component.png',
+    'embed:0:https://cdn.example/embed-image.png',
+    'embed:0:thumbnail:https://cdn.example/embed-thumb.png',
+    'embed:0:author-icon:https://cdn.example/author-icon.png',
+    'embed:0:footer-icon:https://cdn.example/footer-icon.png',
+    'embed:0:gallery:0:https://cdn.example/gallery-image.png',
+    'component:0:thumbnail:https://cdn.example/component.png',
     'sticker:s'
   ]));
+});
+
+test('media cache keys include location identity for moved embed URLs and component media', () => {
+  const plugin = createPlugin();
+  const shared = 'https://cdn.example/shared.png';
+  const sharedComponent = 'https://cdn.example/shared-component.png';
+  const messageWithImage = {
+    id: 'shared-before',
+    attachments: [{ id: 'a' }],
+    embeds: [{
+      image: { url: shared },
+      thumbnail: { url: 'https://cdn.example/thumbnail-before.png' }
+    }],
+    components: [{ type: 11, media: { url: sharedComponent } }]
+  };
+  const messageWithThumb = {
+    id: 'shared-after',
+    attachments: [{ id: 'a' }],
+    embeds: [{
+      image: { url: 'https://cdn.example/image-after.png' },
+      thumbnail: { url: shared }
+    }],
+    components: [{
+      type: 12,
+      items: [{ media: { url: sharedComponent } }]
+    }]
+  };
+
+  const before = plugin.getMessageMediaCacheKeys(messageWithImage);
+  const after = plugin.getMessageMediaCacheKeys(messageWithThumb);
+
+  assert.equal(before.has('embed:0:https://cdn.example/shared.png'), true);
+  assert.equal(after.has('embed:0:thumbnail:https://cdn.example/shared.png'), true);
+  assert.equal(before.has('embed:0:thumbnail:https://cdn.example/shared.png'), false);
+  assert.equal(after.has('embed:0:https://cdn.example/shared.png'), false);
+  assert.equal(before.has('component:0:thumbnail:https://cdn.example/shared-component.png'), true);
+  assert.equal(after.has('component:0:gallery:0:https://cdn.example/shared-component.png'), true);
+  assert.equal(before.has('component:0:gallery:0:https://cdn.example/shared-component.png'), false);
+  assert.equal(after.has('component:0:thumbnail:https://cdn.example/shared-component.png'), false);
+  assert.equal(Array.from(before).filter(key => key.includes('shared-component')).length, 1);
+  assert.equal(Array.from(after).filter(key => key.includes('shared-component')).length, 1);
+  assert.equal(Array.from(before).filter(key => key.includes('shared.png')).length, 1);
+  assert.equal(Array.from(after).filter(key => key.includes('shared.png')).length, 1);
 });
 
 test('Components V2 media traversal is stable, proxy-first, and skips attachment-only files', () => {
@@ -185,6 +238,68 @@ test('Components V2 media traversal is stable, proxy-first, and skips attachment
       label: 'Remote file'
     }
   ]);
+});
+
+test('has:image detection uses shared embed image traversal for all classic media slots', () => {
+  const plugin = createPlugin();
+  assert.equal(plugin.hasImageMedia({
+    id: 'has-image-embed',
+    attachments: [],
+    content: '',
+    components: [],
+    sticker_items: [],
+    embeds: [
+      {
+        image: { url: '' },
+        thumbnail: { url: 'https://cdn.example/thumb.png' }
+      }
+    ]
+  }), true);
+
+  assert.equal(plugin.hasImageMedia({
+    id: 'has-image-author-icon',
+    attachments: [],
+    content: '',
+    components: [],
+    sticker_items: [],
+    embeds: [{ author: { iconUrl: 'https://cdn.example/author.png' } }]
+  }), true);
+
+  assert.equal(plugin.hasImageMedia({
+    id: 'has-image-gallery',
+    attachments: [],
+    content: '',
+    components: [],
+    sticker_items: [],
+    embeds: [{ images: [{ url: 'https://cdn.example/gallery-item.png' }] }]
+  }), true);
+
+  assert.equal(plugin.hasImageMedia({
+    id: 'has-image-author-url-false',
+    attachments: [],
+    content: '',
+    components: [],
+    sticker_items: [],
+    embeds: [{ author: { url: 'https://cdn.example/author-link-only.png' } }]
+  }), false);
+
+  assert.equal(plugin.hasImageMedia({
+    id: 'has-image-footer-icon',
+    attachments: [],
+    content: '',
+    components: [],
+    sticker_items: [],
+    embeds: [{ footer: { icon_proxy_url: 'https://cdn.example/footer-icon.png' } }]
+  }), true);
+
+  assert.equal(plugin.hasImageMedia({
+    id: 'has-image-video-false',
+    attachments: [],
+    content: '',
+    components: [],
+    sticker_items: [],
+    embeds: [{ video: { url: 'https://cdn.example/video.mp4' } }]
+  }), false);
 });
 
 test('Components V2 image detection accepts image MIME metadata on extensionless proxy URLs', () => {
@@ -346,6 +461,11 @@ test('media caching skips malformed embed images and uses valid URL or proxy med
     embeds: [
       { image: { width: 1, height: 2 } },
       { image: { url: 'https://cdn.example/valid-url/image.png' } },
+      {
+        thumbnail: { url: 'https://cdn.example/valid-thumb/image.png' },
+        author: { icon_url: 'https://cdn.example/author.icon.png' },
+        footer: { iconProxyURL: 'https://cdn.example/footer-icon-proxy.png' }
+      },
       { image: { proxy_url: 'https://cdn.example/valid-proxy/image.png' } },
       {
         images: [
@@ -373,10 +493,60 @@ test('media caching skips malformed embed images and uses valid URL or proxy med
 
   assert.deepEqual(cached, [
     ['https://cdn.example/valid-url/image.png', 'embed:1', 'valid-url', message.id, message.channel_id, message.guild_id, 0, 0],
-    ['https://cdn.example/valid-proxy/image.png', 'embed:2', 'valid-proxy', message.id, message.channel_id, message.guild_id, 0, 0],
-    ['https://cdn.example/gallery-proxy/image.png', 'embed:3:gallery:1', 'gallery-proxy', message.id, message.channel_id, message.guild_id, 0, 0],
-    ['https://cdn.example/gallery-url/image.png', 'embed:3:gallery:2', 'gallery-url', message.id, message.channel_id, message.guild_id, 0, 0],
+    ['https://cdn.example/valid-thumb/image.png', 'embed:2:thumbnail', 'valid-thumb', message.id, message.channel_id, message.guild_id, 0, 0],
+    ['https://cdn.example/author.icon.png', 'embed:2:author-icon', null, message.id, message.channel_id, message.guild_id, 0, 0],
+    ['https://cdn.example/footer-icon-proxy.png', 'embed:2:footer-icon', null, message.id, message.channel_id, message.guild_id, 0, 0],
+    ['https://cdn.example/valid-proxy/image.png', 'embed:3', 'valid-proxy', message.id, message.channel_id, message.guild_id, 0, 0],
+    ['https://cdn.example/gallery-proxy/image.png', 'embed:4:gallery:1', 'gallery-proxy', message.id, message.channel_id, message.guild_id, 0, 0],
+    ['https://cdn.example/gallery-url/image.png', 'embed:4:gallery:2', 'gallery-url', message.id, message.channel_id, message.guild_id, 0, 0],
     ['https://cdn.example/component-thumbnail.png', 'component:0:accessory:thumbnail', '123456', message.id, message.channel_id, message.guild_id, 0, 0]
+  ]);
+});
+
+test('same URL in embed image and thumbnail is queued separately and flushed as distinct cache files', async t => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  global.fetch = async () => successfulMediaResponse();
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-location-queue-'));
+  t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
+  fs.rmSync(cacheDir, { force: true, recursive: true });
+  const url = 'https://cdn.example/location-sensitive.png';
+  const message = {
+    id: 'location-embed-message',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    attachments: [],
+    sticker_items: [],
+    embeds: [{ image: { url }, thumbnail: { url } }]
+  };
+  const plugin = createMediaCachePlugin(cacheDir, {
+    __started: true,
+    settings: {
+      cacheAllImages: true,
+      dontSaveData: true,
+      dontLoadArchivedData: false,
+      newSaveAllFileTypes: true,
+      maxCacheFileSize: 0,
+      addUserIdToSavedMediaFilename: false
+    },
+    messageRecord: {
+      [message.id]: { message }
+    }
+  });
+
+  plugin.cacheMessageImages(message);
+  await waitForQueuedMediaTasks();
+
+  assert.equal(pendingMediaRequestCount(plugin), 2);
+  plugin.settings.dontSaveData = false;
+  const started = plugin.flushPendingMediaCacheRequests();
+
+  assert.equal(started, 2);
+  await waitForDeferredMediaToSettle(plugin);
+
+  assert.deepEqual(fs.readdirSync(cacheDir).sort(), [
+    `${message.id}-embed-0 (${message.id}).png`,
+    `${message.id}-embed-0-thumbnail (${message.id}).png`
   ]);
 });
 
@@ -472,7 +642,13 @@ test('record media IDs cover messages, attachments, stickers, embeds, and later 
       id: 'message',
       attachments: [{ id: 'attachment' }],
       sticker_items: [{ id: 'sticker' }],
-      embeds: [{ image: { url: 'https://cdn.example/embedded-id/image.png' } }],
+      embeds: [{
+        image: { url: 'https://cdn.example/embedded-id/image.png' },
+        thumbnail: { url: 'https://cdn.example/embedded-id/thumb.png' },
+        author: { icon_url: 'https://cdn.example/embedded-id/author.png' },
+        footer: { icon_url: 'https://cdn.example/embedded-id/footer.png' },
+        images: [{ url: 'https://cdn.example/embedded-id/gallery/cover.png' }]
+      }],
       components: [{
         type: 11,
         description: 'Component thumbnail',
@@ -487,6 +663,10 @@ test('record media IDs cover messages, attachments, stickers, embeds, and later 
     'attachment',
     'sticker',
     'message-embed-0',
+    'message-embed-0-thumbnail',
+    'message-embed-0-author-icon',
+    'message-embed-0-footer-icon',
+    'message-embed-0-gallery-0',
     'message-component-0-thumbnail',
     'later-attachment'
   ]));
@@ -494,6 +674,11 @@ test('record media IDs cover messages, attachments, stickers, embeds, and later 
     plugin.getRecordCachedMediaLabels(record).get('message-component-0-thumbnail'),
     'component.png'
   );
+  assert.equal(plugin.getRecordCachedMediaLabels(record).get('message-embed-0'), 'image.png');
+  assert.equal(plugin.getRecordCachedMediaLabels(record).get('message-embed-0-thumbnail'), 'thumb.png');
+  assert.equal(plugin.getRecordCachedMediaLabels(record).get('message-embed-0-author-icon'), 'author.png');
+  assert.equal(plugin.getRecordCachedMediaLabels(record).get('message-embed-0-footer-icon'), 'footer.png');
+  assert.equal(plugin.getRecordCachedMediaLabels(record).get('message-embed-0-gallery-0'), 'cover.png');
 });
 
 test('folded thread roots retain the original starter cache identity', () => {
@@ -542,7 +727,12 @@ test('no-save queues attachment, embed, sticker, and video media without fetchin
         { id: 'image', url: 'https://cdn.example/image.png', filename: 'image.png' },
         { id: 'video', url: 'https://cdn.example/video.mp4', filename: 'video.mp4' }
       ],
-      embeds: [{ image: { url: 'https://cdn.example/embed-id/embed.png' } }],
+      embeds: [{
+        image: { url: 'https://cdn.example/embed-id/embed.png' },
+        thumbnail: { proxy_url: 'https://cdn.example/embed-id/thumb.png' },
+        author: { icon_url: 'https://cdn.example/embed-id/author.png' },
+        footer: { iconProxyURL: 'https://cdn.example/embed-id/footer.png' }
+      }],
       components: [{
         type: 11,
         media: {
@@ -571,7 +761,7 @@ test('no-save queues attachment, embed, sticker, and video media without fetchin
 
     assert.equal(fetches, 0, `no-save ${archiveDetached ? 'detached' : 'attached'} mode must not fetch media`);
     assert.equal(fs.existsSync(cacheDir), false, 'no-save media caching must not create the cache directory');
-    assert.ok(pendingMediaRequestCount(plugin) >= 5, 'eligible logger media must stay queued in memory');
+    assert.equal(pendingMediaRequestCount(plugin), 8, 'every eligible logger media location must stay queued in memory');
   }
 });
 
@@ -1277,12 +1467,27 @@ test('removing a record deletes only its related cached files', t => {
     message: {
       id: '200',
       channel_id: 'channel',
-      attachments: [{ id: 'attachment', filename: 'image.png' }]
+      attachments: [{ id: 'attachment', filename: 'image.png' }],
+      embeds: [{
+        image: { url: 'https://cdn.example/embed-id/image.png' },
+        thumbnail: { url: 'https://cdn.example/embed-id/thumb.png' },
+        author: { icon_url: 'https://cdn.example/embed-id/author.png' },
+        footer: { icon_proxy_url: 'https://cdn.example/embed-id/footer.png' },
+        images: [{ url: 'https://cdn.example/embed-id/gallery-1.png' }]
+      }],
+      components: [{ type: 11, media: { url: 'https://cdn.example/component.png' } }]
     }
   };
-  fs.writeFileSync(path.join(cacheDir, 'attachment.png'), 'legacy');
-  fs.writeFileSync(path.join(cacheDir, 'attachment (200).png'), 'current');
-  fs.writeFileSync(path.join(cacheDir, 'unrelated (999).png'), 'keep');
+  const recordMediaFileIds = plugin => {
+    const files = ['attachment'];
+    for (const { sourceId, cacheIndex } of plugin.getIndexedEmbedImageMedia(record.message.embeds[0], 0)) {
+      files.push(plugin.getMediaCacheFileId(sourceId, cacheIndex, record.message.id));
+    }
+    for (const { sourceId, cacheIndex } of plugin.getIndexedComponentMedia(record.message.components)) {
+      files.push(plugin.getMediaCacheFileId(sourceId, cacheIndex, record.message.id));
+    }
+    return files;
+  };
   const plugin = createPlugin({
     messageRecord: { 200: record },
     settings: { imageCacheDir: cacheDir },
@@ -1295,9 +1500,22 @@ test('removing a record deletes only its related cached files', t => {
     queueCachedFilesDeletedToast() {}
   });
 
-  assert.equal(plugin.deleteCachedFilesForRecord(record), 2);
+  for (const file of recordMediaFileIds(plugin)) {
+    fs.writeFileSync(path.join(cacheDir, `${file} (200).png`), 'current');
+  }
+  fs.writeFileSync(path.join(cacheDir, 'attachment.png'), 'legacy');
+  fs.writeFileSync(path.join(cacheDir, 'unrelated (999).png'), 'keep');
+
+  assert.equal(plugin.deleteCachedFilesForRecord(record), recordMediaFileIds(plugin).length + 1);
   assert.equal(fs.existsSync(path.join(cacheDir, 'attachment.png')), false);
   assert.equal(fs.existsSync(path.join(cacheDir, 'attachment (200).png')), false);
+  assert.equal(fs.existsSync(path.join(cacheDir, `${plugin.getMediaCacheFileId('embed-id', 'embed:0', '200')} (200).png`)), false);
+  assert.equal(fs.existsSync(path.join(cacheDir, `${plugin.getMediaCacheFileId('embed-id', 'embed:0:thumbnail', '200')} (200).png`)), false);
+  assert.equal(fs.existsSync(path.join(cacheDir, `${plugin.getMediaCacheFileId('embed-id', 'embed:0:author-icon', '200')} (200).png`)), false);
+  assert.equal(fs.existsSync(path.join(cacheDir, `${plugin.getMediaCacheFileId('embed-id', 'embed:0:footer-icon', '200')} (200).png`)), false);
+  assert.equal(fs.existsSync(path.join(cacheDir, `${plugin.getMediaCacheFileId('embed-id', 'embed:0:gallery:0', '200')} (200).png`)), false);
+  const componentCacheIndex = plugin.getIndexedComponentMedia(record.message.components)[0].cacheIndex;
+  assert.equal(fs.existsSync(path.join(cacheDir, `${plugin.getMediaCacheFileId('component-id', componentCacheIndex, '200')} (200).png`)), false);
   assert.equal(fs.existsSync(path.join(cacheDir, 'unrelated (999).png')), true);
 });
 
