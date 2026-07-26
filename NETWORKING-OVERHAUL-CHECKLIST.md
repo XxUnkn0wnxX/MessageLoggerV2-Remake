@@ -1170,7 +1170,8 @@ evidence for another session to understand what changed and why.
 - **Commit:** Implementation
   `9e5871c75039fc34f262598854701083190df1fd`
   (`fix: guard media cache body transfers`); checklist checkpoint
-  `<pending-stage5a-checkpoint>`.
+  `6830a03b5cca7ccf1689a874ab9445d60215090a`
+  (`docs: record completed media watchdog`).
 - **Exact next action:** Report and stop. Wait for explicit live-sync
   authorization before copying the plugin or running `RT-26`.
 
