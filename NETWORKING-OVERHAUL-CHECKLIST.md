@@ -1231,7 +1231,7 @@ evidence for another session to understand what changed and why.
   user invocation inside Discord remains pending.
 - **Failures or blockers:** None. If DevTools console use is inconvenient, a
   disposable helper plugin can expose the same two probes.
-- **Commit:** `<pending-stage6-test-resource-checkpoint>`.
+- **Commit:** `32b0df1b61116855a4dcfba2ac952b4b3497e02d`.
 - **Exact next action:** Give the user the exact pasteable probes and wait for
   their results.
 
