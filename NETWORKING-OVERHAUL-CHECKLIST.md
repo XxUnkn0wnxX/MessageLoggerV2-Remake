@@ -36,8 +36,8 @@ review, checklist update, and commit must also be complete.
 - **Branch base:** `a5eadbe736f5a0cf4b7a3730bf9950ade17ad752`
   (`docs: prepare 2.8.2.8 release notes`)
 - **Upstream status:** `origin/fix/native-media-networking` remains at the
-  published handoff commit `54a1f385`; local staged implementation is
-  intentionally ahead and has not been pushed. `develop` and `main` both still
+  published handoff commit `54a1f385`; local implementation commits are
+  intentionally ahead and have not been pushed. `develop` and `main` both still
   point to the same released base commit and track their matching `origin`
   branches.
 - **Paused attachment work:** The renamed `fix/attachment-gate` remains
@@ -57,7 +57,7 @@ review, checklist update, and commit must also be complete.
 - **Live plugin:** Intentionally not updated. The user requires a pre-live
   report and separate authorization before any copy to the BetterDiscord
   plugins directory. Read-only SHA-256 comparison confirms the repository
-  plugin is `8a726059bf2b02c536e962d8853e46165da18e1126900913353f14b1601aef89`
+  plugin is `647de34e571b7a14f70c16a464241b0ece55aea59200eb8bfe5b925dda57c7c9`
   and the live plugin is
   `9ed4872e4f342e46ca69a8a68c8aa054ce2a7cb2532a9dc1bdcdef73fec92c99`.
 - **Publishing authority:** The user explicitly authorized pushing both working
@@ -66,11 +66,10 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit the passing Stage 5 documentation/final hardening, record that exact
-commit hash in this checklist through the immediate checklist checkpoint, run
-the final clean-tree automated gate, then stop with the pre-live report.
-Stage 6 is explicitly deferred without execution; do not sync the plugin until
-the user separately authorizes that copy.
+Commit this exact Stage 5 hash checkpoint, run the final clean-tree automated
+and status gates, then stop with the pre-live report. Stage 6 is explicitly
+deferred without execution; do not sync the plugin until the user separately
+authorizes that copy.
 
 ### Resume procedure for a new session
 
@@ -137,7 +136,7 @@ recorded as an amendment before implementation.
 - [x] Automated verification passed.
 - [x] Live BetterDiscord verification explicitly deferred without execution at
       the user-required pre-live stop gate.
-- [ ] Final implementation committed.
+- [x] Final implementation committed.
 
 ## Problem being solved
 
@@ -611,8 +610,8 @@ Stage 4 commit/result:
 
 Stage 5 commit/result:
 
-- Commit: Pending the passing Stage 5 commit; its exact hash will be recorded by
-  the immediate checklist checkpoint.
+- Commit: `ee902036fa083e20ec6700863a5093b9afa1bbec`
+  (`fix: finalize media networking overhaul`).
 - Tests: PASS — focused `node --test tests/media.test.js
   tests/source-contracts.test.js tests/persistence.test.js` reported 151
   passed, 0 failed; independent focused media/source/settings review reported
@@ -940,17 +939,18 @@ evidence for another session to understand what changed and why.
   `git diff --check`, and `cmark` parsing of both documentation files passed.
 - **Runtime evidence:** No live copy or behavior test was performed. Read-only
   SHA-256 comparison found repository
-  `8a726059bf2b02c536e962d8853e46165da18e1126900913353f14b1601aef89`
+  `647de34e571b7a14f70c16a464241b0ece55aea59200eb8bfe5b925dda57c7c9`
   and live
   `9ed4872e4f342e46ca69a8a68c8aa054ce2a7cb2532a9dc1bdcdef73fec92c99`,
   proving the live plugin remains unsynced.
 - **Failures or blockers:** No remaining implementation blocker. Stage 6
   remains deliberately deferred pending the user's separate live-sync
   authorization.
-- **Commit:** Pending the passing Stage 5 commit; the exact hash will be
-  recorded by the immediate checklist checkpoint.
-- **Exact next action:** Commit Stage 5, record its exact hash, run the final
-  clean-tree automated/status check, then report and stop before live sync.
+- **Commit:** `ee902036fa083e20ec6700863a5093b9afa1bbec`
+  (`fix: finalize media networking overhaul`).
+- **Exact next action:** Commit this exact Stage 5 hash checkpoint, run the
+  final clean-tree automated/status check, then report and stop before live
+  sync.
 
 ### Handoff entry template
 
