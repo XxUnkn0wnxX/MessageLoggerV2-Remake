@@ -685,7 +685,8 @@ or clipboard networking.
 
 Stage 5A commit/result:
 
-- Plan commit: `<pending-plan-commit>`.
+- Plan commit: `ab5f56ebc3c1195a23597794f1bcdf9a0a0d1ba2`
+  (`docs: plan media body inactivity watchdog`).
 - Implementation commit: `<pending-implementation-commit>`.
 - Tests: PENDING.
 - Notes: The approved policy measures inactivity rather than total transfer
@@ -1057,7 +1058,8 @@ evidence for another session to understand what changed and why.
 - **Runtime evidence:** None required for this planning checkpoint; live plugin
   remains intentionally unsynced.
 - **Failures or blockers:** None.
-- **Commit:** `<pending-plan-commit>`.
+- **Commit:** `ab5f56ebc3c1195a23597794f1bcdf9a0a0d1ba2`
+  (`docs: plan media body inactivity watchdog`).
 - **Exact next action:** Commit and record this plan checkpoint, then implement
   Stage 5A with focused and full deterministic verification.
 
