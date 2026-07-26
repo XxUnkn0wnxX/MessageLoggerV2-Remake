@@ -698,7 +698,9 @@ Stage 5A commit/result:
 - Cancellation-scope clarification commit:
   `f17a96e42348d725adcc578fb0ec3b489011afb0`
   (`docs: clarify media watchdog cancellation scope`).
-- Draft-audit checkpoint commit: `<pending-draft-audit-commit>`.
+- Draft-audit checkpoint commit:
+  `503035bfe886035d02ed42d93ca738e824c752c0`
+  (`docs: record media watchdog draft audit`).
 - Implementation commit: `<pending-implementation-commit>`.
 - Draft tests: focused media PASS `61/61`; full suite FAIL `367/368` because the
   existing central-handler source contract no longer matched the draft call
@@ -1126,7 +1128,8 @@ evidence for another session to understand what changed and why.
   handle registered.
 - **Failures or blockers:** The reported issues are now approved for bounded
   correction. The draft remains uncommitted and is not eligible for live sync.
-- **Commit:** `<pending-draft-audit-commit>`.
+- **Commit:** `503035bfe886035d02ed42d93ca738e824c752c0`
+  (`docs: record media watchdog draft audit`).
 - **Exact next action:** Commit and record this audit checkpoint, apply the
   approved corrections/tests, then run the full review and verification gates.
 
