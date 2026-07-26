@@ -67,10 +67,12 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Wait for the user's `RT-26` results. Record each live pass or failure before
-changing behavior. If a failure occurs, inspect `debug.log` and gather
-trace-first evidence before patching. If the live checks pass, tick the
-remaining Stage 6 gate and commit the final runtime result.
+Implement the user-approved Stage 5B plugin-side `timeout: 0` override, add
+regression coverage that preserves all caller options and scopes the change to
+native media-cache requests, run the full validation and final audit, commit
+the result, then automatically sync only `MessageLoggerV2.plugin.js`. Verify
+live hash/reload evidence and repeat the controlled local stall probe before
+closing the remaining Stage 6 gate.
 
 ### Resume procedure for a new session
 
@@ -720,6 +722,49 @@ Stage 5A commit/result:
   logger still exits promptly, clears its active handle, avoids retries/writes,
   and has a deterministic regression for that case.
 
+## Stage 5B — Native socket-idle timeout override
+
+The live Stage 6 stall probe exposed a host/runtime timeout below Logger's
+rolling body watchdog. This corrective stage remains limited to native
+media-cache requests.
+
+- [x] Reproduce the early abort twice with public httpbin and once with a
+      controlled local server.
+- [x] Confirm the controlled request closes after about five seconds despite
+      Logger passing `timeout: null`.
+- [x] Trace the supported BetterDiscord implementations and Node HTTP-agent
+      behavior before changing code.
+- [x] Verify independently that explicit `timeout: 0` survives the controlled
+      35-second response gap.
+- [x] Obtain user approval for the plugin-only fix and automatic live sync.
+- [ ] Change only the native media-cache request override from `timeout: null`
+      to `timeout: 0`.
+- [ ] Preserve caller options, the 15-second initial-response watchdog, the
+      rolling 30-second body-inactivity watchdog, transport selection, retries,
+      updater networking, clipboard networking, and every cache behavior.
+- [ ] Add deterministic regression coverage for the exact timeout override and
+      unchanged media-only boundary.
+- [ ] Run focused media/source-contract tests, full `npm test`, `npm run check`,
+      `git diff --check`, and checklist Markdown parsing.
+- [ ] Complete an independent edge-case review and parent final audit.
+- [ ] Commit the implementation and record the exact commit and validation
+      results here before live sync.
+- [ ] Copy only the plugin file live, confirm hash parity and clean hot reload,
+      then repeat the controlled stall probe.
+
+Stage 5B plan/result:
+
+- Root cause: supported BetterDiscord maps `timeout: null` to an undefined
+  `http.request()` timeout. Modern Node global HTTP/HTTPS agents carry a
+  five-second socket timeout, so five seconds without body data terminates the
+  native response before Logger's 30-second watchdog.
+- Approved fix: pass numeric `timeout: 0` for native media-cache requests so
+  the host timer is explicitly disabled and Logger retains timeout ownership.
+- Scope: no BetterDiscord host edit, no renderer/legacy-path change, and no
+  updater, clipboard, attachment-gate, release-metadata, or unrelated plugin
+  change.
+- Plan commit: `<pending-stage5b-plan-checkpoint>`.
+
 ## Stage 6 — Live BetterDiscord verification
 
 - [x] The user separately authorized live sync on 2026-07-27.
@@ -750,9 +795,11 @@ Stage 5A commit/result:
     `https://httpbin.org/drip?duration=70&numbytes=2&delay=0&code=200`;
     it sends one byte immediately, then leaves a roughly 35-second gap, so the
     logger should abort after about 30 seconds without progress.
-    The first live attempt was inconclusive because the request returned a
-    generic `Error: aborted` after 6.0 seconds, before the Logger watchdog
-    deadline.
+    Two public attempts returned generic `Error: aborted` results after 6.0 and
+    5.9 seconds. A controlled localhost response then closed after 5.0 seconds,
+    proving that the supported native host transport's inherited socket
+    timeout runs before Logger's watchdog. Stage 5B corrects this; the
+    controlled probe must pass after its authorized live sync.
   - [ ] Verify media-cache file-size limits.
   - [ ] Verify abort/cancellation behavior when caching is disabled or the plugin
     stops.
@@ -825,6 +872,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-27 | Compatibility note | Retain only a historical mention of the malformed third-party `BdApi.Net.fetch` shape. Both supported BetterDiscord targets at `470ce77f` and `aa241f9` expose async Promise-returning methods, so no production hardening or open checklist work is planned for this theoretical unsupported-host case. | User judged the case very unlikely and asked to scrub it as an issue while retaining a mention |
 | 2026-07-27 | Stage 6 | After the required pre-live report, the user separately authorized live sync. The single plugin file was copied, hash parity was verified, and current log evidence showed a clean hot reload plus successful media-cache activity. The remaining `RT-26` behavior matrix now requires user interaction. | User live-sync authorization and runtime log evidence |
 | 2026-07-27 | Stage 6 resources | Revalidated the original Waifugami image and a Google image as live HTTP 200 image responses without an allowed-origin header. Selected official httpbin drip URLs for a 40-second progressing transfer and a greater-than-30-second body stall, avoiding a large Discord upload. | Live header/chunk-timing checks and user request for practical test URLs |
+| 2026-07-27 | Stage 5B | The public stall probe failed twice at about six seconds and a controlled localhost response failed at exactly five seconds. BetterDiscord's `timeout: null` becomes an unspecified Node request timeout, exposing the modern global agent's five-second socket timeout. Replace only the native media-cache override with `timeout: 0`, leaving Logger's 15-second initial and rolling 30-second body watchdogs authoritative. | Trace-first runtime evidence, supported-host source comparison, explicit `timeout: 0` control test, and user approval to fix and auto-sync |
 
 ## Handoff activity log
 
@@ -1265,6 +1313,30 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Ask the user to rerun only the 70-second/two-byte stall
   probe. If the endpoint aborts early again, replace it with a controlled local
   or helper-plugin stall probe.
+
+### 2026-07-27 — Stage 5B native socket-timeout plan
+
+- **Completed:** Repeated the public stall probe, reproduced the same early
+  abort against a controlled localhost response, traced the supported host
+  implementation, and verified an explicit numeric zero-timeout control.
+- **Decisions:** Replace `timeout: null` with `timeout: 0` only at Logger's
+  native media-cache boundary. Keep Logger's existing 15-second
+  initial-response and rolling 30-second body watchdogs unchanged.
+- **Files changed:** This checklist only; the ignored local stall-server helper
+  remains under `tmp/` for the post-sync runtime check.
+- **Tests and exact results:** Public probes aborted after 6.0 and 5.9 seconds.
+  The controlled Logger probe aborted after 5.0 seconds. The equivalent native
+  Node request with `timeout: 0` received both bytes across the full 35.0-second
+  gap.
+- **Runtime evidence:** The controlled server saw Logger's client close at 5.0
+  seconds but saw the explicit zero-timeout control remain connected and
+  complete at 35.0 seconds.
+- **Failures or blockers:** The current live plugin cannot exercise its
+  30-second body watchdog because the inherited host timer fires first.
+- **Commit:** `<pending-stage5b-plan-checkpoint>`.
+- **Exact next action:** Commit and record this approved plan, implement the
+  narrow override with regression coverage, complete validation/review, then
+  auto-sync the single plugin file as authorized.
 
 ### Handoff entry template
 
