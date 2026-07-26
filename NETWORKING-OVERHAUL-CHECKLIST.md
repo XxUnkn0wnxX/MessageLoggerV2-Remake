@@ -731,8 +731,20 @@ Stage 5A commit/result:
       without a startup error in the current `debug.log`.
 - [ ] Complete and record the remaining user-driven `RT-26` behavior checks:
   - Verify default native routing with a normal Discord CDN URL.
-  - Verify the previously failing Waifugami cross-origin URL.
+  - Verify the previously failing Waifugami cross-origin URL:
+    `https://www.waifugami.com/catalog/81448138f5f163ccdba4acc69819f280/1dacb10f0623c67cb7dbb37587d8b38a/images/76135`.
+    It returned HTTP 200 `image/png` without an
+    `Access-Control-Allow-Origin` header when rechecked on 2026-07-27. A stable
+    backup with the same missing CORS header is
+    `https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png`.
   - Verify an HTTP/mixed-content media URL.
+  - Verify slow progress with
+    `https://httpbin.org/drip?duration=40&numbytes=40&delay=0&code=200`;
+    it sends one byte per second and should complete after about 40 seconds.
+  - Verify body inactivity with
+    `https://httpbin.org/drip?duration=70&numbytes=2&delay=0&code=200`;
+    it sends one byte immediately, then leaves a roughly 35-second gap, so the
+    logger should abort after about 30 seconds without progress.
   - Verify media-cache file-size limits.
   - Verify abort/cancellation behavior when caching is disabled or the plugin
     stops.
@@ -804,6 +816,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-27 | Stage 5A result | Implemented the approved rolling response-body watchdog, bounded non-cooperative cleanup, retry-response release, logical no-`AbortController` cancellation, streamless fallback escape, and deterministic coverage. The full suite passes `373/373`; an independent final review found no blocking defect. | Implementation commit `9e5871c75039fc34f262598854701083190df1fd` and final verification |
 | 2026-07-27 | Compatibility note | Retain only a historical mention of the malformed third-party `BdApi.Net.fetch` shape. Both supported BetterDiscord targets at `470ce77f` and `aa241f9` expose async Promise-returning methods, so no production hardening or open checklist work is planned for this theoretical unsupported-host case. | User judged the case very unlikely and asked to scrub it as an issue while retaining a mention |
 | 2026-07-27 | Stage 6 | After the required pre-live report, the user separately authorized live sync. The single plugin file was copied, hash parity was verified, and current log evidence showed a clean hot reload plus successful media-cache activity. The remaining `RT-26` behavior matrix now requires user interaction. | User live-sync authorization and runtime log evidence |
+| 2026-07-27 | Stage 6 resources | Revalidated the original Waifugami image and a Google image as live HTTP 200 image responses without an allowed-origin header. Selected official httpbin drip URLs for a 40-second progressing transfer and a greater-than-30-second body stall, avoiding a large Discord upload. | Live header/chunk-timing checks and user request for practical test URLs |
 
 ## Handoff activity log
 
@@ -1200,6 +1213,27 @@ evidence for another session to understand what changed and why.
   (`docs: record authorized live sync`).
 - **Exact next action:** Give the user the short `RT-26` test instructions and
   wait for results before making any further code change.
+
+### 2026-07-27 — Stage 6 test URLs sourced
+
+- **Completed:** Rechecked the exact historical Waifugami image, sourced a
+  stable missing-CORS-header backup, and validated two tiny httpbin drip
+  profiles for progressing and stalled response bodies.
+- **Decisions:** Use direct console/helper calls into
+  `fetchMediaCacheResponse()` for the drip checks. They transfer only 40 bytes
+  or two bytes and do not need a large Discord attachment.
+- **Files changed:** This checklist only.
+- **Tests and exact results:** Waifugami HTTP 200 `image/png`, 1,091,999 bytes,
+  no `Access-Control-Allow-Origin`; Google image HTTP 200 `image/png`, 13,504
+  bytes, no `Access-Control-Allow-Origin`; eight-second httpbin sample emitted
+  one-byte chunks at roughly one-second intervals.
+- **Runtime evidence:** Endpoint/header/chunk timing verified outside Discord;
+  user invocation inside Discord remains pending.
+- **Failures or blockers:** None. If DevTools console use is inconvenient, a
+  disposable helper plugin can expose the same two probes.
+- **Commit:** `<pending-stage6-test-resource-checkpoint>`.
+- **Exact next action:** Give the user the exact pasteable probes and wait for
+  their results.
 
 ### Handoff entry template
 
