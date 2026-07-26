@@ -30,7 +30,7 @@ review, checklist update, and commit must also be complete.
 
 ## Living handoff snapshot
 
-- **Last updated:** 2026-07-26
+- **Last updated:** 2026-07-27
 - **Repository:** `$HOME/Apps/Dev/BD/BD-Plugins/MessageLoggerV2-Remake`
 - **Working branch:** `fix/native-media-networking`
 - **Branch base:** `a5eadbe736f5a0cf4b7a3730bf9950ade17ad752`
@@ -66,10 +66,10 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit this exact Stage 5 hash checkpoint, run the final clean-tree automated
-and status gates, then stop with the pre-live report. Stage 6 is explicitly
-deferred without execution; do not sync the plugin until the user separately
-authorizes that copy.
+Wait for explicit user authorization before any live-sync/copy into the live
+BetterDiscord plugins path. If the user instead approves optional body-phase
+hardening before live sync, amend this checklist and treat it as a separate
+behavior stage; otherwise sync only the plugin and run `RT-26`.
 
 ### Resume procedure for a new session
 
@@ -702,6 +702,8 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-26 | Stage 5 | Final review hardened the startup native-capability probe: a throwing `Net`/`fetch` getter is treated as unavailable and activates the same safe legacy path instead of aborting plugin initialization. | Independent and parent final review plus deterministic initializer coverage |
 | 2026-07-26 | Stage 5 | Added concise setting/debug documentation, automated `AT-47`, and deferred live matrix `RT-26`; no attachment-overhaul promise or release metadata change was added. | Documentation stage and source-contract evidence |
 | 2026-07-26 | Stage 6 | Live copy, hash parity, Discord behavior checks, and runtime findings are explicitly deferred without execution until the user authorizes live sync after the pre-live report. | User's required stop-before-live gate |
+| 2026-07-27 | Audit | Inherited response-body timeout/cancellation limitation: transport timeout is authoritative only through response acquisition; body streaming can continue or stall after headers, and the write-epoch guard suppresses late writes. This behavior existed before this branch and any change is a separate approved hardening request. | Non-blocking pre-live finding with no code change |
+| 2026-07-27 | Audit | A theoretical unsupported third-party `BdApi.Net.fetch` replacement could start native work synchronously and then throw or expose an unusable thenable shape. The required compatibility fallback could then start a renderer request too. Supported local and upstream BetterDiscord APIs at commits `470ce77f` and `aa241f9` were checked and are async Promise-returning methods, so they cannot expose this malformed shape. | Non-blocking discovery; no production-code change, approval-first behavior hardening only |
 
 ## Handoff activity log
 
@@ -951,6 +953,27 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit this exact Stage 5 hash checkpoint, run the
   final clean-tree automated/status check, then report and stop before live
   sync.
+
+### 2026-07-27 — Final pre-live handoff checkpoint
+
+- **Completed:** Added final read-only pre-live audit findings, including two
+  non-blocking observations; kept the branch code surface unchanged.
+- **Decisions:** Continue waiting for explicit live-sync authorization before any
+  runtime copy. Any body-phase timeout/cancellation hardening is deferred to a
+  separate approval-first change request.
+- **Files changed:** `NETWORKING-OVERHAUL-CHECKLIST.md` only.
+- **Tests and exact results:** PASS — full suite `359/359`; `npm run check`
+  passed; `git diff --check` passed; this checklist parses with `cmark`.
+- **Runtime evidence:** Supported host references `470ce77f` and `aa241f9` were
+  checked read-only; no live sync or runtime code path changed. Live repository
+  hash remains `647de34e571b7a14f70c16a464241b0ece55aea59200eb8bfe5b925dda57c7c9` and live hash remains
+  `9ed4872e4f342e46ca69a8a68c8aa054ce2a7cb2532a9dc1bdcdef73fec92c99`.
+- **Failures or blockers:** None.
+- **Commit:** `<pending-checkpoint>` (to be replaced by parent after the first
+  documentation checkpoint commit).
+- **Exact next action:** Wait for explicit live-sync authorization; then run RT-26
+  runtime checks. Do not start optional body-phase hardening without separate
+  user approval first.
 
 ### Handoff entry template
 
