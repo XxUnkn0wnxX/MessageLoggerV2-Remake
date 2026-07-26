@@ -1196,7 +1196,8 @@ evidence for another session to understand what changed and why.
 - **Failures or blockers:** Automated and basic load gates have no blocker.
   The remaining checks require the user to exercise real URLs, cancellation,
   and force-mode behavior inside Discord.
-- **Commit:** `<pending-live-sync-checkpoint>`.
+- **Commit:** `f73b8b096f430e9b31d0f2041b447c339d117e81`
+  (`docs: record authorized live sync`).
 - **Exact next action:** Give the user the short `RT-26` test instructions and
   wait for results before making any further code change.
 
