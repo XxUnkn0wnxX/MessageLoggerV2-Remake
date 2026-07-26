@@ -70,12 +70,14 @@ review, checklist update, and commit must also be complete.
 
 Implement the committed Stage 5C detailed media-network console diagnostics
 with deterministic coverage and documentation. Complete the full validation
-and final audit, commit and record the result, automatically sync only
-`MessageLoggerV2.plugin.js`, verify live hash/reload evidence, and finish the
-remaining user-driven Stage 6 checks, including native, legacy, cancellation,
-and the controlled local stall probe. After live sync and its repository
-checkpoint, push `fix/native-media-networking` to `origin`, verify local/remote
-ref alignment, then give the final report and user test list.
+and final audit, then complete the user-requested Stage 5D release metadata:
+bump `2.8.2.8` to `2.8.2.9` and replace the built-in changelog with this
+networking branch's fixes. Commit and record the result, automatically sync
+only `MessageLoggerV2.plugin.js`, verify live hash/reload evidence, and finish
+the remaining user-driven Stage 6 checks, including native, legacy,
+cancellation, and the controlled local stall probe. After live sync and its
+repository checkpoint, push `fix/native-media-networking` to `origin`, verify
+local/remote ref alignment, then give the final report and user test list.
 
 ### Resume procedure for a new session
 
@@ -835,6 +837,35 @@ Stage 5C plan/result:
   distinguishable and concurrent native/legacy activity is attributable.
 - Plan commit: `1ecd08c189893f538725f7d6034fd005b8f09b2b`.
 
+## Stage 5D — Networking release metadata
+
+- [x] Obtain the user's explicit request to increment the plugin version and
+      replace the built-in changelog before live sync.
+- [ ] Increment `@version` from `2.8.2.8` to `2.8.2.9`; do not change data
+      schema or unrelated release metadata.
+- [ ] Replace `getChanges()` with a concise summary of this networking branch:
+      native media routing and legacy fallback/override, the Logger-owned
+      initial/body watchdogs and inherited five-second timeout correction,
+      immediate cache-off/plugin-stop cancellation, deterministic cleanup, and
+      opt-in console-only detailed request diagnostics.
+- [ ] Retain a clear note that **Cache all attachment types** still has its
+      known arbitrary non-image limitation and is not fixed by this branch.
+- [ ] Update deterministic changelog/version contracts and any directly stale
+      release-number wording without expanding into unrelated documentation.
+- [ ] Include release metadata in the final full-suite validation, final audit,
+      implementation commit, live hash check, and branch push.
+
+Stage 5D plan/result:
+
+- Requested version: `2.8.2.9`, the next patch after the current `2.8.2.8`.
+- Changelog scope: networking-overhaul behavior only, plus the still-open
+  arbitrary non-image attachment-cache limitation so the release does not
+  overpromise.
+- Authorization: update the plugin metadata and built-in changelog before the
+  already authorized live sync, then push the current feature branch before
+  the final report.
+- Plan amendment commit: `<pending-stage-5d-plan-commit>`.
+
 ## Stage 6 — Live BetterDiscord verification
 
 - [x] The user separately authorized live sync on 2026-07-27.
@@ -1454,6 +1485,26 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit this plan, record its exact hash, then delegate
   the bounded implementation and focused tests before parent integration,
   full-suite validation, independent audit, and authorized live sync.
+
+### 2026-07-27 — Stage 5D release metadata request
+
+- **Completed:** Recorded the user's explicit pre-sync request to increment the
+  plugin version and replace the built-in changelog with this networking
+  branch's fixes.
+- **Decisions:** Use the next patch, `2.8.2.9`. Keep the changelog concise and
+  network-specific while retaining the known arbitrary non-image attachment
+  limitation. Do not change the persisted data schema.
+- **Files changed:** This checklist only.
+- **Tests and exact results:** `git diff --check` and checklist `cmark` parsing
+  pass; release code has not been edited yet.
+- **Runtime evidence:** None required for this documentation-only plan
+  amendment; the versioned plugin will receive the same full validation and
+  live hash/reload checks as Stage 5C.
+- **Failures or blockers:** None.
+- **Commit:** `<pending-stage-5d-plan-commit>`.
+- **Exact next action:** Finish and review Stage 5C, apply the version/changelog
+  update with matching deterministic contracts, then run the full audit before
+  committing, live syncing, checkpointing, and pushing the feature branch.
 
 ### Handoff entry template
 
