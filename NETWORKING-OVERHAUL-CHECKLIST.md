@@ -95,10 +95,11 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Give the user the short clipboard/disable runtime matrix and record their
-results. Amend the built-in changelog only after the user confirms clipboard
-runtime behavior. Keep provisional Anti-Nuke/Ghost-Ping retention as a separate
-post-networking stage.
+Fix the confirmed BetterDiscord binary-read mismatch in static clipboard copy,
+add a regression matching the real host shim, rerun the full suite, live-sync,
+and republish before the user repeats the clipboard matrix. Amend the built-in
+changelog only after runtime confirmation. Keep provisional Anti-Nuke/Ghost-Ping
+retention as a separate post-networking stage.
 
 ### Resume procedure for a new session
 
@@ -170,6 +171,7 @@ recorded as an amendment before implementation.
 - [x] Cache-scoped clipboard hardening implemented and verified.
 - [x] Plugin-disable presentation cleanup implemented and verified.
 - [x] Combined clipboard/disable build live-synced and hash-verified.
+- [ ] Static-image clipboard binary-read runtime defect fixed and resynced.
 - [ ] User `RT-26` live behavior result received and recorded.
 - [x] Final implementation committed.
 
@@ -2380,6 +2382,30 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Give the user the short runtime matrix, record the
   results, then update the built-in changelog only if clipboard behavior is
   confirmed.
+
+### 2026-07-27 — Static clipboard binary-read runtime defect
+
+- **Completed:** Inspected the current `debug.log`, console export, physical
+  cached file, plugin call site, and both supported BetterDiscord host
+  implementations before changing code.
+- **Decisions:** Make the smallest host-compatible fix: explicitly request
+  binary mode from the BetterDiscord filesystem shim and add a regression that
+  reproduces its UTF-8-by-default behavior. Keep GIF `copyFile`, eligibility
+  gates, version, and changelog unchanged.
+- **Files changed:** This checklist only at the diagnostic checkpoint.
+- **Tests and exact results:** Clean pre-fix `npm test` baseline passed
+  `394/394`.
+- **Runtime evidence:** At `2026-07-26 19:51:37 UTC`, Logger reported
+  `Media clipboard copy failed: Clipboard media file was empty` from
+  `copyMediaToClipboard`. The selected PNG physically exists and is 724,824
+  bytes. Both BetterDiscord `develop` and `upstream-development` implement
+  renderer `readFileSync(path)` through a shim whose omitted option defaults to
+  UTF-8 text; Logger expected binary bytes and rejected that string.
+- **Failures or blockers:** Static image copy is affected. GIF file copy does
+  not read the file bytes and is outside this defect.
+- **Commit:** To be recorded after this diagnostic checkpoint is committed.
+- **Exact next action:** Commit this diagnosis, implement the explicit binary
+  read plus focused regression, then run full validation before live sync.
 
 ### Handoff entry template
 
