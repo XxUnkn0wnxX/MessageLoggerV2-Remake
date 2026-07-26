@@ -1856,10 +1856,10 @@ evidence for another session to understand what changed and why.
   40-second completion window.
 - **Failures or blockers:** None for cache-master cancellation. Plugin-stop
   cancellation still requires a user-run live check.
-- **Commit:** Pending this cache-off runtime-evidence commit; record its exact
-  hash immediately after commit.
-- **Exact next action:** Commit and record this checkpoint, push the branch,
-  then ask the user to test plugin-stop cancellation.
+- **Commit:** Cache-off runtime-evidence checkpoint
+  33a58c1627886e4f5e34cd827a37e8cc6f54d2a8.
+- **Exact next action:** After this commit record is pushed, ask the user to
+  test plugin-stop cancellation.
 
 ### Handoff entry template
 
