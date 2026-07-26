@@ -95,11 +95,10 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Fix the confirmed BetterDiscord binary-read mismatch in static clipboard copy,
-add a regression matching the real host shim, rerun the full suite, live-sync,
-and republish before the user repeats the clipboard matrix. Amend the built-in
-changelog only after runtime confirmation. Keep provisional Anti-Nuke/Ghost-Ping
-retention as a separate post-networking stage.
+Live-sync the validated static clipboard binary-read fix, verify hash/hot
+reload, and republish before the user repeats the clipboard matrix. Amend the
+built-in changelog only after runtime confirmation. Keep provisional
+Anti-Nuke/Ghost-Ping retention as a separate post-networking stage.
 
 ### Resume procedure for a new session
 
@@ -2403,9 +2402,35 @@ evidence for another session to understand what changed and why.
   UTF-8 text; Logger expected binary bytes and rejected that string.
 - **Failures or blockers:** Static image copy is affected. GIF file copy does
   not read the file bytes and is outside this defect.
-- **Commit:** To be recorded after this diagnostic checkpoint is committed.
+- **Commit:** Diagnostic checkpoint
+  4ce9cf97e180d28d9842355959687bccb2a61924.
 - **Exact next action:** Commit this diagnosis, implement the explicit binary
   read plus focused regression, then run full validation before live sync.
+
+### 2026-07-27 — Static clipboard binary-read fix completed
+
+- **Completed:** Static image copy now calls the BetterDiscord filesystem shim
+  with explicit binary mode. The focused mock reproduces the real host
+  behavior: omitted mode returns text, while explicit `null` returns binary
+  bytes. GIF continues using `copyFile` without reading or decoding the file.
+- **Decisions:** Keep the change limited to the cached static-image clipboard
+  reader. Preserve every media eligibility gate, success/error toast, version,
+  and changelog.
+- **Files changed:** `MessageLoggerV2.plugin.js`,
+  `tests/clipboard.test.js`, and `tests/source-contracts.test.js`.
+- **Tests and exact results:** PASS — focused clipboard/source coverage passed
+  `73/73`; final `npm test` passed `394/394`; syntax and
+  `git diff --check` passed. The first full run exposed one stale source
+  assertion that still required the broken one-argument read; it was corrected
+  to require explicit binary mode and the full suite was rerun successfully.
+- **Runtime evidence:** Pending the automatic live sync and user repeat of the
+  static image copy.
+- **Failures or blockers:** No static or automated blocker remains.
+- **Commit:** Binary-read implementation
+  a26f05c1cfcf15ec39a3d44e71142d0452d04d87.
+- **Exact next action:** Commit this checklist evidence, sync only the plugin
+  file, verify hash/hot reload, push the branch, and ask the user to repeat the
+  static copy.
 
 ### Handoff entry template
 
