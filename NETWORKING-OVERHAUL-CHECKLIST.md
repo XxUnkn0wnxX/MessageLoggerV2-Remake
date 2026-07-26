@@ -87,14 +87,14 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Give the user the remaining mixed-content, file-size, debug-output, update, and
-clipboard `RT-26` tests and wait for their runtime results. Default native
-routing, the Waifugami cross-origin request, slow body progress, controlled
-body inactivity, cache-master and plugin-stop cancellation, forced legacy,
-native return, and activation-scoped notice de-duplication now have current
-live evidence. Keep the audited provisional Anti-Nuke/Ghost-Ping
-media-retention work as a separate post-networking stage in `TODO.md`; do not
-implement it on this networking handoff.
+Give the user the remaining file-size, debug-output, update, and clipboard
+`RT-26` tests and wait for their runtime results. Default native routing,
+cross-origin and mixed-content requests, slow body progress, controlled body
+inactivity, cache-master and plugin-stop cancellation, forced legacy, native
+return, and activation-scoped notice de-duplication now have current live
+evidence. Keep the audited provisional Anti-Nuke/Ghost-Ping media-retention
+work as a separate post-networking stage in `TODO.md`; do not implement it on
+this networking handoff.
 
 ### Resume procedure for a new session
 
@@ -947,9 +947,11 @@ Stage 5D plan/result:
     `https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png`.
     The live Logger probe completed with HTTP 200 and 1,091,999 bytes in 2.5
     seconds.
-  - [ ] Verify an HTTP/mixed-content media URL:
+  - [x] Verify an HTTP/mixed-content media URL:
     `http://httpbin.org/image/png` returned HTTP 200 `image/png` without an
-    HTTPS redirect when rechecked on 2026-07-27.
+    HTTPS redirect when rechecked on 2026-07-27. Live native request `#290`
+    completed HTTP 200 with all 8,090 bytes in 0.4 seconds from Discord's HTTPS
+    page.
   - [x] Verify slow progress with
     `https://httpbin.org/drip?duration=40&numbytes=40&delay=0&code=200`;
     the initial live Logger probe completed all 40 bytes in 42.0 seconds. A
@@ -1020,7 +1022,8 @@ Live result:
   cancelled its active body at 3.6 seconds without retry or late completion,
   and the plugin re-enabled successfully. Two forced-legacy probes passed,
   emitted one activation-scoped routing notice, and the next post-toggle probe
-  returned directly to native. Discord was not relaunched.
+  returned directly to native. A plain-HTTP image then passed through native
+  routing with HTTP 200 and 8,090 bytes. Discord was not relaunched.
 
 Historical result:
 
@@ -1092,6 +1095,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-27 | Stage 6 cache-off cancellation | Turning **Cache media locally** Off during an active progressing native body cancelled it immediately after three bytes, emitted exactly one cancelled terminal event, and produced no retry or late completion after the original response window elapsed. | User-run `RT-26` probe plus current BetterDiscord `debug.log` and `console.log` |
 | 2026-07-27 | Stage 6 plugin-stop cancellation | Disabling MessageLoggerV2 during an active progressing native body entered plugin cleanup, cancelled the request after three bytes, emitted exactly one cancelled terminal event, and produced no retry or late completion. Re-enabling initialized fresh media work normally. | User-run `RT-26` probe plus current BetterDiscord `debug.log` and `console.log` |
 | 2026-07-27 | Stage 6 legacy/native toggle | Two manual probes and concurrent ordinary media work used forced renderer fetch successfully while exactly one activation-scoped routing notice appeared. Turning force Off made the next probe use BetterDiscord native fetch immediately. | User-run `RT-26` probes plus current BetterDiscord `debug.log` and `console.log` |
+| 2026-07-27 | Stage 6 mixed content | A plain-HTTP image requested from Discord's HTTPS page used BetterDiscord native fetch and completed HTTP 200 / 8,090 bytes without renderer mixed-content blocking. | User-run `RT-26` probe plus current BetterDiscord `debug.log` and `console.log` |
 
 ## Handoff activity log
 
@@ -1921,8 +1925,26 @@ evidence for another session to understand what changed and why.
   de-duplication. Mixed-content is the next direct transport check.
 - **Commit:** Legacy/native runtime-evidence checkpoint
   d6825dd02fbcd56d380010a60e787b7767153c9c.
-- **Exact next action:** After this commit record is pushed, give the user the
-  mixed-content probe.
+- **Exact next action:** Superseded by the mixed-content result below.
+
+### 2026-07-27 — Mixed-content runtime check
+
+- **Completed:** Requested a plain-HTTP PNG from Discord's HTTPS renderer while
+  force legacy remained Off.
+- **Decisions:** The native media path now has direct runtime proof that it
+  avoids renderer mixed-content enforcement. No code change is indicated.
+- **Files changed:** This checklist only.
+- **Tests and exact results:** Native request `#290` completed HTTP 200 with all
+  8,090 bytes in 0.4 seconds.
+- **Runtime evidence:** Detailed logs explicitly show
+  `http://httpbin.org/image/png`, native selection, BetterDiscord native fetch,
+  and one successful terminal outcome.
+- **Failures or blockers:** None for mixed-content transport. File-size limits
+  are the next media-cache check.
+- **Commit:** Pending this mixed-content runtime-evidence commit; record its
+  exact hash immediately after commit.
+- **Exact next action:** Commit and record this checkpoint, push the branch,
+  then prepare the smallest safe file-size-limit test.
 
 ### Handoff entry template
 
