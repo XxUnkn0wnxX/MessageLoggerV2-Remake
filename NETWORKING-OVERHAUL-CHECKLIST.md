@@ -67,13 +67,12 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit and record the completed Stage 5B `timeout: 0` implementation. Then
-document and commit the user-approved Stage 5C detailed media-network console
-diagnostics plan before implementing it. Complete deterministic tests and a
-final audit for both stages, automatically sync only
-`MessageLoggerV2.plugin.js`, verify live hash/reload evidence, and finish the
-remaining user-driven Stage 6 checks, including native, legacy, cancellation,
-and the controlled local stall probe.
+Commit the user-approved Stage 5C detailed media-network console diagnostics
+plan, record its exact commit, then implement it with deterministic coverage
+and documentation. Complete the full validation and final audit, automatically
+sync only `MessageLoggerV2.plugin.js`, verify live hash/reload evidence, and
+finish the remaining user-driven Stage 6 checks, including native, legacy,
+cancellation, and the controlled local stall probe.
 
 ### Resume procedure for a new session
 
@@ -748,7 +747,7 @@ media-cache requests.
 - [x] Run focused media/source-contract tests, full `npm test`, `npm run check`,
       `git diff --check`, and checklist Markdown parsing.
 - [x] Complete an independent edge-case review and parent final audit.
-- [ ] Commit the implementation and record the exact commit and validation
+- [x] Commit the implementation and record the exact commit and validation
       results here before live sync.
 - [ ] Copy only the plugin file live, confirm hash parity and clean hot reload,
       then repeat the controlled stall probe.
@@ -774,7 +773,61 @@ Stage 5B plan/result:
 - Independent review: no blocking or non-blocking findings. Both supported
   BetterDiscord implementations forward numeric zero to `http.request`, and
   the change remains confined to the native media-cache route.
-- Implementation commit: `<pending-implementation-commit>`.
+- Implementation commit: `aaf31b69659131fb7e67f01c249cb988c81f7474`.
+
+## Stage 5C — Detailed media-network console diagnostics
+
+This stage adds opt-in support evidence for media-cache requests without
+changing their networking, retry, cache, notification, or persistence behavior.
+
+- [x] Obtain user approval for the feature and its automatic live sync after
+      implementation, tests, documentation, and final review.
+- [ ] Add a persisted `detailedMediaNetworkDebug` boolean that defaults to
+      `false` and normalizes malformed or missing legacy values.
+- [ ] Place the child switch directly below **Enable debug logging**, link it
+      with `enableWith: 'debugLogging'`, and retain its saved value while the
+      master console switch is Off.
+- [ ] Require both the master console switch and the child switch at runtime.
+      Detailed media events must always be console-only and must never use
+      debug toasts, even when toast debugging is enabled.
+- [ ] Give each actual network attempt its own request ID and log method, full
+      URL, truthful native/legacy transport, response status, received bytes,
+      elapsed time, and terminal success/cancel/timeout/failure state.
+- [ ] Keep transport attribution correct across forced legacy mode, compatibility
+      fallback, native synchronous incompatibility, and native asynchronous
+      rejection. Never claim a native attempt before a synchronous fallback.
+- [ ] Reuse existing response bytes and lifecycle state. Do not clone or
+      re-read bodies, inspect response bodies for diagnostics, log headers, or
+      let a logging failure change media behavior.
+- [ ] Preserve the existing activation-scoped legacy-routing notice and its
+      existing console/toast routing contract.
+- [ ] Add deterministic coverage for settings defaults/repair/dependency,
+      master/child/toast truth tables, native and legacy attribution, status,
+      exact byte counts, retries, cancellations/timeouts/failures, and
+      duplicate-terminal suppression.
+- [ ] Document the setting, output contract, and the privacy warning that full
+      URLs may contain signed or query data and exported console logs should be
+      handled accordingly.
+- [ ] Run focused tests, full `npm test`, `npm run check`, `git diff --check`,
+      Markdown parsing, independent review, and the parent final audit.
+- [ ] Commit the implementation and record its exact commit and validation
+      results here before live sync.
+- [ ] Sync only the plugin file live, confirm hash parity and clean hot reload,
+      then use the new diagnostics during the remaining Stage 6 runtime checks.
+
+Stage 5C plan/result:
+
+- Scope: media-cache request diagnostics and the new Debug child setting only.
+  No updater, clipboard, cache eligibility, retry, timeout, notification,
+  release metadata, or unrelated plugin behavior change.
+- Output: console lines only. The existing master console toggle is mandatory;
+  `debugToasts` can never route these detailed events to a toast.
+- Privacy: the user requested full request URLs. Headers and response/request
+  bodies remain excluded; documentation will warn that full URLs can contain
+  sensitive signed/query values.
+- Request identity: one monotonic ID per actual HTTP attempt, so retries remain
+  distinguishable and concurrent native/legacy activity is attributable.
+- Plan commit: `<pending-stage-5c-plan-commit>`.
 
 ## Stage 6 — Live BetterDiscord verification
 
@@ -1367,10 +1420,32 @@ evidence for another session to understand what changed and why.
   35-second completion with explicit numeric zero.
 - **Failures or blockers:** None found in deterministic or independent review.
   The post-sync controlled stall result remains runtime-only.
-- **Commit:** `<pending-implementation-commit>`.
+- **Commit:** `aaf31b69659131fb7e67f01c249cb988c81f7474`.
 - **Exact next action:** Commit this implementation, record its exact hash in
   both Stage 5B locations, then add and commit Stage 5C's detailed
   media-network diagnostics plan before changing that behavior.
+
+### 2026-07-27 — Stage 5C detailed media-network diagnostics plan
+
+- **Completed:** Mapped the settings persistence/UI dependency chain and the
+  complete native/legacy media response lifecycle, then documented the approved
+  implementation and validation contract before changing behavior.
+- **Decisions:** The child toggle is persisted but effective only while the
+  main console Debug switch is On. Detailed events are console-only, never
+  toasts, and use one ID per network attempt. Full URLs are included by user
+  request; headers and bodies are excluded.
+- **Files changed:** This checklist only.
+- **Tests and exact results:** `git diff --check` and checklist `cmark` parsing
+  pass. Production behavior remains at the validated Stage 5B commit.
+- **Runtime evidence:** Existing console output contains only the older
+  activation-scoped legacy-routing notice; no detailed per-request stream
+  exists yet.
+- **Failures or blockers:** None. Full URLs may expose signed/query values in
+  exported console logs, so that risk must be documented with the setting.
+- **Commit:** `<pending-stage-5c-plan-commit>`.
+- **Exact next action:** Commit this plan, record its exact hash, then delegate
+  the bounded implementation and focused tests before parent integration,
+  full-suite validation, independent audit, and authorized live sync.
 
 ### Handoff entry template
 
