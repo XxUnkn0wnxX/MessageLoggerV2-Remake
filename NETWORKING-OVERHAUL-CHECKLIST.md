@@ -2228,6 +2228,42 @@ evidence for another session to understand what changed and why.
   trimming, reference protection, and startup/periodic maintenance as a
   separate stage.
 
+### 2026-07-27 — Cache-scoped clipboard follow-up completed
+
+- **Completed:** Reworked both Logger clipboard surfaces around exact saved
+  media ownership and a physical local-file check. Static restored images reuse
+  Discord's native **Copy image** row with Logger's local byte writer; cached
+  GIFs and supported images without that native row receive one **Copy media**
+  file action. The Logger viewer receives the same cache-scoped action and
+  every successful Logger-owned copy now produces one green success toast.
+- **Decisions:** Require **Cache media locally** to be On. Limit eligibility to
+  Logger's established JPG/JPEG, PNG, GIF, BMP, WebP, AVIF, TIF/TIFF media
+  path; **Cache all attachment types** cannot expand this menu. Missing local
+  files, placeholders, hidden media, videos, and arbitrary files receive no
+  Logger copy action. Remove Discord's native copy row only for an owned
+  restored deleted item that fails those gates; ordinary live messages remain
+  Discord-owned.
+- **Files changed:** `MessageLoggerV2.plugin.js`,
+  `tests/clipboard.test.js`, `tests/helpers/plugin-harness.js`, and
+  `tests/source-contracts.test.js`.
+- **Tests and exact results:** PASS — focused clipboard/source coverage passed
+  `72/72`; full `npm test` passed `390/390`; syntax and `git diff --check`
+  passed. The first focused draft exposed stale source-contract assertions and
+  the final independent review found one menu-reuse duplicate edge. Both were
+  corrected and rerun; the exact duplicate reproduction now leaves one Logger
+  action.
+- **Runtime evidence:** The macOS Discord bridge was verified to expose
+  `copyFile(localPath)` for GIF/file clipboard data. User runtime confirmation
+  of the rebuilt GIF, cache-off, toast, and disable paths remains pending until
+  the combined build is live-synced.
+- **Failures or blockers:** Clipboard implementation has no remaining static
+  blocker. Plugin-disable presentation cleanup is still being implemented
+  before the combined live build.
+- **Commit:** Clipboard implementation
+  15705f0fdc6a82fbb4c472e3c9ff53ceb3ca8fb4.
+- **Exact next action:** Implement and test presentation-only cleanup on
+  plugin stop, run the final full audit, then sync and push the combined build.
+
 ### Handoff entry template
 
 ```text
