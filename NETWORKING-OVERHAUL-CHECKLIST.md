@@ -87,8 +87,10 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Give the user the remaining native, legacy, cancellation, controlled-stall,
-update, and clipboard `RT-26` tests and wait for their runtime results. Keep
+Give the user the remaining mixed-content, file-size, cancellation, legacy,
+debug-output, update, and clipboard `RT-26` tests and wait for their runtime
+results. Default native routing, the Waifugami cross-origin request, slow body
+progress, and controlled body inactivity now have current live evidence. Keep
 the audited provisional Anti-Nuke/Ghost-Ping media-retention work as a separate
 post-networking stage in `TODO.md`; do not implement it on this networking
 handoff.
@@ -904,7 +906,7 @@ Stage 5C plan/result:
       known arbitrary non-image limitation and is not fixed by this branch.
 - [x] Update deterministic changelog/version contracts and any directly stale
       release-number wording without expanding into unrelated documentation.
-- [ ] Include release metadata in the final full-suite validation, final audit,
+- [x] Include release metadata in the final full-suite validation, final audit,
       implementation commit, live hash check, and branch push.
 
 Stage 5D plan/result:
@@ -933,7 +935,9 @@ Stage 5D plan/result:
 - [x] Confirm the final hot-reloaded plugin initializes without a matching
       startup/runtime error in the current logs.
 - [ ] Complete and record the remaining user-driven `RT-26` behavior checks:
-  - [ ] Verify default native routing with a normal Discord CDN URL.
+  - [x] Verify default native routing with a normal Discord CDN URL. Current
+        detailed logs show successful Discord CDN requests using BetterDiscord
+        native fetch, including request `#103` with HTTP 200 and 334,583 bytes.
   - [x] Verify the previously failing Waifugami cross-origin URL:
     `https://www.waifugami.com/catalog/81448138f5f163ccdba4acc69819f280/1dacb10f0623c67cb7dbb37587d8b38a/images/76135`.
     It returned HTTP 200 `image/png` without an
@@ -947,17 +951,21 @@ Stage 5D plan/result:
     HTTPS redirect when rechecked on 2026-07-27.
   - [x] Verify slow progress with
     `https://httpbin.org/drip?duration=40&numbytes=40&delay=0&code=200`;
-    the live Logger probe completed all 40 bytes in 42.0 seconds, confirming
-    that continuing body progress keeps the request alive.
-  - [ ] Verify body inactivity with
+    the initial live Logger probe completed all 40 bytes in 42.0 seconds. A
+    final detailed run used native request `#102`, acquired HTTP 200 in 645 ms,
+    and completed all 40 bytes successfully in 39.8 seconds, confirming that
+    continuing body progress keeps the request alive.
+  - [x] Verify body inactivity with
     `https://httpbin.org/drip?duration=70&numbytes=2&delay=0&code=200`;
     it sends one byte immediately, then leaves a roughly 35-second gap, so the
     logger should abort after about 30 seconds without progress.
     Two public attempts returned generic `Error: aborted` results after 6.0 and
     5.9 seconds. A controlled localhost response then closed after 5.0 seconds,
     proving that the supported native host transport's inherited socket
-    timeout runs before Logger's watchdog. Stage 5B corrects this; the
-    controlled probe must pass after its authorized live sync.
+    timeout ran before Logger's watchdog. After Stage 5B's `timeout: 0` fix, the
+    controlled `http://127.0.0.1:32109/stall` probe reached Logger's body
+    watchdog and returned `AbortError: Media cache response body timed out` at
+    exactly 30.0 seconds.
   - [ ] Verify media-cache file-size limits.
   - [ ] Verify abort/cancellation behavior when caching is disabled or the plugin
     stops.
@@ -977,14 +985,17 @@ Stage 5D plan/result:
 
 Live result:
 
-- Date: 2026-07-27 final Stage 5C/5D live replacement.
-- Result: **FINAL 2.8.2.9 SYNC, HASH, AND BASIC HOT-RELOAD PASS; USER RT-26
-  TESTING PENDING.**
+- Date: 2026-07-27 final Debug-linked `2.8.2.9` live replacement and partial
+  `RT-26` run.
+- Result: **FINAL 2.8.2.9 SYNC, HASH, HOT-RELOAD, NATIVE/CORS,
+  SLOW-PROGRESS, AND CONTROLLED-STALL PASS; REMAINING USER RT-26 TESTING
+  PENDING.**
 - Notes: Repository and live SHA-256 both equal
-  `d7cfc616ac9d2bcf36d67a496a0d13e4de63168fd99dad50adfd279b4425ef37`.
-  The current log advanced with cleanup, reinitialization, patch completion,
-  and successful `Cached image` entries without a matching startup exception.
-  Discord was not relaunched.
+  `260a3f8c2c3bf0534b0ad8ef5a91d62fae83cbce088cc9fab3e0a6917d2cd424`.
+  The current logs prove native Discord-CDN success, Waifugami HTTP 200 with
+  1,091,999 bytes in 2.5 seconds, a successful 40-byte progressing body in
+  39.8 seconds, and the controlled no-progress body aborting through Logger's
+  watchdog at exactly 30.0 seconds. Discord was not relaunched.
 
 Historical result:
 
@@ -1052,6 +1063,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-27 | Cache-policy audit | Ordinary media caching follows author and location policy, but Anti-Nuke deliberately pre-caches ignored guild media. Two pre-existing strict-parity gaps also remain: ignored local/self updates can cache new media for an existing cached message, and a filtered partial update under the Ghost Ping override can cache media before a ghost ping is confirmed. Removed-attachment caching separately bypasses normal type/size checks. No policy code was changed because the user requested an audit report only and this networking branch remains scoped to transport re-plumbing. | Read-only source trace plus focused policy/Anti-Nuke/contracts result `95/95` |
 | 2026-07-27 | Anti-Nuke retention audit | DMs cannot enter Anti-Nuke pre-cache, and a confirmed channel deletion adopts/captures only the exact guild parent and its child threads. Eligible ignored or muted media from any guild channel can still be physically pre-cached in case that channel is later deleted. The `15` thread / `45` message / `15` attachment capture caps do not bound, age, or clean those provisional files, so never-confirmed and cap-rejected files can remain orphaned. URL-only staging is unsafe because CDN URLs can expire as the parent disappears. | User designated a separate post-networking hardening stage: bounded provisional physical storage, promote confirmed nuke/Ghost-Ping or ordinary-record files, and delete expired/rejected candidates without touching shared references |
 | 2026-07-27 | Debug master linkage | `debugLogging` is the effective master for both the detailed-media child and the debug-toast child. Turning the master Off greys both and suppresses their output without changing either saved value; turning it On restores only children already saved On. A saved toast Off never auto-enables. The activation-scoped legacy notice flushes both routes immediately only when the saved toast child is On. No plugin version or built-in changelog text changed for this amendment. | Final user clarification plus supported BetterDiscord `enableWith` behavior, deterministic recovery/routing tests, and independent review |
+| 2026-07-27 | Stage 6 partial runtime | Current detailed logs prove default native routing, Waifugami cross-origin success, a 39.8-second progressing response completing without a total deadline, and a controlled no-progress response reaching Logger's rolling 30-second body watchdog. The earlier one-off HTTPBin `Error: aborted` was a remote/transport interruption rather than Logger's watchdog and the same detailed probe then passed. | User-run `RT-26` probes plus current BetterDiscord `debug.log` and `console.log` |
 
 ## Handoff activity log
 
@@ -1789,11 +1801,35 @@ evidence for another session to understand what changed and why.
 - **Failures or blockers:** None in publication. User-driven `RT-26` behavior
   checks are the only remaining networking checklist work.
 - **Commit:** Initial verified remote publication checkpoint
-  e84bfaaf6fffc4b809f7e4fb6fe70ef6ac5c5897; local tracking ref, remote-tracking
-  ref, and `git ls-remote` all matched that full hash.
-- **Exact next action:** Commit and push this final checklist-only publication
-  record, verify alignment once more, then give the user the concise `RT-26`
-  instructions and wait for results.
+  e84bfaaf6fffc4b809f7e4fb6fe70ef6ac5c5897; final publication record
+  4defbd80b9bb99525be9283b69d1bc04c9254dfc. Local `HEAD`, the
+  remote-tracking ref, and `git ls-remote` all matched the latter full hash.
+- **Exact next action:** Superseded by the partial `RT-26` result below.
+
+### 2026-07-27 — Current native, progress, and inactivity runtime checks
+
+- **Completed:** Verified default native routing through ordinary live Discord
+  CDN traffic, the previously CORS-blocked Waifugami URL, a 40-second
+  progressing response, and a controlled response that stops making progress.
+- **Decisions:** Treat the earlier one-off HTTPBin `Error: aborted` as a
+  remote/transport interruption, not a Logger timeout: it did not carry
+  Logger's watchdog error, and the same detailed native probe then completed.
+- **Files changed:** This checklist only.
+- **Tests and exact results:** Waifugami passed HTTP 200 with 1,091,999 bytes in
+  2.5 seconds. Detailed native request `#102` passed HTTP 200 with all 40 bytes
+  in 39.8 seconds. The controlled localhost stall returned
+  `AbortError: Media cache response body timed out` at exactly 30.0 seconds.
+- **Runtime evidence:** Current BetterDiscord `debug.log` and `console.log`
+  identify native selection, response acquisition, exact terminal outcomes,
+  byte counts, and elapsed times. Normal Discord CDN request `#103` also
+  completed natively with HTTP 200 and 334,583 bytes.
+- **Failures or blockers:** None in these four checks. Mixed-content,
+  file-size, cache-disable/plugin-stop cancellation, forced legacy/native
+  return, debug-output matrix, updater, and clipboard checks remain.
+- **Commit:** Pending this runtime-evidence checklist commit; record its exact
+  hash immediately after commit.
+- **Exact next action:** Commit and record this runtime checkpoint, push the
+  branch, then give the user the cache-disable cancellation test.
 
 ### Handoff entry template
 
