@@ -87,15 +87,12 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Give the user the remaining clipboard `RT-26` tests and wait for their runtime
-results. Default native routing, cross-origin and mixed-content requests, slow
-body progress, controlled body inactivity, file-size enforcement,
-cache-master and plugin-stop cancellation, forced legacy, native return,
-linked Debug output, pending per-destination delivery, activation-scoped
-notice de-duplication, and force-independent update checks now have current
-live evidence. Keep the audited provisional Anti-Nuke/Ghost-Ping
-media-retention work as a separate post-networking stage in `TODO.md`; do not
-implement it on this networking handoff.
+Commit the validated clipboard replacement, record its exact commit, sync only
+the plugin source into BetterDiscord, verify source/live hash parity and a clean
+hot reload, push the feature branch, then give the user the remaining
+clipboard-only `RT-26` tests. Keep the audited provisional
+Anti-Nuke/Ghost-Ping media-retention work as a separate post-networking stage
+in `TODO.md`; do not implement it on this networking handoff.
 
 ### Resume procedure for a new session
 
@@ -278,24 +275,25 @@ handler:
 - [x] No Axios, Node HTTP/HTTPS, Electron `net`, external request library, or
       separate XHR downloader was found.
 
-### Current source map at the branch base
+### Current source map
 
 Line numbers are orientation aids and may move; symbol names are authoritative.
 
 | Approximate line | Symbol/path | Current behavior |
 |---|---|---|
-| 576 | `checkNewUpdate()` | Intentionally remains a direct `BdApi.Net.fetch()` call for plugin source. |
+| 566 | `checkNewUpdate()` | Intentionally remains a direct `BdApi.Net.fetch()` call for plugin source. |
 | 977 | `imageCacheServerSimulator` | Resolves synthetic cache keys to local files and returns local object URLs. |
-| 3670 | `reportDebugEvent()` | Routes console output through the Debug master and toast/notification output only while both the master and saved toast child are enabled. |
-| 4311 | Advanced settings category | Planned location for the force-legacy switch. |
-| 7189 | `flushPendingMediaCacheRequests()` | Replays queued downloads through `cacheImage()`. |
-| 8588 | `_getChangedAttachments()` | Sends removed attachments through `cacheImage()`. |
-| 11888 | `fetchMediaCacheResponse()` | Owns cache timeout/abort handling but currently calls renderer `fetch()`. |
-| 11931 | `cacheImage()` | Sole persistent cache-write downloader; consumes a Response and writes bytes. |
-| 12035 | `cacheMessageImages()` | Enumerates qualifying attachments, embeds, components, and stickers. |
-| 13222 | Anti-Nuke pre-cache helper | Calls `cacheMessageImages()` before ordinary policy returns. |
-| 13626 | Normal incoming-message cache path | Calls `cacheMessageImages()`. |
-| 17271 | Image context-menu local request | Intentionally retains renderer `fetch()` for local `blob:` reads and `BdApi.Net.fetch()` for remote clipboard reads. |
+| 3764 | `reportDebugEvent()` | Routes console output through the Debug master and toast/notification output only while both the master and saved toast child are enabled. |
+| 4560 | Advanced settings category | Holds the force-legacy and linked detailed-media diagnostics switches. |
+| 7424 | `flushPendingMediaCacheRequests()` | Replays queued downloads through `cacheImage()`. |
+| 8816 | `_getChangedAttachments()` | Sends removed attachments through `cacheImage()`. |
+| 12136 | `fetchMediaNetworkResponse()` | Selects BetterDiscord native networking by default and renderer fetch only for forced or compatible fallback routing. |
+| 12430 | `fetchMediaCacheResponse()` | Owns initial-response timeout, rolling body watchdog, cancellation, and bounded cleanup. |
+| 12542 | `cacheImage()` | Sole persistent cache-write downloader; consumes a Response and writes bytes. |
+| 12652 | `cacheMessageImages()` | Enumerates qualifying attachments, embeds, components, and stickers. |
+| 13810 | Anti-Nuke pre-cache helper | Calls `cacheMessageImages()` before ordinary policy returns. |
+| 14243 | Normal incoming-message cache path | Calls `cacheMessageImages()`. |
+| 16049 | Saved-media clipboard helpers | Resolve record-owned image media, retain the local `blob:`/remote native split, replace one deleted-message native action, and add one Logger-viewer action. |
 
 ### Expected implementation shape
 
@@ -342,7 +340,7 @@ must not be sent through networking merely to read it again:
 - [x] Keep `blob:` object URLs local.
 - [x] Keep `data:` resources and the local error placeholder local.
 - [x] Keep cache file writes, deletion, reveal-in-folder, and cleanup local.
-- [ ] Keep **Copy image** on the existing fetch split: local `blob:` reads use
+- [x] Keep **Copy image** on the existing fetch split: local `blob:` reads use
       renderer `fetch()` and remote reads use `BdApi.Net.fetch()`.
 - [x] Do not route either clipboard branch through the media-cache handler.
 - [x] Continue revoking locally created object URLs during cleanup.
@@ -357,22 +355,22 @@ reads the matching cache file with `fs`, and returns a local `blob:` URL.
 Discord. The Logger viewer also builds its own context menu and had no image
 copy action. The user approved this self-contained replacement:
 
-- [ ] Leave Discord's native **Copy image** action untouched for ordinary,
+- [x] Leave Discord's native **Copy image** action untouched for ordinary,
       non-deleted messages.
-- [ ] For deleted/restored live message mounts only, patch the existing native
+- [x] For deleted/restored live message mounts only, patch the existing native
       Discord **Copy image** action so Logger reads the saved image source.
       Preserve one visible action rather than adding a duplicate.
-- [ ] Add one Logger-owned **Copy media** action to supported media in the
+- [x] Add one Logger-owned **Copy media** action to supported media in the
       Logger viewer.
-- [ ] Share one byte-copy helper across both Logger-owned paths. Remote sources
+- [x] Share one byte-copy helper across both Logger-owned paths. Remote sources
       use direct `BdApi.Net.fetch()`; local `blob:` sources use renderer
       `fetch()`; neither path uses the media-cache transport selector.
-- [ ] Pass successful bytes to `DiscordNative.clipboard.copyImage()` and never
+- [x] Pass successful bytes to `DiscordNative.clipboard.copyImage()` and never
       invoke the native writer after a failed or non-200 read.
-- [ ] Preserve one user-facing failure notification plus a console error.
-- [ ] Keep clipboard reads independent from **Force legacy media fetching**,
+- [x] Preserve one user-facing failure notification plus a console error.
+- [x] Keep clipboard reads independent from **Force legacy media fetching**,
       media diagnostics, cache writes, and Logger record creation.
-- [ ] Remove the obsolete `image-context` clipboard patch. Do not implement the
+- [x] Remove the obsolete `image-context` clipboard patch. Do not implement the
       separate future **Reveal in folder** feature as part of this fix.
 
 The installed Discord desktop bridge exposes `copyImage(bytes, source)` and
@@ -1054,9 +1052,9 @@ Stage 5D plan/result:
         networking and works with the media force setting both off and on.
   - [x] Runtime defect found before those checks: current Discord did not invoke
         Logger's old `image-context` patch, and the Logger viewer's custom menu
-        exposed no image copy action. The user approved the narrow replacement
-        documented above; clipboard runtime rows remain blocked until it is
-        implemented, fully tested, and synced live.
+        exposed no image copy action. The approved narrow replacement is now
+        implemented and passes deterministic tests plus independent review.
+        The two clipboard rows require only the final live sync and user checks.
   - Record any runtime-only findings and amend earlier stages if necessary.
 
 Live result:
@@ -1105,11 +1103,11 @@ Historical result:
       runtime matrix and post-sync branch push.
 - [x] Full test suite and final independent audit pass on `2.8.2.9`.
 - [x] `git diff --check` and Markdown parsing pass on the final tree.
-- [x] Final live hash parity and clean hot reload are verified.
+- [ ] Clipboard-repair live hash parity and clean hot reload are verified.
 - [ ] Remaining user-driven `RT-26` behavior result recorded.
 - [x] No unrelated attachment-gate implementation was included.
 - [x] Version and built-in changelog are updated under explicit approval.
-- [x] Push the final checkpoint only after the authorized live sync and verify
+- [ ] Push the clipboard-repair checkpoint only after the authorized live sync and verify
       local/remote ref alignment.
 - [x] Checklist removal was not requested for this working branch; retain it as
       the required living handoff.
@@ -2100,6 +2098,35 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit and record this approved plan, implement the
   shared clipboard reader plus the two scoped menu paths, run the full suite,
   audit edge cases, then sync live for the two remaining runtime checks.
+
+### 2026-07-27 — Clipboard replacement implemented and audited
+
+- **Completed:** Removed the obsolete `image-context` patch; added one shared,
+  record-owned image byte reader; replaced Discord's existing copy action only
+  for deleted/restored live records; and added one **Copy media** action to the
+  Logger viewer. Ordinary messages remain Discord-owned.
+- **Decisions:** Keep the plugin self-contained. Local `blob:` and image `data:`
+  sources use renderer `fetch()`, remote images use direct
+  `BdApi.Net.fetch()`, and both remain independent from media routing and its
+  force switch. Frozen React menu props are handled by cloning the existing
+  item instead of adding a duplicate. Videos and non-image files retain
+  link/save behavior because Discord exposes no safe raw-video byte writer.
+- **Files changed:** `MessageLoggerV2.plugin.js`, `tests/clipboard.test.js`,
+  `tests/source-contracts.test.js`, `docs/tests.md`, and this checklist.
+- **Tests and exact results:** PASS — focused clipboard/source coverage passed
+  `68/68`; the full `npm test` suite passed `386/386`, including syntax
+  validation. Independent final review found no remaining concrete blocker.
+- **Runtime evidence:** The user's screenshots prove the real Logger
+  `message` context hook is active and show the missing viewer action that this
+  change repairs. The temporary clipboard trace is no longer needed; its live
+  symlink and generated report are removed.
+- **Failures or blockers:** No static blocker. The local-blob and remote-image
+  clipboard rows still require the authorized live sync and user interaction.
+- **Commit:** Implementation commit pending exact hash.
+- **Exact next action:** Run final diff/metadata/trace checks, commit and record
+  the exact implementation hash, sync the one plugin file, verify live parity
+  and hot reload, push the feature branch, then give the user the two clipboard
+  tests.
 
 ### Handoff entry template
 

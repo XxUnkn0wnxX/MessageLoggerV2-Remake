@@ -380,11 +380,11 @@ test('media networking documentation preserves the selector boundary and officia
   );
   assert.match(
     testsDocs,
-    /\| AT-47 \| Media networking \|[^\n]*native promise rejection and HTTP failure never start a second renderer request[^\n]*clipboard copying retain their direct native\/blob transport split/
+    /\| AT-47 \| Media networking \|[^\n]*native promise rejection and HTTP failure never start a second renderer request[^\n]*clipboard copying retain their direct native\/blob transport split[^\n]*Ordinary messages keep Discord's one native \*\*Copy image\*\* action[^\n]*Logger viewer adds one \*\*Copy media\*\* action[^\n]*videos and non-image files retain link\/save behavior/
   );
   assert.match(
     testsDocs,
-    /\| RT-26 \| Media networking \|[^\n]*Waifugami cross-origin URL[^\n]*HTTP\/mixed-content media URL[^\n]*disabled output \(master Off\)[^\n]*console-only output \(master On and toast child Off\)[^\n]*both outputs \(master On and toast child On\)[^\n]*one possible toast-only delivery[^\n]*remote image copy still uses direct BetterDiscord networking/
+    /\| RT-26 \| Media networking \|[^\n]*Waifugami cross-origin URL[^\n]*HTTP\/mixed-content media URL[^\n]*disabled output \(master Off\)[^\n]*console-only output \(master On and toast child Off\)[^\n]*both outputs \(master On and toast child On\)[^\n]*one possible toast-only delivery[^\n]*ordinary non-deleted image[^\n]*deleted\/restored live image[^\n]*Logger viewer must expose one \*\*Copy media\*\* action[^\n]*video or non-image file/
   );
 });
 
@@ -1492,20 +1492,29 @@ test('checkNewUpdate uses direct updater fetch and skips media helper routes', a
   }
 });
 
-test('image-copy context keeps blob/router fetch split and copies clipboard bytes with failure reporting', () => {
-  const localRequestStart = source.indexOf('const localRequest = {');
+test('saved-media clipboard paths replace only deleted native actions and add one viewer action', () => {
   const copyContext = source.slice(
-    localRequestStart,
-    source.indexOf('this.getSavedThreadRemovalLabel(record),', localRequestStart)
+    source.indexOf('  getClipboardMediaSource(target, record) {'),
+    source.indexOf('  createMessageGroup(message, isStart) {')
   );
-  assert.equal(localRequestStart >= 0, true);
-  assert.ok(copyContext.length > 0);
-  assert.match(copyContext, /const fetchFn = url\.startsWith\(["']blob:\s*["']\)\s*\?\s*fetch\s*:\s*BdApi\.Net\.fetch/);
-  assert.match(copyContext, /const responseBuffer = await response\.arrayBuffer\(\);[\s\S]*new Uint8Array\(responseBuffer\)/);
-  assert.match(copyContext, /DiscordNative\.clipboard\.copyImage\(data\.chunksArr, "image\.png"\);/);
-  assert.match(copyContext, /this\.notifyUser\('Failed to copy\. Details in the console\.', \{\s*type: 'error'\s*\}\);[\s\S]*Logger\.error\(data\);/);
+  assert.match(copyContext, /image\?\.tagName === 'IMG'/);
+  assert.match(copyContext, /querySelectorAll\?\.\('img'\)/);
+  assert.match(copyContext, /const mediaIds = this\.getRecordCachedMediaIds\(record\)/);
+  assert.match(copyContext, /mediaIds\.has\(imageId\)/);
+  assert.match(copyContext, /mediaSources\.has\(sourceKey\(source\)\)/);
+  assert.match(copyContext, /const response = isLocalSource[\s\S]*await fetch\(source\)[\s\S]*await BdApi\.Net\.fetch\(source\)/);
+  assert.match(copyContext, /response\.status !== 200[\s\S]*new Uint8Array\(await response\.arrayBuffer\(\)\)/);
+  assert.match(copyContext, /clipboard\.copyImage\(bytes, 'image\.png'\)/);
+  assert.match(copyContext, /this\.notifyUser\('Failed to copy\. Details in the console\.', \{\s*type: 'error'\s*\}\);[\s\S]*Logger\.error\('Media clipboard copy failed:', error\)/);
+  assert.match(copyContext, /if \(!record\?\.delete_data\) return false/);
+  assert.match(copyContext, /id === 'copy-image'[\s\S]*id === 'copy-media'/);
+  assert.match(copyContext, /React\?\.cloneElement[\s\S]*parentArray\[parentIndex\] = replacementNode/);
+  assert.match(copyContext, /id: 'mlv2-copy-media'[\s\S]*label: 'Copy media'/);
   assert.doesNotMatch(copyContext, /fetchMediaNetworkResponse|fetchMediaCacheResponse/);
   assert.doesNotMatch(copyContext, /forceLegacyMediaFetching/);
+  assert.doesNotMatch(source, /ContextMenu\.patch\('image-context'/);
+  assert.match(source, /this\.replaceNativeSavedMediaCopyAction\(ret, record, props\.target\)/);
+  assert.match(source, /this\.addLoggerViewerCopyMediaItem\(menuItems, e\.target, record\)/);
 });
 
 test('media routing converges through cacheImage and cacheMessageImages across enumeration, deferred, removed, and anti-nuke paths', () => {
@@ -1565,8 +1574,8 @@ test('renderer fetch usage outside fetchMediaNetworkResponse remains constrained
   const nonMediaFetcher = source.slice(0, fetchStart) + source.slice(fetchEnd);
   assert.ok((mediaFetcher.match(/\breturn fetch\(/g) || []).length >= 1);
   assert.equal((nonMediaFetcher.match(/\breturn fetch\(/g) || []).length, 0);
-  assert.equal((source.match(/BdApi\.Net\.fetch\(/g) || []).length, 1);
+  assert.equal((source.match(/BdApi\.Net\.fetch\(/g) || []).length, 2);
   assert.equal((source.match(/nativeFetch\.call\(/g) || []).length, 1);
-  assert.match(source, /const fetchFn = url\.startsWith\(["']blob:["']\)\s*\?\s*fetch\s*:\s*BdApi\.Net\.fetch;/);
-  assert.match(source, /DiscordNative\.clipboard\.copyImage\(data\.chunksArr, "image\.png"\);/);
+  assert.match(source, /const response = isLocalSource[\s\S]*await fetch\(source\)[\s\S]*await BdApi\.Net\.fetch\(source\)/);
+  assert.match(source, /clipboard\.copyImage\(bytes, 'image\.png'\);/);
 });

@@ -16046,6 +16046,181 @@ module.exports = class MessageLoggerV2 {
     }
     return classes.join(' ');
   }
+  getClipboardMediaSource(target, record) {
+    if (!target || !record?.message?.id) return null;
+    const messageId = String(record.message.id);
+    const mediaIds = this.getRecordCachedMediaIds(record);
+    const sourceKey = value => {
+      if (typeof value !== 'string' || !value) return '';
+      try {
+        const parsed = new URL(value);
+        return `${parsed.origin}${parsed.pathname}`;
+      } catch {
+        return value;
+      }
+    };
+    const mediaSources = new Set();
+    const addMediaSource = value => {
+      const key = sourceKey(value);
+      if (key) mediaSources.add(key);
+    };
+    for (const attachment of [
+      ...(record.message.attachments || []),
+      ...this.getRecordRemovedAttachments(record)
+    ]) {
+      addMediaSource(attachment?.url);
+      addMediaSource(attachment?.proxy_url || attachment?.proxyUrl);
+    }
+    for (const sticker of this.getMessageStickerItems(record.message)) {
+      addMediaSource(this.getStickerMedia(sticker)?.url);
+    }
+    for (const embed of record.message.embeds || []) {
+      for (const media of this.getIndexedEmbedImageMedia(embed)) addMediaSource(media.url);
+    }
+    for (const media of this.getIndexedComponentMedia(record.message.components)) addMediaSource(media.url);
+    const candidates = [];
+    const addCandidate = image => {
+      if (image?.tagName === 'IMG' && !candidates.includes(image)) candidates.push(image);
+    };
+    const addImagesFrom = node => {
+      addCandidate(node);
+      const images = node?.querySelectorAll?.('img');
+      if (images && typeof images[Symbol.iterator] === 'function') {
+        for (const image of images) addCandidate(image);
+      } else {
+        addCandidate(node?.querySelector?.('img'));
+      }
+    };
+    let ancestor = target;
+    for (let depth = 0; ancestor && depth < 4; depth++) {
+      addImagesFrom(ancestor);
+      ancestor = ancestor.parentElement;
+    }
+    addImagesFrom(target.closest?.('[data-ml2-attachment-message-id]'));
+    for (const image of candidates) {
+      if (image.classList?.contains?.(this.style?.imageError)) continue;
+      const attachmentHost = image.closest?.('[data-ml2-attachment-message-id]');
+      const ownerMessageId = image.messageId
+        ?? image.dataset?.ml2AttachmentMessageId
+        ?? attachmentHost?.dataset?.ml2AttachmentMessageId;
+      const imageId = String(image.id || '');
+      const source = image.currentSrc || image.src;
+      if (typeof source !== 'string' || !/^(?:blob:|data:image\/|https?:)/i.test(source)) continue;
+      if (source === this.errorImage) continue;
+      const ownsImage = ownerMessageId !== undefined && ownerMessageId !== null
+        ? String(ownerMessageId) === messageId
+        : (!!imageId && mediaIds.has(imageId)) || mediaSources.has(sourceKey(source));
+      if (ownsImage) return source;
+    }
+    return null;
+  }
+  async copyMediaToClipboard(source) {
+    try {
+      if (typeof source !== 'string' || !/^(?:blob:|data:image\/|https?:)/i.test(source)) {
+        throw new Error('Clipboard media source is unavailable');
+      }
+      const isLocalSource = /^(?:blob:|data:image\/)/i.test(source);
+      const response = isLocalSource
+        ? await fetch(source)
+        : await BdApi.Net.fetch(source);
+      if (!response || response.status !== 200 || typeof response.arrayBuffer !== 'function') {
+        throw new Error(`Clipboard media returned HTTP ${response?.status ?? 'unknown'}`);
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (!bytes.byteLength) throw new Error('Clipboard media response was empty');
+      const clipboard = typeof DiscordNative !== 'undefined' ? DiscordNative?.clipboard : null;
+      if (typeof clipboard?.copyImage !== 'function') {
+        throw new Error('Discord image clipboard API is unavailable');
+      }
+      clipboard.copyImage(bytes, 'image.png');
+      return true;
+    } catch (error) {
+      this.notifyUser('Failed to copy. Details in the console.', { type: 'error' });
+      Logger.error('Media clipboard copy failed:', error);
+      return false;
+    }
+  }
+  isNativeClipboardMediaAction(item) {
+    const props = item?.props || {};
+    const id = typeof props.id === 'string' ? props.id.replace(/^message-/, '') : '';
+    const label = typeof props.label === 'string'
+      ? props.label
+      : typeof props.children === 'string'
+        ? props.children
+        : '';
+    return id === 'copy-image'
+      || id === 'copy-media'
+      || /^Copy (?:image|media)$/i.test(label.trim());
+  }
+  replaceNativeSavedMediaCopyAction(tree, record, target) {
+    if (!record?.delete_data) return false;
+    const source = this.getClipboardMediaSource(target, record);
+    if (!source) return false;
+    const seen = new Set();
+    const visit = (node, parentArray = null, parentIndex = -1) => {
+      if (node == null || typeof node === 'boolean') return false;
+      if (Array.isArray(node)) {
+        for (let index = 0; index < node.length; index++) {
+          if (visit(node[index], node, index)) return true;
+        }
+        return false;
+      }
+      if (typeof node !== 'object' || seen.has(node)) return false;
+      seen.add(node);
+      if (this.isNativeClipboardMediaAction(node)) {
+        const props = node.props || {};
+        const replacement = () => {
+          void this.copyMediaToClipboard(source);
+        };
+        const actionKey = typeof props.action === 'function'
+          ? 'action'
+          : typeof props.onClick === 'function'
+            ? 'onClick'
+            : null;
+        if (!actionKey) return false;
+        let mutationError = null;
+        try {
+          props[actionKey] = replacement;
+          if (props[actionKey] === replacement) return true;
+        } catch (error) {
+          mutationError = error;
+        }
+        if (parentArray && parentIndex >= 0) {
+          try {
+            const replacementNode = typeof React?.cloneElement === 'function'
+              ? React.cloneElement(node, { [actionKey]: replacement })
+              : { ...node, props: { ...props, [actionKey]: replacement } };
+            parentArray[parentIndex] = replacementNode;
+            if (parentArray[parentIndex]?.props?.[actionKey] === replacement) return true;
+          } catch (error) {
+            mutationError = error;
+          }
+        }
+        Logger.error(
+          'Could not patch Discord media clipboard action:',
+          mutationError || new Error('Discord menu item is immutable')
+        );
+        return false;
+      }
+      return visit(node.props?.children);
+    };
+    return visit(tree);
+  }
+  addLoggerViewerCopyMediaItem(menuItems, target, record) {
+    if (!Array.isArray(menuItems)) return false;
+    const source = this.getClipboardMediaSource(target, record);
+    if (!source || menuItems.some(item => item?.id === 'mlv2-copy-media')) return false;
+    menuItems.push({
+      id: 'mlv2-copy-media',
+      type: 'item',
+      label: 'Copy media',
+      action: () => {
+        ContextMenu.close?.();
+        void this.copyMediaToClipboard(source);
+      }
+    });
+    return true;
+  }
   createMessageGroup(message, isStart) {
     let deleted = false;
     let edited = false;
@@ -16346,6 +16521,7 @@ module.exports = class MessageLoggerV2 {
               }
             });
           }
+          this.addLoggerViewerCopyMediaItem(menuItems, e.target, record);
           if ((!isBadImage && !isAttachment) || record.message.content.length) {
             menuItems.push(
               {
@@ -17660,6 +17836,7 @@ module.exports = class MessageLoggerV2 {
       const messageId = props.message.id;
       const channelId = props.channel.id;
       const record = this.messageRecord[messageId];
+      this.replaceNativeSavedMediaCopyAction(ret, record, props.target);
       addSavedRecordItems(newItems, addElement, record, messageId, channelId, {
         menu,
         pruneNativeDeletedOptions: true,
@@ -17852,115 +18029,6 @@ module.exports = class MessageLoggerV2 {
             items: [loggerSubmenu]
           }]));
         })
-      ),
-      ContextMenu.patch('image-context', (ret, props) => {
-        const menu = getNestedProp(
-          Utils.findInTree(ret, e => e?.navId === 'image-context'),
-          'children'
-        );
-        if (!Array.isArray(menu)) return;
-        const newItems = [];
-        const addElement = (label, action, options = {}) => newItems.push({ label, action, ...options });
-        let matched;
-        if (!props.src) return;
-        if (props.src.startsWith('data:image/png')) {
-          const cut = props.src.substring(0, 100);
-          matched = cut.match(/;(\d+);(\d+);/);
-        } else {
-          let fakeSrc = props.src + '';
-          matched = props.src.match(/.*ments\/(\d+)\/(\d+)\//);
-          if (!matched) matched = props.src.match(/r8q6.png#(\d+),(\d+)/);
-          if (!matched) {
-            fakeSrc = this.getKeyByValue(this.imageCacheServerSimulator.cached, props.src) ?? props.src;
-          }
-          if (!matched) {
-            matched = /localhost:7474.*#(\d+),(\d+)/.exec(fakeSrc);
-          }
-        }
-        if (!matched) return;
-        const channelId = matched[1];
-        const attachmentId = matched[2];
-        const element = document.getElementById(attachmentId);
-        if (!element) return;
-        const messageId = element.messageId;
-        const record = this.getSavedMessage(messageId);
-        if (!record) return;
-        const localRequest = {
-          get: async (url, options, cb) => {
-            try {
-              const fetchFn = url.startsWith("blob:") ? fetch : BdApi.Net.fetch;
-              const response = await fetchFn(url, options);
-              const responseBuffer = await response.arrayBuffer();
-              cb({
-                statusCode: response.status,
-                chunksArr: new Uint8Array(responseBuffer),
-              });
-            } catch (error) {
-              Logger.error('Image fetch failed:', error);
-              cb({ statusCode: 0, error });
-            }
-          },
-        };
-        addElement(
-          'Copy to Clipboard',
-          () => {
-            localRequest.get(element.src, {}, (data) => {
-              if (data.statusCode != 200) {
-                this.notifyUser('Failed to copy. Details in the console.', { type: 'error' });
-                Logger.error(data);
-              }
-              DiscordNative.clipboard.copyImage(data.chunksArr, "image.png");
-            });
-          },
-          this.obfuscatedClass('copy-to')
-        );
-        addElement(
-          this.getSavedThreadRemovalLabel(record),
-          () => {
-            this.deleteMessageFromRecords(messageId);
-            this.scheduleLoggerMenuRefresh();
-            this.saveData();
-            if (record.delete_data) this.dispatcher.dispatch({ type: 'MESSAGE_DELETE', id: messageId, channelId: channelId, ML2: true });
-            else this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
-          },
-          {
-            className: DiscordModules.ColorClasses?.colorDanger,
-            danger: true,
-            icon: this.getNativeDeleteIconComponent() || undefined
-          }
-        );
-        addElement(
-          'Reveal in folder',
-          () => {
-            const parsedUrl = new URL(matched.input);
-            const parsedFile = this.nodeModules.path.parse(parsedUrl.pathname);
-            const targetPath = this.imageCacheServerSimulator._resolveImagePath(
-              attachmentId,
-              parsedFile.ext,
-              channelId,
-              element.messageId
-            );
-            if (targetPath) this.nodeModules.electron.shell.showItemInFolder(this.nodeModules.path.resolve(targetPath));
-          },
-          this.obfuscatedClass('reveal-in-folder')
-        )
-        if (!(this.menu?.open && this.menu.selectedTab === 'hidden') && this.canJumpToSavedRecord(record)) {
-          addElement(
-            'Jump to Message',
-            () => {
-              this.jumpToSavedRecord(record);
-            },
-            this.obfuscatedClass('jump-to')
-          );
-        }
-        menu.push(ContextMenu.buildMenuChildren([{
-          type: 'group',
-          items: [{
-            type: 'submenu',
-            label: this.settings.contextmenuSubmenuName?.trim() || 'Message Logger',
-            items: newItems
-          }]
-        }]));
-      }));
+      ));
   }
 };
