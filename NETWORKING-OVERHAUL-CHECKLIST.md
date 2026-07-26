@@ -1885,10 +1885,10 @@ evidence for another session to understand what changed and why.
   natively and cached media normally.
 - **Failures or blockers:** None for cancellation. Forced legacy/native-return
   routing is the next live networking check.
-- **Commit:** Pending this plugin-stop runtime-evidence commit; record its exact
-  hash immediately after commit.
-- **Exact next action:** Commit and record this checkpoint, push the branch,
-  then give the user the forced-legacy/native-return test.
+- **Commit:** Plugin-stop runtime-evidence checkpoint
+  9cf8922934d9e056069948e2a705092280cb078c.
+- **Exact next action:** After this commit record is pushed, give the user the
+  forced-legacy/native-return test.
 
 ### Handoff entry template
 
