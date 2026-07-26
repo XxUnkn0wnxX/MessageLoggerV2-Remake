@@ -2007,8 +2007,8 @@ evidence for another session to understand what changed and why.
   ordinary `Cached image` activity continued.
 - **Failures or blockers:** None for Debug linking, output routing, pending
   delivery, or activation de-duplication. Updater and clipboard checks remain.
-- **Commit:** Pending this runtime-evidence commit; replace this text with its
-  exact hash in the immediate checklist checkpoint.
+- **Commit:** Debug-output runtime-evidence checkpoint
+  c0e19440ee45c7355308320c706e48d4df298217.
 - **Exact next action:** Record and push this evidence, then run the updater
   force-Off/force-On check.
 
