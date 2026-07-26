@@ -87,13 +87,14 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Give the user the remaining mixed-content, file-size, legacy, debug-output,
-update, and clipboard `RT-26` tests and wait for their runtime results. Default
-native routing, the Waifugami cross-origin request, slow body progress,
-controlled body inactivity, cache-master cancellation, and plugin-stop
-cancellation now have current live evidence. Keep the audited provisional
-Anti-Nuke/Ghost-Ping media-retention work as a separate post-networking stage
-in `TODO.md`; do not implement it on this networking handoff.
+Give the user the remaining mixed-content, file-size, debug-output, update, and
+clipboard `RT-26` tests and wait for their runtime results. Default native
+routing, the Waifugami cross-origin request, slow body progress, controlled
+body inactivity, cache-master and plugin-stop cancellation, forced legacy,
+native return, and activation-scoped notice de-duplication now have current
+live evidence. Keep the audited provisional Anti-Nuke/Ghost-Ping
+media-retention work as a separate post-networking stage in `TODO.md`; do not
+implement it on this networking handoff.
 
 ### Resume procedure for a new session
 
@@ -981,12 +982,19 @@ Stage 5D plan/result:
           retry or late completion appeared beyond the original 40-second
           completion window, and re-enabling the plugin started fresh work
           normally.
-  - [ ] Verify forced legacy routing.
-  - [ ] Verify the force toggle can return to native routing immediately.
+  - [x] Verify forced legacy routing. Requests `#231` and `#232` both used
+        renderer fetch, returned HTTP 200, and completed all 32 bytes in 0.7
+        and 0.2 seconds respectively.
+  - [x] Verify the force toggle can return to native routing immediately.
+        After turning force Off, request `#246` used BetterDiscord native
+        fetch and completed the same HTTP 200 / 32-byte response in 0.9
+        seconds.
   - [ ] Verify disabled (master Off), console-only (master On/toast child Off),
         and both (master On/toast child On) debug output, plus the one
         destination-specific pending toast after console delivery.
-  - [ ] Verify only one routing notice appears per legacy activation.
+  - [x] Verify only one routing notice appears per legacy activation. Exactly
+        one required notice appeared after force was enabled despite multiple
+        automatic media requests plus both manual probes using legacy routing.
   - [ ] Verify update checks still use direct native networking and work with the
     media force setting both off and on.
   - [ ] Verify local `blob:` clipboard copying still uses renderer `fetch()` and
@@ -1010,7 +1018,9 @@ Live result:
   watchdog at exactly 30.0 seconds, and master cache-off cancelling an active
   body at 3.4 seconds without retry or late completion. Plugin stop likewise
   cancelled its active body at 3.6 seconds without retry or late completion,
-  and the plugin re-enabled successfully. Discord was not relaunched.
+  and the plugin re-enabled successfully. Two forced-legacy probes passed,
+  emitted one activation-scoped routing notice, and the next post-toggle probe
+  returned directly to native. Discord was not relaunched.
 
 Historical result:
 
@@ -1081,6 +1091,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-27 | Stage 6 partial runtime | Current detailed logs prove default native routing, Waifugami cross-origin success, a 39.8-second progressing response completing without a total deadline, and a controlled no-progress response reaching Logger's rolling 30-second body watchdog. The earlier one-off HTTPBin `Error: aborted` was a remote/transport interruption rather than Logger's watchdog and the same detailed probe then passed. | User-run `RT-26` probes plus current BetterDiscord `debug.log` and `console.log` |
 | 2026-07-27 | Stage 6 cache-off cancellation | Turning **Cache media locally** Off during an active progressing native body cancelled it immediately after three bytes, emitted exactly one cancelled terminal event, and produced no retry or late completion after the original response window elapsed. | User-run `RT-26` probe plus current BetterDiscord `debug.log` and `console.log` |
 | 2026-07-27 | Stage 6 plugin-stop cancellation | Disabling MessageLoggerV2 during an active progressing native body entered plugin cleanup, cancelled the request after three bytes, emitted exactly one cancelled terminal event, and produced no retry or late completion. Re-enabling initialized fresh media work normally. | User-run `RT-26` probe plus current BetterDiscord `debug.log` and `console.log` |
+| 2026-07-27 | Stage 6 legacy/native toggle | Two manual probes and concurrent ordinary media work used forced renderer fetch successfully while exactly one activation-scoped routing notice appeared. Turning force Off made the next probe use BetterDiscord native fetch immediately. | User-run `RT-26` probes plus current BetterDiscord `debug.log` and `console.log` |
 
 ## Handoff activity log
 
@@ -1887,8 +1898,31 @@ evidence for another session to understand what changed and why.
   routing is the next live networking check.
 - **Commit:** Plugin-stop runtime-evidence checkpoint
   9cf8922934d9e056069948e2a705092280cb078c.
-- **Exact next action:** After this commit record is pushed, give the user the
-  forced-legacy/native-return test.
+- **Exact next action:** Superseded by the legacy/native result below.
+
+### 2026-07-27 — Forced-legacy and native-return runtime checks
+
+- **Completed:** Enabled forced legacy, ran the same small response twice,
+  observed concurrent ordinary media traffic, disabled force, and repeated the
+  probe through the default route.
+- **Decisions:** Forced legacy, immediate native return, and one-notice-per-
+  activation behavior now have sufficient live evidence. No routing code
+  change is indicated.
+- **Files changed:** This checklist only.
+- **Tests and exact results:** Requests `#231` and `#232` used legacy renderer
+  fetch and completed HTTP 200 / 32 bytes in 0.7 and 0.2 seconds. After force
+  was disabled, request `#246` used BetterDiscord native fetch and completed
+  HTTP 200 / 32 bytes in 0.9 seconds.
+- **Runtime evidence:** Exactly one
+  `Networking: media routing is using the old Discord renderer fetch() method.`
+  console notice appeared during the activation even though many automatic
+  requests and both manual probes used the legacy route.
+- **Failures or blockers:** None for forced legacy, native return, or notice
+  de-duplication. Mixed-content is the next direct transport check.
+- **Commit:** Pending this legacy/native runtime-evidence commit; record its
+  exact hash immediately after commit.
+- **Exact next action:** Commit and record this checkpoint, push the branch,
+  then give the user the mixed-content probe.
 
 ### Handoff entry template
 
