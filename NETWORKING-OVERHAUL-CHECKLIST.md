@@ -42,9 +42,9 @@ review, checklist update, and commit must also be complete.
   separate and tracks `origin/fix/attachment-gate`. Its standalone handoff
   commit is protected by the local-only `local/attachment-gate-handoff` tag.
   Do not merge or implement that feature as part of this networking branch.
-- **Implementation state:** Audit/design and this tracked handoff only. No
-  plugin behavior, setting, test, product documentation, version, changelog, or
-  live-plugin source has been changed.
+- **Implementation state:** Implementation resumed on 2026-07-26 after a fresh
+  Stage 0 gate passed at `54a1f3858140e319873135fcb3485b3ee8fd1266`.
+  Plugin behavior has not yet been edited.
 - **Current tracked task changes:** Checklist/handoff documentation only; no
   plugin implementation.
 - **Live plugin:** Not updated for this task because implementation has not
@@ -55,9 +55,11 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Leave this branch paused after publishing it. When the user later authorizes
-implementation, re-read this entire file, verify the handoff snapshot, then run
-the Stage 0 baseline gate before editing plugin behavior.
+Implement Stage 1 only: add the defaulted Advanced force-legacy media setting,
+media-session transport state/helpers, and focused setting/source contracts.
+Run the focused suites, full `npm test`, and `git diff --check`, update this
+handoff, then commit the passing stage. Do not sync the plugin live; the user
+requested a pre-live report and separate authorization before that copy.
 
 ### Resume procedure for a new session
 
@@ -440,12 +442,15 @@ these compatibility targets is allowed when required:
 
 Baseline result:
 
-- Date: 2026-07-26
-- Commit: `a5eadbe736f5a0cf4b7a3730bf9950ade17ad752`
-- Result: PASS — `npm test` completed with 339 tests passed, 0 failed.
-- Notes: `node --check MessageLoggerV2.plugin.js` passed as part of `npm test`;
-  `git diff --check` also passed. The only worktree change was this expected
-  checklist/handoff.
+- Initial audit gate: PASS on 2026-07-26 at
+  `a5eadbe736f5a0cf4b7a3730bf9950ade17ad752` — `npm test` completed with
+  339 tests passed, 0 failed; `node --check MessageLoggerV2.plugin.js` and
+  `git diff --check` passed.
+- Implementation-resume gate: PASS on 2026-07-26 at
+  `54a1f3858140e319873135fcb3485b3ee8fd1266` — `npm test` completed with
+  339 tests passed, 0 failed; `node --check MessageLoggerV2.plugin.js` passed
+  as part of `npm test`; `git diff --check` passed; the worktree was clean
+  before this checklist update.
 
 ## Stage 1 — Setting and transport contracts
 
@@ -610,6 +615,8 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-26 | Audit | A Discord-console probe of the raw updater URL failed through renderer `fetch()` in 88 ms but succeeded through `BdApi.Net.fetch()` with HTTP 200, version `2.8.2.8`, 815109 bytes, in 69 ms. | Runtime evidence in ignored `tmp/discord.com-1785071943229.log` |
 | 2026-07-26 | Scope | The selector and force toggle govern only persistent media-cache downloads. Update checks and remote clipboard reads remain direct native calls; local `blob:` clipboard reads remain direct renderer calls. | Final user decision after runtime probe |
 | 2026-07-26 | Debug | Forced and automatic legacy media selection use: `Networking: media routing is using the old Discord renderer fetch() method.` | User wording requirement |
+| 2026-07-26 | Compatibility | Both BetterDiscord targets support native `headers`, `signal`, and `timeout`; native media calls must pass `timeout: null` so the host's 8-second default does not replace the logger's existing 15-second timeout. Fork-only `maxResponseBytes` and `httpsOnly` options remain out of scope. | Read-only comparison of local `develop` and `upstream-development` |
+| 2026-07-26 | Resume | Resume implementation, keep every checklist addition/amendment current, preserve all existing functionality, run every focused/full check before deployment, then report and stop before live sync until the user separately authorizes it. | Current user instruction |
 
 ## Handoff activity log
 
@@ -682,6 +689,29 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** After this checklist-only update is committed and
   pushed, leave `fix/native-media-networking` paused until the user explicitly
   resumes implementation.
+
+### 2026-07-26 — Implementation resume and fresh baseline
+
+- **Completed:** Re-read the complete tracked handoff; reconstructed root
+  sessions `019f8e91-06a7-7683-aa18-bdf936727474` and
+  `019f8d43-e4c7-7d53-9e2a-f52cb62a03a1` plus networking inventory session
+  `019f9e65-b51a-7792-9614-9bd92451993b`; verified the clean branch, published
+  upstream, checklist-only branch history, and unchanged plugin source; ran a
+  fresh implementation baseline.
+- **Decisions:** Implement only persistent media-cache networking. Preserve
+  updater, clipboard, cache, retry, cancellation, persistence, forum,
+  Anti-Nuke, version, and changelog behavior. Complete all pre-live checklist
+  work and report before any live plugin copy.
+- **Files changed:** `NETWORKING-OVERHAUL-CHECKLIST.md` only at this checkpoint.
+- **Tests and exact results:** PASS — `npm test` reported 339 passed and 0
+  failed; `node --check MessageLoggerV2.plugin.js` passed within that command;
+  `git diff --check` passed before this checklist edit.
+- **Runtime evidence:** Existing probe evidence was reconstructed; no new
+  Discord probe or live-plugin change was required.
+- **Failures or blockers:** None.
+- **Commit:** Pending with the next passing implementation stage.
+- **Exact next action:** Implement and validate Stage 1, update this file with
+  exact evidence, and commit only after the full stage passes.
 
 ### Handoff entry template
 
