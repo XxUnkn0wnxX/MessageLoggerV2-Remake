@@ -35,11 +35,12 @@ review, checklist update, and commit must also be complete.
 - **Working branch:** `fix/native-media-networking`
 - **Branch base:** a5eadbe736f5a0cf4b7a3730bf9950ade17ad752
   (`docs: prepare 2.8.2.8 release notes`)
-- **Upstream status:** `origin/fix/native-media-networking` remains at the
-  published handoff commit 54a1f3858140e319873135fcb3485b3ee8fd1266; local implementation commits are
-  intentionally ahead and have not been pushed. `develop` and `main` both still
-  point to the same released base commit and track their matching `origin`
-  branches.
+- **Upstream status:** The current local feature branch and
+  `origin/fix/native-media-networking` are aligned. The completed implementation
+  and live-sync history was first published through
+  e84bfaaf6fffc4b809f7e4fb6fe70ef6ac5c5897. `develop`, `main`,
+  `origin/develop`, and `origin/main` all remain untouched at
+  a5eadbe736f5a0cf4b7a3730bf9950ade17ad752.
 - **Paused attachment work:** The renamed `fix/attachment-gate` remains
   separate and tracks `origin/fix/attachment-gate`. Its standalone handoff
   commit is protected by the local-only `local/attachment-gate-handoff` tag.
@@ -64,7 +65,8 @@ review, checklist update, and commit must also be complete.
   master is On while retaining each saved child value. It is fully validated,
   committed at 135eeb37baecfbb153784ce46c6767c2ea7362e2, recorded by checklist
   checkpoint c7d4d32bfb9633f302bd433681bf02fb1766598b, and its matching live sync
-  is recorded at 8b7487225e3c1c694b76c89d1f97a7468f874304. The branch push remains.
+  is recorded at 8b7487225e3c1c694b76c89d1f97a7468f874304. The feature branch
+  publication is verified; user-driven `RT-26` checks remain.
 - **Current tracked task changes:** Stages 1-5D are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/persistence.test.js`, `tests/settings-recovery.test.js`,
@@ -85,11 +87,11 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit this final live-sync evidence, record its full hash, push
-`fix/native-media-networking`, and verify local/remote ref alignment. Then give
-the user the remaining native, legacy, cancellation, controlled-stall, update,
-and clipboard `RT-26` tests. Keep the audited provisional Anti-Nuke/Ghost-Ping
-media-retention work as a separate post-networking stage in `TODO.md`.
+Give the user the remaining native, legacy, cancellation, controlled-stall,
+update, and clipboard `RT-26` tests and wait for their runtime results. Keep
+the audited provisional Anti-Nuke/Ghost-Ping media-retention work as a separate
+post-networking stage in `TODO.md`; do not implement it on this networking
+handoff.
 
 ### Resume procedure for a new session
 
@@ -1008,7 +1010,7 @@ Historical result:
 - [ ] Remaining user-driven `RT-26` behavior result recorded.
 - [x] No unrelated attachment-gate implementation was included.
 - [x] Version and built-in changelog are updated under explicit approval.
-- [ ] Push the final checkpoint only after the authorized live sync and verify
+- [x] Push the final checkpoint only after the authorized live sync and verify
       local/remote ref alignment.
 - [x] Checklist removal was not requested for this working branch; retain it as
       the required living handoff.
@@ -1766,8 +1768,32 @@ evidence for another session to understand what changed and why.
 - **Commit:** 135eeb37baecfbb153784ce46c6767c2ea7362e2; checklist checkpoint
   c7d4d32bfb9633f302bd433681bf02fb1766598b; live-sync checkpoint
   8b7487225e3c1c694b76c89d1f97a7468f874304.
-- **Exact next action:** Push the feature branch and verify local/remote ref
-  alignment.
+- **Exact next action:** Publication completed below. Give the user the
+  remaining `RT-26` checks and wait for runtime results.
+
+### 2026-07-27 — Final feature-branch publication
+
+- **Completed:** Pushed the complete networking implementation, audits,
+  tests, docs, checklist history, and final live-sync evidence to
+  `origin/fix/native-media-networking`.
+- **Decisions:** Publish only the current feature branch. Do not open a pull
+  request or merge/switch/update `develop` or `main`.
+- **Files changed:** No product or live files changed during publication; this
+  checklist records the verified remote state.
+- **Tests and exact results:** The exact product tree published here retains
+  the final `381/381` full-suite pass, `npm run check`, `git diff --check`, and
+  per-file Markdown parse pass.
+- **Runtime evidence:** Final repository/live SHA-256 remains
+  `260a3f8c2c3bf0534b0ad8ef5a91d62fae83cbce088cc9fab3e0a6917d2cd424`,
+  with the clean hot-reload evidence recorded above.
+- **Failures or blockers:** None in publication. User-driven `RT-26` behavior
+  checks are the only remaining networking checklist work.
+- **Commit:** Initial verified remote publication checkpoint
+  e84bfaaf6fffc4b809f7e4fb6fe70ef6ac5c5897; local tracking ref, remote-tracking
+  ref, and `git ls-remote` all matched that full hash.
+- **Exact next action:** Commit and push this final checklist-only publication
+  record, verify alignment once more, then give the user the concise `RT-26`
+  instructions and wait for results.
 
 ### Handoff entry template
 
