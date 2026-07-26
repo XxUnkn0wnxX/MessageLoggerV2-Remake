@@ -30,6 +30,7 @@ const defaults = {
     edited: true
   },
   aggresiveMessageCaching: true,
+  forceLegacyMediaFetching: false,
   newCacheAllImages: true
 };
 
@@ -55,14 +56,21 @@ test('archive-load preference defaults safely and normalizes malformed values', 
   normalizeRecovered(plugin, missing);
   assert.equal(missing.dontSaveData, true);
   assert.equal(missing.dontLoadArchivedData, false);
+  assert.equal(missing.forceLegacyMediaFetching, false);
 
   const enabled = { dontSaveData: false, dontLoadArchivedData: true };
   normalizeRecovered(plugin, enabled);
   assert.equal(enabled.dontLoadArchivedData, true, 'stored child preference survives while its parent is inactive');
 
   const malformed = { dontSaveData: true, dontLoadArchivedData: 'yes' };
+  malformed.forceLegacyMediaFetching = 'true';
   normalizeRecovered(plugin, malformed);
   assert.equal(malformed.dontLoadArchivedData, false);
+  assert.equal(malformed.forceLegacyMediaFetching, false);
+
+  const explicit = { dontSaveData: false, forceLegacyMediaFetching: true };
+  normalizeRecovered(plugin, explicit);
+  assert.equal(explicit.forceLegacyMediaFetching, true);
 });
 
 test('legacy configs gain shortcut defaults while valid custom and cleared bindings survive normalization', () => {

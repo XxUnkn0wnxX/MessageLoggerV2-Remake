@@ -40,6 +40,40 @@ function createMediaCachePlugin(cacheDir, overrides = {}) {
   });
 }
 
+test('media-cache transport helper tracks forced and compatibility-based selection', () => {
+  const originalNetApi = global.BdApi.Net;
+  try {
+    delete global.BdApi.Net;
+    const plugin = createMediaCachePlugin('');
+    plugin.settings.forceLegacyMediaFetching = false;
+    plugin._mediaCacheNativeFetchCompatible = null;
+    assert.equal(plugin.getMediaCacheTransportSelection(), 'native');
+
+    plugin.settings.forceLegacyMediaFetching = true;
+    assert.equal(plugin.getMediaCacheTransportSelection(), 'legacy');
+    plugin.setMediaCacheFetchTransportPreference(true);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, null);
+
+    plugin.settings.forceLegacyMediaFetching = false;
+    plugin._mediaCacheNativeFetchCompatible = null;
+    plugin.setMediaCacheFetchTransportPreference(false);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
+    assert.equal(plugin.getMediaCacheTransportSelection(), 'legacy');
+
+    global.BdApi.Net = { fetch: () => Promise.resolve() };
+    plugin._mediaCacheNativeFetchCompatible = false;
+    plugin.settings.forceLegacyMediaFetching = false;
+    plugin.setMediaCacheFetchTransportPreference(false);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
+    plugin._mediaCacheNativeFetchCompatible = null;
+    plugin.setMediaCacheFetchTransportPreference(false);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, null);
+    assert.equal(plugin.getMediaCacheTransportSelection(), 'native');
+  } finally {
+    global.BdApi.Net = originalNetApi;
+  }
+});
+
 function defer() {
   let resolve;
   const promise = new Promise(nextResolve => { resolve = nextResolve; });

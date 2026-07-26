@@ -105,6 +105,7 @@ test('all fresh-install settings defaults remain stable', () => {
     restoreDeletedMessages: true,
     autoRefreshForumPosts: true,
     contextmenuSubmenuName: '',
+    forceLegacyMediaFetching: false,
     imageCacheDir: '/plugins/MLV2_IMAGE_CACHE',
     maxCacheFileSize: 0,
     onlyRenderCachedAttachments: false,
@@ -375,13 +376,17 @@ test('update-note visibility sits directly below automatic updates', () => {
     source.indexOf("id: 'ml2-settings-debug'")
   );
   const automaticUpdatesIndex = advancedSettings.indexOf("id: 'autoUpdate'");
+  const forceLegacyMediaFetchingIndex = advancedSettings.indexOf("id: 'forceLegacyMediaFetching'");
   const contextMenuIndex = advancedSettings.indexOf("id: 'contextmenuSubmenuName'");
 
   assert.ok(automaticUpdatesIndex >= 0);
+  assert.ok(forceLegacyMediaFetchingIndex >= 0);
   assert.ok(automaticUpdatesIndex < contextMenuIndex);
+  assert.ok(forceLegacyMediaFetchingIndex > automaticUpdatesIndex);
+  assert.ok(forceLegacyMediaFetchingIndex < contextMenuIndex);
   assert.deepEqual(
     Array.from(advancedSettings.slice(automaticUpdatesIndex, contextMenuIndex).matchAll(/id: '([^']+)'/g), match => match[1]),
-    ['autoUpdate', 'displayUpdateNotes']
+    ['autoUpdate', 'displayUpdateNotes', 'forceLegacyMediaFetching']
   );
 });
 
@@ -1214,6 +1219,12 @@ test('high-impact setting changes use routed theme-aware state feedback', () => 
   ]) {
     assert.match(source, new RegExp(`name: ['"]${settingName}['"][\\s\\S]*?action: '${action}'`));
   }
+  assert.match(source, /name: 'Force legacy media fetching'[\s\S]*?action: 'reportForceLegacyMediaFetching'/);
+  assert.match(source, /this\._mediaCacheNativeFetchCompatible = typeof BdApi\?\.Net\?\.fetch === 'function'[\s\S]*: false;/);
+  assert.match(source, /reportForceLegacyMediaFetching: \(val\) => this\.setMediaCacheFetchTransportPreference\(val\)/);
+  assert.match(source, /getMediaCacheTransportSelection\(\)[\s\S]*if \(this\.settings\?\.forceLegacyMediaFetching\)[\s\S]*return 'legacy';[\s\S]*return this\._mediaCacheNativeFetchCompatible === false \? 'legacy' : 'native';/);
+  assert.match(source, /setMediaCacheFetchTransportPreference\(forceLegacyMediaFetching\)[\s\S]*if \(forceLegacyMediaFetching\)[\s\S]*return;[\s\S]*typeof this\._mediaCacheNativeFetchCompatible === 'boolean'[\s\S]*return;[\s\S]*this\._mediaCacheNativeFetchCompatible = typeof BdApi\?\.Net\?\.fetch === 'function' \? null : false;/);
+  assert.match(source, /ensureMediaCacheNativeFetchCompatibilityState\(\)[\s\S]*typeof this\._mediaCacheNativeFetchCompatible === 'boolean'[\s\S]*return;[\s\S]*this\._mediaCacheNativeFetchCompatible = typeof BdApi\?\.Net\?\.fetch === 'function' \? null : false;/);
   assert.match(source, /reportMajorSettingChange\(settingId, enabled\)[\s\S]*onlyLogWhitelist[\s\S]*cacheAllImages[\s\S]*antiNukeEnabled[\s\S]*autoUpdate[\s\S]*onlyRenderCachedAttachments[\s\S]*deleteCachedFilesWithRecords/);
   assert.match(source, /enabled \? 'info' : 'neutral'/);
   assert.match(source, /'neutral': \{ bg: 'var\(--background-tertiary, #4f545c\)', fg: 'var\(--text-default, #fff\)'/);

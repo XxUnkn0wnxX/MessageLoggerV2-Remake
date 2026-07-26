@@ -42,11 +42,13 @@ review, checklist update, and commit must also be complete.
   separate and tracks `origin/fix/attachment-gate`. Its standalone handoff
   commit is protected by the local-only `local/attachment-gate-handoff` tag.
   Do not merge or implement that feature as part of this networking branch.
-- **Implementation state:** Implementation resumed on 2026-07-26 after a fresh
-  Stage 0 gate passed at `54a1f3858140e319873135fcb3485b3ee8fd1266`.
-  Plugin behavior has not yet been edited.
-- **Current tracked task changes:** Checklist/handoff documentation only; no
-  plugin implementation.
+- **Implementation state:** Stage 1 setting/default/session-selection plumbing
+  is implemented and passes its focused and full automated gates. The media
+  request path itself remains unchanged until Stage 2.
+- **Current tracked task changes:** Stage 1 changes are limited to
+  `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
+  `tests/settings-recovery.test.js`, `tests/source-contracts.test.js`, and this
+  checklist.
 - **Live plugin:** Not updated for this task because implementation has not
   started.
 - **Publishing authority:** The user explicitly authorized pushing both working
@@ -55,11 +57,11 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Implement Stage 1 only: add the defaulted Advanced force-legacy media setting,
-media-session transport state/helpers, and focused setting/source contracts.
-Run the focused suites, full `npm test`, and `git diff --check`, update this
-handoff, then commit the passing stage. Do not sync the plugin live; the user
-requested a pre-live report and separate authorization before that copy.
+Commit the passing Stage 1 implementation, record that exact commit hash in
+this checklist through the immediate checklist checkpoint, then implement
+Stage 2's central media network handler and deterministic transport tests. Do
+not sync the plugin live; the user requested a pre-live report and separate
+authorization before that copy.
 
 ### Resume procedure for a new session
 
@@ -122,7 +124,7 @@ recorded as an amendment before implementation.
 - [x] Local cache/blob behavior separated from remote networking behavior.
 - [x] User-approved architecture recorded below.
 - [x] Baseline test gate passed.
-- [ ] Implementation started.
+- [x] Implementation started.
 - [ ] Automated verification passed.
 - [ ] Live BetterDiscord verification passed.
 - [ ] Final implementation committed.
@@ -160,8 +162,8 @@ through renderer `fetch()` because of the renderer's network restrictions.
 
 ## Approved contract
 
-- [ ] Add an Advanced setting named **Force legacy media fetching**.
-- [ ] Default the setting to `false`.
+- [x] Add an Advanced setting named **Force legacy media fetching**.
+- [x] Default the setting to `false`.
 - [ ] With the setting off, use `BdApi.Net.fetch()` for persistent media-cache
       downloads when it is available and compatible.
 - [ ] With the setting on, route only persistent media-cache downloads through
@@ -401,8 +403,8 @@ these compatibility targets is allowed when required:
 
 ## Planned deterministic coverage
 
-- [ ] Default setting is `false` and normalizes missing older values safely.
-- [ ] Advanced **Force legacy media fetching** placement, note, and action
+- [x] Default setting is `false` and normalizes missing older values safely.
+- [x] Advanced **Force legacy media fetching** placement, note, and action
       behavior are stable.
 - [ ] Native available + force off selects `BdApi.Net.fetch()` for persistent
       media-cache downloads.
@@ -454,22 +456,31 @@ Baseline result:
 
 ## Stage 1 — Setting and transport contracts
 
-- [ ] Add the defaulted `Force legacy media fetching` boolean setting.
-- [ ] Add it to the Advanced settings UI with concise media-cache compatibility
+- [x] Add the defaulted `Force legacy media fetching` boolean setting.
+- [x] Add it to the Advanced settings UI with concise media-cache compatibility
       wording.
-- [ ] Confirm older settings normalize the missing value to `false`.
-- [ ] Add media-only transport-selection state and helpers.
-- [ ] Add source/settings regression coverage.
-- [ ] Run the focused settings and source-contract suites.
-- [ ] Run `npm test`.
-- [ ] Run `git diff --check`.
-- [ ] Commit only after the stage passes.
+- [x] Confirm older settings normalize the missing value to `false`.
+- [x] Add media-only transport-selection state and helpers.
+- [x] Add source/settings regression coverage.
+- [x] Run the focused settings and source-contract suites.
+- [x] Run `npm test`.
+- [x] Run `git diff --check`.
+- [x] Commit only after the stage passes.
 
 Stage 1 commit/result:
 
-- Commit:
-- Tests:
-- Notes:
+- Commit: Pending the immediately following Stage 1 implementation commit; its
+  exact hash will be added by the checklist checkpoint before Stage 2 begins.
+- Tests: PASS — focused
+  `node --test tests/settings-recovery.test.js tests/source-contracts.test.js tests/media.test.js`
+  completed with 108 passed, 0 failed; full `npm test` completed with 340
+  passed, 0 failed; `node --check MessageLoggerV2.plugin.js` passed within the
+  full suite; `git diff --check` passed.
+- Notes: The setting defaults to `false`; generic owned-setting normalization
+  repairs missing or malformed older values while retaining a saved `true`;
+  the Advanced action updates only session transport-selection state. Stage 1
+  does not route a media request, emit the legacy notice, or touch updater or
+  clipboard behavior.
 
 ## Stage 2 — Central media network handler
 
@@ -709,9 +720,35 @@ evidence for another session to understand what changed and why.
 - **Runtime evidence:** Existing probe evidence was reconstructed; no new
   Discord probe or live-plugin change was required.
 - **Failures or blockers:** None.
-- **Commit:** Pending with the next passing implementation stage.
+- **Commit:** `f3f4b6c` (`docs: resume networking implementation`).
 - **Exact next action:** Implement and validate Stage 1, update this file with
   exact evidence, and commit only after the full stage passes.
+
+### 2026-07-26 — Stage 1 setting and transport contracts
+
+- **Completed:** Added the default-off **Force legacy media fetching** Advanced
+  switch, older-config normalization coverage, per-session native
+  compatibility selection state/helpers, and focused setting/source/media
+  contracts. The renderer media fetch path remains unchanged in this stage.
+- **Decisions:** Keep the force preference separate from native compatibility:
+  forcing legacy does not label the BetterDiscord API incompatible, while an
+  actual session-latched incompatibility will survive turning the force switch
+  off. Debug activation/delivery state remains Stage 4 work.
+- **Files changed:** `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
+  `tests/settings-recovery.test.js`, `tests/source-contracts.test.js`, and
+  `NETWORKING-OVERHAUL-CHECKLIST.md`.
+- **Tests and exact results:** PASS — focused setting/source/media run: 108
+  passed, 0 failed; full `npm test`: 340 passed, 0 failed; plugin syntax passed
+  within the full suite; `git diff --check` passed.
+- **Runtime evidence:** None required; Stage 1 does not route network traffic.
+- **Failures or blockers:** An initial worker draft moved native requests out
+  of the established AbortController path. Parent review rejected that draft
+  before commit; the final Stage 1 diff restores the existing request path
+  byte-for-byte and has no known blocker.
+- **Commit:** Pending the Stage 1 implementation commit; record its exact hash
+  in the next checklist-only checkpoint before Stage 2 begins.
+- **Exact next action:** Commit Stage 1, record its hash, then implement the
+  central media-only network handler and its deterministic transport coverage.
 
 ### Handoff entry template
 

@@ -307,6 +307,7 @@ module.exports = class MessageLoggerV2 {
     this._pendingMediaCacheRequests = new Map();
     this._activeDeferredMediaCacheRequests = new Map();
     this._mediaCacheAbortControllers = new Set();
+    this._mediaCacheNativeFetchCompatible = null;
     this._flushMediaCacheAfterNextDataSave = false;
     this._dataSavePrimaryFlushInProgress = false;
     this._dataSavePrimaryFlushGeneration = 0;
@@ -366,6 +367,7 @@ module.exports = class MessageLoggerV2 {
     this._pendingMediaCacheRequests?.clear?.();
     this._activeDeferredMediaCacheRequests?.clear?.();
     this._mediaCacheAbortControllers?.clear?.();
+    this._mediaCacheNativeFetchCompatible = null;
     this._flushMediaCacheAfterNextDataSave = false;
     this._dataSavePrimaryFlushInProgress = false;
     this._dataSavePrimaryFlushGeneration = (this._dataSavePrimaryFlushGeneration || 0) + 1;
@@ -781,6 +783,7 @@ module.exports = class MessageLoggerV2 {
       blockSpamEdit: false,
       editSpamThreshold: DEFAULT_EDIT_SPAM_THRESHOLD,
       cacheAllImages: true,
+      forceLegacyMediaFetching: false,
       newCacheAllImagesPath: '',
       newCacheAllImages: true,
       newSaveAllFileTypes: false,
@@ -965,6 +968,9 @@ module.exports = class MessageLoggerV2 {
       this.saveSettings();
       settingsChanged = false;
     }
+    this._mediaCacheNativeFetchCompatible = typeof BdApi?.Net?.fetch === 'function'
+      ? null
+      : false;
     if (settingsChanged) this.saveSettings();
     this.errorImage = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="104" viewBox="0 0 200 104"%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%23666" font-family="Arial" font-size="14"%3EImage Error%3C/text%3E%3C/svg%3E';
     this.nodeModules = {
@@ -4339,6 +4345,13 @@ module.exports = class MessageLoggerV2 {
           },
           { name: 'Display update notes', id: 'displayUpdateNotes', type: 'switch' },
           {
+            name: 'Force legacy media fetching',
+            note: 'Use Discord renderer networking for persistent media-cache downloads instead of BetterDiscord native networking.',
+            id: 'forceLegacyMediaFetching',
+            type: 'switch',
+            action: 'reportForceLegacyMediaFetching'
+          },
+          {
             name: 'Contextmenu submenu name',
             note: 'Custom label for the Message Logger submenu.',
             id: 'contextmenuSubmenuName',
@@ -4422,6 +4435,7 @@ module.exports = class MessageLoggerV2 {
       handleBackup: (val) => this.handleAutoBackupSetting(val),
       reportLoggingScope: (val) => this.reportMajorSettingChange('onlyLogWhitelist', val),
       reportMediaCaching: (val) => this.handleMediaCachingSetting(val),
+      reportForceLegacyMediaFetching: (val) => this.setMediaCacheFetchTransportPreference(val),
       reportAntiNuke: (val) => this.reportMajorSettingChange('antiNukeEnabled', val),
       reportCachedFileDeletion: (val) => this.reportMajorSettingChange('deleteCachedFilesWithRecords', val),
       resetEditSpamState: () => this._handleEditSpamThresholdChange(),
@@ -11927,6 +11941,23 @@ module.exports = class MessageLoggerV2 {
       controller.signal.removeEventListener('abort', onAbort);
       this._mediaCacheAbortControllers?.delete?.(controller);
     }
+  }
+  getMediaCacheTransportSelection() {
+    if (this.settings?.forceLegacyMediaFetching) {
+      return 'legacy';
+    }
+    return this._mediaCacheNativeFetchCompatible === false ? 'legacy' : 'native';
+  }
+  setMediaCacheFetchTransportPreference(forceLegacyMediaFetching) {
+    if (forceLegacyMediaFetching) {
+      return;
+    }
+    if (this._mediaCacheNativeFetchCompatible === false) return;
+    this._mediaCacheNativeFetchCompatible = typeof BdApi?.Net?.fetch === 'function' ? null : false;
+  }
+  ensureMediaCacheNativeFetchCompatibilityState() {
+    if (typeof this._mediaCacheNativeFetchCompatible === 'boolean') return;
+    this._mediaCacheNativeFetchCompatible = typeof BdApi?.Net?.fetch === 'function' ? null : false;
   }
   async cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts = 0, writeEpoch = this._mediaCacheWriteEpoch || 0) {
     if (this.settings?.dontSaveData) {
