@@ -62,8 +62,9 @@ review, checklist update, and commit must also be complete.
   Discord was not relaunched; its hot reload initialized the plugin and resumed
   successful media-cache events without a startup error in `debug.log`.
 - **Publishing authority:** The user explicitly authorized pushing both working
-  branches to `origin` on 2026-07-26. No merge into `develop`/`main` is
-  authorized.
+  branches to `origin` on 2026-07-26 and explicitly re-authorized pushing the
+  current `fix/native-media-networking` branch after live sync on 2026-07-27.
+  No merge into `develop`/`main` is authorized.
 
 ### Exact next action
 
@@ -72,7 +73,9 @@ with deterministic coverage and documentation. Complete the full validation
 and final audit, commit and record the result, automatically sync only
 `MessageLoggerV2.plugin.js`, verify live hash/reload evidence, and finish the
 remaining user-driven Stage 6 checks, including native, legacy, cancellation,
-and the controlled local stall probe.
+and the controlled local stall probe. After live sync and its repository
+checkpoint, push `fix/native-media-networking` to `origin`, verify local/remote
+ref alignment, then give the final report and user test list.
 
 ### Resume procedure for a new session
 
@@ -814,6 +817,9 @@ changing their networking, retry, cache, notification, or persistence behavior.
       results here before live sync.
 - [ ] Sync only the plugin file live, confirm hash parity and clean hot reload,
       then use the new diagnostics during the remaining Stage 6 runtime checks.
+- [ ] After live sync and the final checklist checkpoint, push
+      `fix/native-media-networking` to `origin` and verify local/remote ref
+      alignment before the final report.
 
 Stage 5C plan/result:
 
@@ -1433,7 +1439,9 @@ evidence for another session to understand what changed and why.
 - **Decisions:** The child toggle is persisted but effective only while the
   main console Debug switch is On. Detailed events are console-only, never
   toasts, and use one ID per network attempt. Full URLs are included by user
-  request; headers and bodies are excluded.
+  request; headers and bodies are excluded. After the authorized live sync and
+  final checklist checkpoint, push only the current feature branch and verify
+  its remote ref; do not merge it into another branch.
 - **Files changed:** This checklist only.
 - **Tests and exact results:** `git diff --check` and checklist `cmark` parsing
   pass. Production behavior remains at the validated Stage 5B commit.
