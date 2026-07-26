@@ -68,9 +68,9 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit and record the clarified master-versus-child cancellation boundary, then
-implement and validate the response-body inactivity watchdog. Update this
-checklist with the implementation commit and final evidence, report the result,
+Commit and record the Stage 5A draft-audit findings, then apply only the
+approved bounded corrections and missing tests. Re-run every focused/full gate,
+complete another independent audit, commit the passing implementation, report,
 and stop before any live-sync/copy into the live BetterDiscord plugins path.
 
 ### Resume procedure for a new session
@@ -698,11 +698,17 @@ Stage 5A commit/result:
 - Cancellation-scope clarification commit:
   `f17a96e42348d725adcc578fb0ec3b489011afb0`
   (`docs: clarify media watchdog cancellation scope`).
+- Draft-audit checkpoint commit: `<pending-draft-audit-commit>`.
 - Implementation commit: `<pending-implementation-commit>`.
-- Tests: PENDING.
+- Draft tests: focused media PASS `61/61`; full suite FAIL `367/368` because the
+  existing central-handler source contract no longer matched the draft call
+  shape. This draft must not be committed as the implementation.
 - Notes: The approved policy measures inactivity rather than total transfer
   duration: 15 seconds to receive the initial response, then at most 30 seconds
-  with no incoming bytes. Any non-empty chunk restarts the body watchdog.
+  with no incoming bytes. Any non-empty chunk restarts the body watchdog. The
+  approved correction keeps cancellation cleanup non-blocking, releases
+  retryable HTTP responses before backoff, preserves the existing central
+  handler call contract, and closes the missing deterministic coverage.
 
 ## Stage 6 — Live BetterDiscord verification
 
@@ -781,6 +787,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-26 | Stage 6 | Live copy, hash parity, Discord behavior checks, and runtime findings are explicitly deferred without execution until the user authorizes live sync after the pre-live report. | User's required stop-before-live gate |
 | 2026-07-27 | Stage 5A | Harden the inherited response-body timeout/cancellation gap before live sync. Keep 15 seconds for the initial response, then use a rolling 30-second no-data watchdog that resets whenever non-empty bytes arrive; do not impose a fixed total download deadline. Stop or cache-disable must still cancel immediately and prevent retries or late writes. | User-approved implementation contract |
 | 2026-07-27 | Stage 5A scope | “Cache disabled” means the **Cache media locally** master switch, which cancels every active media request. **Cache all attachment types** must not become a global cancellation gate. Its known-broken/incomplete child behavior remains separate future work; when repaired, turning it Off should cancel only no-longer-eligible non-image attachment/file-component requests while visual media continues. | User clarification before Stage 5A implementation |
+| 2026-07-27 | Stage 5A draft audit | The first draft could still wait forever for a non-cooperative stream-cancel promise, retained retryable HTTP response bodies during backoff, and broke one existing central-handler source contract. Coverage also did not yet prove total transfer time beyond the idle window, body cancellation without `AbortController`, or stalled `arrayBuffer()` fallback. | Reported before correction; user approved the bounded fixes |
 | 2026-07-27 | Compatibility note | Retain only a historical mention of the malformed third-party `BdApi.Net.fetch` shape. Both supported BetterDiscord targets at `470ce77f` and `aa241f9` expose async Promise-returning methods, so no production hardening or open checklist work is planned for this theoretical unsupported-host case. | User judged the case very unlikely and asked to scrub it as an issue while retaining a mention |
 
 ## Handoff activity log
@@ -1098,6 +1105,30 @@ evidence for another session to understand what changed and why.
   (`docs: clarify media watchdog cancellation scope`).
 - **Exact next action:** Commit and record this clarification, then begin the
   bounded Stage 5A implementation without changing the child setting.
+
+### 2026-07-27 — Stage 5A first-draft audit stop
+
+- **Completed:** Built the initial watchdog draft and stopped before correction
+  or implementation commit when parent/full-suite and independent review found
+  issues.
+- **Decisions:** Make cancellation cleanup non-blocking even if a stream refuses
+  to cancel; release retryable HTTP bodies before backoff; preserve the existing
+  central-handler call contract; add the missing body/fallback/rolling/retry
+  coverage.
+- **Files changed:** Uncommitted draft in `MessageLoggerV2.plugin.js` and
+  `tests/media.test.js`; this checkpoint changes only the checklist.
+- **Tests and exact results:** Focused media PASS `61/61`; full `npm test` FAIL
+  `367/368` at `media routing converges through cacheImage and
+  cacheMessageImages across enumeration, deferred, removed, and anti-nuke
+  paths`; `npm run check` and `git diff --check` passed.
+- **Runtime evidence:** A deterministic no-`AbortController` probe confirmed a
+  non-settling reader cancellation left the body promise pending and one active
+  handle registered.
+- **Failures or blockers:** The reported issues are now approved for bounded
+  correction. The draft remains uncommitted and is not eligible for live sync.
+- **Commit:** `<pending-draft-audit-commit>`.
+- **Exact next action:** Commit and record this audit checkpoint, apply the
+  approved corrections/tests, then run the full review and verification gates.
 
 ### Handoff entry template
 
