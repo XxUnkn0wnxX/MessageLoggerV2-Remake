@@ -87,11 +87,12 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Give the user the remaining mixed-content, file-size, cancellation, legacy,
-debug-output, update, and clipboard `RT-26` tests and wait for their runtime
-results. Default native routing, the Waifugami cross-origin request, slow body
-progress, and controlled body inactivity now have current live evidence. Keep
-the audited provisional Anti-Nuke/Ghost-Ping media-retention work as a separate
+Give the user the remaining mixed-content, file-size, plugin-stop
+cancellation, legacy, debug-output, update, and clipboard `RT-26` tests and
+wait for their runtime results. Default native routing, the Waifugami
+cross-origin request, slow body progress, controlled body inactivity, and
+master cache-off cancellation now have current live evidence. Keep the audited
+provisional Anti-Nuke/Ghost-Ping media-retention work as a separate
 post-networking stage in `TODO.md`; do not implement it on this networking
 handoff.
 
@@ -967,8 +968,14 @@ Stage 5D plan/result:
     watchdog and returned `AbortError: Media cache response body timed out` at
     exactly 30.0 seconds.
   - [ ] Verify media-cache file-size limits.
-  - [ ] Verify abort/cancellation behavior when caching is disabled or the plugin
-    stops.
+  - [ ] Verify abort/cancellation behavior:
+    - [x] Turning **Cache media locally** Off cancelled native request `#160`
+          immediately after three received bytes. It emitted one
+          `outcome=cancelled` terminal event and returned
+          `AbortError: Media cache request was cancelled` after 3.4 seconds.
+          No retry or late completion appeared through and beyond the original
+          40-second completion window.
+    - [ ] Disabling/stopping the plugin cancels active media work immediately.
   - [ ] Verify forced legacy routing.
   - [ ] Verify the force toggle can return to native routing immediately.
   - [ ] Verify disabled (master Off), console-only (master On/toast child Off),
@@ -994,8 +1001,10 @@ Live result:
   `260a3f8c2c3bf0534b0ad8ef5a91d62fae83cbce088cc9fab3e0a6917d2cd424`.
   The current logs prove native Discord-CDN success, Waifugami HTTP 200 with
   1,091,999 bytes in 2.5 seconds, a successful 40-byte progressing body in
-  39.8 seconds, and the controlled no-progress body aborting through Logger's
-  watchdog at exactly 30.0 seconds. Discord was not relaunched.
+  39.8 seconds, the controlled no-progress body aborting through Logger's
+  watchdog at exactly 30.0 seconds, and master cache-off cancelling an active
+  body at 3.4 seconds without retry or late completion. Discord was not
+  relaunched.
 
 Historical result:
 
@@ -1064,6 +1073,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-27 | Anti-Nuke retention audit | DMs cannot enter Anti-Nuke pre-cache, and a confirmed channel deletion adopts/captures only the exact guild parent and its child threads. Eligible ignored or muted media from any guild channel can still be physically pre-cached in case that channel is later deleted. The `15` thread / `45` message / `15` attachment capture caps do not bound, age, or clean those provisional files, so never-confirmed and cap-rejected files can remain orphaned. URL-only staging is unsafe because CDN URLs can expire as the parent disappears. | User designated a separate post-networking hardening stage: bounded provisional physical storage, promote confirmed nuke/Ghost-Ping or ordinary-record files, and delete expired/rejected candidates without touching shared references |
 | 2026-07-27 | Debug master linkage | `debugLogging` is the effective master for both the detailed-media child and the debug-toast child. Turning the master Off greys both and suppresses their output without changing either saved value; turning it On restores only children already saved On. A saved toast Off never auto-enables. The activation-scoped legacy notice flushes both routes immediately only when the saved toast child is On. No plugin version or built-in changelog text changed for this amendment. | Final user clarification plus supported BetterDiscord `enableWith` behavior, deterministic recovery/routing tests, and independent review |
 | 2026-07-27 | Stage 6 partial runtime | Current detailed logs prove default native routing, Waifugami cross-origin success, a 39.8-second progressing response completing without a total deadline, and a controlled no-progress response reaching Logger's rolling 30-second body watchdog. The earlier one-off HTTPBin `Error: aborted` was a remote/transport interruption rather than Logger's watchdog and the same detailed probe then passed. | User-run `RT-26` probes plus current BetterDiscord `debug.log` and `console.log` |
+| 2026-07-27 | Stage 6 cache-off cancellation | Turning **Cache media locally** Off during an active progressing native body cancelled it immediately after three bytes, emitted exactly one cancelled terminal event, and produced no retry or late completion after the original response window elapsed. | User-run `RT-26` probe plus current BetterDiscord `debug.log` and `console.log` |
 
 ## Handoff activity log
 
@@ -1824,12 +1834,32 @@ evidence for another session to understand what changed and why.
   byte counts, and elapsed times. Normal Discord CDN request `#103` also
   completed natively with HTTP 200 and 334,583 bytes.
 - **Failures or blockers:** None in these four checks. Mixed-content,
-  file-size, cache-disable/plugin-stop cancellation, forced legacy/native
-  return, debug-output matrix, updater, and clipboard checks remain.
+  file-size, cancellation, forced legacy/native return, debug-output matrix,
+  updater, and clipboard checks remain.
 - **Commit:** Runtime-evidence checkpoint
   72e0409865932ca7314b74824199acb43d41e8d5.
-- **Exact next action:** After this commit record is pushed, give the user the
-  cache-disable cancellation test.
+- **Exact next action:** Superseded by the cache-off cancellation result below.
+
+### 2026-07-27 — Cache-master cancellation runtime check
+
+- **Completed:** Started a 40-second native response and turned **Cache media
+  locally** Off while its body was still progressing.
+- **Decisions:** Keep this result separate from plugin-stop cancellation; the
+  combined RT-26 row is not complete until the stop path is also exercised.
+- **Files changed:** This checklist only.
+- **Tests and exact results:** Native request `#160` acquired HTTP 200, received
+  three bytes, then emitted `terminal outcome=cancelled` only 13 ms after the
+  cache-master setting-change log. The probe returned
+  `AbortError: Media cache request was cancelled` at 3.4 seconds.
+- **Runtime evidence:** No second request, retry, success outcome, or late probe
+  completion appeared through UTC `17:57:08`, beyond the request's original
+  40-second completion window.
+- **Failures or blockers:** None for cache-master cancellation. Plugin-stop
+  cancellation still requires a user-run live check.
+- **Commit:** Pending this cache-off runtime-evidence commit; record its exact
+  hash immediately after commit.
+- **Exact next action:** Commit and record this checkpoint, push the branch,
+  then ask the user to test plugin-stop cancellation.
 
 ### Handoff entry template
 
