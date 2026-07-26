@@ -18077,6 +18077,18 @@ module.exports = class MessageLoggerV2 {
       if (deleteGroupIndex < 0) return false;
       return insertLoggerGroupAt(menu, deleteGroupIndex + 1, loggerSubmenu);
     };
+    const getImageContextLoggerRecord = target => {
+      const messageNode = target?.closest?.('[id^="chat-messages-"]');
+      const match = messageNode?.id?.match?.(/^chat-messages-(\d+)-(\d+)$/);
+      if (!match) return null;
+      const [, channelId, messageId] = match;
+      const record = this.messageRecord?.[messageId];
+      if (!record?.delete_data) return null;
+      if (String(record.message?.id ?? '') !== messageId
+        || String(record.message?.channel_id ?? '') !== channelId) return null;
+      if (!this.shouldPresentSavedMessage(channelId, messageId)) return null;
+      return record;
+    };
     const addSavedRecordItems = (newItems, addElement, record, messageId, channelId, options = {}) => {
       if (!record) return;
       try {
@@ -18262,6 +18274,11 @@ module.exports = class MessageLoggerV2 {
         type: 'group',
         items: [loggerSubmenu]
       }]));
+    }));
+    this.unpatches.push(ContextMenu.patch('image-context', (ret, props) => {
+      const record = getImageContextLoggerRecord(props?.target);
+      if (!record) return;
+      this.replaceNativeSavedMediaCopyAction(ret, record, props?.target);
     }));
     const handleWhiteBlackList = (newItems, id) => {
       this._addListToggleItems(newItems, id, 'whitelist', 'blacklist', 'Whitelist');

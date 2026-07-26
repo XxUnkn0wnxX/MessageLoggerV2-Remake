@@ -2637,6 +2637,38 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Give the user the short runtime matrix, record those
   results, and amend the built-in changelog only after success is confirmed.
 
+### 2026-07-27 — Live-mounted image clipboard hook correction
+
+- **Completed:** Audited and fixed the user's report that Logger's viewer
+  showed its success toast while a restored live PNG showed only Discord's
+  native toast. Logger now patches Discord's separate `image-context` menu.
+- **Decisions:** Patch Discord's separate `image-context` menu only for an
+  exact Logger-restored live row. Require matching channel/message IDs, a
+  deleted Logger record that is currently allowed to be presented, and the
+  existing physically cached PNG/JPG/JPEG gate. Replace only Discord's existing
+  native copy action; never add a fallback or alter ordinary live messages.
+- **Files changed:** `MessageLoggerV2.plugin.js`,
+  `tests/clipboard.test.js`, `tests/source-contracts.test.js`, and this
+  checklist.
+- **Tests and exact results:** PASS — focused clipboard/source tests `75/75`;
+  full `npm test` `396/396`; plugin syntax and `git diff --check` passed.
+  Independent review returned PASS for scope, upstream compatibility, existing
+  cache/native-format gates, and positive/negative coverage.
+- **Runtime evidence:** The failed live copy produced Discord's native
+  `Object.copyImage` rejection and no Logger clipboard error. BetterDiscord
+  dispatches context-menu patches by exact `navId`; the mounted image opens
+  `image-context`, while Logger currently patches only `message`. The Logger
+  viewer path already proved the cached-file writer and Logger notification
+  route work. The no-longer-needed background network-stall test server was
+  stopped.
+- **Failures or blockers:** No automated or review blocker. The final restored
+  live PNG/JPEG click remains a user-driven runtime check.
+- **Commit:** Pending implementation commit; record its exact hash in the
+  follow-up checklist checkpoint.
+- **Exact next action:** Commit the validated implementation, record its exact
+  hash, live-sync only the plugin, verify reload/hash parity, and push the
+  branch before asking the user to retest.
+
 ### Handoff entry template
 
 ```text

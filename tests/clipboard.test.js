@@ -173,6 +173,14 @@ function installContextMenuBuilder() {
   };
   return calls;
 }
+function installContextMenuPatchCapture() {
+  const patches = {};
+  ContextMenu.patch = (contextName, callback) => {
+    patches[contextName] = callback;
+    return () => {};
+  };
+  return patches;
+}
 
 test('clipboard descriptors require an owned, non-placeholder image and a physical local file', () => {
   const localPath = '/tmp/cache/media.png';
@@ -716,6 +724,112 @@ test('an existing Logger copy action removes a native duplicate before menu reus
   assert.equal(menu.length, 1);
   assert.equal(menu[0], nativeAction);
   assert.notEqual(menu[0].props.action, originalNativeAction);
+});
+
+test('image-context menu replaces copy media for restored logger media rows only', () => {
+  const patchedMenus = installContextMenuPatchCapture();
+  const record = createRecord();
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      restoreDeletedMessages: true,
+      showDeletedMessages: true,
+      showPurgedMessages: false
+    },
+    unpatches: [],
+    messageRecord: { [MESSAGE_ID]: record },
+    deletedMessageSet: new Map([[CHANNEL_ID, new Set([MESSAGE_ID])]]),
+    purgedMessageSet: new Map()
+  });
+  installCachedFiles(plugin, [{
+    cacheId: ATTACHMENT_ID,
+    extension: '.png',
+    path: '/tmp/cache/media.png'
+  }]);
+  const copied = [];
+  plugin.copyMediaToClipboard = source => {
+    copied.push(source);
+    return Promise.resolve(true);
+  };
+  plugin.patchContextMenus();
+  const onOpenImageContext = patchedMenus['image-context'];
+  assert.equal(typeof onOpenImageContext, 'function');
+
+  const loggerMessageNode = {
+    id: `chat-messages-${CHANNEL_ID}-${MESSAGE_ID}`
+  };
+  const nativeAction = () => {};
+  const menu = [createNativeCopyItem({ action: nativeAction })];
+  onOpenImageContext(
+    { navId: 'image-context', props: { children: menu } },
+    {
+      target: createImage({
+        closest: selector => selector === '[id^="chat-messages-"]' ? loggerMessageNode : null
+      })
+    }
+  );
+  assert.equal(menu.length, 1);
+  assert.notEqual(menu[0].props.action, nativeAction);
+  menu[0].props.action();
+  assert.equal(copied.length, 1);
+});
+
+test('image-context menu ignores unsupported rows and exact match failures', () => {
+  const patchedMenus = installContextMenuPatchCapture();
+  const record = createRecord();
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      restoreDeletedMessages: true,
+      showDeletedMessages: true,
+      showPurgedMessages: false
+    },
+    unpatches: [],
+    messageRecord: { [MESSAGE_ID]: record },
+    deletedMessageSet: new Map([[CHANNEL_ID, new Set([MESSAGE_ID])]])
+  });
+  installCachedFiles(plugin, [{
+    cacheId: ATTACHMENT_ID,
+    extension: '.png',
+    path: '/tmp/cache/media.png'
+  }]);
+  plugin.patchContextMenus();
+  const onOpenImageContext = patchedMenus['image-context'];
+  assert.equal(typeof onOpenImageContext, 'function');
+  const unchangedAction = () => {};
+  const menu = [createNativeCopyItem({ action: unchangedAction })];
+  onOpenImageContext(
+    { navId: 'image-context', props: { children: menu } },
+    { target: createImage({ closest: () => null }) }
+  );
+  assert.equal(menu.length, 1);
+  assert.equal(menu[0].props.action, unchangedAction);
+
+  const rowMismatchTarget = createImage({
+    closest: () => ({ id: `chat-messages-100000000000000000-100000000000000000` })
+  });
+  const ignoredAction = () => {};
+  const mismatchMenu = [createNativeCopyItem({ action: ignoredAction })];
+  onOpenImageContext(
+    { navId: 'image-context', props: { children: mismatchMenu } },
+    { target: rowMismatchTarget }
+  );
+  assert.equal(mismatchMenu.length, 1);
+  assert.equal(mismatchMenu[0].props.action, ignoredAction);
+
+  plugin.settings.showDeletedMessages = false;
+  const disabledAction = () => {};
+  const disabledMenu = [createNativeCopyItem({ action: disabledAction })];
+  onOpenImageContext(
+    { navId: 'image-context', props: { children: disabledMenu } },
+    {
+      target: createImage({
+        closest: () => ({ id: `chat-messages-${CHANNEL_ID}-${MESSAGE_ID}` })
+      })
+    }
+  );
+  assert.equal(disabledMenu.length, 1);
+  assert.equal(disabledMenu[0].props.action, disabledAction);
 });
 
 test('Logger viewer adds one raw Copy media config only for an eligible cached image', () => {

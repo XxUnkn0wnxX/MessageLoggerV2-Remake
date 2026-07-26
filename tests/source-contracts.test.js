@@ -1567,8 +1567,12 @@ test('saved-media clipboard paths replace only deleted native actions and add on
   assert.match(copyContext, /id: 'mlv2-copy-media'[\s\S]*label: 'Copy media'/);
   assert.doesNotMatch(copyContext, /fetchMediaNetworkResponse|fetchMediaCacheResponse/);
   assert.doesNotMatch(copyContext, /forceLegacyMediaFetching/);
-  assert.doesNotMatch(source, /ContextMenu\.patch\('image-context'/);
+  assert.match(source, /ContextMenu\.patch\('image-context'/);
+  assert.match(source, /const getImageContextLoggerRecord = target =>/);
+  assert.match(source, /\[id\^="chat-messages-"\]/);
+  assert.match(source, /if \(!record\?\.delete_data\) return null;[\s\S]*shouldPresentSavedMessage\(channelId, messageId\)/);
   assert.match(source, /this\.replaceNativeSavedMediaCopyAction\(ret, record, props\.target, menu\)/);
+  assert.match(source, /this\.replaceNativeSavedMediaCopyAction\(ret, record, props\?\.target\)/);
   assert.match(source, /this\.addLoggerViewerCopyMediaItem\(menuItems, e\.target, record\)/);
 });
 
