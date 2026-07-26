@@ -2175,9 +2175,12 @@ evidence for another session to understand what changed and why.
   native image action. Show or replace clipboard actions only while **Cache
   media locally** is On and the exact standard image file exists locally;
   exclude placeholders, remote-only media, videos, and files admitted only by
-  **Cache all attachment types**. On plugin stop, remove only Logger-owned
-  restored rows, structural clones, tints, and controls while preserving saved
-  records, cached files, and Discord-owned messages.
+  **Cache all attachment types**. If the target belongs to a Logger-restored
+  deleted message but that gate fails, remove Discord's native **Copy image**
+  item as well; ordinary live Discord messages remain untouched. On plugin
+  stop, remove only Logger-owned restored rows, structural clones, tints, and
+  controls while preserving saved records, cached files, and Discord-owned
+  messages.
 - **Files changed:** This checklist only at this planning checkpoint.
 - **Tests and exact results:** PASS — the clean pre-change `npm test` baseline
   passed `386/386`, including syntax validation.
