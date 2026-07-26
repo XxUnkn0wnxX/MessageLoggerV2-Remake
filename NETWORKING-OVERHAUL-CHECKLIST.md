@@ -62,7 +62,8 @@ review, checklist update, and commit must also be complete.
   fd8e027b7e67b4985f3d911555d39c9c630c7c41. A final user-requested Debug
   amendment now makes both child switches effective only while the console
   master is On while retaining each saved child value. It is fully validated
-  but still needs its commit, replacement live sync, and branch push.
+  and committed at 135eeb37baecfbb153784ce46c6767c2ea7362e2; the replacement
+  live sync and branch push remain.
 - **Current tracked task changes:** Stages 1-5D are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/persistence.test.js`, `tests/settings-recovery.test.js`,
@@ -82,13 +83,12 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit the validated Debug master-link amendment, record its full commit hash,
-replace the live plugin, verify source/hash/reload evidence, checkpoint that
-sync, push `fix/native-media-networking`, and verify local/remote ref alignment.
-Then give the user the remaining native, legacy, cancellation,
-controlled-stall, update, and clipboard `RT-26` tests. Keep the audited
-provisional Anti-Nuke/Ghost-Ping media-retention work as a separate
-post-networking stage in `TODO.md`.
+Record the Debug master-link implementation commit, replace the live plugin,
+verify source/hash/reload evidence, checkpoint that sync, push
+`fix/native-media-networking`, and verify local/remote ref alignment. Then give
+the user the remaining native, legacy, cancellation, controlled-stall, update,
+and clipboard `RT-26` tests. Keep the audited provisional Anti-Nuke/Ghost-Ping
+media-retention work as a separate post-networking stage in `TODO.md`.
 
 ### Resume procedure for a new session
 
@@ -1760,9 +1760,9 @@ evidence for another session to understand what changed and why.
 - **Failures or blockers:** Independent review found no production defect. It
   found stale Debug matrix wording and missing saved-child recovery coverage;
   both were corrected before the full pass. User-driven `RT-26` checks remain.
-- **Commit:** pending Debug master-link implementation commit.
-- **Exact next action:** Commit this amendment, record the full hash, then copy
-  only the plugin live, verify byte/hash parity and the hot-reload segment,
+- **Commit:** 135eeb37baecfbb153784ce46c6767c2ea7362e2.
+- **Exact next action:** Record this full implementation hash, then copy only
+  the plugin live, verify byte/hash parity and the hot-reload segment,
   checkpoint the result, and push the feature branch.
 
 ### Handoff entry template
