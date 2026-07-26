@@ -16322,40 +16322,77 @@ module.exports = class MessageLoggerV2 {
       entry.domIds.forEach(id => entriesById.set(id, entry));
       entry.sourceKeys.forEach(key => entriesBySource.set(key, entry));
     }
-    const candidates = [];
-    if (target.tagName === 'IMG') {
-      candidates.push(target);
-    } else {
-      let node = target;
-      for (let depth = 0; node && depth < 4 && !candidates.length; depth++) {
-        const images = node.querySelectorAll?.('img');
-        if (images?.length === 1) candidates.push(images[0]);
-        else if (images?.length > 1) break;
-        else {
-          const image = node.querySelector?.('img');
-          if (image) candidates.push(image);
-        }
-        node = node.parentElement;
-      }
-    }
-    for (const image of candidates) {
-      const attachmentHost = image.closest?.('[data-ml2-attachment-message-id]');
-      const ownerMessageId = image.messageId
-        ?? image.dataset?.ml2AttachmentMessageId
-        ?? attachmentHost?.dataset?.ml2AttachmentMessageId;
+    const getNodeSources = node => Array.from(new Set([
+      node?.dataset?.safeSrc,
+      node?.getAttribute?.('data-safe-src'),
+      node?.getAttribute?.('href'),
+      node?.href,
+      node?.currentSrc,
+      node?.src
+    ].filter(value => typeof value === 'string' && value)));
+    const matchCandidate = (image, anchor = null) => {
+      const attachmentHost = image?.closest?.('[data-ml2-attachment-message-id]');
+      const ownerMessageId = image?.messageId
+        ?? image?.dataset?.ml2AttachmentMessageId
+        ?? attachmentHost?.dataset?.ml2AttachmentMessageId
+        ?? anchor?.closest?.('[data-ml2-attachment-message-id]')?.dataset?.ml2AttachmentMessageId;
       if (ownerMessageId !== undefined && ownerMessageId !== null
-        && String(ownerMessageId) !== messageId) continue;
-      const imageId = String(image.id || '');
-      const source = image.currentSrc || image.src;
-      const entry = (imageId && entriesById.get(imageId))
-        || entriesBySource.get(this._getClipboardMediaSourceKey(source));
-      if (!entry) continue;
+        && String(ownerMessageId) !== messageId) return null;
+      const imageId = String(image?.id || '');
+      const imageSources = Array.from(new Set([
+        ...getNodeSources(anchor),
+        ...getNodeSources(image)
+      ]));
+      let entry;
+      let source;
+      for (const imageSource of imageSources) {
+        const sourceEntry = entriesBySource.get(this._getClipboardMediaSourceKey(imageSource));
+        if (!sourceEntry) continue;
+        source = imageSource;
+        entry = sourceEntry;
+        break;
+      }
+      if (!entry && imageId) {
+        entry = entriesById.get(imageId);
+        source = imageSources[0];
+      }
+      if (!entry) return null;
       const blocked = entry.hidden
-        || image.classList?.contains?.(this.style?.imageError)
+        || image?.classList?.contains?.(this.style?.imageError)
         || source === this.errorImage
         || typeof source !== 'string'
         || !/^(?:blob:|data:image\/|https?:)/i.test(source);
       return { image, entry, source, blocked };
+    };
+    if (target.tagName === 'IMG') {
+      return matchCandidate(target);
+    }
+    const closestImageAnchor = target.tagName === 'A'
+      ? target
+      : target.closest?.('a[data-role="img"]');
+    const isImageAnchor = closestImageAnchor?.dataset?.role === 'img'
+      || closestImageAnchor?.getAttribute?.('data-role') === 'img';
+    if (isImageAnchor) {
+      return matchCandidate(closestImageAnchor.querySelector?.('img') || null, closestImageAnchor);
+    }
+    let node = target;
+    for (let depth = 0; node && depth < 4; depth++) {
+      const images = Array.from(node.querySelectorAll?.('img') || []);
+      if (images.length) {
+        const matchesByEntry = new Map();
+        for (const image of images) {
+          const match = matchCandidate(image);
+          if (!match) continue;
+          const existing = matchesByEntry.get(match.entry);
+          if (!existing || (existing.blocked && !match.blocked)) {
+            matchesByEntry.set(match.entry, match);
+          }
+        }
+        if (matchesByEntry.size === 1) return matchesByEntry.values().next().value;
+        if (matchesByEntry.size > 1) return { blocked: true, ambiguous: true };
+        return null;
+      }
+      node = node.parentElement;
     }
     return null;
   }
@@ -16367,11 +16404,10 @@ module.exports = class MessageLoggerV2 {
     const fs = this.nodeModules?.fs;
     const resolvePath = this.imageCacheServerSimulator?._resolveImagePath;
     if (typeof fs?.existsSync !== 'function' || typeof resolvePath !== 'function') return null;
-    const supportedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.avif', '.tif', '.tiff'];
+    const supportedExtensions = ['.jpg', '.jpeg', '.png'];
     const extensions = Array.from(new Set([
-      ...(targetMedia.entry.extensions || []),
-      ...supportedExtensions
-    ]));
+      ...(targetMedia.entry.extensions || [])
+    ])).filter(extension => supportedExtensions.includes(extension));
     for (const cacheId of targetMedia.entry.cacheIds || []) {
       for (const extension of extensions) {
         const localPath = resolvePath.call(
@@ -16386,7 +16422,7 @@ module.exports = class MessageLoggerV2 {
           localPath,
           source: targetMedia.source,
           extension,
-          copyMode: extension === '.gif' ? 'file' : 'image'
+          copyMode: 'image'
         };
       }
     }
@@ -16400,8 +16436,7 @@ module.exports = class MessageLoggerV2 {
   }
   async copyMediaToClipboard(source) {
     try {
-      if (!source || typeof source !== 'object' || !source.localPath
-        || !['image', 'file'].includes(source.copyMode)) {
+      if (!source || typeof source !== 'object' || !source.localPath || source.copyMode !== 'image') {
         throw new Error('Clipboard media source is unavailable');
       }
       const fs = this.nodeModules?.fs;
@@ -16410,14 +16445,6 @@ module.exports = class MessageLoggerV2 {
       }
       const clipboard = typeof DiscordNative !== 'undefined' ? DiscordNative?.clipboard : null;
       const localPath = String(source.localPath).trim();
-      if (source.copyMode === 'file') {
-        if (typeof clipboard?.copyFile !== 'function') {
-          throw new Error('Discord file clipboard API is unavailable');
-        }
-        clipboard.copyFile(localPath);
-        this.notifyUser('Media was copied to the Clipboard', { type: 'success' });
-        return true;
-      }
       if (typeof fs.readFileSync !== 'function') {
         throw new Error('Clipboard media file API is unavailable');
       }
@@ -16461,18 +16488,9 @@ module.exports = class MessageLoggerV2 {
     const targetMedia = this._findRecordSavedMediaImage(target, record);
     if (!targetMedia) return false;
     const source = this._resolveCachedClipboardMedia(targetMedia, record);
-    const hasLoggerCopyAction = (node, seen = new Set()) => {
-      if (node == null || typeof node === 'boolean') return false;
-      if (Array.isArray(node)) return node.some(child => hasLoggerCopyAction(child, seen));
-      if (typeof node !== 'object' || seen.has(node)) return false;
-      seen.add(node);
-      if ((node.props || node)?.id === 'mlv2-copy-media') return true;
-      return hasLoggerCopyAction(node.props?.children, seen);
-    };
     const seen = new Set();
     let changed = false;
     let replacedNative = false;
-    const loggerActionPresent = hasLoggerCopyAction(tree);
     const tryReplaceNativeAction = (node, parentArray, parentIndex) => {
       if (!parentArray || parentIndex < 0) return false;
       const props = node.props || {};
@@ -16512,16 +16530,16 @@ module.exports = class MessageLoggerV2 {
       }
       if (typeof node !== 'object' || seen.has(node)) return false;
       seen.add(node);
-      if ((node.props || node)?.id === 'mlv2-copy-media') return false;
+      const props = node.props || node;
+      if (props?.id === 'mlv2-copy-media') {
+        if (parentArray && parentIndex >= 0) {
+          parentArray.splice(parentIndex, 1);
+          changed = true;
+        }
+        return false;
+      }
       if (this.isNativeClipboardMediaAction(node)) {
         if (source) {
-          if (loggerActionPresent) {
-            if (parentArray && parentIndex >= 0) {
-              parentArray.splice(parentIndex, 1);
-              changed = true;
-            }
-            return false;
-          }
           if (!replacedNative && tryReplaceNativeAction(node, parentArray, parentIndex)) {
             replacedNative = true;
             changed = true;
@@ -16543,38 +16561,6 @@ module.exports = class MessageLoggerV2 {
       return visit(node.props?.children);
     };
     visit(tree);
-    if (!source || replacedNative || loggerActionPresent) return changed;
-    const menuChildren = Array.isArray(menu)
-      ? menu
-      : Array.isArray(tree?.props?.children)
-        ? tree.props.children
-        : null;
-    const alreadyAdded = menuChildren?.some(item => {
-      const props = item?.props || item;
-      return props?.id === 'mlv2-copy-media';
-    });
-    if (!menuChildren || alreadyAdded) return changed;
-    const fileSource = { ...source, copyMode: 'file' };
-    const item = {
-      id: 'mlv2-copy-media',
-      type: 'item',
-      label: 'Copy media',
-      action: () => {
-        ContextMenu.close?.();
-        void this.copyMediaToClipboard(fileSource);
-      }
-    };
-    if (typeof ContextMenu?.buildMenuChildren === 'function') {
-      menuChildren.push(...ContextMenu.buildMenuChildren([{
-        type: 'group',
-        items: [item]
-      }]));
-    } else {
-      menuChildren.push(item);
-    }
-    if (menuChildren.length) {
-      changed = true;
-    }
     return changed;
   }
   addLoggerViewerCopyMediaItem(menuItems, target, record) {

@@ -380,7 +380,7 @@ test('media networking documentation preserves the selector boundary and officia
   );
   assert.match(
     testsDocs,
-    /\| AT-47 \| Media networking \|[^\n]*native promise rejection and HTTP failure never start a second renderer request[^\n]*clipboard copying remain outside the media selector[^\n]*Ordinary live messages keep Discord's one native \*\*Copy image\*\* action[^\n]*\*\*Cache media locally\*\* is On[^\n]*exact standard JPG\/JPEG[^\n]*GIF uses the native file bridge[^\n]*files admitted only by \*\*Cache all attachment types\*\* receive no Logger copy action/
+    /\| AT-47 \| Media networking \|[^\n]*native promise rejection and HTTP failure never start a second renderer request[^\n]*clipboard copying remain outside the media selector[^\n]*Ordinary live messages keep Discord's one native \*\*Copy image\*\* action[^\n]*exact right-clicked saved PNG, JPG, or JPEG[^\n]*never adds a fallback row[^\n]*ambiguous whole-message target receives no Logger copy action[^\n]*GIF, BMP, WebP, AVIF, TIF\/TIFF[^\n]*files admitted only by \*\*Cache all attachment types\*\* receive no Logger copy action/
   );
   assert.match(
     testsDocs,
@@ -388,7 +388,7 @@ test('media networking documentation preserves the selector boundary and officia
   );
   assert.match(
     testsDocs,
-    /\| RT-26 \| Media networking \|[^\n]*Waifugami cross-origin URL[^\n]*HTTP\/mixed-content media URL[^\n]*disabled output \(master Off\)[^\n]*console-only output \(master On and toast child Off\)[^\n]*both outputs \(master On and toast child On\)[^\n]*one possible toast-only delivery[^\n]*ordinary live image[^\n]*physically cached restored static image[^\n]*cached GIF[^\n]*system clipboard[^\n]*cache master Off[^\n]*missing local file[^\n]*all-file-only attachment/
+    /\| RT-26 \| Media networking \|[^\n]*Waifugami cross-origin URL[^\n]*HTTP\/mixed-content media URL[^\n]*disabled output \(master Off\)[^\n]*console-only output \(master On and toast child Off\)[^\n]*both outputs \(master On and toast child On\)[^\n]*one possible toast-only delivery[^\n]*ordinary live image[^\n]*physically cached restored PNG\/JPG\/JPEG[^\n]*exact right-clicked image[^\n]*no batch or first-image guessing[^\n]*cached GIF, BMP, WebP, AVIF, or TIFF[^\n]*cache master Off[^\n]*missing local file[^\n]*all-file-only attachment/
   );
 });
 
@@ -1544,25 +1544,27 @@ test('saved-media clipboard paths replace only deleted native actions and add on
   assert.match(copyContext, /const supportedExtensions = \['\.jpg', '\.jpeg', '\.png', '\.gif', '\.bmp', '\.webp', '\.avif', '\.tif', '\.tiff'\]/);
   assert.match(copyContext, /standardImage: this\.isImage\(attachment\?\.url \|\| ''\)/);
   assert.match(copyContext, /standardImage: !entry\.cacheIndex\.endsWith\(':file'\) && this\.isComponentImageMedia\(entry\)/);
-  assert.match(copyContext, /entriesById\.get\(imageId\)[\s\S]*entriesBySource\.get\(this\._getClipboardMediaSourceKey\(source\)\)/);
+  assert.match(copyContext, /const getNodeSources = node => Array\.from\(new Set\(\[/);
+  assert.match(copyContext, /const closestImageAnchor = target\.tagName === 'A'[\s\S]*target\.closest\?\.\('a\[data-role="img"\]'\)/);
+  assert.match(copyContext, /for \(const imageSource of imageSources\)[\s\S]*entriesBySource\.get\(this\._getClipboardMediaSourceKey\(imageSource\)\)/);
+  assert.match(copyContext, /const matchesByEntry = new Map\(\)[\s\S]*if \(matchesByEntry\.size > 1\) return \{ blocked: true, ambiguous: true \}/);
   assert.match(copyContext, /source === this\.errorImage/);
   assert.equal(copyContext.includes("|| !/^(?:blob:|data:image\\/|https?:)/i.test(source);"), true);
   assert.match(copyContext, /if \(!this\.settings\?\.cacheAllImages\) return null;/);
   assert.match(copyContext, /const resolvePath = this\.imageCacheServerSimulator\?\._resolveImagePath/);
   assert.match(copyContext, /if \(!localPath \|\| !fs\.existsSync\(localPath\)\) continue;/);
-  assert.match(copyContext, /copyMode: extension === '\.gif' \? 'file' : 'image'/);
+  assert.match(copyContext, /copyMode: 'image'/);
+  assert.match(copyContext, /copyMode !== 'image'/);
   assert.match(copyContext, /const rawBytes = fs\.readFileSync\(localPath, null\)/);
-  assert.match(copyContext, /if \(source\.copyMode === 'file'\)[\s\S]*clipboard\.copyFile\(localPath\)/);
   assert.match(copyContext, /clipboard\.copyImage\(bytes, 'image\.png'\)/);
-  assert.match(copyContext, /clipboard\.copyFile\(localPath\)/);
   assert.match(copyContext, /Image was copied to the Clipboard/);
-  assert.match(copyContext, /Media was copied to the Clipboard/);
+  assert.doesNotMatch(copyContext, /Media was copied to the Clipboard/);
+  assert.doesNotMatch(copyContext, /clipboard\.copyFile\(localPath\)/);
   assert.match(copyContext, /this\.notifyUser\('Failed to copy\. Details in the console\.', \{\s*type: 'error'\s*\}\);[\s\S]*Logger\.error\('Media clipboard copy failed:', error\)/);
   assert.match(copyContext, /if \(!record\?\.delete_data\) return false/);
   assert.match(copyContext, /id === 'copy-image'[\s\S]*id === 'copy-media'/);
   assert.match(copyContext, /React\?\.cloneElement[\s\S]*parentArray\[parentIndex\] = replacementNode/);
   assert.match(copyContext, /id: 'mlv2-copy-media'[\s\S]*label: 'Copy media'/);
-  assert.match(copyContext, /ContextMenu\?\.buildMenuChildren[\s\S]*type: 'group'[\s\S]*items: \[item\]/);
   assert.doesNotMatch(copyContext, /fetchMediaNetworkResponse|fetchMediaCacheResponse/);
   assert.doesNotMatch(copyContext, /forceLegacyMediaFetching/);
   assert.doesNotMatch(source, /ContextMenu\.patch\('image-context'/);
@@ -1618,7 +1620,7 @@ test('media routing converges through cacheImage and cacheMessageImages across e
   assert.match(antiNukeSlice, /this\.cacheMessageImages\(cacheMessage, { queueWhileNoSave: false }\);/);
 });
 
-test('renderer fetch usage outside fetchMediaNetworkResponse remains constrained to blob/local copy path', () => {
+test('renderer fetch remains confined to fetchMediaNetworkResponse and clipboard stays filesystem-only', () => {
   const fetchStart = source.indexOf('  fetchMediaNetworkResponse(url, options = {}, requestContext');
   const fetchEnd = source.indexOf('  async fetchMediaCacheResponse(url, options = {})');
   assert.ok(fetchStart >= 0);

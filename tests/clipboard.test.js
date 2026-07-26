@@ -63,6 +63,45 @@ function createImage({
   };
 }
 
+function createImageTarget({
+  id = ATTACHMENT_ID,
+  messageId = MESSAGE_ID,
+  source = 'https://cdn.discordapp.com/attachments/100000000000000002/200000000000000001/media.png',
+  safeSrc = source,
+  includeHiddenPlaceholder = false,
+  ...overrides
+} = {}) {
+  const image = createImage({ id, messageId, source, ...overrides });
+  const hiddenImage = includeHiddenPlaceholder
+    ? createImage({
+      id: '',
+      messageId,
+      source,
+      classList: {
+        contains: () => false
+      }
+    })
+    : null;
+  return {
+    tagName: 'A',
+    dataset: { role: 'img', safeSrc },
+    querySelectorAll: selector => {
+      if (selector !== 'img') return [];
+      return hiddenImage ? [image, hiddenImage] : [image];
+    },
+    querySelector: selector => selector === 'img' ? image : null,
+    getAttribute: name => {
+      if (name === 'data-role') return 'img';
+      if (name === 'data-safe-src') return safeSrc;
+      if (name === 'href') return source;
+      return null;
+    },
+    href: source,
+    closest: () => null,
+    ...overrides
+  };
+}
+
 function installCachedFiles(plugin, mappings = []) {
   const paths = new Map();
   const files = new Map();
@@ -176,6 +215,82 @@ test('clipboard descriptors require an owned, non-placeholder image and a physic
     parentElement: null
   };
   assert.equal(plugin.getClipboardMediaSource(wrapper, record)?.localPath, localPath);
+  const imageTarget = createImageTarget({ source: record.message.attachments[0].url });
+  assert.equal(plugin.getClipboardMediaSource(imageTarget, record)?.localPath, localPath);
+  assert.equal(
+    plugin.getClipboardMediaSource(createImageTarget({
+      source: record.message.attachments[0].url,
+      includeHiddenPlaceholder: true
+    }), record)?.localPath,
+    localPath
+  );
+  const secondAttachmentId = '200000000000000099';
+  const secondUrl = `https://cdn.discordapp.com/attachments/${CHANNEL_ID}/${secondAttachmentId}/second.png`;
+  const multiRecord = createRecord();
+  multiRecord.message.attachments.push({
+    id: secondAttachmentId,
+    filename: 'second.png',
+    url: secondUrl,
+    proxy_url: secondUrl
+  });
+  const multiPlugin = createPlugin({
+    style: { imageError: 'image-error' },
+    errorImage: 'data:image/png;base64,error',
+    settings: { cacheAllImages: true }
+  });
+  installCachedFiles(multiPlugin, [
+    {
+      cacheId: ATTACHMENT_ID,
+      extension: '.png',
+      path: localPath
+    },
+    {
+      cacheId: secondAttachmentId,
+      extension: '.png',
+      path: '/tmp/cache/second.png'
+    }
+  ]);
+  const firstAnchor = createImageTarget({
+    source: multiRecord.message.attachments[0].url
+  });
+  const nestedAnchorTarget = {
+    tagName: 'SPAN',
+    closest: selector => selector === 'a[data-role="img"]' ? firstAnchor : null,
+    querySelectorAll: selector => selector === 'img'
+      ? [createImage({ id: secondAttachmentId, source: secondUrl })]
+      : [],
+    parentElement: null
+  };
+  assert.equal(
+    multiPlugin.getClipboardMediaSource(nestedAnchorTarget, multiRecord)?.localPath,
+    localPath,
+    'the exact image overlay must win over unrelated descendant order'
+  );
+  const ambiguousTarget = {
+    tagName: 'DIV',
+    closest: () => null,
+    querySelectorAll: selector => selector === 'img'
+      ? [
+        createImage({ id: secondAttachmentId, source: secondUrl }),
+        createImage({ source: multiRecord.message.attachments[0].url })
+      ]
+      : [],
+    parentElement: null
+  };
+  assert.equal(multiPlugin.getClipboardMediaSource(ambiguousTarget, multiRecord), null);
+  const ambiguousMenu = [createNativeCopyItem()];
+  assert.equal(multiPlugin.replaceNativeSavedMediaCopyAction(
+    { props: { children: ambiguousMenu } },
+    multiRecord,
+    ambiguousTarget,
+    ambiguousMenu
+  ), true);
+  assert.equal(ambiguousMenu.length, 0, 'an ambiguous restored target must not retain a misleading copy row');
+  const avatarTarget = createImageTarget({
+    source: 'https://cdn.discordapp.com/avatars/user/avatar.png',
+    id: 'avatar'
+  });
+  assert.equal(plugin.getClipboardMediaSource(avatarTarget, record), null);
 
   assert.equal(plugin.getClipboardMediaSource(createImage({
     id: 'avatar',
@@ -203,9 +318,10 @@ test('clipboard descriptors require an owned, non-placeholder image and a physic
   assert.equal(disabledPlugin.getClipboardMediaSource(createImage(), record), null);
 });
 
-test('clipboard eligibility is limited to normal cached image formats and ignores the all-files toggle', () => {
-  const extensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'avif', 'tif', 'tiff'];
-  for (const extension of extensions) {
+test('clipboard eligibility is limited to Discord-native cached image formats and ignores the all-files toggle', () => {
+  const supported = ['jpg', 'jpeg', 'png'];
+  const unsupported = ['gif', 'bmp', 'webp', 'avif', 'tif', 'tiff'];
+  for (const extension of supported) {
     const plugin = createPlugin({
       settings: {
         cacheAllImages: true,
@@ -221,7 +337,23 @@ test('clipboard eligibility is limited to normal cached image formats and ignore
     }]);
     const descriptor = plugin.getClipboardMediaSource(createImage(), record);
     assert.equal(descriptor?.localPath, path, extension);
-    assert.equal(descriptor?.copyMode, extension === 'gif' ? 'file' : 'image', extension);
+    assert.equal(descriptor?.copyMode, 'image', extension);
+  }
+
+  for (const extension of unsupported) {
+    const plugin = createPlugin({
+      settings: {
+        cacheAllImages: true,
+        newSaveAllFileTypes: true
+      }
+    });
+    const record = createRecord({ extension });
+    installCachedFiles(plugin, [{
+      cacheId: ATTACHMENT_ID,
+      extension: `.${extension}`,
+      path: `/tmp/cache/media.${extension}`
+    }]);
+    assert.equal(plugin.getClipboardMediaSource(createImage(), record), null, extension);
   }
 
   const videoPlugin = createPlugin({
@@ -268,19 +400,15 @@ test('clipboard eligibility is limited to normal cached image formats and ignore
   }), componentRecord), null);
 });
 
-test('clipboard writes static images as image data and GIFs as the original local file', async () => {
+test('clipboard writes static images as image data only', async () => {
   const originalDiscordNative = global.DiscordNative;
   const notifications = [];
   const imageWrites = [];
-  const fileWrites = [];
   try {
     global.DiscordNative = {
       clipboard: {
         copyImage(bytes, source) {
           imageWrites.push({ bytes: [...bytes], source });
-        },
-        copyFile(path) {
-          fileWrites.push(path);
         }
       }
     };
@@ -301,12 +429,6 @@ test('clipboard writes static images as image data and GIFs as the original loca
         extension: '.png',
         path: '/tmp/cache/media.png',
         bytes: Buffer.from([4, 5, 6])
-      },
-      {
-        cacheId: ATTACHMENT_ID,
-        extension: '.gif',
-        path: '/tmp/cache/media.gif',
-        bytes: Buffer.from([7, 8, 9])
       }
     ]);
 
@@ -315,17 +437,16 @@ test('clipboard writes static images as image data and GIFs as the original loca
       copyMode: 'image'
     }), true);
     assert.equal(await plugin.copyMediaToClipboard({
-      localPath: '/tmp/cache/media.gif',
+      localPath: '/tmp/cache/media.png',
       copyMode: 'file'
-    }), true);
+    }), false);
 
     assert.deepEqual(imageWrites, [{ bytes: [4, 5, 6], source: 'image.png' }]);
-    assert.deepEqual(fileWrites, ['/tmp/cache/media.gif']);
     assert.deepEqual(cache.reads, ['/tmp/cache/media.png:null']);
     assert.equal(cache.reads[0].endsWith(':null'), true, 'static image copy must read as binary');
     assert.deepEqual(notifications, [
       ['Image was copied to the Clipboard', { type: 'success' }],
-      ['Media was copied to the Clipboard', { type: 'success' }]
+      ['Failed to copy. Details in the console.', { type: 'error' }]
     ]);
   } finally {
     if (originalDiscordNative === undefined) delete global.DiscordNative;
@@ -521,14 +642,8 @@ test('restored owned media hides Discord copy when the cache master or local fil
   assert.equal(errorMenu.length, 0);
 });
 
-test('restored media without a native item gets one real Copy media action using file-copy mode', () => {
-  const builderCalls = installContextMenuBuilder();
+test('restored media without a native item never gets a Logger fallback action', () => {
   const plugin = createPlugin({ settings: { cacheAllImages: true } });
-  const copied = [];
-  plugin.copyMediaToClipboard = descriptor => {
-    copied.push(descriptor);
-    return Promise.resolve(true);
-  };
 
   const gifRecord = createRecord({ extension: 'gif' });
   installCachedFiles(plugin, [{
@@ -543,29 +658,19 @@ test('restored media without a native item gets one real Copy media action using
     gifRecord,
     createImage({ source: gifRecord.message.attachments[0].url }),
     gifMenu
-  ), true);
-  assert.equal(builderCalls.length, 1);
-  assert.equal(builderCalls[0][0].type, 'group');
-  assert.equal(builderCalls[0][0].items[0].id, 'mlv2-copy-media');
-  const gifAction = flattenMenuItems(gifTree).find(item => item.id === 'mlv2-copy-media');
-  assert.ok(gifAction);
-  gifAction.action();
-  assert.equal(copied[0].copyMode, 'file');
-
+  ), false);
+  assert.equal(flattenMenuItems(gifTree).filter(item => item.id === 'mlv2-copy-media').length, 0);
+  assert.equal(gifMenu.length, 0);
   assert.equal(plugin.replaceNativeSavedMediaCopyAction(
     gifTree,
     gifRecord,
     createImage({ source: gifRecord.message.attachments[0].url }),
     gifMenu
   ), false);
-  assert.equal(flattenMenuItems(gifTree).filter(item => item.id === 'mlv2-copy-media').length, 1);
+  assert.equal(flattenMenuItems(gifTree).filter(item => item.id === 'mlv2-copy-media').length, 0);
+  assert.equal(gifMenu.length, 0);
 
   const staticPlugin = createPlugin({ settings: { cacheAllImages: true } });
-  const staticCopied = [];
-  staticPlugin.copyMediaToClipboard = descriptor => {
-    staticCopied.push(descriptor);
-    return Promise.resolve(true);
-  };
   installCachedFiles(staticPlugin, [{
     cacheId: ATTACHMENT_ID,
     extension: '.png',
@@ -578,9 +683,9 @@ test('restored media without a native item gets one real Copy media action using
     createRecord(),
     createImage(),
     staticMenu
-  ), true);
-  flattenMenuItems(staticTree).find(item => item.id === 'mlv2-copy-media').action();
-  assert.equal(staticCopied[0].copyMode, 'file');
+  ), false);
+  assert.equal(flattenMenuItems(staticTree).filter(item => item.id === 'mlv2-copy-media').length, 0);
+  assert.equal(staticMenu.length, 0);
 });
 
 test('an existing Logger copy action removes a native duplicate before menu reuse', () => {
@@ -598,6 +703,7 @@ test('an existing Logger copy action removes a native duplicate before menu reus
     }
   };
   const nativeAction = createNativeCopyItem();
+  const originalNativeAction = nativeAction.props.action;
   const menu = [loggerAction, nativeAction];
   const tree = { props: { children: menu } };
 
@@ -608,7 +714,8 @@ test('an existing Logger copy action removes a native duplicate before menu reus
     menu
   ), true);
   assert.equal(menu.length, 1);
-  assert.equal(menu[0], loggerAction);
+  assert.equal(menu[0], nativeAction);
+  assert.notEqual(menu[0].props.action, originalNativeAction);
 });
 
 test('Logger viewer adds one raw Copy media config only for an eligible cached image', () => {
@@ -634,11 +741,6 @@ test('Logger viewer adds one raw Copy media config only for an eligible cached i
   assert.equal(copied[0].copyMode, 'image');
 
   const gifPlugin = createPlugin({ settings: { cacheAllImages: true } });
-  const gifCopied = [];
-  gifPlugin.copyMediaToClipboard = descriptor => {
-    gifCopied.push(descriptor);
-    return Promise.resolve(true);
-  };
   const gifRecord = createRecord({ extension: 'gif' });
   installCachedFiles(gifPlugin, [{
     cacheId: ATTACHMENT_ID,
@@ -650,9 +752,11 @@ test('Logger viewer adds one raw Copy media config only for an eligible cached i
     gifItems,
     createImage({ source: gifRecord.message.attachments[0].url }),
     gifRecord
-  ), true);
-  gifItems[0].action();
-  assert.equal(gifCopied[0].copyMode, 'file');
+  ), false);
+  assert.equal(gifPlugin.getClipboardMediaSource(createImage({
+    source: gifRecord.message.attachments[0].url
+  }), gifRecord), null);
+  assert.equal(gifItems.length, 0);
 
   const disabledPlugin = createPlugin({ settings: { cacheAllImages: false } });
   installCachedFiles(disabledPlugin, [{

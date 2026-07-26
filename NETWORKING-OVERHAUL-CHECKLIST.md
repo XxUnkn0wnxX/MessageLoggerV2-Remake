@@ -72,9 +72,12 @@ review, checklist update, and commit must also be complete.
   15705f0fdc6a82fbb4c472e3c9ff53ceb3ca8fb4 and plugin-disable presentation
   cleanup at f312df53c334fe912cc9073d1c6f5ce6e78bb102. The BetterDiscord
   binary-read correction is committed at
-  a26f05c1cfcf15ec39a3d44e71142d0452d04d87. Its live copy has exact hash
-  parity and clean hot-reload evidence; user-driven clipboard/disable checks
-  remain before the built-in changelog is amended.
+  a26f05c1cfcf15ec39a3d44e71142d0452d04d87. After runtime probing proved
+  Discord's file bridge was not a portable Finder/Explorer-style clipboard,
+  the approved native-only correction removed file-copy fallbacks, limited
+  Logger copying to cached PNG/JPG/JPEG media, and made multi-image matching
+  exact or fail closed. Focused `73/73` and full `394/394` tests pass; final
+  live replacement remains pending.
 - **Current tracked task changes:** Stages 1-5D are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/persistence.test.js`, `tests/settings-recovery.test.js`,
@@ -82,8 +85,9 @@ review, checklist update, and commit must also be complete.
   `tests/records.test.js`, `README.md`, `TODO.md`,
   `docs/architecture.md`, `docs/help.md`, `docs/settings.md`, `docs/tests.md`,
   and this checklist.
-- **Live plugin:** The combined `2.8.2.9` networking, cache-scoped clipboard,
-  and disable-cleanup build is live. Repository and live SHA-256 both equal
+- **Live plugin:** The previous combined `2.8.2.9` networking, cache-scoped
+  clipboard, and disable-cleanup build remains live. Its last verified
+  repository/live SHA-256 pair equalled
   `83f47ce110f1d179a36e1d6db839dfbb75f304a033e8d8d8eb50e08a9e055a4c`.
   The UTC hot-reload segment at `2026-07-26 19:56:23-19:56:24` shows patch
   cleanup, successful reinitialization, UI refresh completion, and immediate
@@ -97,9 +101,12 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Ask the user to repeat static image copy and inspect the resulting log. Amend
-the built-in changelog only after runtime confirmation. Keep provisional
-Anti-Nuke/Ghost-Ping retention as a separate post-networking stage.
+Commit the fully audited native-only clipboard correction, record its exact
+hash, then live-sync only the plugin, verify hash parity and clean hot reload,
+push the feature branch, and give the user the short PNG/JPEG plus negative
+format matrix. Amend the built-in changelog only after runtime confirmation.
+Keep provisional Anti-Nuke/Ghost-Ping retention as a separate post-networking
+stage.
 
 ### Resume procedure for a new session
 
@@ -172,6 +179,8 @@ recorded as an amendment before implementation.
 - [x] Plugin-disable presentation cleanup implemented and verified.
 - [x] Combined clipboard/disable build live-synced and hash-verified.
 - [x] Static-image clipboard binary-read runtime defect fixed and resynced.
+- [x] Native-only clipboard correction implemented and fully audited.
+- [ ] Native-only clipboard correction committed, live-synced, and pushed.
 - [ ] User `RT-26` live behavior result received and recorded.
 - [x] Final implementation committed.
 
@@ -304,7 +313,7 @@ Line numbers are orientation aids and may move; symbol names are authoritative.
 | 12652 | `cacheMessageImages()` | Enumerates qualifying attachments, embeds, components, and stickers. |
 | 13810 | Anti-Nuke pre-cache helper | Calls `cacheMessageImages()` before ordinary policy returns. |
 | 14243 | Normal incoming-message cache path | Calls `cacheMessageImages()`. |
-| 16049 | Saved-media clipboard helpers | Resolve record-owned image media, retain the local `blob:`/remote native split, replace one deleted-message native action, and add one Logger-viewer action. |
+| 16049 | Saved-media clipboard helpers | Resolve one exact record-owned image, require a physical cached PNG/JPG/JPEG, replace one existing deleted-message native action, and add one gated Logger-viewer action. |
 
 ### Expected implementation shape
 
@@ -328,13 +337,13 @@ normal Discord image
 
 deleted/restored Discord image
   -> patched native Copy image action
-       -> shared Logger clipboard reader
-            -> direct BdApi.Net.fetch()     [remote]
-            -> direct renderer fetch()      [local blob]
+       -> exact saved-image/local-file resolver
+       -> filesystem binary read
+       -> DiscordNative.clipboard.copyImage()
 
 Logger viewer image
   -> Logger Copy media action
-       -> same shared Logger clipboard reader
+       -> same exact local PNG/JPG/JPEG path
 ```
 
 `fetchMediaCacheResponse()` should continue owning cache-specific cancellation
@@ -351,9 +360,9 @@ must not be sent through networking merely to read it again:
 - [x] Keep `blob:` object URLs local.
 - [x] Keep `data:` resources and the local error placeholder local.
 - [x] Keep cache file writes, deletion, reveal-in-folder, and cleanup local.
-- [x] Keep **Copy image** on the existing fetch split: local `blob:` reads use
-      renderer `fetch()` and remote reads use `BdApi.Net.fetch()`.
-- [x] Do not route either clipboard branch through the media-cache handler.
+- [x] Read Logger clipboard media only from the proven physical cache file.
+- [x] Do not route either clipboard surface through renderer fetch, native
+      networking, or the media-cache handler.
 - [x] Continue revoking locally created object URLs during cleanup.
 
 `http://localhost:7474/...` is only a synthetic cache lookup key. The plugin
@@ -371,30 +380,35 @@ copy action. The user approved this self-contained replacement:
 - [x] For deleted/restored live message mounts only, patch the existing native
       Discord **Copy image** action so Logger reads the saved image source.
       Preserve one visible action rather than adding a duplicate.
-- [x] Add one Logger-owned **Copy media** action to supported media in the
-      Logger viewer.
-- [x] Share one byte-copy helper across both Logger-owned paths. Remote sources
-      use direct `BdApi.Net.fetch()`; local `blob:` sources use renderer
-      `fetch()`; neither path uses the media-cache transport selector.
+- [x] Never add a mounted fallback when Discord supplies no native copy row.
+- [x] Add one Logger-owned **Copy media** action only for physically cached
+      PNG/JPG/JPEG media in the Logger viewer.
+- [x] Match the direct image or its exact image overlay first. When a broad
+      target contains more than one saved image, expose no Logger action rather
+      than guessing or batch-copying.
+- [x] Share one physical-file binary reader across both Logger-owned paths;
+      neither path performs a network request.
 - [x] Pass successful bytes to `DiscordNative.clipboard.copyImage()` and never
-      invoke the native writer after a failed or non-200 read.
-- [x] Preserve one user-facing failure notification plus a console error.
+      invoke the native writer after a missing, empty, or failed read.
+- [x] Preserve one green success toast, or one user-facing failure notification
+      plus a console error.
+- [x] Require **Cache media locally** On, an exact local file, and a
+      non-hidden/non-placeholder target. GIF, BMP, WebP, AVIF, TIF/TIFF,
+      videos, remote-only media, and arbitrary all-file attachments expose no
+      Logger clipboard action.
+- [x] Remove Discord's native image-copy row only from Logger-restored media
+      when the Logger gate fails; ordinary live messages remain untouched.
 - [x] Keep clipboard reads independent from **Force legacy media fetching**,
       media diagnostics, cache writes, and Logger record creation.
 - [x] Remove the obsolete `image-context` clipboard patch. Do not implement the
       separate future **Reveal in folder** feature as part of this fix.
 
 The installed Discord desktop bridge exposes `copyImage(bytes, source)` and
-`copyFile(localPath)`, but no raw video-byte clipboard writer. Match native
-Discord rather than inventing an unsafe temporary-file feature:
-
-- Images, including GIF/WebP/APNG sources which Discord's native image bridge
-  can decode, use the shared byte reader and `copyImage()`.
-- A deleted/restored live mount is patched only when Discord already supplies a
-  native clipboard-copy action for that target.
-- Videos and other non-image remote attachments retain Discord's normal
-  link/save actions. `copyFile()` is not used with a URL because it requires an
-  existing local filesystem path.
+`copyFile(localPath)`, but the current macOS file bridge writes only a file URL
+and cannot reproduce Finder/Explorer's complete portable file clipboard through
+the cross-compatible plugin APIs. Logger therefore uses only Discord's native
+image bridge for PNG/JPG/JPEG and hides its action for every other format. No
+fork-only host API or file-copy fallback is used.
 
 ## Boundaries that are not plugin HTTP calls
 
@@ -405,10 +419,10 @@ Discord rather than inventing an unsafe temporary-file feature:
       downloader.
 - [x] Browser loading from `<img src>` or `<video src>` is Chromium element
       loading, not an explicit MessageLogger `fetch()` call.
-- [x] Plugin update checks and remote clipboard reads remain direct
-      `BdApi.Net.fetch()` consumers outside the media-cache selector.
-- [x] Local `blob:` clipboard reads remain direct renderer `fetch()` consumers
-      outside remote networking.
+- [x] Plugin update checks remain direct `BdApi.Net.fetch()` consumers outside
+      the media-cache selector.
+- [x] Saved-media clipboard reads are filesystem-only and remain outside remote
+      networking.
 - [x] Do not broaden this transport change into a renderer prefetch/blob
       conversion redesign without a separate user decision.
 
@@ -1064,9 +1078,12 @@ Stage 5D plan/result:
   - [ ] Verify a physically cached restored static image copies from both the
         live mount and Logger viewer, pastes into another app, and emits one
         green success toast per copy.
-  - [ ] Verify a physically cached GIF exposes **Copy media** on both Logger
-        surfaces, places the original GIF file on the system clipboard, and
-        emits one green success toast.
+  - [ ] On a restored message with multiple cached images, right-click each
+        image separately and confirm Logger copies only that exact image. No
+        batch or first-image fallback is allowed for an ambiguous target.
+  - [ ] Verify cached GIF, BMP, WebP, AVIF, and TIF/TIFF media expose no Logger
+        clipboard action on either surface because Discord's native image
+        clipboard bridge is not used for those formats.
   - [ ] Turn **Cache media locally** Off and confirm Logger copy actions plus
         Discord's native row disappear only from Logger-restored media while
         an ordinary live image keeps Discord's native action.
@@ -1074,7 +1091,8 @@ Stage 5D plan/result:
         attachment receive no Logger clipboard action.
   - [x] Disable Logger while restored rows/tints and any available forum,
         sidebar, or thread-browser clones are visible. The user confirmed the
-        Logger-owned live presentation unmounted immediately on disable.
+        Logger-owned live presentation unmounted immediately on disable, then
+        separately confirmed the same teardown in a forum post/thread.
   - [x] Runtime defect found before those checks: current Discord did not invoke
         Logger's old `image-context` patch, and the Logger viewer's custom menu
         exposed no image copy action. The approved narrow replacement is now
@@ -1136,7 +1154,8 @@ Historical result:
 - [x] `git diff --check` and Markdown parsing pass on the final tree.
 - [x] Combined clipboard/disable live hash parity and clean hot reload are
       verified.
-- [ ] Remaining user-driven `RT-26` behavior result recorded.
+- [ ] Remaining native-only clipboard portion of the user-driven `RT-26`
+      behavior result recorded.
 - [x] No unrelated attachment-gate implementation was included.
 - [x] Version remains `2.8.2.9` as instructed.
 - [ ] After clipboard runtime confirmation, amend the built-in changelog under
@@ -1189,6 +1208,9 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-27 | Stage 6 plugin-stop cancellation | Disabling MessageLoggerV2 during an active progressing native body entered plugin cleanup, cancelled the request after three bytes, emitted exactly one cancelled terminal event, and produced no retry or late completion. Re-enabling initialized fresh media work normally. | User-run `RT-26` probe plus current BetterDiscord `debug.log` and `console.log` |
 | 2026-07-27 | Stage 6 legacy/native toggle | Two manual probes and concurrent ordinary media work used forced renderer fetch successfully while exactly one activation-scoped routing notice appeared. Turning force Off made the next probe use BetterDiscord native fetch immediately. | User-run `RT-26` probes plus current BetterDiscord `debug.log` and `console.log` |
 | 2026-07-27 | Stage 6 mixed content | A plain-HTTP image requested from Discord's HTTPS page used BetterDiscord native fetch and completed HTTP 200 / 8,090 bytes without renderer mixed-content blocking. | User-run `RT-26` probe plus current BetterDiscord `debug.log` and `console.log` |
+| 2026-07-27 | Clipboard compatibility | Finder/Explorer-style file clipboard data cannot be reproduced through the cross-compatible Discord plugin APIs. Logger therefore uses only Discord's native image bridge for cached PNG/JPG/JPEG, adds no mounted fallback, and hides its action for every unsupported format. | User-approved native-only decision recorded by ac235510c36ddd906597f0ccb265774cafea0ced |
+| 2026-07-27 | Clipboard final audit | A broad whole-message target containing multiple saved images could previously choose the first matching DOM image. The issue was reported before correction; direct image/image-overlay identity now wins, while an ambiguous target exposes no Logger action. | Parent correction, focused `73/73`, full `394/394`, and independent final PASS |
+| 2026-07-27 | Disable runtime | Ordinary restored presentation and a separate forum post/thread both unmounted immediately when Logger was disabled. | User runtime confirmation recorded by 8e6e60d12cdcd961e3318e056f7c43b15f07246b and this follow-up |
 
 ## Handoff activity log
 
@@ -2500,7 +2522,8 @@ evidence for another session to understand what changed and why.
 - **Failures or blockers:** Exact Finder/Explorer-style system-file copying is
   unavailable through the cross-compatible plugin APIs. Unsupported formats
   must therefore have no Logger clipboard action.
-- **Commit:** Planning checkpoint commit pending.
+- **Commit:** Planning checkpoint commit
+  ac235510c36ddd906597f0ccb265774cafea0ced.
 - **Exact next action:** Commit this decision, run the clean full baseline,
   then remove file-copy fallbacks and add focused native-format/menu
   regressions before any live sync.
@@ -2515,12 +2538,46 @@ evidence for another session to understand what changed and why.
 - **Tests and exact results:** The implementation remains covered by the clean
   `394/394` baseline, including the three shutdown failure-isolation tests.
 - **Runtime evidence:** Direct user confirmation: restored live presentation
-  unmounted when Logger was disabled.
+  unmounted when Logger was disabled. The user then repeated the check inside
+  a forum post/thread and confirmed that restored presentation unmounted there
+  as well.
 - **Failures or blockers:** None for plugin-disable cleanup.
 - **Commit:** Implementation
-  f312df53c334fe912cc9073d1c6f5ce6e78bb102; runtime-evidence commit pending.
+  f312df53c334fe912cc9073d1c6f5ce6e78bb102; runtime-evidence commit
+  8e6e60d12cdcd961e3318e056f7c43b15f07246b.
 - **Exact next action:** Finish the approved native-only clipboard correction
   and its remaining live checks.
+
+### 2026-07-27 — Native-only clipboard correction completed
+
+- **Completed:** Removed Logger's file-copy path and mounted fallback. Both
+  Logger surfaces now require **Cache media locally** On, an exact physically
+  cached PNG/JPG/JPEG, and Discord's native image clipboard bridge. Ordinary
+  live messages remain untouched. A restored multi-image message resolves the
+  direct image or its exact overlay; ambiguous whole-message targets receive no
+  Logger action.
+- **Decisions:** Copy one right-clicked image at a time. Do not batch, guess the
+  first image, use `copyFile()`, expose unsupported formats, or add a
+  fork-specific BetterDiscord bridge. The Logger viewer uses the same gate as
+  the restored live mount.
+- **Files changed:** `MessageLoggerV2.plugin.js`,
+  `tests/clipboard.test.js`, `tests/source-contracts.test.js`,
+  `docs/tests.md`, and this checklist.
+- **Tests and exact results:** PASS — focused clipboard/source contracts
+  `73/73`; full `npm test` `394/394`; plugin syntax, `git diff --check`, and
+  Markdown parsing passed. Independent final review returned PASS.
+- **Runtime evidence:** No new live copy has occurred. The previous live plugin
+  remains installed until this exact validated tree is committed. The
+  disposable system-clipboard probe and live symlink remain removed.
+- **Failures or blockers:** The final audit found one pre-live edge case: a
+  broad target with multiple images could select the first match by DOM order.
+  This was reported before correction, then fixed with exact-overlay priority
+  and ambiguity rejection. No automated or static blocker remains.
+- **Commit:** Implementation commit pending; its exact hash will be recorded in
+  the immediate checklist evidence commit.
+- **Exact next action:** Commit this validated implementation, record its exact
+  hash, then live-sync only the plugin, verify hash/hot reload, push the feature
+  branch, and give the user the remaining short runtime matrix.
 
 ### Handoff entry template
 
