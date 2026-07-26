@@ -2871,8 +2871,9 @@ evidence for another session to understand what changed and why.
   edge groups: exact multi-image targeting, cache-master isolation, and every
   unsupported/missing media negative.
 - **Failures or blockers:** None. RT-26 is complete.
-- **Commit:** The exact closeout commit is recorded by the immediate
-  checklist-only follow-up.
+- **Commit:** Closeout implementation
+  e0e1b72ca053a5ef9955b0980576d5bc73383870; this exact-hash note is the
+  immediate checklist-only follow-up.
 - **Exact next action:** Commit and push this closeout, then audit and plan the
   provisional Anti-Nuke/Ghost-Ping media-retention stage without implementing
   or syncing it.
