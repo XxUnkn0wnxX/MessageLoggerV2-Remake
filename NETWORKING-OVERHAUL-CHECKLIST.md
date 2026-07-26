@@ -36,17 +36,20 @@ review, checklist update, and commit must also be complete.
 - **Branch base:** `a5eadbe736f5a0cf4b7a3730bf9950ade17ad752`
   (`docs: prepare 2.8.2.8 release notes`)
 - **Upstream status:** `origin/fix/native-media-networking` remains at the
-  published handoff commit `54a1f385`; local Stage 1 work is intentionally
-  ahead and has not been pushed. `develop` and `main` both still point to the
-  same released base commit and track their matching `origin` branches.
+  published handoff commit `54a1f385`; local staged implementation is
+  intentionally ahead and has not been pushed. `develop` and `main` both still
+  point to the same released base commit and track their matching `origin`
+  branches.
 - **Paused attachment work:** The renamed `fix/attachment-gate` remains
   separate and tracks `origin/fix/attachment-gate`. Its standalone handoff
   commit is protected by the local-only `local/attachment-gate-handoff` tag.
   Do not merge or implement that feature as part of this networking branch.
-- **Implementation state:** Stage 1 setting/default/session-selection plumbing
-  is implemented and passes its focused and full automated gates. The media
-  request path itself remains unchanged until Stage 2.
-- **Current tracked task changes:** Stage 1 changes are limited to
+- **Implementation state:** Stage 2's central media network handler is
+  implemented and passes its focused and full automated gates. Persistent
+  media-cache downloads now default to native BetterDiscord networking while
+  synchronous API incompatibility or the force setting selects renderer
+  networking. Output-aware legacy-routing diagnostics remain Stage 4 work.
+- **Current tracked task changes:** Stages 1-2 are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/settings-recovery.test.js`, `tests/source-contracts.test.js`, and this
   checklist.
@@ -58,11 +61,11 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit the passing Stage 1 implementation, record that exact commit hash in
-this checklist through the immediate checklist checkpoint, then implement
-Stage 2's central media network handler and deterministic transport tests. Do
-not sync the plugin live; the user requested a pre-live report and separate
-authorization before that copy.
+Commit the passing Stage 2 implementation, record that exact commit hash in
+this checklist through the immediate checklist checkpoint, then add Stage 3
+source contracts that freeze updater and clipboard transports outside the
+media selector. Do not sync the plugin live; the user requested a pre-live
+report and separate authorization before that copy.
 
 ### Resume procedure for a new session
 
@@ -165,22 +168,22 @@ through renderer `fetch()` because of the renderer's network restrictions.
 
 - [x] Add an Advanced setting named **Force legacy media fetching**.
 - [x] Default the setting to `false`.
-- [ ] With the setting off, use `BdApi.Net.fetch()` for persistent media-cache
+- [x] With the setting off, use `BdApi.Net.fetch()` for persistent media-cache
       downloads when it is available and compatible.
-- [ ] With the setting on, route only persistent media-cache downloads through
+- [x] With the setting on, route only persistent media-cache downloads through
       the legacy Discord renderer `fetch()` method.
-- [ ] Automatically route media-cache downloads to legacy networking when
+- [x] Automatically route media-cache downloads to legacy networking when
       `BdApi.Net.fetch()` is missing or synchronously incompatible.
-- [ ] Keep media-cache transport selection inside one central media network
+- [x] Keep media-cache transport selection inside one central media network
       handler.
-- [ ] Keep update checks on their existing direct `BdApi.Net.fetch()` call.
-- [ ] Keep remote-image clipboard reads on their existing direct
+- [x] Keep update checks on their existing direct `BdApi.Net.fetch()` call.
+- [x] Keep remote-image clipboard reads on their existing direct
       `BdApi.Net.fetch()` call.
-- [ ] Keep local `blob:` clipboard reads on renderer `fetch()` regardless of
+- [x] Keep local `blob:` clipboard reads on renderer `fetch()` regardless of
       the force setting because they are local object-URL reads.
-- [ ] Do not switch the media-cache session to legacy mode for an ordinary HTTP
+- [x] Do not switch the media-cache session to legacy mode for an ordinary HTTP
       failure, timeout, abort, DNS failure, 403, 404, or one bad URL.
-- [ ] Keep remote renderer `fetch()` reachable only through the media handler's
+- [x] Keep remote renderer `fetch()` reachable only through the media handler's
       forced/compatibility legacy branch; local `blob:` reads are the explicit
       non-network exception.
 
@@ -214,11 +217,11 @@ This matrix applies only to persistent media-cache downloads.
 Every persistent media-cache remote download must use the central media
 handler:
 
-- [ ] Persistent media-cache downloads.
-- [ ] Deferred media-cache queue replays.
-- [ ] Removed-attachment recovery downloads.
-- [ ] Normal attachment, embed, component-media, and sticker downloads.
-- [ ] Anti-Nuke media pre-caching.
+- [x] Persistent media-cache downloads.
+- [x] Deferred media-cache queue replays.
+- [x] Removed-attachment recovery downloads.
+- [x] Normal attachment, embed, component-media, and sticker downloads.
+- [x] Anti-Nuke media pre-caching.
 - [ ] Future wildcard attachment downloads when that separate feature is
       implemented.
 
@@ -407,17 +410,17 @@ these compatibility targets is allowed when required:
 - [x] Default setting is `false` and normalizes missing older values safely.
 - [x] Advanced **Force legacy media fetching** placement, note, and action
       behavior are stable.
-- [ ] Native available + force off selects `BdApi.Net.fetch()` for persistent
+- [x] Native available + force off selects `BdApi.Net.fetch()` for persistent
       media-cache downloads.
-- [ ] Force on selects legacy renderer `fetch()` for persistent media-cache
+- [x] Force on selects legacy renderer `fetch()` for persistent media-cache
       downloads even when native exists.
-- [ ] Native API missing selects legacy renderer `fetch()` for persistent
+- [x] Native API missing selects legacy renderer `fetch()` for persistent
       media-cache downloads.
-- [ ] Synchronous native incompatibility selects legacy media fetching for the
+- [x] Synchronous native incompatibility selects legacy media fetching for the
       session.
-- [ ] Ordinary asynchronous media request rejection does not change the
+- [x] Ordinary asynchronous media request rejection does not change the
       session's selected media transport.
-- [ ] Native media calls receive compatible headers, abort signals, and
+- [x] Native media calls receive compatible headers, abort signals, and
       timeout-related behavior required by the cache caller.
 - [ ] All persistent media-cache downloads enter the central media handler.
 - [ ] The update checker retains its direct `BdApi.Net.fetch()` call and is
@@ -432,7 +435,7 @@ these compatibility targets is allowed when required:
 - [ ] Console and toast routes remain independent.
 - [ ] Debug reporting is silent with both debug flags off.
 - [ ] Multiple files and retries do not repeat the notice.
-- [ ] Existing media timeout, abort, retry, status, file-size, and write-epoch
+- [x] Existing media timeout, abort, retry, status, file-size, and write-epoch
       tests remain green.
 
 ## Stage 0 — Baseline gate
@@ -485,27 +488,42 @@ Stage 1 commit/result:
 
 ## Stage 2 — Central media network handler
 
-- [ ] Implement one low-level media-cache network handler.
-- [ ] Preserve media caller headers, signals, and compatible options.
-- [ ] Route the media-cache response function through it.
-- [ ] Prove all persistent media-cache callers still converge through
+- [x] Implement one low-level media-cache network handler.
+- [x] Preserve media caller headers, signals, and compatible options.
+- [x] Route the media-cache response function through it.
+- [x] Prove all persistent media-cache callers still converge through
       `cacheImage()` and `fetchMediaCacheResponse()`.
-- [ ] Preserve the update checker and both clipboard branches exactly as the
+- [x] Preserve the update checker and both clipboard branches exactly as the
       documented direct non-cache transports.
-- [ ] Re-run a repository search proving no alternate remote persistent-cache
+- [x] Re-run a repository search proving no alternate remote persistent-cache
       fetch remains outside the media handler.
-- [ ] Add native, forced-legacy, and automatic media-fallback tests.
-- [ ] Prove ordinary media request failures do not change the session's media
+- [x] Add native, forced-legacy, and automatic media-fallback tests.
+- [x] Prove ordinary media request failures do not change the session's media
       transport mode.
-- [ ] Run focused tests, `npm test`, and `git diff --check`.
-- [ ] Commit only after the stage passes.
+- [x] Run focused tests, `npm test`, and `git diff --check`.
+- [x] Commit only after the stage passes.
 
 Stage 2 commit/result:
 
-- Commit:
-- Tests:
-- Remaining direct-fetch audit:
-- Notes:
+- Commit: pending this passing stage commit; its exact hash will be recorded by
+  the immediate checklist checkpoint.
+- Tests: PASS — `node --test tests/media.test.js` completed with 47 passed, 0
+  failed; full `npm test` completed with 349 passed, 0 failed;
+  `node --check MessageLoggerV2.plugin.js` passed within the full suite;
+  `git diff --check` passed.
+- Remaining direct-fetch audit: `rg -n
+  "fetchMediaNetworkResponse|fetchMediaCacheResponse|cacheImage\\(|cacheMessageImages\\(|BdApi\\.Net\\.fetch|\\bfetch\\("
+  MessageLoggerV2.plugin.js` found updater native fetch at line 578, all media
+  renderer branches inside `fetchMediaNetworkResponse()` at lines 11904-11925,
+  the sole cache response/write chain at lines 11930-12015, and the unchanged
+  clipboard split at line 17340. No alternate persistent-cache downloader was
+  found.
+- Notes: `fetchMediaNetworkResponse()` is deliberately non-async so it can
+  distinguish synchronous API incompatibility from a later rejected network
+  promise. Native calls preserve the caller's common options and receive
+  `timeout: null`, leaving the logger's existing 15-second AbortController
+  timeout authoritative. HTTP failures and asynchronous rejections remain on
+  the native session path and never trigger a duplicate renderer request.
 
 ## Stage 3 — Preserve non-cache fetch boundaries
 
@@ -629,6 +647,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-26 | Debug | Forced and automatic legacy media selection use: `Networking: media routing is using the old Discord renderer fetch() method.` | User wording requirement |
 | 2026-07-26 | Compatibility | Both BetterDiscord targets support native `headers`, `signal`, and `timeout`; native media calls must pass `timeout: null` so the host's 8-second default does not replace the logger's existing 15-second timeout. Fork-only `maxResponseBytes` and `httpsOnly` options remain out of scope. | Read-only comparison of local `develop` and `upstream-development` |
 | 2026-07-26 | Resume | Resume implementation, keep every checklist addition/amendment current, preserve all existing functionality, run every focused/full check before deployment, then report and stop before live sync until the user separately authorizes it. | Current user instruction |
+| 2026-07-26 | Stage 2 | The central media selector is non-async and latches legacy mode only for a missing/non-callable native API, a synchronous invocation throw, or an unusable thenable shape. A rejected native promise or HTTP failure remains an ordinary request failure and never starts a second renderer request. | Approved compatibility boundary plus deterministic regression evidence |
 
 ## Handoff activity log
 
@@ -750,6 +769,37 @@ evidence for another session to understand what changed and why.
   (`feat: add media fetch transport setting`).
 - **Exact next action:** Commit Stage 1, record its hash, then implement the
   central media-only network handler and its deterministic transport coverage.
+
+### 2026-07-26 — Stage 2 central media network handler
+
+- **Completed:** Added `fetchMediaNetworkResponse()` as the only selector for
+  persistent media-cache transport, routed the existing
+  `fetchMediaCacheResponse()` timeout/AbortController path through it, and
+  covered native default, forced legacy, missing native API, synchronous throw,
+  non-thenable/throwing-then incompatibility, asynchronous rejection, HTTP
+  failure, option propagation, and session latching.
+- **Decisions:** Keep the selector non-async so synchronous compatibility
+  defects can be separated from ordinary rejected requests. Pass
+  `timeout: null` only to native BetterDiscord requests so the plugin's existing
+  15-second timeout remains authoritative. Never retry one failed native
+  request through renderer networking.
+- **Files changed:** `MessageLoggerV2.plugin.js`, `tests/media.test.js`, and
+  `NETWORKING-OVERHAUL-CHECKLIST.md`.
+- **Tests and exact results:** PASS — focused media run: 47 passed, 0 failed;
+  full `npm test`: 349 passed, 0 failed; plugin syntax passed within the full
+  suite; `git diff --check` passed.
+- **Runtime evidence:** None required at this stage. The BetterDiscord native
+  request contract was verified read-only against local `develop` and
+  mainstream `upstream-development`.
+- **Failures or blockers:** None. A test-only draft assertion attempted to
+  preserve renderer `credentials`, which is not a shared BetterDiscord native
+  option; parent review removed that assertion before commit. No product code
+  relied on it.
+- **Commit:** Pending this passing stage commit; the immediate checklist
+  checkpoint will replace this sentence with the exact hash.
+- **Exact next action:** Add Stage 3 source contracts proving update checks,
+  remote clipboard reads, and local `blob:` clipboard reads remain independent
+  of the media-only selector.
 
 ### Handoff entry template
 

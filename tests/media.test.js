@@ -40,37 +40,393 @@ function createMediaCachePlugin(cacheDir, overrides = {}) {
   });
 }
 
-test('media-cache transport helper tracks forced and compatibility-based selection', () => {
+function mockAbortControllerWithSignalCapture() {
+  const signal = {
+    listeners: new Set(),
+    aborted: false,
+    addEventListener(event, listener) {
+      if (event !== 'abort') return;
+      this.listeners.add(listener);
+    },
+    removeEventListener(event, listener) {
+      if (event !== 'abort') return;
+      this.listeners.delete(listener);
+    }
+  };
+  const controller = {
+    signal,
+    abort() {
+      signal.aborted = true;
+      for (const listener of Array.from(signal.listeners)) {
+        listener();
+      }
+      signal.listeners.clear();
+    }
+  };
+  return { controller, signal };
+}
+
+test('media-cache transport uses native fetch by default with unchanged options and forced timeout null', async () => {
   const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
   try {
-    delete global.BdApi.Net;
+    const controllerState = mockAbortControllerWithSignalCapture();
+    let nativeRequest;
+    let rendererRequest;
+    global.AbortController = class {
+      constructor() {
+        return controllerState.controller;
+      }
+    };
     const plugin = createMediaCachePlugin('');
     plugin.settings.forceLegacyMediaFetching = false;
     plugin._mediaCacheNativeFetchCompatible = null;
-    assert.equal(plugin.getMediaCacheTransportSelection(), 'native');
-
-    plugin.settings.forceLegacyMediaFetching = true;
-    assert.equal(plugin.getMediaCacheTransportSelection(), 'legacy');
-    plugin.setMediaCacheFetchTransportPreference(true);
-    assert.equal(plugin._mediaCacheNativeFetchCompatible, null);
-
-    plugin.settings.forceLegacyMediaFetching = false;
-    plugin._mediaCacheNativeFetchCompatible = null;
-    plugin.setMediaCacheFetchTransportPreference(false);
-    assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
-    assert.equal(plugin.getMediaCacheTransportSelection(), 'legacy');
-
-    global.BdApi.Net = { fetch: () => Promise.resolve() };
-    plugin._mediaCacheNativeFetchCompatible = false;
-    plugin.settings.forceLegacyMediaFetching = false;
-    plugin.setMediaCacheFetchTransportPreference(false);
-    assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
-    plugin._mediaCacheNativeFetchCompatible = null;
-    plugin.setMediaCacheFetchTransportPreference(false);
-    assert.equal(plugin._mediaCacheNativeFetchCompatible, null);
-    assert.equal(plugin.getMediaCacheTransportSelection(), 'native');
+    const options = {
+      method: 'GET',
+      headers: { 'X-Test': 'media-cache' }
+    };
+    global.BdApi.Net = {
+      fetch(url, requestInit) {
+        nativeRequest = { url, requestInit };
+        return Promise.resolve(successfulMediaResponse());
+      }
+    };
+    global.fetch = (url, requestInit) => {
+      rendererRequest = { url, requestInit };
+      return Promise.resolve(successfulMediaResponse());
+    };
+    const response = await plugin.fetchMediaCacheResponse('https://cdn.example/media', options);
+    assert.equal(response.ok, true);
+    assert.equal(nativeRequest.url, 'https://cdn.example/media');
+    assert.ok(nativeRequest.requestInit);
+    assert.equal(nativeRequest.requestInit.timeout, null);
+    assert.equal(nativeRequest.requestInit.signal, controllerState.signal);
+    assert.equal(nativeRequest.requestInit.headers, options.headers);
+    assert.equal(nativeRequest.requestInit.method, options.method);
+    assert.equal(rendererRequest, undefined);
   } finally {
     global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-cache transport helper tracks forced and compatibility-based selection', () => {
+  const plugin = createMediaCachePlugin('');
+  plugin.settings.forceLegacyMediaFetching = false;
+  plugin._mediaCacheNativeFetchCompatible = null;
+  assert.equal(plugin.getMediaCacheTransportSelection(), 'native');
+  plugin.settings.forceLegacyMediaFetching = true;
+  assert.equal(plugin.getMediaCacheTransportSelection(), 'legacy');
+  plugin.settings.forceLegacyMediaFetching = false;
+  plugin._mediaCacheNativeFetchCompatible = false;
+  assert.equal(plugin.getMediaCacheTransportSelection(), 'legacy');
+});
+
+test('media-cache transport forces legacy on-demand without mutating compatibility state', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    global.AbortController = class {
+      constructor() { return mockAbortControllerWithSignalCapture().controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    plugin.settings.forceLegacyMediaFetching = true;
+    plugin._mediaCacheNativeFetchCompatible = null;
+    let nativeCalls = 0;
+    let rendererCalls = 0;
+    global.BdApi.Net = {
+      fetch() {
+        nativeCalls += 1;
+        return Promise.resolve(successfulMediaResponse());
+      }
+    };
+    global.fetch = () => {
+      rendererCalls += 1;
+      return Promise.resolve(successfulMediaResponse());
+    };
+    const response = await plugin.fetchMediaCacheResponse('https://cdn.example/legacy');
+    assert.equal(response.ok, true);
+    assert.equal(nativeCalls, 0);
+    assert.equal(rendererCalls, 1);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, null);
+    assert.equal(plugin.getMediaCacheTransportSelection(), 'legacy');
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-cache fetch falls back to renderer and latches compatibility when native API is missing', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    global.AbortController = class {
+      constructor() { return mockAbortControllerWithSignalCapture().controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    let rendererCalls = 0;
+    plugin._mediaCacheNativeFetchCompatible = null;
+    global.BdApi.Net = undefined;
+    global.fetch = () => {
+      rendererCalls += 1;
+      return Promise.resolve(successfulMediaResponse());
+    };
+    const response = await plugin.fetchMediaCacheResponse('https://cdn.example/missing');
+    assert.equal(response.ok, true);
+    assert.equal(rendererCalls, 1);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-cache fetch latches native incompatibility on synchronous throw and does not reprobe', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const controllerState = mockAbortControllerWithSignalCapture();
+    global.AbortController = class {
+      constructor() { return controllerState.controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    let nativeCalls = 0;
+    let rendererCalls = 0;
+    let firstRequest = true;
+    global.BdApi.Net = {
+      fetch() {
+        if (firstRequest) {
+          firstRequest = false;
+          throw new Error('sync throw');
+        }
+        nativeCalls += 1;
+        return Promise.resolve(successfulMediaResponse());
+      }
+    };
+    global.fetch = () => {
+      rendererCalls += 1;
+      return Promise.resolve(successfulMediaResponse());
+    };
+    const first = await plugin.fetchMediaCacheResponse('https://cdn.example/throw');
+    assert.equal(first.ok, true);
+    assert.equal(rendererCalls, 1);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
+    await plugin.fetchMediaCacheResponse('https://cdn.example/throw');
+    assert.equal(nativeCalls, 0);
+    assert.equal(rendererCalls, 2);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-cache fetch latches native incompatibility on non-thenable return and does not reprobe', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const controllerState = mockAbortControllerWithSignalCapture();
+    global.AbortController = class {
+      constructor() { return controllerState.controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    let nativeCalls = 0;
+    let rendererCalls = 0;
+    global.BdApi.Net = {
+      fetch() {
+        nativeCalls += 1;
+        return { ok: true };
+      }
+    };
+    global.fetch = () => {
+      rendererCalls += 1;
+      return Promise.resolve(successfulMediaResponse());
+    };
+    await plugin.fetchMediaCacheResponse('https://cdn.example/non-thenable');
+    assert.equal(rendererCalls, 1);
+    assert.equal(nativeCalls, 1);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
+    await plugin.fetchMediaCacheResponse('https://cdn.example/non-thenable');
+    assert.equal(rendererCalls, 2);
+    assert.equal(nativeCalls, 1);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-cache fetch latches native incompatibility when then getter throws during async shape check', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const controllerState = mockAbortControllerWithSignalCapture();
+    global.AbortController = class {
+      constructor() { return controllerState.controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    plugin._mediaCacheNativeFetchCompatible = null;
+    let nativeCalls = 0;
+    const thenError = new Error('bad then');
+    const invalidThenable = {};
+    Object.defineProperty(invalidThenable, 'then', {
+      get() {
+        throw thenError;
+      }
+    });
+    global.BdApi.Net = {
+      fetch() {
+        nativeCalls += 1;
+        return invalidThenable;
+      }
+    };
+    let rendererCalls = 0;
+    global.fetch = () => {
+      rendererCalls += 1;
+      return Promise.resolve(successfulMediaResponse());
+    };
+    const response = await plugin.fetchMediaCacheResponse('https://cdn.example/then-getter');
+    assert.equal(response.ok, true);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
+    assert.equal(nativeCalls, 1);
+    assert.equal(rendererCalls, 1);
+    const secondResponse = await plugin.fetchMediaCacheResponse('https://cdn.example/then-getter');
+    assert.equal(secondResponse.ok, true);
+    assert.equal(rendererCalls, 2);
+    assert.equal(nativeCalls, 1);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-cache fetch keeps native path on async rejection and recovers on later native success', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const controllerState = mockAbortControllerWithSignalCapture();
+    global.AbortController = class {
+      constructor() { return controllerState.controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    plugin._mediaCacheNativeFetchCompatible = null;
+    let nativeCalls = 0;
+    const networkError = new Error('async reject');
+    global.BdApi.Net = {
+      fetch() {
+        nativeCalls += 1;
+        if (nativeCalls === 1) return Promise.reject(networkError);
+        return Promise.resolve(successfulMediaResponse());
+      }
+    };
+    let rendererCalls = 0;
+    global.fetch = () => {
+      rendererCalls += 1;
+      return Promise.resolve(successfulMediaResponse());
+    };
+    await assert.rejects(
+      () => plugin.fetchMediaCacheResponse('https://cdn.example/reject'),
+      /async reject/
+    );
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, true);
+    assert.equal(nativeCalls, 1);
+    assert.equal(rendererCalls, 0);
+    const response = await plugin.fetchMediaCacheResponse('https://cdn.example/reject');
+    assert.equal(response.ok, true);
+    assert.equal(nativeCalls, 2);
+    assert.equal(rendererCalls, 0);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-cache fetch keeps native compatibility on HTTP failure and continues native next request', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const controllerState = mockAbortControllerWithSignalCapture();
+    global.AbortController = class {
+      constructor() { return controllerState.controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    let nativeCalls = 0;
+    global.BdApi.Net = {
+      fetch() {
+        nativeCalls += 1;
+        if (nativeCalls === 1) {
+          return Promise.resolve({
+            ok: false,
+            status: 404,
+            headers: { get: () => 'image/png' },
+            arrayBuffer: async () => new Uint8Array([0x4d]).buffer
+          });
+        }
+        return Promise.resolve(successfulMediaResponse());
+      }
+    };
+    global.fetch = () => assert.fail('renderer should not be used for HTTP failures');
+    const response = await plugin.fetchMediaCacheResponse('https://cdn.example/http-failure');
+    assert.equal(response.status, 404);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, true);
+    const successResponse = await plugin.fetchMediaCacheResponse('https://cdn.example/http-failure');
+    assert.equal(successResponse.ok, true);
+    assert.equal(nativeCalls, 2);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-cache fetch preserves caller options while forcing native timeout null', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const sharedHeaders = { 'X-Test': 'options' };
+    const options = {
+      method: 'GET',
+      headers: sharedHeaders,
+      timeout: 1000
+    };
+    let nativeInit;
+    global.AbortController = class {
+      constructor() { return mockAbortControllerWithSignalCapture().controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    plugin._mediaCacheNativeFetchCompatible = null;
+    global.BdApi.Net = {
+      fetch(_, init) {
+        nativeInit = init;
+        return Promise.resolve(successfulMediaResponse());
+      }
+    };
+    global.fetch = () => assert.fail('renderer should not be used for native defaults');
+    const response = await plugin.fetchMediaCacheResponse('https://cdn.example/options', options);
+    assert.equal(response.ok, true);
+    assert.equal(nativeInit.method, options.method);
+    assert.equal(nativeInit.headers, sharedHeaders);
+    assert.equal(nativeInit.timeout, null);
+    assert.notEqual(options.timeout, null);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, true);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
   }
 });
 

@@ -11899,7 +11899,36 @@ module.exports = class MessageLoggerV2 {
     if (!record) return this.cachedMessageRecord.find(m => m.id == id);
     return record.message;
   }
-  async fetchMediaCacheResponse(url) {
+  fetchMediaNetworkResponse(url, options = {}) {
+    if (this.settings?.forceLegacyMediaFetching || this._mediaCacheNativeFetchCompatible === false) {
+      return fetch(url, options);
+    }
+    const netApi = globalThis.BdApi?.Net;
+    const nativeFetch = netApi?.fetch;
+    if (typeof nativeFetch !== 'function') {
+      this._mediaCacheNativeFetchCompatible = false;
+      return fetch(url, options);
+    }
+
+    let response;
+    try {
+      response = nativeFetch.call(netApi, url, {
+        ...options,
+        timeout: null
+      });
+      if (response == null || typeof response.then !== 'function') {
+        this._mediaCacheNativeFetchCompatible = false;
+        return fetch(url, options);
+      }
+    } catch (error) {
+      this._mediaCacheNativeFetchCompatible = false;
+      return fetch(url, options);
+    }
+    this._mediaCacheNativeFetchCompatible = true;
+    return response;
+  }
+  async fetchMediaCacheResponse(url, options = {}) {
+    const requestOptions = options && typeof options === 'object' ? { ...options } : {};
     const configuredTimeout = Number(this._mediaCacheFetchTimeoutMs);
     const timeoutMs = Number.isFinite(configuredTimeout)
       ? Math.max(1, configuredTimeout)
@@ -11909,7 +11938,7 @@ module.exports = class MessageLoggerV2 {
       let timeout;
       try {
         return await Promise.race([
-          fetch(url),
+          this.fetchMediaNetworkResponse(url, requestOptions),
           new Promise((_, reject) => {
             timeout = setTimeout(() => {
               const error = new Error('Media cache request timed out');
@@ -11935,7 +11964,13 @@ module.exports = class MessageLoggerV2 {
     controller.signal.addEventListener('abort', onAbort, { once: true });
     timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      return await Promise.race([fetch(url, { signal: controller.signal }), aborted]);
+      return await Promise.race([
+        this.fetchMediaNetworkResponse(url, {
+          ...requestOptions,
+          signal: controller.signal
+        }),
+        aborted
+      ]);
     } finally {
       clearTimeout(timeout);
       controller.signal.removeEventListener('abort', onAbort);
