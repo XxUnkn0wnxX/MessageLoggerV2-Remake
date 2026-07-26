@@ -56,22 +56,21 @@ review, checklist update, and commit must also be complete.
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/settings-recovery.test.js`, `tests/source-contracts.test.js`,
   `docs/settings.md`, `docs/tests.md`, and this checklist.
-- **Live plugin:** Intentionally not updated. The user requires a pre-live
-  report and separate authorization before any copy to the BetterDiscord
-  plugins directory. Read-only SHA-256 comparison confirms the repository
-  plugin is `430d2e995d025bf883c365815230555419ba90fab1b8d223277101fb9d53fc3e`
-  and the live plugin is
-  `9ed4872e4f342e46ca69a8a68c8aa054ce2a7cb2532a9dc1bdcdef73fec92c99`.
+- **Live plugin:** Updated after the user's separate authorization on
+  2026-07-27. Repository and live SHA-256 are both
+  `430d2e995d025bf883c365815230555419ba90fab1b8d223277101fb9d53fc3e`.
+  Discord was not relaunched; its hot reload initialized the plugin and resumed
+  successful media-cache events without a startup error in `debug.log`.
 - **Publishing authority:** The user explicitly authorized pushing both working
   branches to `origin` on 2026-07-26. No merge into `develop`/`main` is
   authorized.
 
 ### Exact next action
 
-Report the completed Stage 5A gate and stop. Do not copy or sync the plugin into
-the live BetterDiscord plugins path. After separate explicit authorization,
-copy only `MessageLoggerV2.plugin.js`, verify hash parity, and run the relevant
-`RT-26` live checks.
+Wait for the user's `RT-26` results. Record each live pass or failure before
+changing behavior. If a failure occurs, inspect `debug.log` and gather
+trace-first evidence before patching. If the live checks pass, tick the
+remaining Stage 6 gate and commit the final runtime result.
 
 ### Resume procedure for a new session
 
@@ -139,8 +138,8 @@ recorded as an amendment before implementation.
 - [x] Response-body inactivity hardening approved as a separate pre-live stage.
 - [x] Stage 5A response-body inactivity hardening implemented and verified.
 - [x] Post-hardening final audit completed and pre-live report prepared.
-- [x] Live BetterDiscord verification explicitly deferred without execution at
-      the user-required pre-live stop gate.
+- [x] Live plugin sync separately authorized, completed, and hash-verified.
+- [ ] User `RT-26` live behavior result received and recorded.
 - [x] Final implementation committed.
 
 ## Problem being solved
@@ -723,13 +722,14 @@ Stage 5A commit/result:
 
 ## Stage 6 — Live BetterDiscord verification
 
-- [x] **Explicitly deferred without execution.** The user instructed this run
-      to report and stop before live sync, then wait for separate authorization.
-      The following runbook is retained for that authorized follow-up:
-  - Copy only `MessageLoggerV2.plugin.js` into the live BetterDiscord plugins
-    directory.
-  - Compare hashes and confirm the live plugin matches the repository file.
-  - Do not relaunch Discord automatically.
+- [x] The user separately authorized live sync on 2026-07-27.
+- [x] Copied only `MessageLoggerV2.plugin.js` into the live BetterDiscord
+      plugins directory.
+- [x] Verified repository/live SHA-256 parity.
+- [x] Did not relaunch Discord.
+- [x] Confirmed the hot-reloaded plugin initialized and resumed media caching
+      without a startup error in the current `debug.log`.
+- [ ] Complete and record the remaining user-driven `RT-26` behavior checks:
   - Verify default native routing with a normal Discord CDN URL.
   - Verify the previously failing Waifugami cross-origin URL.
   - Verify an HTTP/mixed-content media URL.
@@ -750,12 +750,14 @@ Stage 5A commit/result:
 
 Live result:
 
-- Date: 2026-07-26 pre-live stop gate.
-- BetterDiscord/runtime version: Not probed in this implementation run.
-- Result: **DEFERRED — no live copy or live behavior test was performed.**
-- Notes: Read-only hashes differ, which is expected and proves the repository
-  implementation was not synced. `RT-26` contains the authorized follow-up
-  matrix.
+- Date: 2026-07-27 authorized live sync.
+- BetterDiscord/runtime version: Not separately probed.
+- Result: **SYNCED / BASIC HOT-RELOAD PASS — USER `RT-26` TESTING PENDING.**
+- Notes: Repository and live SHA-256 both equal
+  `430d2e995d025bf883c365815230555419ba90fab1b8d223277101fb9d53fc3e`.
+  The current `debug.log` shows plugin cleanup, reinitialization, patch
+  completion, and subsequent successful `Cached image` entries without a
+  matching startup exception.
 
 ## Final branch gate
 
@@ -763,8 +765,8 @@ Live result:
       explicitly deferred with a reason.
 - [x] Full test suite passes after Stage 5A.
 - [x] `git diff --check` passes after Stage 5A.
-- [x] Live hash parity explicitly deferred: read-only hashes intentionally
-      differ because no live sync was authorized or performed.
+- [x] Live hash parity verified after separate user authorization.
+- [ ] Remaining user-driven `RT-26` behavior result recorded.
 - [x] No unrelated attachment-gate implementation was included.
 - [x] No version or built-in changelog change was included without approval.
 - [x] Working-branch pushes were performed only after explicit approval.
@@ -801,6 +803,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-27 | Stage 5A draft audit | The first draft could still wait forever for a non-cooperative stream-cancel promise, retained retryable HTTP response bodies during backoff, and broke one existing central-handler source contract. Coverage also did not yet prove total transfer time beyond the idle window, body cancellation without `AbortController`, or stalled `arrayBuffer()` fallback. | Reported before correction; user approved the bounded fixes |
 | 2026-07-27 | Stage 5A result | Implemented the approved rolling response-body watchdog, bounded non-cooperative cleanup, retry-response release, logical no-`AbortController` cancellation, streamless fallback escape, and deterministic coverage. The full suite passes `373/373`; an independent final review found no blocking defect. | Implementation commit `9e5871c75039fc34f262598854701083190df1fd` and final verification |
 | 2026-07-27 | Compatibility note | Retain only a historical mention of the malformed third-party `BdApi.Net.fetch` shape. Both supported BetterDiscord targets at `470ce77f` and `aa241f9` expose async Promise-returning methods, so no production hardening or open checklist work is planned for this theoretical unsupported-host case. | User judged the case very unlikely and asked to scrub it as an issue while retaining a mention |
+| 2026-07-27 | Stage 6 | After the required pre-live report, the user separately authorized live sync. The single plugin file was copied, hash parity was verified, and current log evidence showed a clean hot reload plus successful media-cache activity. The remaining `RT-26` behavior matrix now requires user interaction. | User live-sync authorization and runtime log evidence |
 
 ## Handoff activity log
 
@@ -1174,6 +1177,28 @@ evidence for another session to understand what changed and why.
   (`docs: record completed media watchdog`).
 - **Exact next action:** Report and stop. Wait for explicit live-sync
   authorization before copying the plugin or running `RT-26`.
+
+### 2026-07-27 — Authorized live sync and test handoff
+
+- **Completed:** Re-ran the full automated suite, copied only
+  `MessageLoggerV2.plugin.js` into the active BetterDiscord plugins directory,
+  verified exact hash parity, and inspected the current runtime log after the
+  hot reload.
+- **Decisions:** Do not relaunch Discord. Stop for the user's manual `RT-26`
+  checks; use trace-first diagnosis if any check fails.
+- **Files changed:** Live `MessageLoggerV2.plugin.js` plus this checklist. No
+  repository plugin code changed after implementation commit `9e5871c`.
+- **Tests and exact results:** PASS — pre-sync `npm test` `373/373`; live plugin
+  syntax check; repository/live `cmp`; SHA-256 parity.
+- **Runtime evidence:** `debug.log` advanced after the copy and showed plugin
+  cleanup/reinitialization, patch completion, and successful `Cached image`
+  events without a matching startup error.
+- **Failures or blockers:** Automated and basic load gates have no blocker.
+  The remaining checks require the user to exercise real URLs, cancellation,
+  and force-mode behavior inside Discord.
+- **Commit:** `<pending-live-sync-checkpoint>`.
+- **Exact next action:** Give the user the short `RT-26` test instructions and
+  wait for results before making any further code change.
 
 ### Handoff entry template
 
