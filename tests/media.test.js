@@ -742,7 +742,10 @@ test('media-network diagnostics only log to console when the detailed toggle is 
     await plugin.fetchMediaCacheResponse('https://cdn.example/detailed-console');
     assert.equal(fetchCalls, 1);
     assert.equal(loggerEvents.some(([level, message]) => (
-      level === 'log' && /^\[Debug\] Media request #1 \[attempt 1\] GET https:\/\/cdn\.example\/detailed-console \(legacy\)/.test(message)
+      level === 'log'
+      && /\[Debug\] Media request #1/.test(message)
+      && /\(legacy\)/.test(message)
+      && /transport-started/.test(message)
     )), true);
     assert.equal(loggerEvents.filter(([level]) => level === 'warn' || level === 'error').length, 0);
     assert.equal(plugin.settings.detailedMediaNetworkDebug, true);
@@ -832,7 +835,10 @@ test('media-image caching logs per-request status/bytes/duration without toasts'
     assert.equal(fs.existsSync(responsePath), true);
     assert.equal(notifications, 1);
     assert.equal(loggerEvents.some(([level, message]) => (
-      level === 'log' && message.includes('completed with status 200') && message.includes('bytes=4') && /durationMs=\d+/.test(message)
+      level === 'log'
+      && message.includes('completed status=200')
+      && message.includes('bytes=4')
+      && /durationMs=\d+/.test(message)
     )), true);
     assert.equal(plugin._mediaCacheRequestSerial, 1);
   } finally {

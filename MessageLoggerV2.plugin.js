@@ -65,7 +65,7 @@ const DiscordModules = (() => {
         const result = getter();
         if (result != null) cache[key] = result;
         return result ?? null;
-      } catch (e) {
+  } catch (e) {
         Logger.error(`Failed to load module: ${key}`, e);
         return null;
       }
@@ -309,6 +309,7 @@ module.exports = class MessageLoggerV2 {
     this._mediaCacheRequestSerial = 0;
     this._pendingMediaCacheRequests = new Map();
     this._activeDeferredMediaCacheRequests = new Map();
+    this._mediaNetworkRequestContextByResponse = new WeakMap();
     this._mediaCacheAbortControllers = new Set();
     this._mediaCacheNativeFetchCompatible = null;
     this._mediaCacheLegacyRoutingNoticeState = null;
@@ -3799,34 +3800,95 @@ module.exports = class MessageLoggerV2 {
     return this._mediaCacheRequestSerial;
   }
   _createMediaNetworkRequestContext(url, options = {}) {
-    const method = typeof options?.method === 'string' && options.method
-      ? options.method.toUpperCase()
-      : 'GET';
+    let safeUrl = '[unprintable-url]';
+    let safeMethod = 'GET';
+    try {
+      safeUrl = String(url);
+    } catch {}
+    try {
+      const method = options?.method;
+      safeMethod = typeof method === 'string' && method
+        ? method.toUpperCase()
+        : 'GET';
+    } catch {
+      safeMethod = 'GET';
+    }
     return {
       id: this._nextMediaNetworkRequestId(),
-      url,
-      method,
+      url: safeUrl,
+      method: safeMethod,
       route: 'unknown',
       startedAtMs: Date.now(),
-      attempt: 0
+      bytes: 0,
+      terminal: false
     };
   }
   _isDetailedMediaNetworkDebugEnabled() {
     return !!(this.settings?.debugLogging && this.settings?.detailedMediaNetworkDebug);
   }
+  _startMediaNetworkTransport(trace, route = 'unknown') {
+    if (!trace || !trace.id) return;
+    if (!trace.started) {
+      trace.started = true;
+      trace.route = route || 'unknown';
+      this._reportMediaNetworkDebug(trace, 'transport-started');
+      return;
+    }
+    if (route) trace.route = route;
+  }
   _reportMediaNetworkDebug(context, event, details = '') {
-    if (!this._isDetailedMediaNetworkDebugEnabled()) return;
-    if (!context || !context.id) return;
-    const attemptLabel = Number.isInteger(context.attempt) ? `attempt ${context.attempt}` : 'attempt unknown';
-    const route = context.route || 'unknown';
-    const prefix = `Media request #${context.id}`;
-    const destination = `${context.method} ${context.url}`;
-    const suffix = details ? `: ${details}` : '';
-    this.reportDebugEvent(
-      `${prefix} [${attemptLabel}] ${destination} (${route}) ${event}${suffix}`,
-      4000,
-      { console: true, toast: false }
-    );
+    try {
+      if (!this._isDetailedMediaNetworkDebugEnabled()) return;
+      if (!context || !context.id) return;
+      const route = context.route || 'unknown';
+      const destination = `${context.method || 'GET'} ${context.url || '[unprintable-url]'}`;
+      const detailPrefix = typeof event === 'string' ? event.trim() : '';
+      const detailSuffix = typeof details === 'string'
+        ? details.trim()
+        : details == null ? '' : String(details);
+      const detail = detailPrefix ? ` ${detailPrefix}` : '';
+      const extra = detailSuffix ? `${detailPrefix ? ' ' : ' '}${detailSuffix}` : '';
+      this.reportDebugEvent(
+        `Media request #${context.id} ${destination} (${route})${detail}${extra}`,
+        4000,
+        { console: true, toast: false }
+      );
+    } catch {
+    }
+  }
+  _classifyMediaNetworkOutcome(error, abortHandle) {
+    const message = (error && error.message) ? String(error.message) : '';
+    if (message.includes('timed out')) return 'timeout';
+    if ((error && error.name === 'AbortError') || abortHandle?.aborted) return 'cancelled';
+    return 'failed';
+  }
+  _safeMediaNetworkResponseStatus(response) {
+    try {
+      const status = response?.status;
+      return Number.isFinite(status) ? status : null;
+    } catch {
+      return null;
+    }
+  }
+  _reportMediaNetworkOutcome(context, outcome, options = {}) {
+    if (!context || !context.id || context.terminal) return;
+    context.terminal = true;
+    const elapsedMs = context.startedAtMs ? Date.now() - context.startedAtMs : null;
+    const safeBytes = Number.isFinite(context.bytes) ? context.bytes : 0;
+    const status = Number.isFinite(context.responseStatus)
+      ? context.responseStatus
+      : this._safeMediaNetworkResponseStatus(options.response || options.requestResponse);
+    const includeStatus = options.includeStatus !== false && Number.isFinite(status);
+    const statusText = includeStatus ? ` status=${status}` : '';
+    const elapsedText = elapsedMs == null ? '' : ` durationMs=${elapsedMs}`;
+    const bytesText = ` bytes=${safeBytes}`;
+    const extraText = options.extra ? ` ${options.extra}` : '';
+    const destination = `${context.method || 'GET'} ${context.url || '[unprintable-url]'}`;
+    const details = `${outcome}${statusText}${extraText}${bytesText}${elapsedText}`;
+    context.elapsedMs = elapsedMs;
+    context.route = context.route || 'unknown';
+    this._reportMediaNetworkDebug(context, details);
+    return `${context.route} ${destination} ${outcome}${statusText}${bytesText}${elapsedText}`;
   }
   queueAutoBackup(delayMs, reason = 'queued') {
     this.saveBackupTimeout = setTimeout(() => this.saveBackup(), delayMs);
@@ -12062,12 +12124,10 @@ module.exports = class MessageLoggerV2 {
   }
   fetchMediaNetworkResponse(url, options = {}, requestContext = null) {
     const context = requestContext || this._createMediaNetworkRequestContext(url, options);
-    context.attempt += 1;
-    this._reportMediaNetworkDebug(context, 'routing check');
     if (this.settings?.forceLegacyMediaFetching || this._mediaCacheNativeFetchCompatible === false) {
-      context.route = 'legacy';
+      this._startMediaNetworkTransport(context, 'legacy');
       this._activateMediaCacheLegacyRoutingNotice();
-      this._reportMediaNetworkDebug(context, 'forced legacy routing (renderer fetch)');
+      this._reportMediaNetworkDebug(context, 'legacy routing (renderer fetch forced)');
       return fetch(url, options);
     }
     let netApi;
@@ -12076,14 +12136,14 @@ module.exports = class MessageLoggerV2 {
       netApi = this._getMediaCacheNetApi();
       nativeFetch = netApi?.fetch;
     } catch (error) {
-      context.route = 'legacy';
+      this._startMediaNetworkTransport(context, 'legacy');
       this._mediaCacheNativeFetchCompatible = false;
       this._activateMediaCacheLegacyRoutingNotice();
       this._reportMediaNetworkDebug(context, 'native fetch getter failed, falling back to legacy renderer fetch', error?.message);
       return fetch(url, options);
     }
     if (typeof nativeFetch !== 'function') {
-      context.route = 'legacy';
+      this._startMediaNetworkTransport(context, 'legacy');
       this._mediaCacheNativeFetchCompatible = false;
       this._activateMediaCacheLegacyRoutingNotice();
       this._reportMediaNetworkDebug(context, 'native fetch was not a function, falling back to legacy renderer fetch');
@@ -12092,21 +12152,21 @@ module.exports = class MessageLoggerV2 {
 
     let response;
     try {
-      context.route = 'native';
+      this._startMediaNetworkTransport(context, 'native');
       this._reportMediaNetworkDebug(context, 'using BetterDiscord native fetch');
       response = nativeFetch.call(netApi, url, {
         ...options,
         timeout: 0
       });
       if (response == null || typeof response.then !== 'function') {
-        context.route = 'legacy';
+        this._startMediaNetworkTransport(context, 'legacy');
         this._reportMediaNetworkDebug(context, 'native fetch promise check failed, falling back to legacy renderer fetch');
         this._mediaCacheNativeFetchCompatible = false;
         this._activateMediaCacheLegacyRoutingNotice();
         return fetch(url, options);
       }
     } catch (error) {
-      context.route = 'legacy';
+      this._startMediaNetworkTransport(context, 'legacy');
       this._reportMediaNetworkDebug(context, 'native fetch threw, falling back to legacy renderer fetch', error?.message);
       this._mediaCacheNativeFetchCompatible = false;
       this._activateMediaCacheLegacyRoutingNotice();
@@ -12155,7 +12215,7 @@ module.exports = class MessageLoggerV2 {
     }
     return handle;
   }
-  _createManagedMediaCacheResponse(response, abortHandle, bodyTimeoutMs) {
+  _createManagedMediaCacheResponse(response, abortHandle, bodyTimeoutMs, requestContext = null) {
     const configuredTimeout = Number(bodyTimeoutMs);
     const resolvedTimeoutMs = Number.isFinite(configuredTimeout)
       ? Math.max(1, configuredTimeout)
@@ -12165,7 +12225,9 @@ module.exports = class MessageLoggerV2 {
       finalizing: false,
       bodyReadPromise: null,
       bodyTimeout: 0,
-      finalizationPromise: null
+      finalizationPromise: null,
+      readError: null,
+      bodyReadCompleted: false
     };
     const clearBodyTimeout = () => {
       if (!state.bodyTimeout) return;
@@ -12197,6 +12259,9 @@ module.exports = class MessageLoggerV2 {
       state.finalizing = true;
       clearBodyTimeout();
       this._mediaCacheAbortControllers?.delete?.(abortHandle);
+      if (requestContext && this._mediaNetworkRequestContextByResponse instanceof WeakMap) {
+        this._mediaNetworkRequestContextByResponse.delete(responseWrapper);
+      }
       const reader = state.reader;
       if (state.reader) {
         state.reader = null;
@@ -12217,6 +12282,37 @@ module.exports = class MessageLoggerV2 {
         try {
           reader.releaseLock();
         } catch {}
+      }).then(async () => {
+        if (!requestContext || requestContext.terminal) return;
+        if (state.bodyReadCompleted) {
+          this._reportMediaNetworkOutcome(
+            requestContext,
+            'completed',
+            { response: response, includeStatus: true }
+          );
+          return;
+        }
+        if (state.readError) {
+          this._reportMediaNetworkOutcome(
+            requestContext,
+            this._classifyMediaNetworkOutcome(state.readError, abortHandle),
+            { response: response, includeStatus: false }
+          );
+          return;
+        }
+        if (abortHandle?.aborted) {
+          this._reportMediaNetworkOutcome(
+            requestContext,
+            this._classifyMediaNetworkOutcome(null, abortHandle),
+            { response: response, includeStatus: false }
+          );
+          return;
+        }
+        this._reportMediaNetworkOutcome(
+          requestContext,
+          'released',
+          { response: response, includeStatus: false }
+        );
       });
       state.finalizationPromise = finalizationPromise;
       if (options.awaitCleanup) {
@@ -12240,7 +12336,9 @@ module.exports = class MessageLoggerV2 {
               continue;
             }
             chunks.push(chunk);
-            totalLength += chunk.byteLength;
+            const chunkLength = chunk.byteLength;
+            totalLength += chunkLength;
+            if (requestContext) requestContext.bytes = (requestContext.bytes || 0) + chunkLength;
             resetBodyTimeout();
           }
           const buffer = new Uint8Array(totalLength);
@@ -12249,9 +12347,11 @@ module.exports = class MessageLoggerV2 {
             buffer.set(chunk, offset);
             offset += chunk.byteLength;
           }
+          state.bodyReadCompleted = true;
           return buffer.buffer;
         } catch (error) {
           failed = true;
+          state.readError = error;
           throw error;
         } finally {
           await finalize({
@@ -12267,9 +12367,12 @@ module.exports = class MessageLoggerV2 {
           response.arrayBuffer(),
           abortHandle.promise
         ]);
+        if (result && result.byteLength != null && requestContext) requestContext.bytes = result.byteLength;
+        state.bodyReadCompleted = true;
         return result;
       } catch (error) {
         failed = true;
+        state.readError = error;
         throw error;
       } finally {
         await finalize({
@@ -12278,7 +12381,7 @@ module.exports = class MessageLoggerV2 {
         });
       }
     };
-    return {
+    const responseWrapper = {
       response,
       get ok() { return response.ok; },
       get status() { return response.status; },
@@ -12297,11 +12400,14 @@ module.exports = class MessageLoggerV2 {
         return finalize({ awaitCleanup: true, cancelReader: true });
       }
     };
+    if (requestContext && requestContext.id) {
+      this._mediaNetworkRequestContextByResponse?.set(responseWrapper, requestContext);
+    }
+    return responseWrapper;
   }
   async fetchMediaCacheResponse(url, options = {}) {
     const requestOptions = options && typeof options === 'object' ? { ...options } : {};
     const requestContext = this._createMediaNetworkRequestContext(url, requestOptions);
-    this._reportMediaNetworkDebug(requestContext, 'start');
     const configuredTimeout = Number(this._mediaCacheFetchTimeoutMs);
     const timeoutMs = Number.isFinite(configuredTimeout)
       ? Math.max(1, configuredTimeout)
@@ -12340,18 +12446,20 @@ module.exports = class MessageLoggerV2 {
         requestContext.responseStatusText = response?.statusText;
         requestContext.responseReceivedAtMs = Date.now();
         requestContext.completedAtMs = Date.now();
-        this._reportMediaNetworkDebug(requestContext, 'response received');
-      }
-      if (response == null && abortHandle.reason) {
-        this._reportMediaNetworkDebug(requestContext, `response missing: ${abortHandle.reason?.message || abortHandle.reason}`);
+        this._reportMediaNetworkDebug(requestContext, 'response acquired');
       }
     } catch (error) {
       if (requestContext) {
         requestContext.error = error;
         requestContext.completedAtMs = Date.now();
-        this._reportMediaNetworkDebug(
+        this._reportMediaNetworkOutcome(
           requestContext,
-          `failed while routing: ${error?.name || 'Error'}${error?.message ? ` (${error.message})` : ''}`
+          this._classifyMediaNetworkOutcome(error, abortHandle),
+          {
+            response: null,
+            includeStatus: false,
+            extra: `${error?.name || 'Error'}${error?.message ? ` (${error.message})` : ''}`
+          }
         );
       }
       throw error;
@@ -12364,12 +12472,17 @@ module.exports = class MessageLoggerV2 {
     if (response == null) {
       const error = abortHandle.reason || new Error('Media cache request timed out');
       if (!error.name) error.name = 'AbortError';
+      if (requestContext) {
+        requestContext.completedAtMs = Date.now();
+        this._reportMediaNetworkOutcome(
+          requestContext,
+          this._classifyMediaNetworkOutcome(error, abortHandle),
+          { response: null, includeStatus: false, extra: error.message || '' }
+        );
+      }
       throw error;
     }
-    const responseWrapper = this._createManagedMediaCacheResponse(response, abortHandle, bodyTimeoutMs);
-    if (requestContext && responseWrapper && typeof responseWrapper === 'object') {
-      responseWrapper.__mlv2MediaNetworkContext = requestContext;
-    }
+    const responseWrapper = this._createManagedMediaCacheResponse(response, abortHandle, bodyTimeoutMs, requestContext);
     return responseWrapper;
   }
   getMediaCacheTransportSelection() {
@@ -12416,17 +12529,14 @@ module.exports = class MessageLoggerV2 {
     let elapsedMs;
     try {
       response = await this.fetchMediaCacheResponse(url);
-      requestContext = response?.__mlv2MediaNetworkContext;
+      requestContext = this._mediaNetworkRequestContextByResponse?.get(response) || null;
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       if (!response.ok) {
-        this._reportMediaNetworkDebug(requestContext, `HTTP ${response.status}`);
         await (response?.release?.() ?? response?.releaseBody?.() ?? Promise.resolve());
+        if (requestContext) this._reportMediaNetworkOutcome(requestContext, 'completed', { response, includeStatus: true });
         if (response.status === 404 || response.status === 403) {
           Logger.warn(`Image ${attachmentId} unavailable (${response.status}), skipping cache`);
-          this._reportMediaNetworkDebug(
-            requestContext,
-            `completed with unrecoverable status ${response.status}`
-          );
+          if (requestContext) this._reportMediaNetworkOutcome(requestContext, `completed with unrecoverable status ${response?.status}`, { extra: `code=${response?.status}`, includeStatus: false });
           if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
             this.reportDeferredMediaCacheFailure(
               attachmentId,
@@ -12438,9 +12548,10 @@ module.exports = class MessageLoggerV2 {
         attempts++;
         if (attempts >= maxAttempts) {
           Logger.warn(`Failed to get image ${attachmentId} for caching, error code ${response.status}`);
-          this._reportMediaNetworkDebug(
+          if (requestContext) this._reportMediaNetworkOutcome(
             requestContext,
-            `completed with retry limit exceeded (status=${response.status})`
+            `completed with retry limit exceeded status=${response?.status}`,
+            { includeStatus: false }
           );
           if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
             this.reportDeferredMediaCacheFailure(
@@ -12488,20 +12599,24 @@ module.exports = class MessageLoggerV2 {
       const authorId = this.messageRecord[messageId]?.message?.author?.id || this.cachedMessagesMap.get(messageId)?.author?.id;
       this.nodeModules.fs.writeFileSync(filePath + `/${fileId} (${messageId}${(this.settings.addUserIdToSavedMediaFilename && authorId) ? (" by " + authorId) : ""
       })${fileExtension}`, finalData, { encoding: null });
-      Logger.log(`Cached image: ${fileId}${fileExtension}`);
-      this._reportMediaNetworkDebug(
-        requestContext,
-        `completed with status ${response.status}${requestContext?.bytes != null ? ` bytes=${requestContext.bytes}` : ''}${elapsedMs != null ? ` durationMs=${elapsedMs}` : ''}`
-      );
+        Logger.log(`Cached image: ${fileId}${fileExtension}`);
+      if (requestContext) {
+        this._reportMediaNetworkOutcome(requestContext, 'completed', {
+          response,
+          includeStatus: true
+        });
+      }
     } catch (e) {
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       attempts++;
       if (attempts >= maxAttempts) {
         Logger.error(`Failed to cache image ${attachmentId}:`, e.message);
-        this._reportMediaNetworkDebug(
-          requestContext,
-          `failed with ${e?.name || 'Error'}${e?.message ? ` (${e.message})` : ''} after ${attempts} attempts`
-        );
+        if (requestContext) {
+          this._reportMediaNetworkOutcome(
+            requestContext,
+            `failed with ${e?.name || 'Error'}${e?.message ? ` (${e.message})` : ''} after ${attempts} attempts`
+          );
+        }
         if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
           this.reportDeferredMediaCacheFailure(attachmentId, e);
         }

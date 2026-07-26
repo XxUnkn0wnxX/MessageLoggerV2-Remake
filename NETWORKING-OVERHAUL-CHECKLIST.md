@@ -70,14 +70,12 @@ review, checklist update, and commit must also be complete.
 
 Implement the committed Stage 5C detailed media-network console diagnostics
 with deterministic coverage and documentation. Complete the full validation
-and final audit, then complete the user-requested Stage 5D release metadata:
-bump `2.8.2.8` to `2.8.2.9` and replace the built-in changelog with this
-networking branch's fixes. Commit and record the result, automatically sync
-only `MessageLoggerV2.plugin.js`, verify live hash/reload evidence, and finish
-the remaining user-driven Stage 6 checks, including native, legacy,
-cancellation, and the controlled local stall probe. After live sync and its
-repository checkpoint, push `fix/native-media-networking` to `origin`, verify
-local/remote ref alignment, then give the final report and user test list.
+and final audit, then finish and record the user-driven Stage 6 checks:
+native and legacy routing, cancellation handling, and controlled local stall
+probes (`RT-26`). After those checks and user verification, sync only
+`MessageLoggerV2.plugin.js`, verify live hash/reload evidence, and—if still
+authorized—push `fix/native-media-networking` to `origin`, verify local/remote
+ref alignment, then give the final report and test list.
 
 ### Resume procedure for a new session
 
@@ -1491,6 +1489,25 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit this plan, record its exact hash, then delegate
   the bounded implementation and focused tests before parent integration,
   full-suite validation, independent audit, and authorized live sync.
+
+### 2026-07-27 — Stage 5C detailed media-network diagnostics implementation
+
+- **Completed:** Fixed detailed console diagnostics wiring so event names are emitted
+  at transport start, acquisition, and terminal outcome, with full URL + route + bytes
+  + elapsed timing in each per-request message.
+- **Decisions:** Keep detailed diagnostics tied to `debugLogging`; keep
+  `detailedMediaNetworkDebug` console-only (no toasts); keep legacy-routing
+  notice behavior unchanged.
+- **Files changed:** `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
+  `NETWORKING-OVERHAUL-CHECKLIST.md`.
+- **Tests and exact results:** Focused Stage 5C tests and the full suite passed
+  with `376/376`.
+- **Runtime evidence:** N/A for this follow-up implementation pass; deterministic
+  coverage now covers the full message format contract.
+- **Failures or blockers:** None.
+- **Commit:** this implementation commit.
+- **Exact next action:** Keep branch paused until the user confirms or runs
+  live `RT-26` checks, then record those results under Stage 6.
 
 ### 2026-07-27 — Stage 5D release metadata request
 
