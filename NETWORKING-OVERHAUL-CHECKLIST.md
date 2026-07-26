@@ -1919,10 +1919,10 @@ evidence for another session to understand what changed and why.
   requests and both manual probes used the legacy route.
 - **Failures or blockers:** None for forced legacy, native return, or notice
   de-duplication. Mixed-content is the next direct transport check.
-- **Commit:** Pending this legacy/native runtime-evidence commit; record its
-  exact hash immediately after commit.
-- **Exact next action:** Commit and record this checkpoint, push the branch,
-  then give the user the mixed-content probe.
+- **Commit:** Legacy/native runtime-evidence checkpoint
+  d6825dd02fbcd56d380010a60e787b7767153c9c.
+- **Exact next action:** After this commit record is pushed, give the user the
+  mixed-content probe.
 
 ### Handoff entry template
 
