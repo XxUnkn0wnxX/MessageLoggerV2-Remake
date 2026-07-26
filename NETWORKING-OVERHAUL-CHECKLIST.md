@@ -324,7 +324,7 @@ deleted/restored Discord image
             -> direct renderer fetch()      [local blob]
 
 Logger viewer image
-  -> Logger Copy image action
+  -> Logger Copy media action
        -> same shared Logger clipboard reader
 ```
 
@@ -362,7 +362,7 @@ copy action. The user approved this self-contained replacement:
 - [ ] For deleted/restored live message mounts only, patch the existing native
       Discord **Copy image** action so Logger reads the saved image source.
       Preserve one visible action rather than adding a duplicate.
-- [ ] Add one Logger-owned **Copy image** action to image attachments in the
+- [ ] Add one Logger-owned **Copy media** action to supported media in the
       Logger viewer.
 - [ ] Share one byte-copy helper across both Logger-owned paths. Remote sources
       use direct `BdApi.Net.fetch()`; local `blob:` sources use renderer
@@ -374,6 +374,18 @@ copy action. The user approved this self-contained replacement:
       media diagnostics, cache writes, and Logger record creation.
 - [ ] Remove the obsolete `image-context` clipboard patch. Do not implement the
       separate future **Reveal in folder** feature as part of this fix.
+
+The installed Discord desktop bridge exposes `copyImage(bytes, source)` and
+`copyFile(localPath)`, but no raw video-byte clipboard writer. Match native
+Discord rather than inventing an unsafe temporary-file feature:
+
+- Images, including GIF/WebP/APNG sources which Discord's native image bridge
+  can decode, use the shared byte reader and `copyImage()`.
+- A deleted/restored live mount is patched only when Discord already supplies a
+  native clipboard-copy action for that target.
+- Videos and other non-image remote attachments retain Discord's normal
+  link/save actions. `copyFile()` is not used with a URL because it requires an
+  existing local filesystem path.
 
 ## Boundaries that are not plugin HTTP calls
 
@@ -2067,8 +2079,11 @@ evidence for another session to understand what changed and why.
   deleted/restored image.
 - **Decisions:** Keep the plugin self-contained. Leave ordinary Discord
   messages on Discord's own native action; replace that native action only for
-  deleted/restored Logger records, and add one Logger-owned action in the
-  viewer. Both paths will share the existing local-blob/remote-network split.
+  deleted/restored Logger records, and add one Logger-owned **Copy media**
+  action in the viewer. Both paths will share the existing
+  local-blob/remote-network split. The current Discord bridge has no raw video
+  clipboard writer, so unsupported video/file targets retain native link/save
+  behavior rather than creating temporary files.
 - **Files changed:** This checklist only at this planning checkpoint.
 - **Tests and exact results:** FAIL as expected — the viewer had no image copy
   action. The visible live-chat action was Discord's own action, while Logger's
@@ -2080,7 +2095,8 @@ evidence for another session to understand what changed and why.
   missing action.
 - **Failures or blockers:** Clipboard implementation and deterministic tests
   are required before the two remaining `RT-26` clipboard rows can run.
-- **Commit:** Pending checklist-plan commit.
+- **Commit:** Checklist-plan commit
+  afdce2fb18932fbf5690c9c5e45deab89d3e6a58.
 - **Exact next action:** Commit and record this approved plan, implement the
   shared clipboard reader plus the two scoped menu paths, run the full suite,
   audit edge cases, then sync live for the two remaining runtime checks.
