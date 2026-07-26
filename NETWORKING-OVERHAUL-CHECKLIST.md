@@ -87,14 +87,15 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Give the user the remaining debug-output, update, and clipboard `RT-26` tests
-and wait for their runtime results. Default native routing, cross-origin and
-mixed-content requests, slow body progress, controlled body inactivity,
-file-size enforcement, cache-master and plugin-stop cancellation, forced
-legacy, native return, and activation-scoped notice de-duplication now have
-current live evidence. Keep the audited provisional Anti-Nuke/Ghost-Ping
-media-retention work as a separate post-networking stage in `TODO.md`; do not
-implement it on this networking handoff.
+Give the user the remaining update and clipboard `RT-26` tests and wait for
+their runtime results. Default native routing, cross-origin and mixed-content
+requests, slow body progress, controlled body inactivity, file-size
+enforcement, cache-master and plugin-stop cancellation, forced legacy, native
+return, linked Debug output, pending per-destination delivery, and
+activation-scoped notice de-duplication now have current live evidence. Keep
+the audited provisional Anti-Nuke/Ghost-Ping media-retention work as a separate
+post-networking stage in `TODO.md`; do not implement it on this networking
+handoff.
 
 ### Resume procedure for a new session
 
@@ -996,9 +997,18 @@ Stage 5D plan/result:
         After turning force Off, request `#246` used BetterDiscord native
         fetch and completed the same HTTP 200 / 32-byte response in 0.9
         seconds.
-  - [ ] Verify disabled (master Off), console-only (master On/toast child Off),
+  - [x] Verify disabled (master Off), console-only (master On/toast child Off),
         and both (master On/toast child On) debug output, plus the one
-        destination-specific pending toast after console delivery.
+        destination-specific pending toast after console delivery:
+    - [x] With the master Off, the user observed no toast and both logs stayed
+          free of the routing notice while ordinary media caching continued.
+    - [x] Re-enabling the master with the toast child Off produced exactly one
+          console notice at `18:13:01` UTC and no toast.
+    - [x] Enabling the toast child while legacy routing remained active
+          delivered exactly one pending toast without duplicating the console
+          notice.
+    - [x] Starting a fresh legacy activation with both outputs On produced one
+          new toast and exactly one new console notice at `18:14:29` UTC.
   - [x] Verify only one routing notice appears per legacy activation. Exactly
         one required notice appeared after force was enabled despite multiple
         automatic media requests plus both manual probes using legacy routing.
@@ -1015,8 +1025,8 @@ Live result:
 - Date: 2026-07-27 final Debug-linked `2.8.2.9` live replacement and partial
   `RT-26` run.
 - Result: **FINAL 2.8.2.9 SYNC, HASH, HOT-RELOAD, NATIVE/CORS,
-  SLOW-PROGRESS, CONTROLLED-STALL, AND FILE-SIZE PASS; REMAINING USER RT-26
-  TESTING PENDING.**
+  SLOW-PROGRESS, CONTROLLED-STALL, FILE-SIZE, AND DEBUG-OUTPUT PASS; REMAINING
+  USER RT-26 TESTING PENDING.**
 - Notes: Repository and live SHA-256 both equal
   `260a3f8c2c3bf0534b0ad8ef5a91d62fae83cbce088cc9fab3e0a6917d2cd424`.
   The current logs prove native Discord-CDN success, Waifugami HTTP 200 with
@@ -1030,7 +1040,10 @@ Live result:
   returned directly to native. A plain-HTTP image then passed through native
   routing with HTTP 200 and 8,090 bytes. A 2.12 MB attachment was rejected
   immediately by the 1 MB cache limit without deletion or a media-cache fetch.
-  Discord was not relaunched.
+  The full linked Debug matrix then passed: master-Off silence, console-only
+  delivery, one pending toast without console duplication, and one console
+  notice plus one toast for a fresh both-output activation. Discord was not
+  relaunched.
 
 Historical result:
 
@@ -1972,8 +1985,32 @@ evidence for another session to understand what changed and why.
   Debug-output, updater, and clipboard checks remain.
 - **Commit:** File-size runtime-evidence checkpoint
   76e0bc805c82e34152e19fe8c906a7c3d73964bc.
-- **Exact next action:** Record and push this evidence, then run the
-  debug-output matrix.
+- **Exact next action:** Superseded by the Debug-output result below.
+
+### 2026-07-27 — Linked Debug-output runtime matrix
+
+- **Completed:** Exercised the legacy-routing notice with the Debug master Off,
+  console-only output, delayed toast delivery, and both destinations active.
+- **Decisions:** Keep the saved child-state behavior unchanged. A destination
+  which was unavailable at detection may receive its one pending notice later,
+  but a destination that already received it must not receive a duplicate.
+- **Files changed:** This checklist only.
+- **Tests and exact results:** PASS — master Off produced no console notice or
+  user-visible toast. Master On with the toast child Off produced one console
+  notice and no toast. Enabling the child produced one pending toast without a
+  second console line. A fresh both-output activation produced one new console
+  notice and one new toast.
+- **Runtime evidence:** Both current BetterDiscord logs contain the
+  console-only notice at `18:13:01` UTC and exactly one further notice for the
+  fresh both-output activation at `18:14:29` UTC. The user confirmed the toast
+  outcomes. While the master was Off, detailed diagnostics stopped even though
+  ordinary `Cached image` activity continued.
+- **Failures or blockers:** None for Debug linking, output routing, pending
+  delivery, or activation de-duplication. Updater and clipboard checks remain.
+- **Commit:** Pending this runtime-evidence commit; replace this text with its
+  exact hash in the immediate checklist checkpoint.
+- **Exact next action:** Record and push this evidence, then run the updater
+  force-Off/force-On check.
 
 ### Handoff entry template
 
