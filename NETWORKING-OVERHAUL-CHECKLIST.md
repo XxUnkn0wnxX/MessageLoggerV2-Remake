@@ -763,7 +763,7 @@ Stage 5B plan/result:
 - Scope: no BetterDiscord host edit, no renderer/legacy-path change, and no
   updater, clipboard, attachment-gate, release-metadata, or unrelated plugin
   change.
-- Plan commit: `<pending-stage5b-plan-checkpoint>`.
+- Plan commit: `486fc1b214729338bbd59e0c24aee0d6d4b5218a`.
 
 ## Stage 6 — Live BetterDiscord verification
 
@@ -1333,7 +1333,7 @@ evidence for another session to understand what changed and why.
   complete at 35.0 seconds.
 - **Failures or blockers:** The current live plugin cannot exercise its
   30-second body watchdog because the inherited host timer fires first.
-- **Commit:** `<pending-stage5b-plan-checkpoint>`.
+- **Commit:** `486fc1b214729338bbd59e0c24aee0d6d4b5218a`.
 - **Exact next action:** Commit and record this approved plan, implement the
   narrow override with regression coverage, complete validation/review, then
   auto-sync the single plugin file as authorized.
