@@ -2194,7 +2194,8 @@ evidence for another session to understand what changed and why.
   no working GIF/file clipboard path or cache-only menu gate, and incomplete
   live-presentation teardown on plugin disable.
 - **Commit:** Checklist-plan commit
-  49510011be628cee3225a2c1e63c50b4656436fd.
+  49510011be628cee3225a2c1e63c50b4656436fd; restored-native-action
+  clarification c7fb361ea5d6d3db835627933e551e158a5a5da7.
 - **Exact next action:** Commit this plan, record its exact hash, then implement
   both bounded fixes with focused regressions and the full test suite before
   any live sync.
