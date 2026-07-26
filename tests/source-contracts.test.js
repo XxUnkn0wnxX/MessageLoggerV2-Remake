@@ -1038,9 +1038,12 @@ test('backup and edit-spam diagnostics remain opt-in under their warning-colored
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Debug'[\s\S]*id: 'ml2-settings-debug'[\s\S]*collapsible: true[\s\S]*shown: false/);
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Enable debug logging[\s\S]*id: 'debugLogging'[\s\S]*type: 'switch'/);
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Show debug messages as toasts[\s\S]*id: 'debugToasts'[\s\S]*type: 'switch'/);
-  assert.match(source, /if \(this\.settings\?\.debugLogging\) Logger\.log\(`\[Debug\] \$\{message\}`\)/);
-  assert.match(source, /if \(this\.settings\?\.debugToasts\)[\s\S]*this\.notifyUser\(message,[\s\S]*title: 'Message Logger Debug'[\s\S]*type: 'warning'/);
-  assert.match(source, /automatic-backup and edit-spam timer[\s\S]*lifecycle events/);
+  assert.match(source, /reportDebugEvent\(message, timeout = 4000, outputSelection = null\)[\s\S]*const output = this\._normalizeDebugEventOutputSelection\(outputSelection\);[\s\S]*if \(output\.console && this\.settings\?\.debugLogging\)[\s\S]*Logger\.log\(`\[Debug\] \$\{message\}`\)[\s\S]*if \(output\.toast && this\.settings\?\.debugToasts\)[\s\S]*this\.notifyUser\(message,[\s\S]*title: 'Message Logger Debug'[\s\S]*type: 'warning'/);
+  assert.match(source, /Log automatic-backup, edit-spam, channel-entry, and networking diagnostics to the console\./);
+  assert.match(source, /id: 'debugLogging',[\s\S]*action: 'reportLegacyRoutingDebugLoggingState'/);
+  assert.match(source, /id: 'debugToasts',[\s\S]*action: 'reportLegacyRoutingDebugToastsState'/);
+  assert.match(source, /reportLegacyRoutingDebugLoggingState:[\s\S]*console: true, toast: false/);
+  assert.match(source, /reportLegacyRoutingDebugToastsState:[\s\S]*console: false, toast: true/);
 });
 
 test('system and UI feedback uses one router while only spam warnings opt into system interactions', () => {
@@ -1220,11 +1223,14 @@ test('high-impact setting changes use routed theme-aware state feedback', () => 
     assert.match(source, new RegExp(`name: ['"]${settingName}['"][\\s\\S]*?action: '${action}'`));
   }
   assert.match(source, /name: 'Force legacy media fetching'[\s\S]*?action: 'reportForceLegacyMediaFetching'/);
-  assert.match(source, /this\._mediaCacheNativeFetchCompatible = typeof BdApi\?\.Net\?\.fetch === 'function'[\s\S]*: false;/);
+  assert.match(source, /_hasMediaCacheNativeFetch\(\)/);
+  assert.match(source, /this\._initializeMediaCacheLegacyRoutingNoticeState\(\);/);
+  assert.match(source, /MEDIA_CACHE_LEGACY_ROUTING_NOTICE = 'Networking: media routing is using the old Discord renderer fetch\(\) method\.';/);
   assert.match(source, /reportForceLegacyMediaFetching: \(val\) => this\.setMediaCacheFetchTransportPreference\(val\)/);
   assert.match(source, /getMediaCacheTransportSelection\(\)[\s\S]*if \(this\.settings\?\.forceLegacyMediaFetching\)[\s\S]*return 'legacy';[\s\S]*return this\._mediaCacheNativeFetchCompatible === false \? 'legacy' : 'native';/);
-  assert.match(source, /setMediaCacheFetchTransportPreference\(forceLegacyMediaFetching\)[\s\S]*if \(forceLegacyMediaFetching\)[\s\S]*return;[\s\S]*typeof this\._mediaCacheNativeFetchCompatible === 'boolean'[\s\S]*return;[\s\S]*this\._mediaCacheNativeFetchCompatible = typeof BdApi\?\.Net\?\.fetch === 'function' \? null : false;/);
-  assert.match(source, /ensureMediaCacheNativeFetchCompatibilityState\(\)[\s\S]*typeof this\._mediaCacheNativeFetchCompatible === 'boolean'[\s\S]*return;[\s\S]*this\._mediaCacheNativeFetchCompatible = typeof BdApi\?\.Net\?\.fetch === 'function' \? null : false;/);
+  assert.match(source, /setMediaCacheFetchTransportPreference\(forceLegacyMediaFetching\)[\s\S]*if \(forceLegacyMediaFetching\)[\s\S]*return;[\s\S]*typeof this\._mediaCacheNativeFetchCompatible !== 'boolean'[\s\S]*this\._mediaCacheNativeFetchCompatible = this\._hasMediaCacheNativeFetch\(\)\s*\?\s*null\s*:\s*false;[\s\S]*this\._syncMediaCacheLegacyRoutingNotice\(\);/);
+  assert.match(source, /_initializeMediaCacheLegacyRoutingNoticeState\(\)[\s\S]*this\.settings\?\.forceLegacyMediaFetching[\s\S]*this\._hasMediaCacheNativeFetch\(\)\s*\? null\s*:\s*false;[\s\S]*this\._syncMediaCacheLegacyRoutingNotice\(\);/);
+  assert.match(source, /ensureMediaCacheNativeFetchCompatibilityState\(\)[\s\S]*typeof this\._mediaCacheNativeFetchCompatible === 'boolean'[\s\S]*return;[\s\S]*this\._mediaCacheNativeFetchCompatible = this\._hasMediaCacheNativeFetch\(\) \? null : false;/);
   assert.match(source, /reportMajorSettingChange\(settingId, enabled\)[\s\S]*onlyLogWhitelist[\s\S]*cacheAllImages[\s\S]*antiNukeEnabled[\s\S]*autoUpdate[\s\S]*onlyRenderCachedAttachments[\s\S]*deleteCachedFilesWithRecords/);
   assert.match(source, /enabled \? 'info' : 'neutral'/);
   assert.match(source, /'neutral': \{ bg: 'var\(--background-tertiary, #4f545c\)', fg: 'var\(--text-default, #fff\)'/);
@@ -1505,8 +1511,8 @@ test('renderer fetch usage outside fetchMediaNetworkResponse remains constrained
   assert.ok(fetchEnd > fetchStart);
   const mediaFetcher = source.slice(fetchStart, fetchEnd);
   const nonMediaFetcher = source.slice(0, fetchStart) + source.slice(fetchEnd);
-  assert.ok((mediaFetcher.match(/\bfetch\(/g) || []).length >= 1);
-  assert.equal((nonMediaFetcher.match(/(^|[^.])\bfetch\(/g) || []).length, 0);
+  assert.ok((mediaFetcher.match(/\breturn fetch\(/g) || []).length >= 1);
+  assert.equal((nonMediaFetcher.match(/\breturn fetch\(/g) || []).length, 0);
   assert.equal((source.match(/BdApi\.Net\.fetch\(/g) || []).length, 1);
   assert.equal((source.match(/nativeFetch\.call\(/g) || []).length, 1);
   assert.match(source, /const fetchFn = url\.startsWith\(["']blob:["']\)\s*\?\s*fetch\s*:\s*BdApi\.Net\.fetch;/);

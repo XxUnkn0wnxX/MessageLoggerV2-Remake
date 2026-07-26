@@ -4,9 +4,16 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { createPlugin, resetHarness } = require('./helpers/plugin-harness');
+const {
+  createPlugin,
+  loggerEvents,
+  resetHarness
+} = require('./helpers/plugin-harness');
 
 test.beforeEach(resetHarness);
+
+const MEDIA_CACHE_LEGACY_ROUTING_NOTICE =
+  'Networking: media routing is using the old Discord renderer fetch() method.';
 
 function successfulMediaResponse(contentType = 'image/png') {
   return {
@@ -82,12 +89,14 @@ test('media-cache transport uses native fetch by default with unchanged options 
     const plugin = createMediaCachePlugin('');
     plugin.settings.forceLegacyMediaFetching = false;
     plugin._mediaCacheNativeFetchCompatible = null;
+    let nativeReceiver;
     const options = {
       method: 'GET',
       headers: { 'X-Test': 'media-cache' }
     };
     global.BdApi.Net = {
       fetch(url, requestInit) {
+        nativeReceiver = this;
         nativeRequest = { url, requestInit };
         return Promise.resolve(successfulMediaResponse());
       }
@@ -98,6 +107,7 @@ test('media-cache transport uses native fetch by default with unchanged options 
     };
     const response = await plugin.fetchMediaCacheResponse('https://cdn.example/media', options);
     assert.equal(response.ok, true);
+    assert.equal(nativeReceiver, global.BdApi.Net);
     assert.equal(nativeRequest.url, 'https://cdn.example/media');
     assert.ok(nativeRequest.requestInit);
     assert.equal(nativeRequest.requestInit.timeout, null);
@@ -197,6 +207,10 @@ test('media-cache fetch latches native incompatibility on synchronous throw and 
       constructor() { return controllerState.controller; }
     };
     const plugin = createMediaCachePlugin('');
+    const notifications = [];
+    plugin.settings.debugLogging = true;
+    plugin.settings.debugToasts = true;
+    plugin.notifyUser = (content, options = {}) => notifications.push([content, options]);
     let nativeCalls = 0;
     let rendererCalls = 0;
     let firstRequest = true;
@@ -218,9 +232,17 @@ test('media-cache fetch latches native incompatibility on synchronous throw and 
     assert.equal(first.ok, true);
     assert.equal(rendererCalls, 1);
     assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
+    assert.equal(notifications.length, 1);
+    assert.deepEqual(loggerEvents, [
+      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+    ]);
+    assert.equal(notifications[0][0], MEDIA_CACHE_LEGACY_ROUTING_NOTICE);
+    assert.equal(notifications[0][1].timeout, 4000);
     await plugin.fetchMediaCacheResponse('https://cdn.example/throw');
     assert.equal(nativeCalls, 0);
     assert.equal(rendererCalls, 2);
+    assert.equal(notifications.length, 1);
+    assert.equal(loggerEvents.length, 1);
   } finally {
     global.BdApi.Net = originalNetApi;
     global.fetch = originalFetch;
@@ -257,6 +279,49 @@ test('media-cache fetch latches native incompatibility on non-thenable return an
     await plugin.fetchMediaCacheResponse('https://cdn.example/non-thenable');
     assert.equal(rendererCalls, 2);
     assert.equal(nativeCalls, 1);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-cache fetch latches native incompatibility when the native fetch property getter throws', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const controllerState = mockAbortControllerWithSignalCapture();
+    global.AbortController = class {
+      constructor() { return controllerState.controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    plugin._mediaCacheNativeFetchCompatible = null;
+    let getterReads = 0;
+    const netApi = {};
+    Object.defineProperty(netApi, 'fetch', {
+      get() {
+        getterReads += 1;
+        throw new Error('bad native fetch getter');
+      }
+    });
+    global.BdApi.Net = netApi;
+    let rendererCalls = 0;
+    global.fetch = () => {
+      rendererCalls += 1;
+      return Promise.resolve(successfulMediaResponse());
+    };
+
+    const response = await plugin.fetchMediaCacheResponse('https://cdn.example/fetch-getter');
+    assert.equal(response.ok, true);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
+    assert.equal(getterReads, 1);
+    assert.equal(rendererCalls, 1);
+
+    const secondResponse = await plugin.fetchMediaCacheResponse('https://cdn.example/fetch-getter');
+    assert.equal(secondResponse.ok, true);
+    assert.equal(getterReads, 1);
+    assert.equal(rendererCalls, 2);
   } finally {
     global.BdApi.Net = originalNetApi;
     global.fetch = originalFetch;
@@ -320,6 +385,10 @@ test('media-cache fetch keeps native path on async rejection and recovers on lat
       constructor() { return controllerState.controller; }
     };
     const plugin = createMediaCachePlugin('');
+    const notifications = [];
+    plugin.settings.debugLogging = true;
+    plugin.settings.debugToasts = true;
+    plugin.notifyUser = (content, options = {}) => notifications.push([content, options]);
     plugin._mediaCacheNativeFetchCompatible = null;
     let nativeCalls = 0;
     const networkError = new Error('async reject');
@@ -339,6 +408,8 @@ test('media-cache fetch keeps native path on async rejection and recovers on lat
       () => plugin.fetchMediaCacheResponse('https://cdn.example/reject'),
       /async reject/
     );
+    assert.equal(notifications.length, 0);
+    assert.equal(loggerEvents.length, 0);
     assert.equal(plugin._mediaCacheNativeFetchCompatible, true);
     assert.equal(nativeCalls, 1);
     assert.equal(rendererCalls, 0);
@@ -346,6 +417,8 @@ test('media-cache fetch keeps native path on async rejection and recovers on lat
     assert.equal(response.ok, true);
     assert.equal(nativeCalls, 2);
     assert.equal(rendererCalls, 0);
+    assert.equal(notifications.length, 0);
+    assert.equal(loggerEvents.length, 0);
   } finally {
     global.BdApi.Net = originalNetApi;
     global.fetch = originalFetch;
@@ -363,6 +436,10 @@ test('media-cache fetch keeps native compatibility on HTTP failure and continues
       constructor() { return controllerState.controller; }
     };
     const plugin = createMediaCachePlugin('');
+    const notifications = [];
+    plugin.settings.debugLogging = true;
+    plugin.settings.debugToasts = true;
+    plugin.notifyUser = (content, options = {}) => notifications.push([content, options]);
     let nativeCalls = 0;
     global.BdApi.Net = {
       fetch() {
@@ -381,15 +458,197 @@ test('media-cache fetch keeps native compatibility on HTTP failure and continues
     global.fetch = () => assert.fail('renderer should not be used for HTTP failures');
     const response = await plugin.fetchMediaCacheResponse('https://cdn.example/http-failure');
     assert.equal(response.status, 404);
+    assert.equal(notifications.length, 0);
+    assert.equal(loggerEvents.length, 0);
     assert.equal(plugin._mediaCacheNativeFetchCompatible, true);
     const successResponse = await plugin.fetchMediaCacheResponse('https://cdn.example/http-failure');
     assert.equal(successResponse.ok, true);
     assert.equal(nativeCalls, 2);
+    assert.equal(notifications.length, 0);
+    assert.equal(loggerEvents.length, 0);
   } finally {
     global.BdApi.Net = originalNetApi;
     global.fetch = originalFetch;
     global.AbortController = OriginalAbortController;
   }
+});
+
+test('media-cache transport notices follow active-delivered routing and dedupe unless output routes change state', () => {
+  const plugin = createMediaCachePlugin('');
+  const notifications = [];
+  plugin.notifyUser = (content, options = {}) => notifications.push([content, options]);
+
+  plugin.settings.forceLegacyMediaFetching = true;
+  plugin._initializeMediaCacheLegacyRoutingNoticeState();
+  assert.equal(loggerEvents.length, 0);
+  assert.equal(notifications.length, 0);
+  plugin.settings.debugLogging = true;
+  plugin.settings.debugToasts = false;
+
+  const first = plugin.reportLegacyRoutingOutputStateChange(
+    true,
+    { console: true, toast: false }
+  );
+  assert.deepEqual(first, { console: true, toast: false });
+  assert.deepEqual(loggerEvents, [
+    ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+  ]);
+  assert.equal(notifications.length, 0);
+
+  plugin.settings.debugToasts = true;
+  const second = plugin.reportLegacyRoutingOutputStateChange(
+    true,
+    { console: false, toast: true }
+  );
+  assert.deepEqual(second, { console: false, toast: true });
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0][0], MEDIA_CACHE_LEGACY_ROUTING_NOTICE);
+  assert.equal(notifications[0][1].timeout, 4000);
+
+  const third = plugin._flushMediaCacheLegacyRoutingNoticeForOutputSelection();
+  assert.deepEqual(third, { console: false, toast: false });
+  assert.equal(notifications.length, 1);
+
+  plugin._deactivateMediaCacheLegacyRoutingNotice();
+  plugin.settings.debugLogging = true;
+  plugin.settings.debugToasts = true;
+  const fourth = plugin._flushMediaCacheLegacyRoutingNoticeForOutputSelection();
+  assert.deepEqual(fourth, { console: false, toast: false });
+  assert.equal(notifications.length, 1);
+  plugin._activateMediaCacheLegacyRoutingNotice();
+  assert.deepEqual(loggerEvents, [
+    ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`],
+    ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+  ]);
+  assert.equal(notifications.length, 2);
+  assert.equal(notifications[1][0], MEDIA_CACHE_LEGACY_ROUTING_NOTICE);
+  const fifth = plugin._flushMediaCacheLegacyRoutingNoticeForOutputSelection();
+  assert.deepEqual(fifth, { console: false, toast: false });
+});
+
+test('media cache force toggle reports immediately and preserves a latched native incompatibility', () => {
+  const plugin = createMediaCachePlugin('');
+  const originalNetApi = global.BdApi.Net;
+  try {
+    plugin.settings.debugLogging = true;
+    plugin.settings.debugToasts = false;
+    plugin.settings.forceLegacyMediaFetching = true;
+    plugin._mediaCacheNativeFetchCompatible = null;
+    plugin.setMediaCacheFetchTransportPreference(true);
+    assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
+    assert.deepEqual(loggerEvents, [
+      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+    ]);
+    plugin.setMediaCacheFetchTransportPreference(true);
+    assert.equal(loggerEvents.length, 1);
+
+    plugin.settings.forceLegacyMediaFetching = false;
+    let nativeCalls = 0;
+    global.BdApi.Net = {
+      fetch() {
+        nativeCalls += 1;
+        return Promise.resolve(successfulMediaResponse());
+      }
+    };
+    plugin.setMediaCacheFetchTransportPreference(false);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, null);
+    assert.equal(plugin.getMediaCacheTransportSelection(), 'native');
+    assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, false);
+
+    plugin._mediaCacheNativeFetchCompatible = false;
+    plugin.setMediaCacheFetchTransportPreference(false);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
+    assert.equal(plugin.getMediaCacheTransportSelection(), 'legacy');
+    assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
+    assert.equal(nativeCalls, 0);
+    assert.deepEqual(loggerEvents, [
+      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`],
+      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+    ]);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+  }
+});
+
+test('media routing legacy notice startup state initializer selects native-latent and forced legacy paths', () => {
+  const originalNetApi = global.BdApi.Net;
+  try {
+    const plugin = createMediaCachePlugin('');
+    const notifications = [];
+    plugin.notifyUser = (content, options = {}) => notifications.push([content, options]);
+    plugin.settings.debugLogging = true;
+    plugin.settings.debugToasts = false;
+
+    plugin.settings.forceLegacyMediaFetching = true;
+    global.BdApi.Net = {
+      fetch: () => Promise.resolve(successfulMediaResponse())
+    };
+    plugin._initializeMediaCacheLegacyRoutingNoticeState();
+    assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, null);
+    assert.deepEqual(loggerEvents, [
+      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+    ]);
+
+    plugin.settings.forceLegacyMediaFetching = false;
+    global.BdApi.Net = undefined;
+    plugin._initializeMediaCacheLegacyRoutingNoticeState();
+    assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
+    assert.deepEqual(loggerEvents, [
+      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`],
+      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+    ]);
+
+    global.BdApi.Net = {
+      fetch: () => Promise.resolve(successfulMediaResponse())
+    };
+    plugin._mediaCacheLegacyRoutingNoticeState = null;
+    plugin._initializeMediaCacheLegacyRoutingNoticeState();
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, null);
+    assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, false);
+    assert.equal(notifications.length, 0);
+    assert.equal(loggerEvents.length, 2);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+  }
+});
+
+test('reportDebugEvent routes to requested output selection and returns dispatch flags', () => {
+  const plugin = createMediaCachePlugin('');
+  const notifications = [];
+  plugin.notifyUser = (content, options = {}) => notifications.push([content, options]);
+  plugin.settings.debugLogging = true;
+  plugin.settings.debugToasts = true;
+
+  const both = plugin.reportDebugEvent('combined debug event');
+  assert.deepEqual(both, { console: true, toast: true });
+  assert.deepEqual(loggerEvents.at(-1), ['log', '[Debug] combined debug event']);
+  assert.equal(notifications.at(-1)[1].timeout, 4000);
+
+  const consoleOnly = plugin.reportDebugEvent('console-only', 1200, 'console');
+  assert.deepEqual(consoleOnly, { console: true, toast: false });
+  assert.equal(loggerEvents.length, 2);
+  assert.equal(notifications.length, 1);
+
+  plugin.settings.debugLogging = false;
+  plugin.settings.debugToasts = true;
+  const toastOnly = plugin.reportDebugEvent('toast-only', 2200, 'toast');
+  assert.deepEqual(toastOnly, { console: false, toast: true });
+  assert.equal(notifications.at(-1)[1].timeout, 2200);
+
+  plugin.settings.debugLogging = false;
+  plugin.settings.debugToasts = false;
+  const none = plugin.reportDebugEvent('neither', 4000, 'none');
+  assert.deepEqual(none, { console: false, toast: false });
+  assert.equal(loggerEvents.length, 2);
+  assert.equal(notifications.length, 2);
+
+  plugin.settings.debugLogging = true;
+  plugin.settings.debugToasts = true;
+  const objectSelection = plugin.reportDebugEvent('custom object', 1500, { console: false, toast: true });
+  assert.deepEqual(objectSelection, { console: false, toast: true });
+  assert.equal(notifications.at(-1)[1].timeout, 1500);
 });
 
 test('media-cache fetch preserves caller options while forcing native timeout null', async () => {
@@ -1582,6 +1841,8 @@ test('deferred media retries exactly three bounded attempts without latching the
       newSaveAllFileTypes: true,
       maxCacheFileSize: 0,
       addUserIdToSavedMediaFilename: false,
+      debugLogging: true,
+      debugToasts: false,
       imageCacheDir: cacheDir
     },
     messageRecord: { [messageId]: { message: { id: messageId, attachments: [{ id: 36, url }] } } },
@@ -1594,6 +1855,11 @@ test('deferred media retries exactly three bounded attempts without latching the
   await waitForQueuedMediaTasks();
 
   assert.equal(fetches, 3);
+  assert.deepEqual(loggerEvents.filter(([level, message]) => (
+    level === 'log' && message === `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`
+  )), [
+    ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+  ]);
   assert.equal(mediaErrors.length, 1, 'only terminal media exhaustion should route the media error');
   assert.equal(plugin._activeDeferredMediaCacheRequests.size, 0);
   assert.equal(plugin.isDataSaveModeTransitionBusy(), false);

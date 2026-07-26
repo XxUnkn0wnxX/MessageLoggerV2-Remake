@@ -18,12 +18,12 @@ This file has two jobs:
 
 Before each stage commit:
 
-- [ ] Tick the completed work in that stage.
-- [ ] Record exact commands and results in the stage result block.
-- [ ] Record changed files and important implementation decisions.
-- [ ] Record failures, unresolved questions, and runtime-only work still needed.
-- [ ] Update **Exact next action** below.
-- [ ] Add an entry to **Handoff activity log**.
+- [x] Tick the completed work in that stage.
+- [x] Record exact commands and results in the stage result block.
+- [x] Record changed files and important implementation decisions.
+- [x] Record failures, unresolved questions, and runtime-only work still needed.
+- [x] Update **Exact next action** below.
+- [x] Add an entry to **Handoff activity log**.
 
 Never mark a stage complete merely because code was written. Its required tests,
 review, checklist update, and commit must also be complete.
@@ -44,28 +44,29 @@ review, checklist update, and commit must also be complete.
   separate and tracks `origin/fix/attachment-gate`. Its standalone handoff
   commit is protected by the local-only `local/attachment-gate-handoff` tag.
   Do not merge or implement that feature as part of this networking branch.
-- **Implementation state:** Stage 3's non-cache boundary contracts are
-  implemented and pass their focused and full automated gates. Persistent
-  media-cache downloads use the central selector; updater and clipboard
-  behavior are independently locked to their existing transports.
-  Output-aware legacy-routing diagnostics remain Stage 4 work.
+- **Implementation state:** Stages 1-4 are implemented and pass their focused
+  and full automated gates. Persistent media-cache downloads use the central
+  selector; updater and clipboard behavior are independently locked to their
+  existing transports; exact output-aware legacy-routing diagnostics are
+  de-duplicated per activation and per output.
 - **Current tracked task changes:** Stages 1-2 are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/settings-recovery.test.js`, `tests/source-contracts.test.js`, and this
   checklist.
-- **Live plugin:** Not updated for this task because implementation has not
-  started.
+- **Live plugin:** Intentionally not updated. The user requires a pre-live
+  report and separate authorization before any copy to the BetterDiscord
+  plugins directory.
 - **Publishing authority:** The user explicitly authorized pushing both working
   branches to `origin` on 2026-07-26. No merge into `develop`/`main` is
   authorized.
 
 ### Exact next action
 
-Commit the passing Stage 3 boundary contracts, record that exact commit hash in
-this checklist through the immediate checklist checkpoint, then implement
-Stage 4's exact output-aware, de-duplicated legacy-routing diagnostic. Do not
-sync the plugin live; the user requested a pre-live report and separate
-authorization before that copy.
+Commit the passing Stage 4 diagnostic implementation, record that exact commit
+hash in this checklist through the immediate checklist checkpoint, then
+complete Stage 5 documentation and the final static/automated review. Explicitly
+defer Stage 6 and stop with a pre-live report; do not sync the plugin until the
+user separately authorizes that copy.
 
 ### Resume procedure for a new session
 
@@ -343,18 +344,18 @@ Use this exact message for both forced and automatic legacy selection:
 > Networking: media routing is using the old Discord renderer fetch()
 > method.
 
-- [ ] Route the message through the existing debug console/toast controls.
-- [ ] With `debugLogging` enabled, print it once to the console.
-- [ ] With `debugToasts` enabled, show it once through the configured debug
+- [x] Route the message through the existing debug console/toast controls.
+- [x] With `debugLogging` enabled, print it once to the console.
+- [x] With `debugToasts` enabled, show it once through the configured debug
       notification route.
-- [ ] With both enabled, emit once to each output.
-- [ ] With both disabled, remain silent.
-- [ ] Emit once when automatic compatibility detection activates legacy mode.
-- [ ] Emit immediately when the force toggle changes from off to on.
-- [ ] Emit once at startup when forced mode was already saved.
-- [ ] Permit a new notice after leaving and later re-entering legacy mode.
-- [ ] Do not repeat it per request, file, retry, or failure.
-- [ ] If legacy mode was selected while a debug output was disabled, allow that
+- [x] With both enabled, emit once to each output.
+- [x] With both disabled, remain silent.
+- [x] Emit once when automatic compatibility detection activates legacy mode.
+- [x] Emit immediately when the force toggle changes from off to on.
+- [x] Emit once at startup when forced mode was already saved.
+- [x] Permit a new notice after leaving and later re-entering legacy mode.
+- [x] Do not repeat it per request, file, retry, or failure.
+- [x] If legacy mode was selected while a debug output was disabled, allow that
       output to receive one notice when it is subsequently enabled.
 
 The existing `reportDebugEvent()` helper already provides independent
@@ -366,18 +367,18 @@ without causing per-request spam.
 
 ## Behavior that must remain unchanged
 
-- [ ] Media-cache master gating.
-- [ ] Maximum cache file-size enforcement.
-- [ ] Timeout and cancellation behavior.
-- [ ] Abort-controller tracking and plugin-stop cleanup.
-- [ ] Existing retry count and delay.
-- [ ] Terminal 403/404 handling.
-- [ ] Cache paths, filenames, and local object-URL cleanup.
-- [ ] Disable-saving deferred queue behavior.
-- [ ] Delete-cached-files-with-log-record behavior.
-- [ ] Forum, post, thread, and restored-message behavior.
-- [ ] Anti-Nuke capture ordering and ignore-policy bypass behavior.
-- [ ] Persisted message/schema compatibility.
+- [x] Media-cache master gating.
+- [x] Maximum cache file-size enforcement.
+- [x] Timeout and cancellation behavior.
+- [x] Abort-controller tracking and plugin-stop cleanup.
+- [x] Existing retry count and delay.
+- [x] Terminal 403/404 handling.
+- [x] Cache paths, filenames, and local object-URL cleanup.
+- [x] Disable-saving deferred queue behavior.
+- [x] Delete-cached-files-with-log-record behavior.
+- [x] Forum, post, thread, and restored-message behavior.
+- [x] Anti-Nuke capture ordering and ignore-policy bypass behavior.
+- [x] Persisted message/schema compatibility.
 - [x] Direct `BdApi.Net.fetch()` update checks.
 - [x] Direct `BdApi.Net.fetch()` remote clipboard reads.
 - [x] Direct renderer `fetch()` local `blob:` clipboard reads.
@@ -431,10 +432,10 @@ these compatibility targets is allowed when required:
       unaffected by the media force setting.
 - [x] A source audit permits only those documented non-cache direct calls and
       proves there is no alternate remote persistent-cache downloader.
-- [ ] Forced and automatic legacy selection use the exact same message.
-- [ ] Console and toast routes remain independent.
-- [ ] Debug reporting is silent with both debug flags off.
-- [ ] Multiple files and retries do not repeat the notice.
+- [x] Forced and automatic legacy selection use the exact same message.
+- [x] Console and toast routes remain independent.
+- [x] Debug reporting is silent with both debug flags off.
+- [x] Multiple files and retries do not repeat the notice.
 - [x] Existing media timeout, abort, retry, status, file-size, and write-epoch
       tests remain green.
 
@@ -556,23 +557,34 @@ Stage 3 commit/result:
 
 ## Stage 4 — Debug routing and de-duplication
 
-- [ ] Implement the exact shared legacy-routing message.
-- [ ] Confirm the shared console/toast text is exactly:
+- [x] Implement the exact shared legacy-routing message.
+- [x] Confirm the shared console/toast text is exactly:
       `Networking: media routing is using the old Discord renderer fetch()
       method.`
-- [ ] Cover automatic media compatibility detection, forced activation, and
+- [x] Cover automatic media compatibility detection, forced activation, and
       forced startup.
-- [ ] Cover console-only, toast-only, both, and neither.
-- [ ] Prove retries and multiple downloads do not create message spam.
-- [ ] Prove a later debug-output enable can receive one pending notice.
-- [ ] Run focused tests, `npm test`, and `git diff --check`.
-- [ ] Commit only after the stage passes.
+- [x] Cover console-only, toast-only, both, and neither.
+- [x] Prove retries and multiple downloads do not create message spam.
+- [x] Prove a later debug-output enable can receive one pending notice.
+- [x] Run focused tests, `npm test`, and `git diff --check`.
+- [x] Commit only after the stage passes.
 
 Stage 4 commit/result:
 
-- Commit:
-- Tests:
-- Notes:
+- Commit: Pending the passing Stage 4 implementation commit; its exact hash will
+  be recorded by the immediate checklist checkpoint.
+- Tests: PASS — `node --check MessageLoggerV2.plugin.js`; focused
+  `node --test tests/media.test.js tests/source-contracts.test.js
+  tests/persistence.test.js` reported 150 passed, 0 failed; full `npm test`
+  reported 358 passed, 0 failed; `git diff --check` passed.
+- Notes: The notice uses one shared constant and the existing debug router.
+  Delivery state is reset on each new legacy activation and tracked separately
+  for console and toast, so disabled outputs remain pending without per-request
+  spam. Forced mode does not overwrite native-compatibility state; missing or
+  synchronously incompatible native fetch latches legacy for the session;
+  asynchronous rejection and HTTP failure remain native request failures.
+  Parent review also added behavioral coverage for native receiver preservation
+  and a throwing native `fetch` property getter.
 
 ## Stage 5 — Documentation and static final review
 
@@ -658,6 +670,8 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-26 | Resume | Resume implementation, keep every checklist addition/amendment current, preserve all existing functionality, run every focused/full check before deployment, then report and stop before live sync until the user separately authorizes it. | Current user instruction |
 | 2026-07-26 | Stage 2 | The central media selector is non-async and latches legacy mode only for a missing/non-callable native API, a synchronous invocation throw, or an unusable thenable shape. A rejected native promise or HTTP failure remains an ordinary request failure and never starts a second renderer request. | Approved compatibility boundary plus deterministic regression evidence |
 | 2026-07-26 | Stage 3 | Updater and clipboard transports are now protected by symbol-bounded source contracts plus a direct updater behavior mock; no product code was changed for this stage. | Approved media-only scope and regression evidence |
+| 2026-07-26 | Stage 4 | Legacy-routing diagnostics are activation-scoped and output-aware. A disabled console/toast route remains pending and receives at most one notice if later enabled during the same activation. | Exact debug-reporting contract plus deterministic evidence |
+| 2026-07-26 | Stage 4 | Two worker drafts were rejected before commit: the first used the wrong notice text, reset the compatibility latch, and omitted coverage; the second incorrectly routed clipboard reads through the media selector. Parent review restored the approved cache-only boundary before validation. | Checklist scope and final user instruction |
 
 ## Handoff activity log
 
@@ -835,6 +849,43 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Implement and deterministically verify the exact
   output-aware legacy-routing notice without altering request, retry, updater,
   clipboard, or cache-write behavior.
+
+### 2026-07-26 — Stage 4 debug routing and de-duplication
+
+- **Completed:** Added the exact shared legacy-routing message, extended the
+  existing debug router with optional per-output selection, added
+  activation-scoped/per-output delivery state, wired late-enable callbacks for
+  both Debug switches, and covered automatic fallback, force toggle, saved
+  forced startup, all output combinations, re-entry, retries, and de-duplication.
+- **Decisions:** Keep one compatibility latch and one diagnostic activation
+  state. A force preference never marks the native API incompatible. A
+  missing/non-callable API, throwing native property getter, synchronous
+  invocation throw, non-thenable response, or throwing `then` getter latches
+  legacy; asynchronous rejection and HTTP failure do not. Preserve the native
+  method receiver and pass `timeout: null` while the logger retains its 15-second
+  AbortController timeout.
+- **Files changed:** `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
+  `tests/source-contracts.test.js`, and
+  `NETWORKING-OVERHAUL-CHECKLIST.md`.
+- **Tests and exact results:** PASS — focused debug/media/source run: 150
+  passed, 0 failed; full `npm test`: 358 passed, 0 failed; plugin syntax passed
+  within both gates; `git diff --check` passed.
+- **Runtime evidence:** No new Discord probe was required. An independent
+  read-only review confirmed the selector remains cache-only, the native
+  receiver and timeout ownership are preserved, and updater/clipboard code is
+  untouched.
+- **Failures or blockers:** The first focused run reported 146 passed and 3
+  failed because new source/assertion patterns matched the exact notice string
+  and existing retry warnings too broadly; those test-contract defects were
+  corrected without changing runtime behavior. Two worker drafts were rejected
+  before commit: one had the wrong exact notice, reset the compatibility latch,
+  and lacked tests; the next improperly routed clipboard reads through the
+  media selector. Parent review removed both regressions. No blocker remains.
+- **Commit:** Pending the passing Stage 4 implementation commit; the exact hash
+  will be recorded by the immediate checklist checkpoint.
+- **Exact next action:** Commit Stage 4, record its exact hash, then document the
+  setting/debug event and complete the final pre-live static and automated
+  review. Do not copy the plugin live.
 
 ### Handoff entry template
 

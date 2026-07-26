@@ -25,6 +25,7 @@ const ARCHIVE_LOAD_MODE_SETTLE_MS = 350;
 const MEDIA_CACHE_FETCH_TIMEOUT_MS = 15 * 1000;
 const MEDIA_CACHE_RETRY_DELAY_MS = 1000;
 const MEDIA_CACHE_MAX_ATTEMPTS = 3;
+const MEDIA_CACHE_LEGACY_ROUTING_NOTICE = 'Networking: media routing is using the old Discord renderer fetch() method.';
 const DATA_SAVE_TRANSITION_TIMEOUT_MS = 30 * 1000;
 const DATA_SAVE_MAX_ATTEMPTS = 3;
 const DATA_SAVE_RETRY_DELAY_MS = 500;
@@ -308,6 +309,7 @@ module.exports = class MessageLoggerV2 {
     this._activeDeferredMediaCacheRequests = new Map();
     this._mediaCacheAbortControllers = new Set();
     this._mediaCacheNativeFetchCompatible = null;
+    this._mediaCacheLegacyRoutingNoticeState = null;
     this._flushMediaCacheAfterNextDataSave = false;
     this._dataSavePrimaryFlushInProgress = false;
     this._dataSavePrimaryFlushGeneration = 0;
@@ -368,6 +370,7 @@ module.exports = class MessageLoggerV2 {
     this._activeDeferredMediaCacheRequests?.clear?.();
     this._mediaCacheAbortControllers?.clear?.();
     this._mediaCacheNativeFetchCompatible = null;
+    this._mediaCacheLegacyRoutingNoticeState = null;
     this._flushMediaCacheAfterNextDataSave = false;
     this._dataSavePrimaryFlushInProgress = false;
     this._dataSavePrimaryFlushGeneration = (this._dataSavePrimaryFlushGeneration || 0) + 1;
@@ -968,9 +971,7 @@ module.exports = class MessageLoggerV2 {
       this.saveSettings();
       settingsChanged = false;
     }
-    this._mediaCacheNativeFetchCompatible = typeof BdApi?.Net?.fetch === 'function'
-      ? null
-      : false;
+    this._initializeMediaCacheLegacyRoutingNoticeState();
     if (settingsChanged) this.saveSettings();
     this.errorImage = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="104" viewBox="0 0 200 104"%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%23666" font-family="Arial" font-size="14"%3EImage Error%3C/text%3E%3C/svg%3E';
     this.nodeModules = {
@@ -3673,20 +3674,118 @@ module.exports = class MessageLoggerV2 {
     const seconds = delayMs / 1000;
     return `${seconds} second${seconds === 1 ? '' : 's'}`;
   }
-  reportDebugEvent(message, timeout = 4000) {
-    // Debug output is intentionally opt-in for automatic-backup, edit-spam timer, and
-    // channel-entry counter events. The two settings are independent so developers can use
-    // either the console, the selected notification/toast route, or both without affecting errors.
+  _normalizeDebugEventOutputSelection(outputSelection = null) {
+    if (outputSelection == null) return { console: true, toast: true };
+    if (typeof outputSelection === 'string') {
+      if (outputSelection === 'console') return { console: true, toast: false };
+      if (outputSelection === 'toast') return { console: false, toast: true };
+      if (outputSelection === 'both') return { console: true, toast: true };
+      if (outputSelection === 'none') return { console: false, toast: false };
+    }
+    if (typeof outputSelection === 'object' && outputSelection !== null) {
+      const hasExplicitOutputSelection = Object.prototype.hasOwnProperty.call(outputSelection, 'console')
+        || Object.prototype.hasOwnProperty.call(outputSelection, 'toast');
+      if (hasExplicitOutputSelection) {
+        return {
+          console: !!outputSelection.console,
+          toast: !!outputSelection.toast
+        };
+      }
+    }
+    return { console: true, toast: true };
+  }
+  _getMediaCacheNetApi() {
+    return globalThis.BdApi?.Net;
+  }
+  _hasMediaCacheNativeFetch() {
+    return typeof this._getMediaCacheNetApi()?.fetch === 'function';
+  }
+  _getMediaCacheLegacyRoutingNoticeState() {
+    if (!this._mediaCacheLegacyRoutingNoticeState) {
+      this._mediaCacheLegacyRoutingNoticeState = {
+        active: false,
+        delivered: { console: false, toast: false }
+      };
+    }
+    return this._mediaCacheLegacyRoutingNoticeState;
+  }
+  _activateMediaCacheLegacyRoutingNotice() {
+    const state = this._getMediaCacheLegacyRoutingNoticeState();
+    if (!state.active) {
+      state.active = true;
+      state.delivered = { console: false, toast: false };
+    }
+    return this._flushMediaCacheLegacyRoutingNoticeForOutputSelection();
+  }
+  _deactivateMediaCacheLegacyRoutingNotice() {
+    const state = this._getMediaCacheLegacyRoutingNoticeState();
+    state.active = false;
+    state.delivered = { console: false, toast: false };
+    return { console: false, toast: false };
+  }
+  _flushMediaCacheLegacyRoutingNoticeForOutputSelection(outputSelection = { console: true, toast: true }) {
+    const state = this._getMediaCacheLegacyRoutingNoticeState();
+    if (!state.active) return { console: false, toast: false };
+    const requested = this._normalizeDebugEventOutputSelection(outputSelection);
+    const pending = {
+      console: requested.console && !state.delivered.console,
+      toast: requested.toast && !state.delivered.toast
+    };
+    if (!pending.console && !pending.toast) return { console: false, toast: false };
+    const result = this.reportDebugEvent(
+      MEDIA_CACHE_LEGACY_ROUTING_NOTICE,
+      4000,
+      pending
+    );
+    state.delivered.console = state.delivered.console || result.console;
+    state.delivered.toast = state.delivered.toast || result.toast;
+    return result;
+  }
+  reportLegacyRoutingOutputStateChange(enabled, outputSelection) {
+    if (!enabled) return { console: false, toast: false };
+    return this._flushMediaCacheLegacyRoutingNoticeForOutputSelection(outputSelection);
+  }
+  _initializeMediaCacheLegacyRoutingNoticeState() {
+    this._mediaCacheLegacyRoutingNoticeState = null;
+    this._mediaCacheNativeFetchCompatible = this.settings?.forceLegacyMediaFetching
+      ? null
+      : this._hasMediaCacheNativeFetch()
+        ? null
+        : false;
+    this._syncMediaCacheLegacyRoutingNotice();
+  }
+  _syncMediaCacheLegacyRoutingNotice() {
+    if (this.getMediaCacheTransportSelection() === 'legacy') {
+      return this._activateMediaCacheLegacyRoutingNotice();
+    }
+    return this._deactivateMediaCacheLegacyRoutingNotice();
+  }
+  reportDebugEvent(message, timeout = 4000, outputSelection = null) {
+    // Debug output is intentionally opt-in for automatic-backup, edit-spam timer,
+    // channel-entry counter, and media-networking events. The two settings are independent so
+    // developers can use either the console, the selected notification/toast route, or both
+    // without affecting errors.
     // All debug notifications deliberately use the warning type so they share the same
     // attention color as the Debug category in both light and dark Discord themes.
-    if (this.settings?.debugLogging) Logger.log(`[Debug] ${message}`);
-    if (this.settings?.debugToasts) {
+    const output = this._normalizeDebugEventOutputSelection(outputSelection);
+    let reportedConsole = false;
+    let reportedToast = false;
+    if (output.console && this.settings?.debugLogging) {
+      Logger.log(`[Debug] ${message}`);
+      reportedConsole = true;
+    }
+    if (output.toast && this.settings?.debugToasts) {
       this.notifyUser(message, {
         title: 'Message Logger Debug',
         type: 'warning',
         timeout
       });
+      reportedToast = true;
     }
+    return {
+      console: reportedConsole,
+      toast: reportedToast
+    };
   }
   queueAutoBackup(delayMs, reason = 'queued') {
     this.saveBackupTimeout = setTimeout(() => this.saveBackup(), delayMs);
@@ -4389,9 +4488,10 @@ module.exports = class MessageLoggerV2 {
               { style: { color: 'var(--text-warning, var(--status-warning))' } },
               'Enable debug logging'
             ),
-            note: 'Log automatic-backup and edit-spam timer lifecycle events to the console.',
+            note: 'Log automatic-backup, edit-spam, channel-entry, and networking diagnostics to the console.',
             id: 'debugLogging',
-            type: 'switch'
+            type: 'switch',
+            action: 'reportLegacyRoutingDebugLoggingState'
           },
           {
             name: React.createElement(
@@ -4399,9 +4499,10 @@ module.exports = class MessageLoggerV2 {
               { style: { color: 'var(--text-warning, var(--status-warning))' } },
               'Show debug messages as toasts'
             ),
-            note: 'Show backup and edit-spam timer diagnostics through the selected alert mode.',
+            note: 'Show the same diagnostics through the selected alert mode.',
             id: 'debugToasts',
-            type: 'switch'
+            type: 'switch',
+            action: 'reportLegacyRoutingDebugToastsState'
           }
         ]
       }
@@ -4436,6 +4537,14 @@ module.exports = class MessageLoggerV2 {
       reportLoggingScope: (val) => this.reportMajorSettingChange('onlyLogWhitelist', val),
       reportMediaCaching: (val) => this.handleMediaCachingSetting(val),
       reportForceLegacyMediaFetching: (val) => this.setMediaCacheFetchTransportPreference(val),
+      reportLegacyRoutingDebugLoggingState: (enabled) => this.reportLegacyRoutingOutputStateChange(
+        enabled,
+        { console: true, toast: false }
+      ),
+      reportLegacyRoutingDebugToastsState: (enabled) => this.reportLegacyRoutingOutputStateChange(
+        enabled,
+        { console: false, toast: true }
+      ),
       reportAntiNuke: (val) => this.reportMajorSettingChange('antiNukeEnabled', val),
       reportCachedFileDeletion: (val) => this.reportMajorSettingChange('deleteCachedFilesWithRecords', val),
       resetEditSpamState: () => this._handleEditSpamThresholdChange(),
@@ -11901,12 +12010,22 @@ module.exports = class MessageLoggerV2 {
   }
   fetchMediaNetworkResponse(url, options = {}) {
     if (this.settings?.forceLegacyMediaFetching || this._mediaCacheNativeFetchCompatible === false) {
+      this._activateMediaCacheLegacyRoutingNotice();
       return fetch(url, options);
     }
-    const netApi = globalThis.BdApi?.Net;
-    const nativeFetch = netApi?.fetch;
+    let netApi;
+    let nativeFetch;
+    try {
+      netApi = this._getMediaCacheNetApi();
+      nativeFetch = netApi?.fetch;
+    } catch (error) {
+      this._mediaCacheNativeFetchCompatible = false;
+      this._activateMediaCacheLegacyRoutingNotice();
+      return fetch(url, options);
+    }
     if (typeof nativeFetch !== 'function') {
       this._mediaCacheNativeFetchCompatible = false;
+      this._activateMediaCacheLegacyRoutingNotice();
       return fetch(url, options);
     }
 
@@ -11918,12 +12037,15 @@ module.exports = class MessageLoggerV2 {
       });
       if (response == null || typeof response.then !== 'function') {
         this._mediaCacheNativeFetchCompatible = false;
+        this._activateMediaCacheLegacyRoutingNotice();
         return fetch(url, options);
       }
     } catch (error) {
       this._mediaCacheNativeFetchCompatible = false;
+      this._activateMediaCacheLegacyRoutingNotice();
       return fetch(url, options);
     }
+    this._deactivateMediaCacheLegacyRoutingNotice();
     this._mediaCacheNativeFetchCompatible = true;
     return response;
   }
@@ -11985,14 +12107,19 @@ module.exports = class MessageLoggerV2 {
   }
   setMediaCacheFetchTransportPreference(forceLegacyMediaFetching) {
     if (forceLegacyMediaFetching) {
+      this._activateMediaCacheLegacyRoutingNotice();
       return;
     }
-    if (this._mediaCacheNativeFetchCompatible === false) return;
-    this._mediaCacheNativeFetchCompatible = typeof BdApi?.Net?.fetch === 'function' ? null : false;
+    if (typeof this._mediaCacheNativeFetchCompatible !== 'boolean') {
+      this._mediaCacheNativeFetchCompatible = this._hasMediaCacheNativeFetch()
+        ? null
+        : false;
+    }
+    this._syncMediaCacheLegacyRoutingNotice();
   }
   ensureMediaCacheNativeFetchCompatibilityState() {
     if (typeof this._mediaCacheNativeFetchCompatible === 'boolean') return;
-    this._mediaCacheNativeFetchCompatible = typeof BdApi?.Net?.fetch === 'function' ? null : false;
+    this._mediaCacheNativeFetchCompatible = this._hasMediaCacheNativeFetch() ? null : false;
   }
   async cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts = 0, writeEpoch = this._mediaCacheWriteEpoch || 0) {
     if (this.settings?.dontSaveData) {
