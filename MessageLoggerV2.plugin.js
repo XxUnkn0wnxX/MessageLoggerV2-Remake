@@ -3698,7 +3698,11 @@ module.exports = class MessageLoggerV2 {
     return globalThis.BdApi?.Net;
   }
   _hasMediaCacheNativeFetch() {
-    return typeof this._getMediaCacheNetApi()?.fetch === 'function';
+    try {
+      return typeof this._getMediaCacheNetApi()?.fetch === 'function';
+    } catch {
+      return false;
+    }
   }
   _getMediaCacheLegacyRoutingNoticeState() {
     if (!this._mediaCacheLegacyRoutingNoticeState) {

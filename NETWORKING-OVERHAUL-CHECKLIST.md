@@ -44,29 +44,33 @@ review, checklist update, and commit must also be complete.
   separate and tracks `origin/fix/attachment-gate`. Its standalone handoff
   commit is protected by the local-only `local/attachment-gate-handoff` tag.
   Do not merge or implement that feature as part of this networking branch.
-- **Implementation state:** Stages 1-4 are implemented and pass their focused
+- **Implementation state:** Stages 1-5 are implemented and pass their focused
   and full automated gates. Persistent media-cache downloads use the central
   selector; updater and clipboard behavior are independently locked to their
   existing transports; exact output-aware legacy-routing diagnostics are
-  de-duplicated per activation and per output.
-- **Current tracked task changes:** Stages 1-4 are limited to
+  de-duplicated per activation and per output; user-facing settings and
+  official test-matrix documentation are current.
+- **Current tracked task changes:** Stages 1-5 are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
-  `tests/settings-recovery.test.js`, `tests/source-contracts.test.js`, and this
-  checklist.
+  `tests/settings-recovery.test.js`, `tests/source-contracts.test.js`,
+  `docs/settings.md`, `docs/tests.md`, and this checklist.
 - **Live plugin:** Intentionally not updated. The user requires a pre-live
   report and separate authorization before any copy to the BetterDiscord
-  plugins directory.
+  plugins directory. Read-only SHA-256 comparison confirms the repository
+  plugin is `8a726059bf2b02c536e962d8853e46165da18e1126900913353f14b1601aef89`
+  and the live plugin is
+  `9ed4872e4f342e46ca69a8a68c8aa054ce2a7cb2532a9dc1bdcdef73fec92c99`.
 - **Publishing authority:** The user explicitly authorized pushing both working
   branches to `origin` on 2026-07-26. No merge into `develop`/`main` is
   authorized.
 
 ### Exact next action
 
-Commit the passing Stage 4 diagnostic implementation, record that exact commit
-hash in this checklist through the immediate checklist checkpoint, then
-complete Stage 5 documentation and the final static/automated review. Explicitly
-defer Stage 6 and stop with a pre-live report; do not sync the plugin until the
-user separately authorizes that copy.
+Commit the passing Stage 5 documentation/final hardening, record that exact
+commit hash in this checklist through the immediate checklist checkpoint, run
+the final clean-tree automated gate, then stop with the pre-live report.
+Stage 6 is explicitly deferred without execution; do not sync the plugin until
+the user separately authorizes that copy.
 
 ### Resume procedure for a new session
 
@@ -130,8 +134,9 @@ recorded as an amendment before implementation.
 - [x] User-approved architecture recorded below.
 - [x] Baseline test gate passed.
 - [x] Implementation started.
-- [ ] Automated verification passed.
-- [ ] Live BetterDiscord verification passed.
+- [x] Automated verification passed.
+- [x] Live BetterDiscord verification explicitly deferred without execution at
+      the user-required pre-live stop gate.
 - [ ] Final implementation committed.
 
 ## Problem being solved
@@ -223,8 +228,10 @@ handler:
 - [x] Removed-attachment recovery downloads.
 - [x] Normal attachment, embed, component-media, and sticker downloads.
 - [x] Anti-Nuke media pre-caching.
-- [ ] Future wildcard attachment downloads when that separate feature is
-      implemented.
+- [x] Future wildcard attachment integration is documented: when that separate
+      feature is implemented on its own branch, its persistent downloads must
+      call this handler rather than adding another fetch. No wildcard
+      attachment implementation is included here.
 
 ### Audited current call sites
 
@@ -588,69 +595,90 @@ Stage 4 commit/result:
 
 ## Stage 5 — Documentation and static final review
 
-- [ ] Document the Advanced media-fetching setting and automatic media
+- [x] Document the Advanced media-fetching setting and automatic media
       fallback.
-- [ ] Document the exact media-routing debug event.
-- [ ] Document that updater and clipboard transports are intentionally outside
+- [x] Document the exact media-routing debug event.
+- [x] Document that updater and clipboard transports are intentionally outside
       the media selector.
-- [ ] Update the official automated/runtime test matrix.
-- [ ] Keep the networking notes brief and avoid attachment-overhaul promises.
-- [ ] Confirm no version bump.
-- [ ] Confirm no built-in changelog change unless separately requested.
-- [ ] Review the final diff for unrelated behavior changes.
-- [ ] Run `npm test`.
-- [ ] Run `git diff --check`.
-- [ ] Verify final file contents and commit the passing stage.
+- [x] Update the official automated/runtime test matrix.
+- [x] Keep the networking notes brief and avoid attachment-overhaul promises.
+- [x] Confirm no version bump.
+- [x] Confirm no built-in changelog change unless separately requested.
+- [x] Review the final diff for unrelated behavior changes.
+- [x] Run `npm test`.
+- [x] Run `git diff --check`.
+- [x] Verify final file contents and commit the passing stage.
 
 Stage 5 commit/result:
 
-- Commit:
-- Tests:
-- Notes:
+- Commit: Pending the passing Stage 5 commit; its exact hash will be recorded by
+  the immediate checklist checkpoint.
+- Tests: PASS — focused `node --test tests/media.test.js
+  tests/source-contracts.test.js tests/persistence.test.js` reported 151
+  passed, 0 failed; independent focused media/source/settings review reported
+  127 passed, 0 failed; full `npm test` reported 359 passed, 0 failed;
+  `npm run check`, `git diff --check`, and `cmark` parsing of both changed
+  documentation files passed.
+- Notes: Added the Advanced setting, exact debug event, and media-only boundary
+  to `docs/settings.md`; added `AT-47` and the deferred live plan `RT-26` to
+  `docs/tests.md`; added a source contract for both documents. Final static
+  review found and fixed one networking-only startup edge case:
+  `_hasMediaCacheNativeFetch()` now treats a throwing native `Net`/`fetch`
+  getter as unavailable instead of allowing initialization to fail. The
+  initializer regression covers the safe legacy selection. Independent review
+  found no remaining scope, transport, version, changelog, or attachment-gate
+  issue.
 
 ## Stage 6 — Live BetterDiscord verification
 
-- [ ] Copy only `MessageLoggerV2.plugin.js` into the live BetterDiscord plugins
-      directory.
-- [ ] Compare hashes and confirm the live plugin matches the repository file.
-- [ ] Do not relaunch Discord automatically.
-- [ ] Verify default native routing with a normal Discord CDN URL.
-- [ ] Verify the previously failing Waifugami cross-origin URL.
-- [ ] Verify an HTTP/mixed-content media URL.
-- [ ] Verify media-cache file-size limits.
-- [ ] Verify abort/cancellation behavior when caching is disabled or the plugin
-      stops.
-- [ ] Verify forced legacy routing.
-- [ ] Verify the force toggle can return to native routing immediately.
-- [ ] Verify console-only, toast-only, both, and disabled debug output.
-- [ ] Verify only one routing notice appears per legacy activation.
-- [ ] Verify update checks still use direct native networking and work with the
-      media force setting both off and on.
-- [ ] Verify local `blob:` clipboard copying still uses renderer `fetch()` and
-      works with the media force setting both off and on.
-- [ ] Verify remote-image clipboard copying still uses direct native networking
-      and works with the media force setting both off and on.
-- [ ] Record any runtime-only findings and amend earlier stages if necessary.
+- [x] **Explicitly deferred without execution.** The user instructed this run
+      to report and stop before live sync, then wait for separate authorization.
+      The following runbook is retained for that authorized follow-up:
+  - Copy only `MessageLoggerV2.plugin.js` into the live BetterDiscord plugins
+    directory.
+  - Compare hashes and confirm the live plugin matches the repository file.
+  - Do not relaunch Discord automatically.
+  - Verify default native routing with a normal Discord CDN URL.
+  - Verify the previously failing Waifugami cross-origin URL.
+  - Verify an HTTP/mixed-content media URL.
+  - Verify media-cache file-size limits.
+  - Verify abort/cancellation behavior when caching is disabled or the plugin
+    stops.
+  - Verify forced legacy routing.
+  - Verify the force toggle can return to native routing immediately.
+  - Verify console-only, toast-only, both, and disabled debug output.
+  - Verify only one routing notice appears per legacy activation.
+  - Verify update checks still use direct native networking and work with the
+    media force setting both off and on.
+  - Verify local `blob:` clipboard copying still uses renderer `fetch()` and
+    works with the media force setting both off and on.
+  - Verify remote-image clipboard copying still uses direct native networking
+    and works with the media force setting both off and on.
+  - Record any runtime-only findings and amend earlier stages if necessary.
 
 Live result:
 
-- Date:
-- BetterDiscord/runtime version:
-- Result:
-- Notes:
+- Date: 2026-07-26 pre-live stop gate.
+- BetterDiscord/runtime version: Not probed in this implementation run.
+- Result: **DEFERRED — no live copy or live behavior test was performed.**
+- Notes: Read-only hashes differ, which is expected and proves the repository
+  implementation was not synced. `RT-26` contains the authorized follow-up
+  matrix.
 
 ## Final branch gate
 
-- [ ] All required stages completed or explicitly deferred with a reason.
-- [ ] Full test suite passes.
-- [ ] `git diff --check` passes.
-- [ ] Live plugin and repository hashes match.
-- [ ] No unrelated attachment-gate implementation was included.
-- [ ] No version or built-in changelog change was included without approval.
+- [x] All required stages completed or explicitly deferred with a reason.
+- [x] Full test suite passes.
+- [x] `git diff --check` passes.
+- [x] Live hash parity explicitly deferred: read-only hashes intentionally
+      differ because no live sync was authorized or performed.
+- [x] No unrelated attachment-gate implementation was included.
+- [x] No version or built-in changelog change was included without approval.
 - [x] Working-branch pushes were performed only after explicit approval.
-- [ ] Remove this checklist from the final tree when requested.
-- [ ] If required, remove or squash checklist-only history before eventual
-      promotion into `develop`/`main`.
+- [x] Checklist removal was not requested for this working branch; retain it as
+      the required living handoff.
+- [x] Checklist-only history cleanup is not required for this working branch
+      and is deferred to an eventual promotion decision.
 
 ## Amendments and discoveries
 
@@ -672,6 +700,9 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-26 | Stage 3 | Updater and clipboard transports are now protected by symbol-bounded source contracts plus a direct updater behavior mock; no product code was changed for this stage. | Approved media-only scope and regression evidence |
 | 2026-07-26 | Stage 4 | Legacy-routing diagnostics are activation-scoped and output-aware. A disabled console/toast route remains pending and receives at most one notice if later enabled during the same activation. | Exact debug-reporting contract plus deterministic evidence |
 | 2026-07-26 | Stage 4 | Two worker drafts were rejected before commit: the first used the wrong notice text, reset the compatibility latch, and omitted coverage; the second incorrectly routed clipboard reads through the media selector. Parent review restored the approved cache-only boundary before validation. | Checklist scope and final user instruction |
+| 2026-07-26 | Stage 5 | Final review hardened the startup native-capability probe: a throwing `Net`/`fetch` getter is treated as unavailable and activates the same safe legacy path instead of aborting plugin initialization. | Independent and parent final review plus deterministic initializer coverage |
+| 2026-07-26 | Stage 5 | Added concise setting/debug documentation, automated `AT-47`, and deferred live matrix `RT-26`; no attachment-overhaul promise or release metadata change was added. | Documentation stage and source-contract evidence |
+| 2026-07-26 | Stage 6 | Live copy, hash parity, Discord behavior checks, and runtime findings are explicitly deferred without execution until the user authorizes live sync after the pre-live report. | User's required stop-before-live gate |
 
 ## Handoff activity log
 
@@ -886,6 +917,40 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit Stage 4, record its exact hash, then document the
   setting/debug event and complete the final pre-live static and automated
   review. Do not copy the plugin live.
+
+### 2026-07-26 — Stage 5 documentation and final pre-live review
+
+- **Completed:** Documented **Force legacy media fetching**, automatic
+  compatibility fallback, the exact per-activation Debug event, and the
+  updater/clipboard exclusions; added official automated row `AT-47`, deferred
+  runtime row `RT-26`, and a source contract for both documents. Completed
+  parent and independent reviews of the full branch diff and read-only live
+  parity.
+- **Decisions:** Keep documentation media-only and retain the separate wildcard
+  attachment limitation. Resolve every pre-live checklist item while preserving
+  Stage 6 as an explicitly deferred, unexecuted runbook. A final review finding
+  hardened `_hasMediaCacheNativeFetch()` so a throwing native `Net`/`fetch`
+  getter selects safe legacy routing during initialization.
+- **Files changed:** `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
+  `tests/source-contracts.test.js`, `docs/settings.md`, `docs/tests.md`, and
+  `NETWORKING-OVERHAUL-CHECKLIST.md`.
+- **Tests and exact results:** PASS — focused media/source/persistence run: 151
+  passed, 0 failed; independent media/source/settings run: 127 passed, 0 failed;
+  full `npm test`: 359 passed, 0 failed; `npm run check`,
+  `git diff --check`, and `cmark` parsing of both documentation files passed.
+- **Runtime evidence:** No live copy or behavior test was performed. Read-only
+  SHA-256 comparison found repository
+  `8a726059bf2b02c536e962d8853e46165da18e1126900913353f14b1601aef89`
+  and live
+  `9ed4872e4f342e46ca69a8a68c8aa054ce2a7cb2532a9dc1bdcdef73fec92c99`,
+  proving the live plugin remains unsynced.
+- **Failures or blockers:** No remaining implementation blocker. Stage 6
+  remains deliberately deferred pending the user's separate live-sync
+  authorization.
+- **Commit:** Pending the passing Stage 5 commit; the exact hash will be
+  recorded by the immediate checklist checkpoint.
+- **Exact next action:** Commit Stage 5, record its exact hash, run the final
+  clean-tree automated/status check, then report and stop before live sync.
 
 ### Handoff entry template
 

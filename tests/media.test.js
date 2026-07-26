@@ -600,6 +600,22 @@ test('media routing legacy notice startup state initializer selects native-laten
       ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
     ]);
 
+    const incompatibleNetApi = {};
+    Object.defineProperty(incompatibleNetApi, 'fetch', {
+      get() {
+        throw new Error('bad startup fetch getter');
+      }
+    });
+    global.BdApi.Net = incompatibleNetApi;
+    plugin._initializeMediaCacheLegacyRoutingNoticeState();
+    assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
+    assert.deepEqual(loggerEvents, [
+      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`],
+      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`],
+      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+    ]);
+
     global.BdApi.Net = {
       fetch: () => Promise.resolve(successfulMediaResponse())
     };
@@ -608,7 +624,7 @@ test('media routing legacy notice startup state initializer selects native-laten
     assert.equal(plugin._mediaCacheNativeFetchCompatible, null);
     assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, false);
     assert.equal(notifications.length, 0);
-    assert.equal(loggerEvents.length, 2);
+    assert.equal(loggerEvents.length, 3);
   } finally {
     global.BdApi.Net = originalNetApi;
   }

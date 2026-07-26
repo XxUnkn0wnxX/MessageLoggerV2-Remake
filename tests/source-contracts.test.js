@@ -7,6 +7,7 @@ const { createPlugin } = require('./helpers/plugin-harness');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'MessageLoggerV2.plugin.js'), 'utf8');
 const settingsDocs = fs.readFileSync(path.join(__dirname, '..', 'docs', 'settings.md'), 'utf8');
+const testsDocs = fs.readFileSync(path.join(__dirname, '..', 'docs', 'tests.md'), 'utf8');
 
 function readDefaultSettings() {
   const match = source.match(/const defaultSettings = (\{[\s\S]*?\n    \});\n    const Flags =/);
@@ -348,7 +349,8 @@ test('settings documentation retains audited group order and current UI labels',
     'Use BdApi notifications instead of custom toasts',
     'Block spam edit notifications (if enabled)',
     'Display open logs button next to the search box top right in channels',
-    'Disable toasts for local user (yourself)'
+    'Disable toasts for local user (yourself)',
+    'Force legacy media fetching'
   ]) {
     assert.ok(settingsDocs.includes(`| ${label} |`), `${label} is missing from the settings reference`);
   }
@@ -356,6 +358,25 @@ test('settings documentation retains audited group order and current UI labels',
   assert.match(settingsDocs, /Obfuscate CSS classes \| On \|[^\n]*restarts MessageLogger by temporarily disabling and re-enabling it[^\n]*\*\*No\*\*[^\n]*leaves the setting unchanged/);
   assert.match(settingsDocs, /Automatic updates \| On \|[^\n]*offers \*\*Update Now\*\*/);
   assert.match(settingsDocs, /Delete cached files with log records \| Off \|[^\n]*pauses while \*\*Disable loading archived data\*\* is active/);
+});
+
+test('media networking documentation preserves the selector boundary and official matrices', () => {
+  assert.match(
+    settingsDocs,
+    /\| Force legacy media fetching \| Off \|[^\n]*Persistent media-cache downloads use BetterDiscord native networking by default\.[^\n]*does not affect update checks or local\/remote image-copy requests\./
+  );
+  assert.match(
+    settingsDocs,
+    /Networking: media routing is using the old Discord renderer fetch\(\) method\.[^\n]*once per legacy-routing activation[^\n]*pending notice/
+  );
+  assert.match(
+    testsDocs,
+    /\| AT-47 \| Media networking \|[^\n]*native promise rejection and HTTP failure never start a second renderer request[^\n]*clipboard copying retain their direct native\/blob transport split/
+  );
+  assert.match(
+    testsDocs,
+    /\| RT-26 \| Media networking \|[^\n]*Waifugami cross-origin URL[^\n]*HTTP\/mixed-content media URL[^\n]*console-only, toast-only, both, and disabled Debug output[^\n]*remote image copy still uses direct BetterDiscord networking/
+  );
 });
 
 test('Ignore bots covers automated sources while ephemeral Components V2 stays excluded', () => {

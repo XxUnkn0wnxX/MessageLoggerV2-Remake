@@ -232,6 +232,7 @@ Message-history caching and hierarchical media storage are core behavior with no
 | Obfuscate CSS classes | On | Uses plugin-specific class names to reduce conflicts with themes and plugins. Changing either direction restarts MessageLogger by temporarily disabling and re-enabling it so the class map can be rebuilt. With **Disable saving data** **Off**, the accepted value saves immediately and the existing shutdown path flushes pending archive data before restart. With it **On**, a compact danger confirmation warns that memory-only session activity will be discarded; **Restart Logger** saves and proceeds, while **No** or dismissing the modal leaves the setting unchanged. |
 | Automatic updates | On | Periodically checks the repository for a newer plugin version and offers **Update Now**. Choosing it installs the update and reloads the renderer. |
 | Display update notes | On | Shows the plugin changelog after a version change. |
+| Force legacy media fetching | Off | Persistent media-cache downloads use BetterDiscord native networking by default. Turn this on to use Discord renderer `fetch()` instead; the renderer route is also selected automatically for the current plugin session when the native fetch API is missing or synchronously incompatible. This media-only selector does not affect update checks or local/remote image-copy requests. |
 | Contextmenu submenu name | Empty | Replaces the **Message Logger** label. Empty values use the built-in label. |
 | Only render locally cached attachments | Off | Prevents uncached attachments from rendering through Discord CDN. The saved record shows a filename placeholder instead. Toggling this reevaluates open logger and channel views immediately. |
 | Delete cached files with log records | Off | Permanently deletes related cached attachments, embeds, Components V2 media, and stickers whenever their final log record is removed, including purges and thread/forum cascades. It still runs in ordinary no-save mode, but pauses while **Disable loading archived data** is active because unseen archive records cannot participate in shared-media reference checks. |
@@ -242,8 +243,8 @@ The Debug category title and both setting labels use Discord's native warning co
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Enable debug logging | Off | Writes automatic-backup lifecycle events, edit-spam diagnostics, and deleted/edited channel-entry counter increases to the console. Counter output includes the new total, increase, server, and channel; edit-spam output shows each username's current/threshold counter, cooldown start, 10-second warning, final reset, and early settings reset without printing user IDs. |
-| Show debug messages as toasts | Off | Sends the same backup, edit-spam, and channel-entry counter events through the selected BetterDiscord-notification or custom-toast mode. Debug alerts are warning-colored, expire without pausing on hover, and dismiss on a left- or right-click. This control is independent of console debug logging. |
+| Enable debug logging | Off | Writes automatic-backup lifecycle events, edit-spam diagnostics, deleted/edited channel-entry counter increases, and media-networking diagnostics to the console. Counter output includes the new total, increase, server, and channel; edit-spam output shows each username's current/threshold counter, cooldown start, 10-second warning, final reset, and early settings reset without printing user IDs. |
+| Show debug messages as toasts | Off | Sends the same backup, edit-spam, channel-entry counter, and media-networking diagnostics through the selected BetterDiscord-notification or custom-toast mode. Debug alerts are warning-colored, expire without pausing on hover, and dismiss on a left- or right-click. This control is independent of console debug logging. |
 
 **Settings that can generate Debug output when the relevant event occurs:**
 
@@ -254,8 +255,9 @@ The Debug category title and both setting labels use Discord's native warning co
 - **Edit spam threshold**: active timer-reset details when the value changes while edit-spam blocking is enabled.
 - **Show amount of new deleted messages when entering a channel**: every enabled Deleted counter increase, including one combined increase for a bulk purge.
 - **Show amount of new edited messages when entering a channel**: every enabled Edited counter increase.
+- **Force legacy media fetching** and automatic native-compatibility fallback: report `Networking: media routing is using the old Discord renderer fetch() method.` once per legacy-routing activation to each enabled Debug output. An output enabled later receives its one pending notice; requests, retries, and files do not repeat it.
 
-Debug output does not change backup timing, persistence, counter behavior, edit blocking, or normal error reporting.
+Debug output does not change backup timing, persistence, counter behavior, edit blocking, media routing, or normal error reporting.
 
 ## 📣 High-Impact Setting Feedback
 
