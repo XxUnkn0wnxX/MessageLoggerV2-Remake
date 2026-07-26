@@ -2663,11 +2663,11 @@ evidence for another session to understand what changed and why.
   stopped.
 - **Failures or blockers:** No automated or review blocker. The final restored
   live PNG/JPEG click remains a user-driven runtime check.
-- **Commit:** Pending implementation commit; record its exact hash in the
-  follow-up checklist checkpoint.
-- **Exact next action:** Commit the validated implementation, record its exact
-  hash, live-sync only the plugin, verify reload/hash parity, and push the
-  branch before asking the user to retest.
+- **Commit:** Validated implementation
+  e425b24f01fd7179f69f7f1508c1c7d8a78b8080.
+- **Exact next action:** Commit this exact-hash checklist checkpoint,
+  live-sync only the plugin, verify reload/hash parity, and push the branch
+  before asking the user to retest.
 
 ### Handoff entry template
 
