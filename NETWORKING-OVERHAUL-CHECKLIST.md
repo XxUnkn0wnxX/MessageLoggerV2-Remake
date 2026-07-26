@@ -2608,10 +2608,11 @@ evidence for another session to understand what changed and why.
   trace/probe/clipboard helper is linked.
 - **Failures or blockers:** No live-sync blocker. Only the short user-driven
   native clipboard matrix remains.
-- **Commit:** Live-sync evidence commit pending.
-- **Exact next action:** Commit this evidence, push the feature branch, verify
-  local/tracking/direct-remote refs, then give the user the final short test
-  list.
+- **Commit:** Live-sync evidence
+  484efe420777a3d69cc49202ba7d31922e632085.
+- **Exact next action:** Commit this exact-hash follow-up, push the feature
+  branch, verify local/tracking/direct-remote refs, then give the user the
+  final short test list.
 
 ### Handoff entry template
 
