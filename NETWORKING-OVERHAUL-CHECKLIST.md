@@ -68,7 +68,7 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit this approved Stage 5A plan, record the exact plan commit below, then
+Commit and record the clarified master-versus-child cancellation boundary, then
 implement and validate the response-body inactivity watchdog. Update this
 checklist with the implementation commit and final evidence, report the result,
 and stop before any live-sync/copy into the live BetterDiscord plugins path.
@@ -458,6 +458,9 @@ these compatibility targets is allowed when required:
 - [ ] There is no fixed overall response-body download deadline.
 - [ ] Plugin stop or media-cache disable aborts header and body phases
       immediately, without a retry or a late cache write.
+- [x] **Cache all attachment types** is not a global cancellation gate. Its
+      known-incomplete selective non-image behavior remains deferred to the
+      later file-type-gate repair.
 - [ ] A same-instance restart cannot allow a body started by an older
       activation to write.
 - [ ] Supported streaming responses and the guarded non-streaming fallback are
@@ -667,6 +670,11 @@ or clipboard networking.
       finite no-progress escape.
 - [ ] On plugin stop or media-cache disable, immediately abort and release the
       active response/body operation; do not retry it and do not write a file.
+- [x] Interpret “media-cache disable” here only as the **Cache media locally**
+      master switch. Do not make **Cache all attachment types** abort every
+      request. Its later repair should selectively cancel only in-flight
+      non-image attachment/file-component requests that cease to qualify while
+      allowing image, embed, sticker, thumbnail, and gallery work to continue.
 - [ ] Preserve write-epoch protection for completion races and same-instance
       restarts.
 - [ ] Preserve existing response-size enforcement and release body resources
@@ -687,6 +695,7 @@ Stage 5A commit/result:
 
 - Plan commit: `ab5f56ebc3c1195a23597794f1bcdf9a0a0d1ba2`
   (`docs: plan media body inactivity watchdog`).
+- Cancellation-scope clarification commit: `<pending-scope-commit>`.
 - Implementation commit: `<pending-implementation-commit>`.
 - Tests: PENDING.
 - Notes: The approved policy measures inactivity rather than total transfer
@@ -769,6 +778,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-26 | Stage 5 | Added concise setting/debug documentation, automated `AT-47`, and deferred live matrix `RT-26`; no attachment-overhaul promise or release metadata change was added. | Documentation stage and source-contract evidence |
 | 2026-07-26 | Stage 6 | Live copy, hash parity, Discord behavior checks, and runtime findings are explicitly deferred without execution until the user authorizes live sync after the pre-live report. | User's required stop-before-live gate |
 | 2026-07-27 | Stage 5A | Harden the inherited response-body timeout/cancellation gap before live sync. Keep 15 seconds for the initial response, then use a rolling 30-second no-data watchdog that resets whenever non-empty bytes arrive; do not impose a fixed total download deadline. Stop or cache-disable must still cancel immediately and prevent retries or late writes. | User-approved implementation contract |
+| 2026-07-27 | Stage 5A scope | “Cache disabled” means the **Cache media locally** master switch, which cancels every active media request. **Cache all attachment types** must not become a global cancellation gate. Its known-broken/incomplete child behavior remains separate future work; when repaired, turning it Off should cancel only no-longer-eligible non-image attachment/file-component requests while visual media continues. | User clarification before Stage 5A implementation |
 | 2026-07-27 | Compatibility note | Retain only a historical mention of the malformed third-party `BdApi.Net.fetch` shape. Both supported BetterDiscord targets at `470ce77f` and `aa241f9` expose async Promise-returning methods, so no production hardening or open checklist work is planned for this theoretical unsupported-host case. | User judged the case very unlikely and asked to scrub it as an issue while retaining a mention |
 
 ## Handoff activity log
@@ -1050,7 +1060,10 @@ evidence for another session to understand what changed and why.
 - **Decisions:** Preserve the 15-second initial response deadline. During body
   consumption, allow unlimited total transfer time while non-empty bytes keep
   arriving, but abort after 30 continuous seconds without byte progress.
-  Plugin stop and media-cache disable remain immediate cancellation events.
+  Plugin stop and the **Cache media locally** master switch remain immediate
+  all-request cancellation events. **Cache all attachment types** remains
+  outside this stage: its later repair should cancel only newly ineligible
+  non-image requests without disturbing visual-media downloads.
 - **Files changed:** `NETWORKING-OVERHAUL-CHECKLIST.md` only.
 - **Tests and exact results:** PASS — `npm test` reported 359 passed, 0 failed;
   `npm run check`, `git diff --check`, and `cmark
@@ -1062,6 +1075,26 @@ evidence for another session to understand what changed and why.
   (`docs: plan media body inactivity watchdog`).
 - **Exact next action:** Commit and record this plan checkpoint, then implement
   Stage 5A with focused and full deterministic verification.
+
+### 2026-07-27 — Stage 5A cancellation-scope clarification
+
+- **Completed:** Distinguished the media-cache master switch from the known
+  incomplete all-attachment-types child before implementation.
+- **Decisions:** Plugin stop and **Cache media locally** Off cancel all current
+  media transfers. **Cache all attachment types** Off must never globally
+  cancel visual media; its eventual repair is separate and should cancel only
+  no-longer-eligible non-image attachment/file-component transfers.
+- **Files changed:** `NETWORKING-OVERHAUL-CHECKLIST.md` only.
+- **Tests and exact results:** PASS — `npm test` reported 359 passed, 0 failed;
+  `npm run check`, `git diff --check`, and checklist `cmark` parsing passed.
+  No plugin code has changed.
+- **Runtime evidence:** Static setting/call-path inspection only. The child
+  setting is `newSaveAllFileTypes`; the master is `cacheAllImages`.
+- **Failures or blockers:** The child toggle remains a documented known
+  limitation for a later, separately scoped repair.
+- **Commit:** `<pending-scope-commit>`.
+- **Exact next action:** Commit and record this clarification, then begin the
+  bounded Stage 5A implementation without changing the child setting.
 
 ### Handoff entry template
 
