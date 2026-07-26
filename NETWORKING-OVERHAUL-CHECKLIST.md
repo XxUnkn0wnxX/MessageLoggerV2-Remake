@@ -541,8 +541,8 @@ Stage 2 commit/result:
 
 Stage 3 commit/result:
 
-- Commit: pending this passing stage commit; its exact hash will be recorded by
-  the immediate checklist checkpoint.
+- Commit: `ffec3316aed4b7e0559899b04f387a814fa64f38`
+  (`test: lock media networking boundaries`).
 - Tests: PASS — `node --test tests/source-contracts.test.js` completed with 61
   passed, 0 failed; full `npm test` completed with 353 passed, 0 failed;
   `node --check MessageLoggerV2.plugin.js` passed within the full suite;
@@ -830,8 +830,8 @@ evidence for another session to understand what changed and why.
 - **Failures or blockers:** None. Parent review removed two unrelated static
   assertions and strengthened the updater parsing/error and force-setting
   independence contracts before commit.
-- **Commit:** Pending this passing stage commit; the immediate checklist
-  checkpoint will replace this sentence with the exact hash.
+- **Commit:** `ffec3316aed4b7e0559899b04f387a814fa64f38`
+  (`test: lock media networking boundaries`).
 - **Exact next action:** Implement and deterministically verify the exact
   output-aware legacy-routing notice without altering request, retry, updater,
   clipboard, or cache-write behavior.
