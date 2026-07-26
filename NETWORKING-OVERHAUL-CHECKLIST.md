@@ -87,15 +87,15 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Give the user the remaining update and clipboard `RT-26` tests and wait for
-their runtime results. Default native routing, cross-origin and mixed-content
-requests, slow body progress, controlled body inactivity, file-size
-enforcement, cache-master and plugin-stop cancellation, forced legacy, native
-return, linked Debug output, pending per-destination delivery, and
-activation-scoped notice de-duplication now have current live evidence. Keep
-the audited provisional Anti-Nuke/Ghost-Ping media-retention work as a separate
-post-networking stage in `TODO.md`; do not implement it on this networking
-handoff.
+Give the user the remaining clipboard `RT-26` tests and wait for their runtime
+results. Default native routing, cross-origin and mixed-content requests, slow
+body progress, controlled body inactivity, file-size enforcement,
+cache-master and plugin-stop cancellation, forced legacy, native return,
+linked Debug output, pending per-destination delivery, activation-scoped
+notice de-duplication, and force-independent update checks now have current
+live evidence. Keep the audited provisional Anti-Nuke/Ghost-Ping
+media-retention work as a separate post-networking stage in `TODO.md`; do not
+implement it on this networking handoff.
 
 ### Resume procedure for a new session
 
@@ -1012,8 +1012,11 @@ Stage 5D plan/result:
   - [x] Verify only one routing notice appears per legacy activation. Exactly
         one required notice appeared after force was enabled despite multiple
         automatic media requests plus both manual probes using legacy routing.
-  - [ ] Verify update checks still use direct native networking and work with the
-    media force setting both off and on.
+  - [x] Verify update checks still use direct native networking and work with
+        the media force setting both off and on. Manual checks returned HTTP
+        200 at `18:16:36` UTC with force Off and `18:17:18` UTC with force On.
+        Neither check received a media request ID or entered detailed media
+        diagnostics.
   - [ ] Verify local `blob:` clipboard copying still uses renderer `fetch()` and
     works with the media force setting both off and on.
   - [ ] Verify remote-image clipboard copying still uses direct native
@@ -1025,8 +1028,8 @@ Live result:
 - Date: 2026-07-27 final Debug-linked `2.8.2.9` live replacement and partial
   `RT-26` run.
 - Result: **FINAL 2.8.2.9 SYNC, HASH, HOT-RELOAD, NATIVE/CORS,
-  SLOW-PROGRESS, CONTROLLED-STALL, FILE-SIZE, AND DEBUG-OUTPUT PASS; REMAINING
-  USER RT-26 TESTING PENDING.**
+  SLOW-PROGRESS, CONTROLLED-STALL, FILE-SIZE, DEBUG-OUTPUT, AND UPDATER PASS;
+  REMAINING USER RT-26 TESTING PENDING.**
 - Notes: Repository and live SHA-256 both equal
   `260a3f8c2c3bf0534b0ad8ef5a91d62fae83cbce088cc9fab3e0a6917d2cd424`.
   The current logs prove native Discord-CDN success, Waifugami HTTP 200 with
@@ -1042,8 +1045,9 @@ Live result:
   immediately by the 1 MB cache limit without deletion or a media-cache fetch.
   The full linked Debug matrix then passed: master-Off silence, console-only
   delivery, one pending toast without console duplication, and one console
-  notice plus one toast for a fresh both-output activation. Discord was not
-  relaunched.
+  notice plus one toast for a fresh both-output activation. Manual update
+  checks returned HTTP 200 with media force Off and On without entering the
+  media request route. Discord was not relaunched.
 
 Historical result:
 
@@ -2009,8 +2013,28 @@ evidence for another session to understand what changed and why.
   delivery, or activation de-duplication. Updater and clipboard checks remain.
 - **Commit:** Debug-output runtime-evidence checkpoint
   c0e19440ee45c7355308320c706e48d4df298217.
-- **Exact next action:** Record and push this evidence, then run the updater
-  force-Off/force-On check.
+- **Exact next action:** Superseded by the updater result below.
+
+### 2026-07-27 — Force-independent updater runtime check
+
+- **Completed:** Ran **Check for update now!** once with **Force legacy media
+  fetching** Off and again with it On.
+- **Decisions:** Keep update checking outside the media transport selector. The
+  force-setting activation notice is independent from the updater request.
+- **Files changed:** This checklist only.
+- **Tests and exact results:** PASS — both manual checks fetched the maintained
+  branch plugin URL and returned `200 OK`. Neither request received a media
+  request ID or appeared in detailed media-network diagnostics.
+- **Runtime evidence:** Both current BetterDiscord logs show the force-Off
+  request at `18:16:36` UTC and the force-On request at `18:17:18` UTC. The
+  legacy-routing notice at `18:17:15` UTC records the force activation, not the
+  updater route.
+- **Failures or blockers:** None for updater isolation or force independence.
+  Local and remote clipboard checks remain.
+- **Commit:** Pending this runtime-evidence commit; replace this text with its
+  exact hash in the immediate checklist checkpoint.
+- **Exact next action:** Record and push this evidence, then run local `blob:`
+  clipboard copying with media force Off and On.
 
 ### Handoff entry template
 
