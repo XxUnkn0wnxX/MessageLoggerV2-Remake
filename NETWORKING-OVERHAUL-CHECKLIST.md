@@ -35,9 +35,9 @@ review, checklist update, and commit must also be complete.
 - **Working branch:** `fix/native-media-networking`
 - **Branch base:** a5eadbe736f5a0cf4b7a3730bf9950ade17ad752
   (`docs: prepare 2.8.2.8 release notes`)
-- **Upstream status:** The final combined checkpoint is ready for the
-  authorized push to `origin/fix/native-media-networking`; remote-ref parity
-  must be verified before the user report. The completed earlier implementation
+- **Upstream status:** The authorized combined checkpoint was pushed through
+  4d8a2e732c7e905adc17ca3ef465a49601fd644c; local, tracking, and direct remote
+  refs matched exactly after publication. The completed earlier implementation
   and live-sync history was first published through
   e84bfaaf6fffc4b809f7e4fb6fe70ef6ac5c5897. `develop`, `main`,
   `origin/develop`, and `origin/main` all remain untouched at
@@ -95,10 +95,10 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Push the final combined checkpoint, verify local/remote branch parity, then give
-the user the short clipboard/disable runtime matrix. Amend the built-in
-changelog only after the user confirms clipboard runtime behavior. Keep
-provisional Anti-Nuke/Ghost-Ping retention as a separate post-networking stage.
+Give the user the short clipboard/disable runtime matrix and record their
+results. Amend the built-in changelog only after the user confirms clipboard
+runtime behavior. Keep provisional Anti-Nuke/Ghost-Ping retention as a separate
+post-networking stage.
 
 ### Resume procedure for a new session
 
@@ -1136,8 +1136,8 @@ Historical result:
 - [x] Version remains `2.8.2.9` as instructed.
 - [ ] After clipboard runtime confirmation, amend the built-in changelog under
       the user's new explicit approval.
-- [x] Push the clipboard-repair checkpoint only after the authorized live sync and verify
-      local/remote ref alignment.
+- [x] Push the combined clipboard/disable checkpoint only after the authorized
+      live sync and verify local/tracking/direct-remote ref alignment.
 - [x] Checklist removal was not requested for this working branch; retain it as
       the required living handoff.
 - [x] Checklist-only history cleanup is not required for this working branch
@@ -2360,6 +2360,26 @@ evidence for another session to understand what changed and why.
   e2ef2424bc586d6d54803f2813c5e3adc7b4c23e.
 - **Exact next action:** Commit this live evidence, record its exact hash, push
   the feature branch, verify refs, and hand the runtime matrix to the user.
+
+### 2026-07-27 — Combined checkpoint publication
+
+- **Completed:** Pushed `fix/native-media-networking` to its existing origin
+  branch after the authorized live sync.
+- **Decisions:** Do not merge into `develop` or `main`. Do not amend version or
+  changelog until clipboard runtime confirmation.
+- **Files changed:** This final publication note only.
+- **Tests and exact results:** Publication reused the exact live-synced tree
+  that passed `394/394`; no product file changed after that run.
+- **Runtime evidence:** Local `HEAD`, the local
+  `origin/fix/native-media-networking` tracking ref, and direct `git ls-remote`
+  all matched 4d8a2e732c7e905adc17ca3ef465a49601fd644c after push.
+- **Failures or blockers:** None in publication. Only the short user-driven
+  clipboard and disable/re-enable behavior checks remain.
+- **Commit:** Published combined checkpoint
+  4d8a2e732c7e905adc17ca3ef465a49601fd644c.
+- **Exact next action:** Give the user the short runtime matrix, record the
+  results, then update the built-in changelog only if clipboard behavior is
+  confirmed.
 
 ### Handoff entry template
 
