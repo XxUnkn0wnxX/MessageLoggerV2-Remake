@@ -33,10 +33,10 @@ review, checklist update, and commit must also be complete.
 - **Last updated:** 2026-07-27
 - **Repository:** `$HOME/Apps/Dev/BD/BD-Plugins/MessageLoggerV2-Remake`
 - **Working branch:** `fix/native-media-networking`
-- **Branch base:** `a5eadbe736f5a0cf4b7a3730bf9950ade17ad752`
+- **Branch base:** a5eadbe736f5a0cf4b7a3730bf9950ade17ad752
   (`docs: prepare 2.8.2.8 release notes`)
 - **Upstream status:** `origin/fix/native-media-networking` remains at the
-  published handoff commit `54a1f385`; local implementation commits are
+  published handoff commit 54a1f3858140e319873135fcb3485b3ee8fd1266; local implementation commits are
   intentionally ahead and have not been pushed. `develop` and `main` both still
   point to the same released base commit and track their matching `origin`
   branches.
@@ -484,11 +484,11 @@ these compatibility targets is allowed when required:
 Baseline result:
 
 - Initial audit gate: PASS on 2026-07-26 at
-  `a5eadbe736f5a0cf4b7a3730bf9950ade17ad752` — `npm test` completed with
+  a5eadbe736f5a0cf4b7a3730bf9950ade17ad752 — `npm test` completed with
   339 tests passed, 0 failed; `node --check MessageLoggerV2.plugin.js` and
   `git diff --check` passed.
 - Implementation-resume gate: PASS on 2026-07-26 at
-  `54a1f3858140e319873135fcb3485b3ee8fd1266` — `npm test` completed with
+  54a1f3858140e319873135fcb3485b3ee8fd1266 — `npm test` completed with
   339 tests passed, 0 failed; `node --check MessageLoggerV2.plugin.js` passed
   as part of `npm test`; `git diff --check` passed; the worktree was clean
   before this checklist update.
@@ -508,7 +508,7 @@ Baseline result:
 
 Stage 1 commit/result:
 
-- Commit: `cedf3a65bf020abe3608642b63a62e4a6cb1633b`
+- Commit: cedf3a65bf020abe3608642b63a62e4a6cb1633b
   (`feat: add media fetch transport setting`).
 - Tests: PASS — focused
   `node --test tests/settings-recovery.test.js tests/source-contracts.test.js tests/media.test.js`
@@ -540,7 +540,7 @@ Stage 1 commit/result:
 
 Stage 2 commit/result:
 
-- Commit: `3c13374bb1a387cbb6ae13e7294cabb1317c99e5`
+- Commit: 3c13374bb1a387cbb6ae13e7294cabb1317c99e5
   (`feat: route media cache through native networking`).
 - Tests: PASS — `node --test tests/media.test.js` completed with 47 passed, 0
   failed; full `npm test` completed with 349 passed, 0 failed;
@@ -576,7 +576,7 @@ Stage 2 commit/result:
 
 Stage 3 commit/result:
 
-- Commit: `ffec3316aed4b7e0559899b04f387a814fa64f38`
+- Commit: ffec3316aed4b7e0559899b04f387a814fa64f38
   (`test: lock media networking boundaries`).
 - Tests: PASS — `node --test tests/source-contracts.test.js` completed with 61
   passed, 0 failed; full `npm test` completed with 353 passed, 0 failed;
@@ -605,7 +605,7 @@ Stage 3 commit/result:
 
 Stage 4 commit/result:
 
-- Commit: `3ef7e6caae738d298ebada5bcab2241204d87571`
+- Commit: 3ef7e6caae738d298ebada5bcab2241204d87571
   (`feat: report legacy media routing`).
 - Tests: PASS — `node --check MessageLoggerV2.plugin.js`; focused
   `node --test tests/media.test.js tests/source-contracts.test.js
@@ -638,7 +638,7 @@ Stage 4 commit/result:
 
 Stage 5 commit/result:
 
-- Commit: `ee902036fa083e20ec6700863a5093b9afa1bbec`
+- Commit: ee902036fa083e20ec6700863a5093b9afa1bbec
   (`fix: finalize media networking overhaul`).
 - Tests: PASS — focused `node --test tests/media.test.js
   tests/source-contracts.test.js tests/persistence.test.js` reported 151
@@ -699,15 +699,15 @@ or clipboard networking.
 
 Stage 5A commit/result:
 
-- Plan commit: `ab5f56ebc3c1195a23597794f1bcdf9a0a0d1ba2`
+- Plan commit: ab5f56ebc3c1195a23597794f1bcdf9a0a0d1ba2
   (`docs: plan media body inactivity watchdog`).
 - Cancellation-scope clarification commit:
-  `f17a96e42348d725adcc578fb0ec3b489011afb0`
+  f17a96e42348d725adcc578fb0ec3b489011afb0
   (`docs: clarify media watchdog cancellation scope`).
 - Draft-audit checkpoint commit:
-  `503035bfe886035d02ed42d93ca738e824c752c0`
+  503035bfe886035d02ed42d93ca738e824c752c0
   (`docs: record media watchdog draft audit`).
-- Implementation commit: `9e5871c75039fc34f262598854701083190df1fd`
+- Implementation commit: 9e5871c75039fc34f262598854701083190df1fd
   (`fix: guard media cache body transfers`).
 - Draft tests: focused media PASS `61/61`; full suite FAIL `367/368` because the
   existing central-handler source contract no longer matched the draft call
@@ -768,7 +768,7 @@ Stage 5B plan/result:
 - Scope: no BetterDiscord host edit, no renderer/legacy-path change, and no
   updater, clipboard, attachment-gate, release-metadata, or unrelated plugin
   change.
-- Plan commit: `486fc1b214729338bbd59e0c24aee0d6d4b5218a`.
+- Plan commit: 486fc1b214729338bbd59e0c24aee0d6d4b5218a.
 - Implementation result: the native call now receives exactly `timeout: 0`;
   caller-supplied options remain unchanged and Logger's own watchdogs retain
   timeout ownership.
@@ -778,7 +778,7 @@ Stage 5B plan/result:
 - Independent review: no blocking or non-blocking findings. Both supported
   BetterDiscord implementations forward numeric zero to `http.request`, and
   the change remains confined to the native media-cache route.
-- Implementation commit: `aaf31b69659131fb7e67f01c249cb988c81f7474`.
+- Implementation commit: aaf31b69659131fb7e67f01c249cb988c81f7474.
 
 ## Stage 5C — Detailed media-network console diagnostics
 
@@ -835,7 +835,13 @@ Stage 5C plan/result:
   sensitive signed/query values.
 - Request identity: one monotonic ID per actual HTTP attempt, so retries remain
   distinguishable and concurrent native/legacy activity is attributable.
-- Plan commit: `1ecd08c189893f538725f7d6034fd005b8f09b2b`.
+- Plan commit: 1ecd08c189893f538725f7d6034fd005b8f09b2b.
+- Initial implementation commit:
+  429701ebd65afdac8841b5f77e2173e4bbf2d2a5. Its full automated suite passed
+  `376/376`, but the parent pre-live audit rejected it as final: it could print
+  a native route before validating the native thenable, and it did not yet own
+  exact body-terminal outcome/partial-byte reporting inside the managed
+  response lifecycle. Nothing from that draft was synced live.
 
 ## Stage 5D — Networking release metadata
 
@@ -864,7 +870,7 @@ Stage 5D plan/result:
 - Authorization: update the plugin metadata and built-in changelog before the
   already authorized live sync, then push the current feature branch before
   the final report.
-- Plan amendment commit: `adf773e81cc189d1f9fa841fb0ef0de1f4cc29c8`.
+- Plan amendment commit: adf773e81cc189d1f9fa841fb0ef0de1f4cc29c8.
 
 ## Stage 6 — Live BetterDiscord verification
 
@@ -969,8 +975,8 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-27 | Stage 5A | Harden the inherited response-body timeout/cancellation gap before live sync. Keep 15 seconds for the initial response, then use a rolling 30-second no-data watchdog that resets whenever non-empty bytes arrive; do not impose a fixed total download deadline. Stop or cache-disable must still cancel immediately and prevent retries or late writes. | User-approved implementation contract |
 | 2026-07-27 | Stage 5A scope | “Cache disabled” means the **Cache media locally** master switch, which cancels every active media request. **Cache all attachment types** must not become a global cancellation gate. Its known-broken/incomplete child behavior remains separate future work; when repaired, turning it Off should cancel only no-longer-eligible non-image attachment/file-component requests while visual media continues. | User clarification before Stage 5A implementation |
 | 2026-07-27 | Stage 5A draft audit | The first draft could still wait forever for a non-cooperative stream-cancel promise, retained retryable HTTP response bodies during backoff, and broke one existing central-handler source contract. Coverage also did not yet prove total transfer time beyond the idle window, body cancellation without `AbortController`, or stalled `arrayBuffer()` fallback. | Reported before correction; user approved the bounded fixes |
-| 2026-07-27 | Stage 5A result | Implemented the approved rolling response-body watchdog, bounded non-cooperative cleanup, retry-response release, logical no-`AbortController` cancellation, streamless fallback escape, and deterministic coverage. The full suite passes `373/373`; an independent final review found no blocking defect. | Implementation commit `9e5871c75039fc34f262598854701083190df1fd` and final verification |
-| 2026-07-27 | Compatibility note | Retain only a historical mention of the malformed third-party `BdApi.Net.fetch` shape. Both supported BetterDiscord targets at `470ce77f` and `aa241f9` expose async Promise-returning methods, so no production hardening or open checklist work is planned for this theoretical unsupported-host case. | User judged the case very unlikely and asked to scrub it as an issue while retaining a mention |
+| 2026-07-27 | Stage 5A result | Implemented the approved rolling response-body watchdog, bounded non-cooperative cleanup, retry-response release, logical no-`AbortController` cancellation, streamless fallback escape, and deterministic coverage. The full suite passes `373/373`; an independent final review found no blocking defect. | Implementation commit 9e5871c75039fc34f262598854701083190df1fd and final verification |
+| 2026-07-27 | Compatibility note | Retain only a historical mention of the malformed third-party `BdApi.Net.fetch` shape. Both supported BetterDiscord targets at 470ce77f1af43dd9abb061b087e8e54dd99ea3b9 and aa241f9fd57fa20698fd92eff201fbba086c9b9a expose async Promise-returning methods, so no production hardening or open checklist work is planned for this theoretical unsupported-host case. | User judged the case very unlikely and asked to scrub it as an issue while retaining a mention |
 | 2026-07-27 | Stage 6 | After the required pre-live report, the user separately authorized live sync. The single plugin file was copied, hash parity was verified, and current log evidence showed a clean hot reload plus successful media-cache activity. The remaining `RT-26` behavior matrix now requires user interaction. | User live-sync authorization and runtime log evidence |
 | 2026-07-27 | Stage 6 resources | Revalidated the original Waifugami image and a Google image as live HTTP 200 image responses without an allowed-origin header. Selected official httpbin drip URLs for a 40-second progressing transfer and a greater-than-30-second body stall, avoiding a large Discord upload. | Live header/chunk-timing checks and user request for practical test URLs |
 | 2026-07-27 | Stage 5B | The public stall probe failed twice at about six seconds and a controlled localhost response failed at exactly five seconds. BetterDiscord's `timeout: null` becomes an unspecified Node request timeout, exposing the modern global agent's five-second socket timeout. Replace only the native media-cache override with `timeout: 0`, leaving Logger's 15-second initial and rolling 30-second body watchdogs authoritative. | Trace-first runtime evidence, supported-host source comparison, explicit `timeout: 0` control test, and user approval to fix and auto-sync |
@@ -1066,7 +1072,7 @@ evidence for another session to understand what changed and why.
 - **Runtime evidence:** Existing probe evidence was reconstructed; no new
   Discord probe or live-plugin change was required.
 - **Failures or blockers:** None.
-- **Commit:** `f3f4b6c` (`docs: resume networking implementation`).
+- **Commit:** f3f4b6c0ef7b11136fbfa6adc86a9a6c35bf257a (`docs: resume networking implementation`).
 - **Exact next action:** Implement and validate Stage 1, update this file with
   exact evidence, and commit only after the full stage passes.
 
@@ -1091,7 +1097,7 @@ evidence for another session to understand what changed and why.
   of the established AbortController path. Parent review rejected that draft
   before commit; the final Stage 1 diff restores the existing request path
   byte-for-byte and has no known blocker.
-- **Commit:** `cedf3a65bf020abe3608642b63a62e4a6cb1633b`
+- **Commit:** cedf3a65bf020abe3608642b63a62e4a6cb1633b
   (`feat: add media fetch transport setting`).
 - **Exact next action:** Commit Stage 1, record its hash, then implement the
   central media-only network handler and its deterministic transport coverage.
@@ -1121,7 +1127,7 @@ evidence for another session to understand what changed and why.
   preserve renderer `credentials`, which is not a shared BetterDiscord native
   option; parent review removed that assertion before commit. No product code
   relied on it.
-- **Commit:** `3c13374bb1a387cbb6ae13e7294cabb1317c99e5`
+- **Commit:** 3c13374bb1a387cbb6ae13e7294cabb1317c99e5
   (`feat: route media cache through native networking`).
 - **Exact next action:** Add Stage 3 source contracts proving update checks,
   remote clipboard reads, and local `blob:` clipboard reads remain independent
@@ -1146,7 +1152,7 @@ evidence for another session to understand what changed and why.
 - **Failures or blockers:** None. Parent review removed two unrelated static
   assertions and strengthened the updater parsing/error and force-setting
   independence contracts before commit.
-- **Commit:** `ffec3316aed4b7e0559899b04f387a814fa64f38`
+- **Commit:** ffec3316aed4b7e0559899b04f387a814fa64f38
   (`test: lock media networking boundaries`).
 - **Exact next action:** Implement and deterministically verify the exact
   output-aware legacy-routing notice without altering request, retry, updater,
@@ -1183,7 +1189,7 @@ evidence for another session to understand what changed and why.
   before commit: one had the wrong exact notice, reset the compatibility latch,
   and lacked tests; the next improperly routed clipboard reads through the
   media selector. Parent review removed both regressions. No blocker remains.
-- **Commit:** `3ef7e6caae738d298ebada5bcab2241204d87571`
+- **Commit:** 3ef7e6caae738d298ebada5bcab2241204d87571
   (`feat: report legacy media routing`).
 - **Exact next action:** Commit Stage 4, record its exact hash, then document the
   setting/debug event and complete the final pre-live static and automated
@@ -1218,7 +1224,7 @@ evidence for another session to understand what changed and why.
 - **Failures or blockers:** No remaining implementation blocker. Stage 6
   remains deliberately deferred pending the user's separate live-sync
   authorization.
-- **Commit:** `ee902036fa083e20ec6700863a5093b9afa1bbec`
+- **Commit:** ee902036fa083e20ec6700863a5093b9afa1bbec
   (`fix: finalize media networking overhaul`).
 - **Exact next action:** Commit this exact Stage 5 hash checkpoint, run the
   final clean-tree automated/status check, then report and stop before live
@@ -1234,12 +1240,12 @@ evidence for another session to understand what changed and why.
 - **Files changed:** `NETWORKING-OVERHAUL-CHECKLIST.md` only.
 - **Tests and exact results:** PASS — full suite `359/359`; `npm run check`
   passed; `git diff --check` passed; this checklist parses with `cmark`.
-- **Runtime evidence:** Supported host references `470ce77f` and `aa241f9` were
+- **Runtime evidence:** Supported host references 470ce77f1af43dd9abb061b087e8e54dd99ea3b9 and aa241f9fd57fa20698fd92eff201fbba086c9b9a were
   checked read-only; no live sync or runtime code path changed. Live repository
   hash remains `647de34e571b7a14f70c16a464241b0ece55aea59200eb8bfe5b925dda57c7c9` and live hash remains
   `9ed4872e4f342e46ca69a8a68c8aa054ce2a7cb2532a9dc1bdcdef73fec92c99`.
 - **Failures or blockers:** None.
-- **Commit:** `dfcfa5f845abbaca02df4d6e01e421496a938f88`
+- **Commit:** dfcfa5f845abbaca02df4d6e01e421496a938f88
   (`docs: record final networking edge audit`).
 - **Exact next action:** Wait for explicit live-sync authorization; then run RT-26
   runtime checks. Do not start optional body-phase hardening without separate
@@ -1265,7 +1271,7 @@ evidence for another session to understand what changed and why.
 - **Runtime evidence:** None required for this planning checkpoint; live plugin
   remains intentionally unsynced.
 - **Failures or blockers:** None.
-- **Commit:** `ab5f56ebc3c1195a23597794f1bcdf9a0a0d1ba2`
+- **Commit:** ab5f56ebc3c1195a23597794f1bcdf9a0a0d1ba2
   (`docs: plan media body inactivity watchdog`).
 - **Exact next action:** Commit and record this plan checkpoint, then implement
   Stage 5A with focused and full deterministic verification.
@@ -1286,7 +1292,7 @@ evidence for another session to understand what changed and why.
   setting is `newSaveAllFileTypes`; the master is `cacheAllImages`.
 - **Failures or blockers:** The child toggle remains a documented known
   limitation for a later, separately scoped repair.
-- **Commit:** `f17a96e42348d725adcc578fb0ec3b489011afb0`
+- **Commit:** f17a96e42348d725adcc578fb0ec3b489011afb0
   (`docs: clarify media watchdog cancellation scope`).
 - **Exact next action:** Commit and record this clarification, then begin the
   bounded Stage 5A implementation without changing the child setting.
@@ -1311,7 +1317,7 @@ evidence for another session to understand what changed and why.
   handle registered.
 - **Failures or blockers:** The reported issues are now approved for bounded
   correction. The draft remains uncommitted and is not eligible for live sync.
-- **Commit:** `503035bfe886035d02ed42d93ca738e824c752c0`
+- **Commit:** 503035bfe886035d02ed42d93ca738e824c752c0
   (`docs: record media watchdog draft audit`).
 - **Exact next action:** Commit and record this audit checkpoint, apply the
   approved corrections/tests, then run the full review and verification gates.
@@ -1341,9 +1347,9 @@ evidence for another session to understand what changed and why.
   slow/stalled response behavior and stop/master-toggle cancellation remain
   the separately authorized `RT-26` live checks.
 - **Commit:** Implementation
-  `9e5871c75039fc34f262598854701083190df1fd`
+  9e5871c75039fc34f262598854701083190df1fd
   (`fix: guard media cache body transfers`); checklist checkpoint
-  `6830a03b5cca7ccf1689a874ab9445d60215090a`
+  6830a03b5cca7ccf1689a874ab9445d60215090a
   (`docs: record completed media watchdog`).
 - **Exact next action:** Report and stop. Wait for explicit live-sync
   authorization before copying the plugin or running `RT-26`.
@@ -1357,7 +1363,7 @@ evidence for another session to understand what changed and why.
 - **Decisions:** Do not relaunch Discord. Stop for the user's manual `RT-26`
   checks; use trace-first diagnosis if any check fails.
 - **Files changed:** Live `MessageLoggerV2.plugin.js` plus this checklist. No
-  repository plugin code changed after implementation commit `9e5871c`.
+  repository plugin code changed after implementation commit 9e5871c75039fc34f262598854701083190df1fd.
 - **Tests and exact results:** PASS — pre-sync `npm test` `373/373`; live plugin
   syntax check; repository/live `cmp`; SHA-256 parity.
 - **Runtime evidence:** `debug.log` advanced after the copy and showed plugin
@@ -1366,7 +1372,7 @@ evidence for another session to understand what changed and why.
 - **Failures or blockers:** Automated and basic load gates have no blocker.
   The remaining checks require the user to exercise real URLs, cancellation,
   and force-mode behavior inside Discord.
-- **Commit:** `f73b8b096f430e9b31d0f2041b447c339d117e81`
+- **Commit:** f73b8b096f430e9b31d0f2041b447c339d117e81
   (`docs: record authorized live sync`).
 - **Exact next action:** Give the user the short `RT-26` test instructions and
   wait for results before making any further code change.
@@ -1389,9 +1395,9 @@ evidence for another session to understand what changed and why.
   user invocation inside Discord remains pending.
 - **Failures or blockers:** None. If DevTools console use is inconvenient, a
   disposable helper plugin can expose the same two probes.
-- **Commit:** `32b0df1b61116855a4dcfba2ac952b4b3497e02d`.
+- **Commit:** 32b0df1b61116855a4dcfba2ac952b4b3497e02d.
 - **HTTP test-resource follow-up:**
-  `51624f181299276dc12669cd2522198afaa8736f`.
+  51624f181299276dc12669cd2522198afaa8736f.
 - **Exact next action:** Give the user the exact pasteable probes and wait for
   their results.
 
@@ -1410,7 +1416,7 @@ evidence for another session to understand what changed and why.
   confirmed Logger defect.
 - **Failures or blockers:** The 30-second body-inactivity behavior still needs
   one clean live retest. No code fix is authorized or indicated by this result.
-- **Commit:** `90abbad3ae35e8d8f1819ba178d462ffa7467301`.
+- **Commit:** 90abbad3ae35e8d8f1819ba178d462ffa7467301.
 - **Exact next action:** Ask the user to rerun only the 70-second/two-byte stall
   probe. If the endpoint aborts early again, replace it with a controlled local
   or helper-plugin stall probe.
@@ -1434,7 +1440,7 @@ evidence for another session to understand what changed and why.
   complete at 35.0 seconds.
 - **Failures or blockers:** The current live plugin cannot exercise its
   30-second body watchdog because the inherited host timer fires first.
-- **Commit:** `486fc1b214729338bbd59e0c24aee0d6d4b5218a`.
+- **Commit:** 486fc1b214729338bbd59e0c24aee0d6d4b5218a.
 - **Exact next action:** Commit and record this approved plan, implement the
   narrow override with regression coverage, complete validation/review, then
   auto-sync the single plugin file as authorized.
@@ -1457,7 +1463,7 @@ evidence for another session to understand what changed and why.
   35-second completion with explicit numeric zero.
 - **Failures or blockers:** None found in deterministic or independent review.
   The post-sync controlled stall result remains runtime-only.
-- **Commit:** `aaf31b69659131fb7e67f01c249cb988c81f7474`.
+- **Commit:** aaf31b69659131fb7e67f01c249cb988c81f7474.
 - **Exact next action:** Commit this implementation, record its exact hash in
   both Stage 5B locations, then add and commit Stage 5C's detailed
   media-network diagnostics plan before changing that behavior.
@@ -1481,7 +1487,7 @@ evidence for another session to understand what changed and why.
   exists yet.
 - **Failures or blockers:** None. Full URLs may expose signed/query values in
   exported console logs, so that risk must be documented with the setting.
-- **Commit:** `1ecd08c189893f538725f7d6034fd005b8f09b2b`.
+- **Commit:** 1ecd08c189893f538725f7d6034fd005b8f09b2b.
 - **Exact next action:** Commit this plan, record its exact hash, then delegate
   the bounded implementation and focused tests before parent integration,
   full-suite validation, independent audit, and authorized live sync.
@@ -1501,10 +1507,35 @@ evidence for another session to understand what changed and why.
   amendment; the versioned plugin will receive the same full validation and
   live hash/reload checks as Stage 5C.
 - **Failures or blockers:** None.
-- **Commit:** `adf773e81cc189d1f9fa841fb0ef0de1f4cc29c8`.
+- **Commit:** adf773e81cc189d1f9fa841fb0ef0de1f4cc29c8.
 - **Exact next action:** Finish and review Stage 5C, apply the version/changelog
   update with matching deterministic contracts, then run the full audit before
   committing, live syncing, checkpointing, and pushing the feature branch.
+
+### 2026-07-27 — Stage 5C initial implementation audit
+
+- **Completed:** Added the setting/default/docs and an initial per-request
+  telemetry implementation, ran its full suite, then inspected the exact
+  native/legacy and managed-body call paths before live sync.
+- **Decisions:** Do not accept or sync the first draft. Transport start must be
+  emitted only after the actual native/legacy route is known, and managed body
+  consumption must own the single terminal outcome with exact partial bytes.
+- **Files changed:** The initial implementation commit changed
+  `MessageLoggerV2.plugin.js`, `docs/settings.md`, `docs/tests.md`,
+  `tests/media.test.js`, `tests/settings-recovery.test.js`, and
+  `tests/source-contracts.test.js`. This follow-up changes the checklist only.
+- **Tests and exact results:** The initial commit's full `npm test` passed
+  `376/376`, but passing coverage did not exercise the two rejected contracts.
+  Corrective tests and another complete validation are required.
+- **Runtime evidence:** None; live sync remains deliberately blocked until the
+  corrections and second audit pass.
+- **Failures or blockers:** Incorrect early native attribution during a
+  synchronous fallback; incomplete body timeout/cancel/failure and partial-byte
+  terminal reporting.
+- **Commit:** 429701ebd65afdac8841b5f77e2173e4bbf2d2a5.
+- **Exact next action:** Correct the two audited gaps, harden logging so it
+  cannot affect networking, expand focused coverage, then apply Stage 5D and
+  run the complete pre-live audit.
 
 ### Handoff entry template
 
