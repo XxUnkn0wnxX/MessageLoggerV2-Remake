@@ -2094,7 +2094,8 @@ evidence for another session to understand what changed and why.
 - **Failures or blockers:** Clipboard implementation and deterministic tests
   are required before the two remaining `RT-26` clipboard rows can run.
 - **Commit:** Checklist-plan commit
-  afdce2fb18932fbf5690c9c5e45deab89d3e6a58.
+  afdce2fb18932fbf5690c9c5e45deab89d3e6a58; exact-plan checkpoint
+  d8099145810a224cb878231019db4eadffd89aba.
 - **Exact next action:** Commit and record this approved plan, implement the
   shared clipboard reader plus the two scoped menu paths, run the full suite,
   audit edge cases, then sync live for the two remaining runtime checks.
@@ -2122,7 +2123,8 @@ evidence for another session to understand what changed and why.
   symlink and generated report are removed.
 - **Failures or blockers:** No static blocker. The local-blob and remote-image
   clipboard rows still require the authorized live sync and user interaction.
-- **Commit:** Implementation commit pending exact hash.
+- **Commit:** Implementation commit
+  db781e1c77f9257122ad469405d8bab09f8cdb58.
 - **Exact next action:** Run final diff/metadata/trace checks, commit and record
   the exact implementation hash, sync the one plugin file, verify live parity
   and hot reload, push the feature branch, then give the user the two clipboard
