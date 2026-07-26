@@ -35,11 +35,10 @@ review, checklist update, and commit must also be complete.
 - **Working branch:** `fix/native-media-networking`
 - **Branch base:** a5eadbe736f5a0cf4b7a3730bf9950ade17ad752
   (`docs: prepare 2.8.2.8 release notes`)
-- **Upstream status:** The local feature branch is ten commits ahead of
-  `origin/fix/native-media-networking` at
-  c25c5c9bcb812af20f51d4cde953573bc455e2ad while the final combined build is
-  validated and live-synced. The completed earlier implementation and
-  live-sync history was first published through
+- **Upstream status:** The final combined checkpoint is ready for the
+  authorized push to `origin/fix/native-media-networking`; remote-ref parity
+  must be verified before the user report. The completed earlier implementation
+  and live-sync history was first published through
   e84bfaaf6fffc4b809f7e4fb6fe70ef6ac5c5897. `develop`, `main`,
   `origin/develop`, and `origin/main` all remain untouched at
   a5eadbe736f5a0cf4b7a3730bf9950ade17ad752.
@@ -72,8 +71,8 @@ review, checklist update, and commit must also be complete.
   cache-scoped local-file implementation at
   15705f0fdc6a82fbb4c472e3c9ff53ceb3ca8fb4 and plugin-disable presentation
   cleanup at f312df53c334fe912cc9073d1c6f5ce6e78bb102. Their combined live copy
-  and user-driven clipboard/disable checks remain before the built-in
-  changelog is amended.
+  now has exact hash parity and clean hot-reload evidence; user-driven
+  clipboard/disable checks remain before the built-in changelog is amended.
 - **Current tracked task changes:** Stages 1-5D are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/persistence.test.js`, `tests/settings-recovery.test.js`,
@@ -81,16 +80,14 @@ review, checklist update, and commit must also be complete.
   `tests/records.test.js`, `README.md`, `TODO.md`,
   `docs/architecture.md`, `docs/help.md`, `docs/settings.md`, `docs/tests.md`,
   and this checklist.
-- **Live plugin:** The earlier `2.8.2.9` networking and initial clipboard-test
-  build is live; the cache-scoped clipboard plus disable-cleanup build is not
-  yet synced.
-  Repository and live SHA-256 both equal
-  `5683ea4cfb21dcb59959a290c57fa7dbce6cdcb8f79aed82c1e587d08ba0ff20`.
-  The UTC hot-reload segment at `2026-07-26 18:50:20-18:50:22` shows patch
+- **Live plugin:** The combined `2.8.2.9` networking, cache-scoped clipboard,
+  and disable-cleanup build is live. Repository and live SHA-256 both equal
+  `ac4cacb705b54bfcd8ddff7a239f9fefed12bea9ac80fdf116a868b3e7faa379`.
+  The UTC hot-reload segment at `2026-07-26 19:48:53-19:48:56` shows patch
   cleanup, successful reinitialization, UI refresh completion, and immediate
-  later media-cache activity without a matching Logger error. Discord was not
-  relaunched. The temporary clipboard trace source, live link, and report are
-  removed.
+  completion without a matching Logger error. Discord was not relaunched. No
+  MessageLogger trace/probe/clipboard helper is linked in the live plugin
+  directory.
 - **Publishing authority:** The user explicitly authorized pushing both working
   branches to `origin` on 2026-07-26 and explicitly re-authorized pushing the
   current `fix/native-media-networking` branch after live sync on 2026-07-27.
@@ -98,12 +95,10 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Finish the documentation/checklist checkpoint, run the final full suite and
-audit, sync the combined plugin, verify source/live hashes and hot reload, then
-push the feature branch and give the user the short clipboard/disable runtime
-matrix. Amend the built-in changelog only after the user confirms clipboard
-runtime behavior. Keep provisional Anti-Nuke/Ghost-Ping retention as a separate
-post-networking stage.
+Push the final combined checkpoint, verify local/remote branch parity, then give
+the user the short clipboard/disable runtime matrix. Amend the built-in
+changelog only after the user confirms clipboard runtime behavior. Keep
+provisional Anti-Nuke/Ghost-Ping retention as a separate post-networking stage.
 
 ### Resume procedure for a new session
 
@@ -174,7 +169,7 @@ recorded as an amendment before implementation.
 - [x] Live plugin sync separately authorized, completed, and hash-verified.
 - [x] Cache-scoped clipboard hardening implemented and verified.
 - [x] Plugin-disable presentation cleanup implemented and verified.
-- [ ] Combined clipboard/disable build live-synced and hash-verified.
+- [x] Combined clipboard/disable build live-synced and hash-verified.
 - [ ] User `RT-26` live behavior result received and recorded.
 - [x] Final implementation committed.
 
@@ -1088,14 +1083,13 @@ Stage 5D plan/result:
 
 Live result:
 
-- Date: 2026-07-27 earlier clipboard-linked `2.8.2.9` live replacement and
-  partial `RT-26` run; combined clipboard/disable sync pending.
-- Result: **EARLIER 2.8.2.9 SYNC, HASH, HOT-RELOAD, NATIVE/CORS,
+- Date: 2026-07-27 combined clipboard/disable `2.8.2.9` live replacement and
+  partial `RT-26` run.
+- Result: **CURRENT 2.8.2.9 SYNC, HASH, HOT-RELOAD, NATIVE/CORS,
   SLOW-PROGRESS, CONTROLLED-STALL, FILE-SIZE, DEBUG-OUTPUT, AND UPDATER PASS;
-  COMBINED CLIPBOARD/DISABLE SYNC, USER TESTING, AND CHANGELOG AMENDMENT
-  PENDING.**
+  CLIPBOARD/DISABLE USER TESTING AND CHANGELOG AMENDMENT PENDING.**
 - Notes: Repository and live SHA-256 both equal
-  `5683ea4cfb21dcb59959a290c57fa7dbce6cdcb8f79aed82c1e587d08ba0ff20`.
+  `ac4cacb705b54bfcd8ddff7a239f9fefed12bea9ac80fdf116a868b3e7faa379`.
   The current logs prove native Discord-CDN success, Waifugami HTTP 200 with
   1,091,999 bytes in 2.5 seconds, a successful 40-byte progressing body in
   39.8 seconds, the controlled no-progress body aborting through Logger's
@@ -1111,9 +1105,9 @@ Live result:
   delivery, one pending toast without console duplication, and one console
   notice plus one toast for a fresh both-output activation. Manual update
   checks returned HTTP 200 with media force Off and On without entering the
-  media request route. The clipboard repair then hot-reloaded cleanly at
-  `18:50:20-18:50:22` UTC with matching source/live bytes. Discord was not
-  relaunched.
+  media request route. The final cache-scoped clipboard and disable-cleanup
+  build hot-reloaded cleanly at `19:48:53-19:48:56` UTC with matching
+  source/live bytes and no matching Logger error. Discord was not relaunched.
 
 Historical result:
 
@@ -1135,7 +1129,7 @@ Historical result:
       runtime matrix and post-sync branch push.
 - [x] Full test suite and final independent audit pass on `2.8.2.9`.
 - [x] `git diff --check` and Markdown parsing pass on the final tree.
-- [ ] Combined clipboard/disable live hash parity and clean hot reload are
+- [x] Combined clipboard/disable live hash parity and clean hot reload are
       verified.
 - [ ] Remaining user-driven `RT-26` behavior result recorded.
 - [x] No unrelated attachment-gate implementation was included.
@@ -2344,6 +2338,27 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit this audit note, live-sync only
   `MessageLoggerV2.plugin.js`, verify hash/hot reload, record the evidence, push
   the feature branch, and give the user the short runtime matrix.
+
+### 2026-07-27 — Combined clipboard/disable live sync
+
+- **Completed:** Copied only the validated `MessageLoggerV2.plugin.js` into the
+  live BetterDiscord plugins directory without relaunching Discord.
+- **Decisions:** Keep version `2.8.2.9` and the built-in changelog unchanged
+  until the user confirms the clipboard paths.
+- **Files changed:** Live plugin copy plus this checklist evidence only.
+- **Tests and exact results:** The exact pre-sync tree passed `npm test`
+  `394/394`, `git diff --check`, and all three `cmark` parses.
+- **Runtime evidence:** Sync began at `2026-07-26 19:48:52 UTC`. Repository and
+  live SHA-256 both equal
+  `ac4cacb705b54bfcd8ddff7a239f9fefed12bea9ac80fdf116a868b3e7faa379`.
+  Logs at `19:48:53-19:48:56` show cleanup, patch removal, UI refresh,
+  reinitialization, patch application, and final UI refresh without a matching
+  Logger error. No MessageLogger trace/probe/clipboard helper is linked.
+- **Failures or blockers:** No sync blocker. Clipboard and presentation
+  behavior now need the short user-driven Discord checks.
+- **Commit:** Recorded by the following checklist checkpoint.
+- **Exact next action:** Commit this live evidence, record its exact hash, push
+  the feature branch, verify refs, and hand the runtime matrix to the user.
 
 ### Handoff entry template
 
