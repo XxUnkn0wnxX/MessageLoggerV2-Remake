@@ -1950,8 +1950,7 @@ evidence for another session to understand what changed and why.
   are the next media-cache check.
 - **Commit:** Mixed-content runtime-evidence checkpoint
   fc9741e8d15aa8ac3b8a12452ad9cd9743233a2c.
-- **Exact next action:** After this commit record is pushed, prepare the
-  smallest safe file-size-limit test.
+- **Exact next action:** Superseded by the file-size result below.
 
 ### 2026-07-27 — Media-cache file-size runtime check
 
@@ -1971,8 +1970,8 @@ evidence for another session to understand what changed and why.
   Other nearby media requests were unrelated emoji and image traffic.
 - **Failures or blockers:** None for attachment file-size enforcement.
   Debug-output, updater, and clipboard checks remain.
-- **Commit:** Pending this runtime-evidence commit; replace this text with its
-  exact hash in the immediate checklist checkpoint.
+- **Commit:** File-size runtime-evidence checkpoint
+  76e0bc805c82e34152e19fe8c906a7c3d73964bc.
 - **Exact next action:** Record and push this evidence, then run the
   debug-output matrix.
 
