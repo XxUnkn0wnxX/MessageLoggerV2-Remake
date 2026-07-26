@@ -882,7 +882,7 @@ changing their networking, retry, cache, notification, or persistence behavior.
       results here before live sync.
 - [x] Sync only the plugin file live, confirm hash parity and clean hot reload,
       then use the new diagnostics during the remaining Stage 6 runtime checks.
-- [ ] After live sync and the final checklist checkpoint, push
+- [x] After live sync and the final checklist checkpoint, push
       `fix/native-media-networking` to `origin` and verify local/remote ref
       alignment before the final report.
 
@@ -1116,7 +1116,7 @@ Historical result:
 - [x] Version remains `2.8.2.9` as instructed.
 - [ ] After clipboard runtime confirmation, amend the built-in changelog under
       the user's new explicit approval.
-- [ ] Push the clipboard-repair checkpoint only after the authorized live sync and verify
+- [x] Push the clipboard-repair checkpoint only after the authorized live sync and verify
       local/remote ref alignment.
 - [x] Checklist removal was not requested for this working branch; retain it as
       the required living handoff.
@@ -2140,6 +2140,29 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit and push this live-sync evidence, then give the
   user the two clipboard tests. If both pass, amend the built-in changelog,
   rerun the full suite, resync, and publish the final checkpoint.
+
+### 2026-07-27 — Clipboard test-build publication
+
+- **Completed:** Pushed the validated clipboard implementation, regression
+  coverage, official test documentation, checklist checkpoint, and clean
+  live-sync evidence to `origin/fix/native-media-networking`.
+- **Decisions:** Publish only the current feature branch. Do not open a pull
+  request or merge, switch, or update `develop` or `main`.
+- **Files changed:** No product or live file changed during publication.
+- **Tests and exact results:** The published product tree retains the focused
+  `68/68` and full `386/386` passes plus syntax, diff, and Markdown checks.
+- **Runtime evidence:** Source/live SHA-256 both equal
+  `5683ea4cfb21dcb59959a290c57fa7dbce6cdcb8f79aed82c1e587d08ba0ff20`.
+  Local `HEAD`, `origin/fix/native-media-networking`, and `git ls-remote`
+  matched fdf1eec89d739b0f5f23774cbacd9fa72b5ba415 immediately after the
+  test-build push.
+- **Failures or blockers:** Only the user's two clipboard checks remain before
+  the newly authorized changelog amendment and final resync/publication.
+- **Commit:** Clipboard live-sync evidence commit
+  fdf1eec89d739b0f5f23774cbacd9fa72b5ba415.
+- **Exact next action:** Ask the user to test deleted/restored live
+  **Copy image** and Logger-viewer **Copy media**. On confirmation, amend the
+  built-in changelog, rerun all tests, resync, and push the final checkpoint.
 
 ### Handoff entry template
 
