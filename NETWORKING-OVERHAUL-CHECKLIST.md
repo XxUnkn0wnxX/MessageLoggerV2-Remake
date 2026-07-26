@@ -2221,8 +2221,8 @@ evidence for another session to understand what changed and why.
   audit confirm provisional files currently have no age/count cleanup.
 - **Failures or blockers:** Defaults, bounds, and the exact meaning of an age
   value of `0` still require an implementation plan before that later stage.
-- **Commit:** Retention-contract commit pending; its exact hash will be recorded
-  by the following checklist checkpoint.
+- **Commit:** Retention-contract commit
+  d492cbea2cdea589eb6fc00c08e109dba2723915.
 - **Exact next action:** Finish networking/clipboard and live verification
   first. Then design and test the provisional manifest, promotion, age/count
   trimming, reference protection, and startup/periodic maintenance as a
