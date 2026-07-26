@@ -2164,6 +2164,38 @@ evidence for another session to understand what changed and why.
   **Copy image** and Logger-viewer **Copy media**. On confirmation, amend the
   built-in changelog, rerun all tests, resync, and push the final checkpoint.
 
+### 2026-07-27 — Clipboard runtime follow-up and disable-cleanup plan
+
+- **Completed:** Audited the user's live static-image, GIF, cache-scope, toast,
+  and plugin-disable results before making another product change.
+- **Decisions:** Use Logger's notification router for one green success toast
+  after a Logger-owned clipboard write. Keep `copyImage` for supported static
+  images and use Discord's verified native `copyFile(localPath)` bridge for a
+  cached GIF or another standard cached image for which Discord supplies no
+  native image action. Show or replace clipboard actions only while **Cache
+  media locally** is On and the exact standard image file exists locally;
+  exclude placeholders, remote-only media, videos, and files admitted only by
+  **Cache all attachment types**. On plugin stop, remove only Logger-owned
+  restored rows, structural clones, tints, and controls while preserving saved
+  records, cached files, and Discord-owned messages.
+- **Files changed:** This checklist only at this planning checkpoint.
+- **Tests and exact results:** PASS — the clean pre-change `npm test` baseline
+  passed `386/386`, including syntax validation.
+- **Runtime evidence:** Static image copy works in both Logger surfaces. GIF
+  media is cached, but the mounted menu has no native copy action and the
+  viewer's `copyImage` call silently produces no usable clipboard content.
+  Discord's current macOS bridge implements `copyFile(localPath)` with a
+  `public.file-url` clipboard entry. Disabling Logger also leaves previously
+  restored mounts visible because `stop()` unpatches without evicting them.
+- **Failures or blockers:** Three product gaps are confirmed: no success toast,
+  no working GIF/file clipboard path or cache-only menu gate, and incomplete
+  live-presentation teardown on plugin disable.
+- **Commit:** Checklist-plan commit pending; its exact hash will be recorded by
+  the following checklist checkpoint before implementation.
+- **Exact next action:** Commit this plan, record its exact hash, then implement
+  both bounded fixes with focused regressions and the full test suite before
+  any live sync.
+
 ### Handoff entry template
 
 ```text
