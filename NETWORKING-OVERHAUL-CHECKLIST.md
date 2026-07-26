@@ -35,10 +35,10 @@ review, checklist update, and commit must also be complete.
 - **Working branch:** `fix/native-media-networking`
 - **Branch base:** a5eadbe736f5a0cf4b7a3730bf9950ade17ad752
   (`docs: prepare 2.8.2.8 release notes`)
-- **Upstream status:** The authorized combined checkpoint was pushed through
-  4d8a2e732c7e905adc17ca3ef465a49601fd644c; local, tracking, and direct remote
-  refs matched exactly after publication. The completed earlier implementation
-  and live-sync history was first published through
+- **Upstream status:** The binary-read correction is live and awaiting its
+  authorized push to `origin/fix/native-media-networking`; local/tracking/direct
+  remote parity must be rechecked before reporting. The completed earlier
+  implementation and live-sync history was first published through
   e84bfaaf6fffc4b809f7e4fb6fe70ef6ac5c5897. `develop`, `main`,
   `origin/develop`, and `origin/main` all remain untouched at
   a5eadbe736f5a0cf4b7a3730bf9950ade17ad752.
@@ -70,9 +70,11 @@ review, checklist update, and commit must also be complete.
   repair at db781e1c77f9257122ad469405d8bab09f8cdb58 was followed by the
   cache-scoped local-file implementation at
   15705f0fdc6a82fbb4c472e3c9ff53ceb3ca8fb4 and plugin-disable presentation
-  cleanup at f312df53c334fe912cc9073d1c6f5ce6e78bb102. Their combined live copy
-  now has exact hash parity and clean hot-reload evidence; user-driven
-  clipboard/disable checks remain before the built-in changelog is amended.
+  cleanup at f312df53c334fe912cc9073d1c6f5ce6e78bb102. The BetterDiscord
+  binary-read correction is committed at
+  a26f05c1cfcf15ec39a3d44e71142d0452d04d87. Its live copy has exact hash
+  parity and clean hot-reload evidence; user-driven clipboard/disable checks
+  remain before the built-in changelog is amended.
 - **Current tracked task changes:** Stages 1-5D are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/persistence.test.js`, `tests/settings-recovery.test.js`,
@@ -82,8 +84,8 @@ review, checklist update, and commit must also be complete.
   and this checklist.
 - **Live plugin:** The combined `2.8.2.9` networking, cache-scoped clipboard,
   and disable-cleanup build is live. Repository and live SHA-256 both equal
-  `ac4cacb705b54bfcd8ddff7a239f9fefed12bea9ac80fdf116a868b3e7faa379`.
-  The UTC hot-reload segment at `2026-07-26 19:48:53-19:48:56` shows patch
+  `83f47ce110f1d179a36e1d6db839dfbb75f304a033e8d8d8eb50e08a9e055a4c`.
+  The UTC hot-reload segment at `2026-07-26 19:56:23-19:56:24` shows patch
   cleanup, successful reinitialization, UI refresh completion, and immediate
   completion without a matching Logger error. Discord was not relaunched. No
   MessageLogger trace/probe/clipboard helper is linked in the live plugin
@@ -95,10 +97,10 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Live-sync the validated static clipboard binary-read fix, verify hash/hot
-reload, and republish before the user repeats the clipboard matrix. Amend the
-built-in changelog only after runtime confirmation. Keep provisional
-Anti-Nuke/Ghost-Ping retention as a separate post-networking stage.
+Push the live-synced static clipboard binary-read fix, verify all branch refs,
+then ask the user to repeat static image copy. Amend the built-in changelog only
+after runtime confirmation. Keep provisional Anti-Nuke/Ghost-Ping retention as
+a separate post-networking stage.
 
 ### Resume procedure for a new session
 
@@ -170,7 +172,7 @@ recorded as an amendment before implementation.
 - [x] Cache-scoped clipboard hardening implemented and verified.
 - [x] Plugin-disable presentation cleanup implemented and verified.
 - [x] Combined clipboard/disable build live-synced and hash-verified.
-- [ ] Static-image clipboard binary-read runtime defect fixed and resynced.
+- [x] Static-image clipboard binary-read runtime defect fixed and resynced.
 - [ ] User `RT-26` live behavior result received and recorded.
 - [x] Final implementation committed.
 
@@ -1090,7 +1092,7 @@ Live result:
   SLOW-PROGRESS, CONTROLLED-STALL, FILE-SIZE, DEBUG-OUTPUT, AND UPDATER PASS;
   CLIPBOARD/DISABLE USER TESTING AND CHANGELOG AMENDMENT PENDING.**
 - Notes: Repository and live SHA-256 both equal
-  `ac4cacb705b54bfcd8ddff7a239f9fefed12bea9ac80fdf116a868b3e7faa379`.
+  `83f47ce110f1d179a36e1d6db839dfbb75f304a033e8d8d8eb50e08a9e055a4c`.
   The current logs prove native Discord-CDN success, Waifugami HTTP 200 with
   1,091,999 bytes in 2.5 seconds, a successful 40-byte progressing body in
   39.8 seconds, the controlled no-progress body aborting through Logger's
@@ -1107,8 +1109,9 @@ Live result:
   notice plus one toast for a fresh both-output activation. Manual update
   checks returned HTTP 200 with media force Off and On without entering the
   media request route. The final cache-scoped clipboard and disable-cleanup
-  build hot-reloaded cleanly at `19:48:53-19:48:56` UTC with matching
-  source/live bytes and no matching Logger error. Discord was not relaunched.
+  build plus the static binary-read correction hot-reloaded cleanly at
+  `19:56:23-19:56:24` UTC with matching source/live bytes and no new matching
+  Logger error. Discord was not relaunched.
 
 Historical result:
 
@@ -2431,6 +2434,29 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit this checklist evidence, sync only the plugin
   file, verify hash/hot reload, push the branch, and ask the user to repeat the
   static copy.
+
+### 2026-07-27 — Static clipboard binary-read live sync
+
+- **Completed:** Copied only the validated plugin file into the live
+  BetterDiscord directory without relaunching Discord.
+- **Decisions:** Keep version/changelog unchanged until the user confirms the
+  repaired clipboard path.
+- **Files changed:** Live plugin copy plus this checklist evidence only.
+- **Tests and exact results:** The exact synced product tree passed focused
+  coverage `73/73`, full `npm test` `394/394`, syntax, and
+  `git diff --check`.
+- **Runtime evidence:** Sync began at `2026-07-26 19:56:22 UTC`. Repository and
+  live SHA-256 both equal
+  `83f47ce110f1d179a36e1d6db839dfbb75f304a033e8d8d8eb50e08a9e055a4c`.
+  Logs at `19:56:23-19:56:24` show cleanup, patch removal, reinitialization,
+  patch application, and UI refresh without a new matching Logger error. The
+  visible clipboard error at `19:54:41` predates this sync. No relevant trace
+  helper is linked.
+- **Failures or blockers:** No sync blocker. Static image copy now needs the
+  user repeat.
+- **Commit:** Recorded by the following checklist checkpoint.
+- **Exact next action:** Commit this evidence, record its hash, push and verify
+  refs, then ask the user to retry the same cached static image.
 
 ### Handoff entry template
 
