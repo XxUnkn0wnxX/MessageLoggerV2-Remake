@@ -1235,7 +1235,8 @@ evidence for another session to understand what changed and why.
 - **Failures or blockers:** None. If DevTools console use is inconvenient, a
   disposable helper plugin can expose the same two probes.
 - **Commit:** `32b0df1b61116855a4dcfba2ac952b4b3497e02d`.
-- **HTTP test-resource follow-up:** `<pending-stage6-http-resource-checkpoint>`.
+- **HTTP test-resource follow-up:**
+  `51624f181299276dc12669cd2522198afaa8736f`.
 - **Exact next action:** Give the user the exact pasteable probes and wait for
   their results.
 
