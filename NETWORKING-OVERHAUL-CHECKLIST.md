@@ -87,14 +87,13 @@ review, checklist update, and commit must also be complete.
   `tests/records.test.js`, `README.md`, `TODO.md`,
   `docs/architecture.md`, `docs/help.md`, `docs/settings.md`, `docs/tests.md`,
   and this checklist.
-- **Live plugin:** The previous combined `2.8.2.9` networking, cache-scoped
-  clipboard, and disable-cleanup build remains live. Its last verified
-  repository/live SHA-256 pair equalled
-  `83f47ce110f1d179a36e1d6db839dfbb75f304a033e8d8d8eb50e08a9e055a4c`.
-  The UTC hot-reload segment at `2026-07-26 19:56:23-19:56:24` shows patch
-  cleanup, successful reinitialization, UI refresh completion, and immediate
-  completion without a matching Logger error. Discord was not relaunched. No
-  MessageLogger trace/probe/clipboard helper is linked in the live plugin
+- **Live plugin:** The native-only `2.8.2.9` build is live. Repository and live
+  SHA-256 both equal
+  `7a4ae6fc0374779451b2c68d679e8c978fe1901b9bae9bb2fe61300a3cbf7b58`.
+  The UTC hot-reload segment at `2026-07-26 20:39:34-20:39:40` shows patch
+  cleanup, successful reinitialization, UI refresh completion, and fresh
+  media-cache work without a matching Logger error. Discord was not relaunched.
+  No MessageLogger trace/probe/clipboard helper is linked in the live plugin
   directory.
 - **Publishing authority:** The user explicitly authorized pushing both working
   branches to `origin` on 2026-07-26 and explicitly re-authorized pushing the
@@ -103,11 +102,11 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit this exact-hash checklist evidence, then live-sync only the plugin,
-verify hash parity and clean hot reload, push the feature branch, and give the
-user the short PNG/JPEG plus negative-format matrix. Amend the built-in
-changelog only after runtime confirmation. Keep provisional
-Anti-Nuke/Ghost-Ping retention as a separate post-networking stage.
+Commit the live-sync evidence, push the feature branch, verify local/tracking
+and direct-remote refs, then give the user the short PNG/JPEG plus
+negative-format matrix. Amend the built-in changelog only after runtime
+confirmation. Keep provisional Anti-Nuke/Ghost-Ping retention as a separate
+post-networking stage.
 
 ### Resume procedure for a new session
 
@@ -182,7 +181,8 @@ recorded as an amendment before implementation.
 - [x] Static-image clipboard binary-read runtime defect fixed and resynced.
 - [x] Native-only clipboard correction implemented and fully audited.
 - [x] Native-only clipboard correction committed.
-- [ ] Native-only clipboard correction live-synced and pushed.
+- [x] Native-only clipboard correction live-synced.
+- [ ] Native-only clipboard correction pushed.
 - [ ] User `RT-26` live behavior result received and recorded.
 - [x] Final implementation committed.
 
@@ -1110,8 +1110,8 @@ Live result:
   SLOW-PROGRESS, CONTROLLED-STALL, FILE-SIZE, DEBUG-OUTPUT, UPDATER, AND
   PLUGIN-DISABLE CLEANUP PASS; CLIPBOARD USER TESTING AND CHANGELOG AMENDMENT
   PENDING.**
-- Notes: Repository and live SHA-256 both equal
-  `83f47ce110f1d179a36e1d6db839dfbb75f304a033e8d8d8eb50e08a9e055a4c`.
+- Notes: Repository and live SHA-256 now both equal
+  `7a4ae6fc0374779451b2c68d679e8c978fe1901b9bae9bb2fe61300a3cbf7b58`.
   The current logs prove native Discord-CDN success, Waifugami HTTP 200 with
   1,091,999 bytes in 2.5 seconds, a successful 40-byte progressing body in
   39.8 seconds, the controlled no-progress body aborting through Logger's
@@ -1131,8 +1131,13 @@ Live result:
   build plus the static binary-read correction hot-reloaded cleanly at
   `19:56:23-19:56:24` UTC with matching source/live bytes and no new matching
   Logger error. The user then confirmed Logger-owned live presentation
-  unmounted immediately when the plugin was disabled. Discord was not
-  relaunched.
+  unmounted immediately when the plugin was disabled, including in a forum
+  post/thread. The later native-only clipboard correction hot-reloaded cleanly
+  at `20:39:34-20:39:40` UTC with matching bytes, patches reapplied, fresh
+  caching, and no matching Logger error. A generic empty `WINDOW:ERROR`
+  recurred after reload, but identical empty events also appear repeatedly
+  during ordinary prior navigation and are not attributed to Logger. Discord
+  was not relaunched.
 
 Historical result:
 
@@ -2580,6 +2585,33 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit this exact-hash checklist evidence, then
   live-sync only the plugin, verify hash/hot reload, push the feature branch,
   and give the user the remaining short runtime matrix.
+
+### 2026-07-27 — Native-only clipboard live sync
+
+- **Completed:** Copied only the fully validated
+  `MessageLoggerV2.plugin.js` into the live BetterDiscord plugins directory
+  without relaunching Discord.
+- **Decisions:** Keep version `2.8.2.9` and the built-in changelog unchanged
+  until the user confirms the final clipboard behavior.
+- **Files changed:** Live plugin copy plus this checklist evidence only.
+- **Tests and exact results:** The exact synced source tree passed focused
+  clipboard/source contracts `73/73`, full `npm test` `394/394`, syntax,
+  `git diff --check`, Markdown parsing, and independent final review.
+- **Runtime evidence:** Sync began at `2026-07-26 20:39:33 UTC`. Repository and
+  live SHA-256 both equal
+  `7a4ae6fc0374779451b2c68d679e8c978fe1901b9bae9bb2fe61300a3cbf7b58`.
+  Logs at `20:39:34-20:39:40` show cleanup, patch removal, UI refresh,
+  reinitialization, patch application, another UI refresh, and fresh cache
+  writes without a matching Logger error. The empty `WINDOW:ERROR` at
+  `20:39:37` has no message, filename, line, or Logger stack and matches
+  recurring client noise seen during ordinary earlier navigation. No relevant
+  trace/probe/clipboard helper is linked.
+- **Failures or blockers:** No live-sync blocker. Only the short user-driven
+  native clipboard matrix remains.
+- **Commit:** Live-sync evidence commit pending.
+- **Exact next action:** Commit this evidence, push the feature branch, verify
+  local/tracking/direct-remote refs, then give the user the final short test
+  list.
 
 ### Handoff entry template
 
