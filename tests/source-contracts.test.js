@@ -307,7 +307,7 @@ test('the BdApi notification setting omits the outdated basic qualifier', () => 
   assert.doesNotMatch(source, /BdApi basic notifications/i);
 });
 
-test('the current changelog covers the networking release and known attachment limitation', () => {
+test('the current changelog covers the networking and cached-media clipboard release', () => {
   assert.match(source, /Persistent media caching now uses BetterDiscord native networking by default/);
   assert.match(source, /Forced legacy mode and automatic fallback remain available/);
   assert.match(source, /Update checks and local or remote image-copy networking remain unchanged/);
@@ -317,6 +317,9 @@ test('the current changelog covers the networking release and known attachment l
   assert.match(source, /request ID, method, full URL, transport, status, bytes, timing, and terminal outcome/);
   assert.match(source, /Detailed media-request diagnostics never emit toasts or change request behavior/);
   assert.match(source, /Known limitation: Cache all attachment types remains incomplete for arbitrary non-image files/);
+  assert.match(source, /Restored cached PNG, JPG, and JPEG media can now be copied from both live messages and the Logger viewer through Discord\\'s native image clipboard/);
+  assert.match(source, /Copy actions require the exact physical cached image and stay hidden for ambiguous, missing, placeholder, unsupported, or cache-disabled media/);
+  assert.match(source, /Logger keeps ownership of its restored-media copy action after Discord reloads and alongside other context-menu plugins without changing ordinary live messages/);
   assert.match(source, /Known limitation: intended to cache videos, audio, and other files, but arbitrary non-image types may stay CDN-backed when On or remain Logger references when Off/);
 });
 

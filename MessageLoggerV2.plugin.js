@@ -572,6 +572,15 @@ module.exports = class MessageLoggerV2 {
           'Detailed media-request diagnostics never emit toasts or change request behavior.',
           'Known limitation: Cache all attachment types remains incomplete for arbitrary non-image files.'
         ]
+      },
+      {
+        title: 'Cached media clipboard',
+        type: 'fixed',
+        items: [
+          'Restored cached PNG, JPG, and JPEG media can now be copied from both live messages and the Logger viewer through Discord\'s native image clipboard.',
+          'Copy actions require the exact physical cached image and stay hidden for ambiguous, missing, placeholder, unsupported, or cache-disabled media.',
+          'Logger keeps ownership of its restored-media copy action after Discord reloads and alongside other context-menu plugins without changing ordinary live messages.'
+        ]
       }
     ];
   }
