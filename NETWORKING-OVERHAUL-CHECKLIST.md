@@ -969,8 +969,8 @@ evidence for another session to understand what changed and why.
   hash remains `647de34e571b7a14f70c16a464241b0ece55aea59200eb8bfe5b925dda57c7c9` and live hash remains
   `9ed4872e4f342e46ca69a8a68c8aa054ce2a7cb2532a9dc1bdcdef73fec92c99`.
 - **Failures or blockers:** None.
-- **Commit:** `<pending-checkpoint>` (to be replaced by parent after the first
-  documentation checkpoint commit).
+- **Commit:** `dfcfa5f845abbaca02df4d6e01e421496a938f88`
+  (`docs: record final networking edge audit`).
 - **Exact next action:** Wait for explicit live-sync authorization; then run RT-26
   runtime checks. Do not start optional body-phase hardening without separate
   user approval first.
