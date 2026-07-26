@@ -44,22 +44,22 @@ review, checklist update, and commit must also be complete.
   separate and tracks `origin/fix/attachment-gate`. Its standalone handoff
   commit is protected by the local-only `local/attachment-gate-handoff` tag.
   Do not merge or implement that feature as part of this networking branch.
-- **Implementation state:** Stages 1-5 are implemented and pass their focused
+- **Implementation state:** Stages 1-5A are implemented and pass their focused
   and full automated gates. Persistent media-cache downloads use the central
   selector; updater and clipboard behavior are independently locked to their
   existing transports; exact output-aware legacy-routing diagnostics are
-  de-duplicated per activation and per output. The user has now approved
-  pre-live Stage 5A body-transfer hardening: retain the 15-second initial
-  response deadline, then use a 30-second rolling no-data watchdog with no
-  fixed total download deadline.
-- **Current tracked task changes:** Stages 1-5 are limited to
+  de-duplicated per activation and per output. Stage 5A retains the 15-second
+  initial response deadline and adds a 30-second rolling no-data body watchdog
+  with no fixed total download deadline. Stop or **Cache media locally** Off
+  cancels active response/body work without retrying or writing late.
+- **Current tracked task changes:** Stages 1-5A are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/settings-recovery.test.js`, `tests/source-contracts.test.js`,
   `docs/settings.md`, `docs/tests.md`, and this checklist.
 - **Live plugin:** Intentionally not updated. The user requires a pre-live
   report and separate authorization before any copy to the BetterDiscord
   plugins directory. Read-only SHA-256 comparison confirms the repository
-  plugin is `647de34e571b7a14f70c16a464241b0ece55aea59200eb8bfe5b925dda57c7c9`
+  plugin is `430d2e995d025bf883c365815230555419ba90fab1b8d223277101fb9d53fc3e`
   and the live plugin is
   `9ed4872e4f342e46ca69a8a68c8aa054ce2a7cb2532a9dc1bdcdef73fec92c99`.
 - **Publishing authority:** The user explicitly authorized pushing both working
@@ -68,10 +68,10 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit and record the Stage 5A draft-audit findings, then apply only the
-approved bounded corrections and missing tests. Re-run every focused/full gate,
-complete another independent audit, commit the passing implementation, report,
-and stop before any live-sync/copy into the live BetterDiscord plugins path.
+Report the completed Stage 5A gate and stop. Do not copy or sync the plugin into
+the live BetterDiscord plugins path. After separate explicit authorization,
+copy only `MessageLoggerV2.plugin.js`, verify hash parity, and run the relevant
+`RT-26` live checks.
 
 ### Resume procedure for a new session
 
@@ -137,8 +137,8 @@ recorded as an amendment before implementation.
 - [x] Implementation started.
 - [x] Automated verification passed.
 - [x] Response-body inactivity hardening approved as a separate pre-live stage.
-- [ ] Stage 5A response-body inactivity hardening implemented and verified.
-- [ ] Post-hardening final audit and pre-live report completed.
+- [x] Stage 5A response-body inactivity hardening implemented and verified.
+- [x] Post-hardening final audit completed and pre-live report prepared.
 - [x] Live BetterDiscord verification explicitly deferred without execution at
       the user-required pre-live stop gate.
 - [x] Final implementation committed.
@@ -449,21 +449,21 @@ these compatibility targets is allowed when required:
 - [x] Multiple files and retries do not repeat the notice.
 - [x] Existing media timeout, abort, retry, status, file-size, and write-epoch
       tests remain green.
-- [ ] Initial response acquisition still aborts after 15 seconds without a
+- [x] Initial response acquisition still aborts after 15 seconds without a
       response.
-- [ ] A response body that makes no byte progress for 30 seconds is aborted.
-- [ ] Each non-empty body chunk restarts the 30-second watchdog, allowing a
+- [x] A response body that makes no byte progress for 30 seconds is aborted.
+- [x] Each non-empty body chunk restarts the 30-second watchdog, allowing a
       transfer to take longer than 30 seconds in total while bytes continue to
       arrive.
-- [ ] There is no fixed overall response-body download deadline.
-- [ ] Plugin stop or media-cache disable aborts header and body phases
+- [x] There is no fixed overall response-body download deadline.
+- [x] Plugin stop or media-cache disable aborts header and body phases
       immediately, without a retry or a late cache write.
 - [x] **Cache all attachment types** is not a global cancellation gate. Its
       known-incomplete selective non-image behavior remains deferred to the
       later file-type-gate repair.
-- [ ] A same-instance restart cannot allow a body started by an older
+- [x] A same-instance restart cannot allow a body started by an older
       activation to write.
-- [ ] Supported streaming responses and the guarded non-streaming fallback are
+- [x] Supported streaming responses and the guarded non-streaming fallback are
       both deterministic and cannot leave stale timers, readers, or abort
       controllers behind.
 
@@ -657,38 +657,38 @@ change transport selection, retry counts, HTTP status handling, cache size
 rules, filenames, no-save behavior, Anti-Nuke convergence, updater networking,
 or clipboard networking.
 
-- [ ] Keep the existing 15-second initial response-acquisition deadline.
-- [ ] Keep one cache-owned `AbortController` registered through both response
+- [x] Keep the existing 15-second initial response-acquisition deadline.
+- [x] Keep one cache-owned `AbortController` registered through both response
       acquisition and response-body consumption.
-- [ ] Consume supported response bodies incrementally.
-- [ ] Start a 30-second no-data watchdog for body consumption and restart it
+- [x] Consume supported response bodies incrementally.
+- [x] Start a 30-second no-data watchdog for body consumption and restart it
       after every non-empty chunk.
-- [ ] Do not impose a fixed total body-transfer deadline; a slow download may
+- [x] Do not impose a fixed total body-transfer deadline; a slow download may
       continue for as long as bytes keep arriving within each watchdog window.
-- [ ] If a response does not expose a readable stream, retain a guarded
+- [x] If a response does not expose a readable stream, retain a guarded
       `arrayBuffer()` fallback with the same lifecycle/write protections and a
       finite no-progress escape.
-- [ ] On plugin stop or media-cache disable, immediately abort and release the
+- [x] On plugin stop or media-cache disable, immediately abort and release the
       active response/body operation; do not retry it and do not write a file.
 - [x] Interpret “media-cache disable” here only as the **Cache media locally**
       master switch. Do not make **Cache all attachment types** abort every
       request. Its later repair should selectively cancel only in-flight
       non-image attachment/file-component requests that cease to qualify while
       allowing image, embed, sticker, thumbnail, and gallery work to continue.
-- [ ] Preserve write-epoch protection for completion races and same-instance
+- [x] Preserve write-epoch protection for completion races and same-instance
       restarts.
-- [ ] Preserve existing response-size enforcement and release body resources
+- [x] Preserve existing response-size enforcement and release body resources
       on success, timeout, abort, HTTP terminal status, and ordinary failure.
-- [ ] Add focused deterministic regression coverage for header timeout, stalled
+- [x] Add focused deterministic regression coverage for header timeout, stalled
       body, rolling progress beyond 30 seconds total, stop/disable cancellation,
       completion races, restart isolation, non-streaming fallback, HTTP
       terminal responses, and no-`AbortController` compatibility.
-- [ ] Re-run the existing media/networking regression suites.
-- [ ] Run `npm test`, `npm run check`, `git diff --check`, and checklist/docs
+- [x] Re-run the existing media/networking regression suites.
+- [x] Run `npm test`, `npm run check`, `git diff --check`, and checklist/docs
       Markdown parsing.
-- [ ] Complete a parent edge-case audit and record any finding before changing
+- [x] Complete a parent edge-case audit and record any finding before changing
       behavior further.
-- [ ] Commit only after all Stage 5A checks pass, record the exact commit here,
+- [x] Commit only after all Stage 5A checks pass, record the exact commit here,
       and stop before live sync.
 
 Stage 5A commit/result:
@@ -701,16 +701,25 @@ Stage 5A commit/result:
 - Draft-audit checkpoint commit:
   `503035bfe886035d02ed42d93ca738e824c752c0`
   (`docs: record media watchdog draft audit`).
-- Implementation commit: `<pending-implementation-commit>`.
+- Implementation commit: `9e5871c75039fc34f262598854701083190df1fd`
+  (`fix: guard media cache body transfers`).
 - Draft tests: focused media PASS `61/61`; full suite FAIL `367/368` because the
   existing central-handler source contract no longer matched the draft call
   shape. This draft must not be committed as the implementation.
+- Final tests: focused media PASS `66/66`; focused source contracts PASS
+  `62/62`; full `npm test` PASS `373/373`; `npm run check`,
+  `git diff --check`, and `cmark` parsing for the checklist and both amended
+  docs PASS.
 - Notes: The approved policy measures inactivity rather than total transfer
   duration: 15 seconds to receive the initial response, then at most 30 seconds
   with no incoming bytes. Any non-empty chunk restarts the body watchdog. The
   approved correction keeps cancellation cleanup non-blocking, releases
   retryable HTTP responses before backoff, preserves the existing central
   handler call contract, and closes the missing deterministic coverage.
+  Independent review found no blocking defect. A deliberately malformed stream
+  whose cancel promise never settles can make lock release best-effort, but the
+  logger still exits promptly, clears its active handle, avoids retries/writes,
+  and has a deterministic regression for that case.
 
 ## Stage 6 — Live BetterDiscord verification
 
@@ -750,10 +759,10 @@ Live result:
 
 ## Final branch gate
 
-- [ ] Stage 5A and every other required pre-live stage are completed or
+- [x] Stage 5A and every other required pre-live stage are completed or
       explicitly deferred with a reason.
-- [ ] Full test suite passes after Stage 5A.
-- [ ] `git diff --check` passes after Stage 5A.
+- [x] Full test suite passes after Stage 5A.
+- [x] `git diff --check` passes after Stage 5A.
 - [x] Live hash parity explicitly deferred: read-only hashes intentionally
       differ because no live sync was authorized or performed.
 - [x] No unrelated attachment-gate implementation was included.
@@ -790,6 +799,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-27 | Stage 5A | Harden the inherited response-body timeout/cancellation gap before live sync. Keep 15 seconds for the initial response, then use a rolling 30-second no-data watchdog that resets whenever non-empty bytes arrive; do not impose a fixed total download deadline. Stop or cache-disable must still cancel immediately and prevent retries or late writes. | User-approved implementation contract |
 | 2026-07-27 | Stage 5A scope | “Cache disabled” means the **Cache media locally** master switch, which cancels every active media request. **Cache all attachment types** must not become a global cancellation gate. Its known-broken/incomplete child behavior remains separate future work; when repaired, turning it Off should cancel only no-longer-eligible non-image attachment/file-component requests while visual media continues. | User clarification before Stage 5A implementation |
 | 2026-07-27 | Stage 5A draft audit | The first draft could still wait forever for a non-cooperative stream-cancel promise, retained retryable HTTP response bodies during backoff, and broke one existing central-handler source contract. Coverage also did not yet prove total transfer time beyond the idle window, body cancellation without `AbortController`, or stalled `arrayBuffer()` fallback. | Reported before correction; user approved the bounded fixes |
+| 2026-07-27 | Stage 5A result | Implemented the approved rolling response-body watchdog, bounded non-cooperative cleanup, retry-response release, logical no-`AbortController` cancellation, streamless fallback escape, and deterministic coverage. The full suite passes `373/373`; an independent final review found no blocking defect. | Implementation commit `9e5871c75039fc34f262598854701083190df1fd` and final verification |
 | 2026-07-27 | Compatibility note | Retain only a historical mention of the malformed third-party `BdApi.Net.fetch` shape. Both supported BetterDiscord targets at `470ce77f` and `aa241f9` expose async Promise-returning methods, so no production hardening or open checklist work is planned for this theoretical unsupported-host case. | User judged the case very unlikely and asked to scrub it as an issue while retaining a mention |
 
 ## Handoff activity log
@@ -1132,6 +1142,37 @@ evidence for another session to understand what changed and why.
   (`docs: record media watchdog draft audit`).
 - **Exact next action:** Commit and record this audit checkpoint, apply the
   approved corrections/tests, then run the full review and verification gates.
+
+### 2026-07-27 — Stage 5A completed pre-live gate
+
+- **Completed:** Added the 15-second initial-response deadline plus rolling
+  30-second response-body inactivity watchdog, bounded cleanup, streamless
+  fallback escape, and the approved cancellation/retry protections. Updated
+  `AT-47`, `RT-26`, and the settings reference.
+- **Decisions:** No fixed total transfer deadline. Non-empty bytes reset the
+  watchdog. Plugin stop and **Cache media locally** Off cancel all active media
+  work. **Cache all attachment types** remains unchanged and is not a global
+  cancellation gate.
+- **Files changed:** `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
+  `tests/source-contracts.test.js`, `docs/settings.md`, `docs/tests.md`, and
+  this checklist.
+- **Tests and exact results:** PASS — focused media `66/66`; focused source
+  contracts `62/62`; full `npm test` `373/373`; `npm run check`,
+  `git diff --check`, and checklist/docs `cmark` parsing.
+- **Runtime evidence:** None added. Read-only SHA-256 comparison is intentionally
+  different: repository
+  `430d2e995d025bf883c365815230555419ba90fab1b8d223277101fb9d53fc3e`;
+  live
+  `9ed4872e4f342e46ca69a8a68c8aa054ce2a7cb2532a9dc1bdcdef73fec92c99`.
+- **Failures or blockers:** No automated or audit blocker. Actual BetterDiscord
+  slow/stalled response behavior and stop/master-toggle cancellation remain
+  the separately authorized `RT-26` live checks.
+- **Commit:** Implementation
+  `9e5871c75039fc34f262598854701083190df1fd`
+  (`fix: guard media cache body transfers`); checklist checkpoint
+  `<pending-stage5a-checkpoint>`.
+- **Exact next action:** Report and stop. Wait for explicit live-sync
+  authorization before copying the plugin or running `RT-26`.
 
 ### Handoff entry template
 
