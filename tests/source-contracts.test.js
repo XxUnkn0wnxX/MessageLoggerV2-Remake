@@ -1481,6 +1481,8 @@ test('image-copy context keeps blob/router fetch split and copies clipboard byte
 });
 
 test('media routing converges through cacheImage and cacheMessageImages across enumeration, deferred, removed, and anti-nuke paths', () => {
+  assert.match(source, /const MEDIA_CACHE_FETCH_TIMEOUT_MS = 15 \* 1000;/);
+  assert.match(source, /const MEDIA_CACHE_BODY_IDLE_TIMEOUT_MS = 30 \* 1000;/);
   const networkSlice = source.slice(
     source.indexOf('  fetchMediaNetworkResponse(url, options = {})'),
     source.indexOf('  async fetchMediaCacheResponse(url, options = {})')
@@ -1517,7 +1519,7 @@ test('media routing converges through cacheImage and cacheMessageImages across e
   assert.match(networkSlice, /return fetch\(url, options\);/);
   assert.match(cacheSlice, /this\.fetchMediaNetworkResponse\(url, requestOptions\)/);
   assert.match(cacheSlice, /this\.fetchMediaNetworkResponse\(url, \{\s*\.\.\.requestOptions,\s*signal: controller\.signal/);
-  assert.match(imageCacheSlice, /const response = await this\.fetchMediaCacheResponse\(url\);/);
+  assert.match(imageCacheSlice, /let response;[\s\S]*response = await this\.fetchMediaCacheResponse\(url\);/);
   assert.match(deferredSlice, /Promise\.resolve\(this\.cacheImage\(/);
   assert.match(removedSlice, /this\.cacheImage\(url, i, attachmentId, messageId, channelId, guildId\);/);
   assert.match(updatePayloadSlice, /this\.cacheMessageImages\(current, \{\s*queueWhileNoSave: records\.some\(Boolean\)\s*\|\|\s*!!this\.messageRecord\?\.?\[current\.id\]\s*\}\);/);

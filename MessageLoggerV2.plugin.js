@@ -23,6 +23,7 @@ const EDIT_SPAM_COOLDOWN_MS = 60 * 1000;
 const EDIT_SPAM_DEBUG_WARNING_MS = 10 * 1000;
 const ARCHIVE_LOAD_MODE_SETTLE_MS = 350;
 const MEDIA_CACHE_FETCH_TIMEOUT_MS = 15 * 1000;
+const MEDIA_CACHE_BODY_IDLE_TIMEOUT_MS = 30 * 1000;
 const MEDIA_CACHE_RETRY_DELAY_MS = 1000;
 const MEDIA_CACHE_MAX_ATTEMPTS = 3;
 const MEDIA_CACHE_LEGACY_ROUTING_NOTICE = 'Networking: media routing is using the old Discord renderer fetch() method.';
@@ -12053,55 +12054,231 @@ module.exports = class MessageLoggerV2 {
     this._mediaCacheNativeFetchCompatible = true;
     return response;
   }
+  _createMediaCacheAbortHandle(reason = 'Media cache request was cancelled') {
+    const handle = {
+      aborted: false,
+      reason: null,
+      signal: null,
+      promise: null,
+      _reject: null,
+      controller: null
+    };
+    handle.promise = new Promise((_, reject) => {
+      handle._reject = reject;
+    });
+    const rejectWithReason = message => {
+      if (handle.aborted) return;
+      handle.aborted = true;
+      const error = message instanceof Error ? message : new Error(message);
+      error.name = 'AbortError';
+      handle.reason = error;
+      if (handle._reject) handle._reject(error);
+    };
+    const AbortControllerClass = globalThis.AbortController;
+    if (typeof AbortControllerClass === 'function') {
+      const controller = new AbortControllerClass();
+      handle.controller = controller;
+      handle.signal = controller.signal;
+      const nativeAbort = () => {
+        try {
+          controller.abort();
+        } catch {}
+      };
+      handle.abort = message => {
+        nativeAbort();
+        rejectWithReason(message ?? reason);
+      };
+    } else {
+      handle.abort = message => rejectWithReason(message ?? reason);
+    }
+    return handle;
+  }
+  _createManagedMediaCacheResponse(response, abortHandle, bodyTimeoutMs) {
+    const configuredTimeout = Number(bodyTimeoutMs);
+    const resolvedTimeoutMs = Number.isFinite(configuredTimeout)
+      ? Math.max(1, configuredTimeout)
+      : MEDIA_CACHE_BODY_IDLE_TIMEOUT_MS;
+    const state = {
+      reader: null,
+      finalizing: false,
+      bodyReadPromise: null,
+      bodyTimeout: 0,
+      finalizationPromise: null
+    };
+    const clearBodyTimeout = () => {
+      if (!state.bodyTimeout) return;
+      clearTimeout(state.bodyTimeout);
+      state.bodyTimeout = 0;
+    };
+    const resetBodyTimeout = () => {
+      clearBodyTimeout();
+      state.bodyTimeout = setTimeout(() => {
+        abortHandle?.abort?.('Media cache response body timed out');
+      }, resolvedTimeoutMs);
+    };
+    const runCleanupTask = task => {
+      const timeoutMs = 1;
+      try {
+        return Promise.race([
+          Promise.resolve().then(() => task()),
+          new Promise(resolve => setTimeout(resolve, timeoutMs))
+        ]);
+      } catch {
+        return Promise.resolve();
+      }
+    };
+    const finalize = (options = {}) => {
+      if (state.finalizing) {
+        if (options.awaitCleanup) return state.finalizationPromise || Promise.resolve();
+        return Promise.resolve();
+      }
+      state.finalizing = true;
+      clearBodyTimeout();
+      this._mediaCacheAbortControllers?.delete?.(abortHandle);
+      const reader = state.reader;
+      if (state.reader) {
+        state.reader = null;
+      }
+      const cleanupTasks = [];
+      if (options.cancelReader && reader?.cancel) {
+        cleanupTasks.push(() => reader.cancel(abortHandle?.reason));
+      }
+      if (typeof response?.release === 'function') {
+        cleanupTasks.push(() => response.release());
+      } else if (typeof response?.releaseBody === 'function') {
+        cleanupTasks.push(() => response.releaseBody());
+      } else if (response?.body?.cancel) {
+        cleanupTasks.push(() => response.body.cancel(abortHandle?.reason));
+      }
+      const finalizationPromise = Promise.allSettled(cleanupTasks.map(runCleanupTask)).finally(() => {
+        if (!reader) return;
+        try {
+          reader.releaseLock();
+        } catch {}
+      });
+      state.finalizationPromise = finalizationPromise;
+      if (options.awaitCleanup) {
+        return finalizationPromise;
+      }
+      return Promise.resolve();
+    };
+    const readResponseBody = async () => {
+      if (response.body && typeof response.body.getReader === 'function') {
+        state.reader = response.body.getReader();
+        const chunks = [];
+        let totalLength = 0;
+        let failed = false;
+        resetBodyTimeout();
+        try {
+          while (true) {
+            const readResult = await Promise.race([state.reader.read(), abortHandle.promise]);
+            if (readResult?.done) break;
+            const chunk = readResult?.value;
+            if (!chunk?.byteLength) {
+              continue;
+            }
+            chunks.push(chunk);
+            totalLength += chunk.byteLength;
+            resetBodyTimeout();
+          }
+          const buffer = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const chunk of chunks) {
+            buffer.set(chunk, offset);
+            offset += chunk.byteLength;
+          }
+          return buffer.buffer;
+        } catch (error) {
+          failed = true;
+          throw error;
+        } finally {
+          await finalize({
+            awaitCleanup: true,
+            cancelReader: failed
+          });
+        }
+      }
+      let failed = false;
+      resetBodyTimeout();
+      try {
+        const result = await Promise.race([
+          response.arrayBuffer(),
+          abortHandle.promise
+        ]);
+        return result;
+      } catch (error) {
+        failed = true;
+        throw error;
+      } finally {
+        await finalize({
+          awaitCleanup: true,
+          cancelReader: failed
+        });
+      }
+    };
+    return {
+      response,
+      get ok() { return response.ok; },
+      get status() { return response.status; },
+      get headers() { return response.headers; },
+      body: response.body,
+      async arrayBuffer() {
+        if (!state.bodyReadPromise) {
+          state.bodyReadPromise = readResponseBody();
+        }
+        return state.bodyReadPromise;
+      },
+      async releaseBody() {
+        return finalize({ awaitCleanup: true, cancelReader: true });
+      },
+      async release() {
+        return finalize({ awaitCleanup: true, cancelReader: true });
+      }
+    };
+  }
   async fetchMediaCacheResponse(url, options = {}) {
     const requestOptions = options && typeof options === 'object' ? { ...options } : {};
     const configuredTimeout = Number(this._mediaCacheFetchTimeoutMs);
     const timeoutMs = Number.isFinite(configuredTimeout)
       ? Math.max(1, configuredTimeout)
       : MEDIA_CACHE_FETCH_TIMEOUT_MS;
-    const AbortControllerClass = globalThis.AbortController;
-    if (typeof AbortControllerClass !== 'function') {
-      let timeout;
-      try {
-        return await Promise.race([
-          this.fetchMediaNetworkResponse(url, requestOptions),
-          new Promise((_, reject) => {
-            timeout = setTimeout(() => {
-              const error = new Error('Media cache request timed out');
-              error.name = 'AbortError';
-              reject(error);
-            }, timeoutMs);
-          })
-        ]);
-      } finally {
-        clearTimeout(timeout);
-      }
-    }
-    const controller = new AbortControllerClass();
-    (this._mediaCacheAbortControllers ||= new Set()).add(controller);
+    const configuredBodyTimeout = Number(this._mediaCacheBodyIdleTimeoutMs);
+    const bodyTimeoutMs = Number.isFinite(configuredBodyTimeout)
+      ? Math.max(1, configuredBodyTimeout)
+      : MEDIA_CACHE_BODY_IDLE_TIMEOUT_MS;
+    const abortHandle = this._createMediaCacheAbortHandle('Media cache request was cancelled');
+    const controller = abortHandle?.controller;
+    (this._mediaCacheAbortControllers ||= new Set()).add(abortHandle);
+    let response;
     let timeout;
-    let rejectAborted;
-    const aborted = new Promise((_, reject) => { rejectAborted = reject; });
-    const onAbort = () => {
-      const error = new Error('Media cache request was cancelled');
-      error.name = 'AbortError';
-      rejectAborted(error);
-    };
-    controller.signal.addEventListener('abort', onAbort, { once: true });
-    timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      return await Promise.race([
-        this.fetchMediaNetworkResponse(url, {
-          ...requestOptions,
-          signal: controller.signal
-        }),
-        aborted
-      ]);
+      timeout = setTimeout(() => abortHandle.abort('Media cache request timed out'), timeoutMs);
+      if (controller) {
+        response = await Promise.race([
+          this.fetchMediaNetworkResponse(url, {
+            ...requestOptions,
+            signal: controller.signal
+          }),
+          abortHandle.promise
+        ]);
+      } else {
+        response = await Promise.race([
+          this.fetchMediaNetworkResponse(url, requestOptions),
+          abortHandle.promise
+        ]);
+      }
     } finally {
       clearTimeout(timeout);
-      controller.signal.removeEventListener('abort', onAbort);
-      this._mediaCacheAbortControllers?.delete?.(controller);
+      if (response == null) {
+        this._mediaCacheAbortControllers?.delete?.(abortHandle);
+      }
     }
+    if (response == null) {
+      const error = abortHandle.reason || new Error('Media cache request timed out');
+      if (!error.name) error.name = 'AbortError';
+      throw error;
+    }
+    return this._createManagedMediaCacheResponse(response, abortHandle, bodyTimeoutMs);
   }
   getMediaCacheTransportSelection() {
     if (this.settings?.forceLegacyMediaFetching) {
@@ -12142,10 +12319,12 @@ module.exports = class MessageLoggerV2 {
     const retryDelay = Number.isFinite(configuredRetryDelay)
       ? Math.max(0, configuredRetryDelay)
       : MEDIA_CACHE_RETRY_DELAY_MS;
+    let response;
     try {
-      const response = await this.fetchMediaCacheResponse(url);
+      response = await this.fetchMediaCacheResponse(url);
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       if (!response.ok) {
+        await (response?.release?.() ?? response?.releaseBody?.() ?? Promise.resolve());
         if (response.status === 404 || response.status === 403) {
           Logger.warn(`Image ${attachmentId} unavailable (${response.status}), skipping cache`);
           if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
@@ -12209,6 +12388,10 @@ module.exports = class MessageLoggerV2 {
       }
       if (retryDelay) await new Promise(resolve => setTimeout(resolve, retryDelay));
       return this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts, writeEpoch);
+    } finally {
+      try {
+        await (response?.release?.() ?? response?.releaseBody?.() ?? Promise.resolve());
+      } catch {}
     }
   }
   contentTypeToExtension(contentType) {

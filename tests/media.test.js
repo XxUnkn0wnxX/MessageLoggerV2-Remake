@@ -73,6 +73,56 @@ function mockAbortControllerWithSignalCapture() {
   return { controller, signal };
 }
 
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function createStreamChunkStep(value, delayMs = 0) {
+  return async () => {
+    if (delayMs > 0) await delay(delayMs);
+    return value;
+  };
+}
+
+function createStreamResponse(readPlan = [], options = {}) {
+  const state = {
+    reads: 0,
+    cancelled: false,
+    released: false,
+    cancelReason: null
+  };
+  const contentType = options.contentType ?? 'image/png';
+  const steps = readPlan.map(step => {
+    if (typeof step === 'function') return step;
+    return () => step;
+  });
+  const reader = {
+    async read() {
+      state.reads += 1;
+      const next = steps.shift();
+      if (!next) return { done: true };
+      return await next();
+    },
+    async cancel(reason) {
+      state.cancelled = true;
+      state.cancelReason = reason;
+    },
+    releaseLock() {
+      state.released = true;
+    }
+  };
+  return {
+    state,
+    response: {
+      ok: true,
+      status: 200,
+      headers: { get: name => name === 'content-type' ? contentType : null },
+      body: { getReader: () => reader },
+      ...(options.extraResponseFields || {})
+    }
+  };
+}
+
 test('media-cache transport uses native fetch by default with unchanged options and forced timeout null', async () => {
   const originalNetApi = global.BdApi.Net;
   const originalFetch = global.fetch;
@@ -705,10 +755,658 @@ test('media-cache fetch preserves caller options while forcing native timeout nu
   }
 });
 
+test('media-cache fetch aborts stalled headers after the configured timeout', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const controllerState = mockAbortControllerWithSignalCapture();
+    let capturedSignal;
+    let inFlight = 0;
+    global.BdApi.Net = undefined;
+    global.AbortController = class {
+      constructor() { return controllerState.controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    plugin.settings.forceLegacyMediaFetching = true;
+    plugin._mediaCacheFetchTimeoutMs = 5;
+    global.fetch = (_url, options) => {
+      capturedSignal = options?.signal;
+      inFlight += 1;
+      return new Promise(() => {});
+    };
+    let error;
+    try {
+      await plugin.fetchMediaCacheResponse('https://cdn.example/header-timeout');
+      assert.fail('timeout should abort the header fetch');
+    } catch (thrown) {
+      error = thrown;
+    }
+    assert.equal(inFlight, 1);
+    assert.equal(capturedSignal, controllerState.signal);
+    assert.equal(controllerState.signal.aborted, true);
+    assert.equal(plugin._mediaCacheAbortControllers?.size || 0, 0);
+    assert.equal(error?.name, 'AbortError');
+    assert.equal(/timed out/.test(error?.message || ''), true);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-cache fetch aborts body reads after idle timeout and releases the stream reader', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const controllerState = mockAbortControllerWithSignalCapture();
+    let capturedSignal;
+    const { response, state } = createStreamResponse([
+      createStreamChunkStep({ done: false, value: new Uint8Array([0x4d]) }, 0),
+      () => new Promise(() => {})
+    ]);
+    global.BdApi.Net = undefined;
+    global.AbortController = class {
+      constructor() { return controllerState.controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    plugin._mediaCacheBodyIdleTimeoutMs = 10;
+    plugin._mediaCacheFetchTimeoutMs = 100;
+    plugin.settings.forceLegacyMediaFetching = true;
+    global.fetch = async (_url, options) => {
+      capturedSignal = options?.signal;
+      return response;
+    };
+    const responseWrapper = await plugin.fetchMediaCacheResponse('https://cdn.example/body-timeout');
+    assert.equal(responseWrapper.ok, true);
+    let arrayError;
+    try {
+      await responseWrapper.arrayBuffer();
+      assert.fail('body stream should reject after idle timeout');
+    } catch (error) {
+      arrayError = error;
+    }
+    assert.equal(arrayError?.name, 'AbortError');
+    assert.equal(/body timed out/.test(arrayError?.message || ''), true);
+    assert.equal(arrayError?.message, 'Media cache response body timed out');
+    await delay(1);
+    assert.equal(capturedSignal, controllerState.signal);
+    assert.equal(capturedSignal.aborted, true);
+    assert.equal(state.cancelled, true);
+    assert.equal(state.released, true);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-cache rolling stream progress respects per-chunk idle timeout', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const controllerState = mockAbortControllerWithSignalCapture();
+    const { response, state } = createStreamResponse([
+      createStreamChunkStep({ done: false, value: new Uint8Array([0x4d]) }, 0),
+      createStreamChunkStep({ done: false, value: new Uint8Array([0x4c]) }, 18),
+      createStreamChunkStep({ done: false, value: new Uint8Array([0x56]) }, 18),
+      { done: true }
+    ]);
+    global.BdApi.Net = undefined;
+    global.AbortController = class {
+      constructor() { return controllerState.controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    plugin._mediaCacheBodyIdleTimeoutMs = 30;
+    plugin._mediaCacheFetchTimeoutMs = 100;
+    plugin.settings.forceLegacyMediaFetching = true;
+    global.fetch = async () => response;
+    const responseWrapper = await plugin.fetchMediaCacheResponse('https://cdn.example/body-rolling-window');
+    const arrayBuffer = await responseWrapper.arrayBuffer();
+    assert.deepEqual(Array.from(new Uint8Array(arrayBuffer)), [0x4d, 0x4c, 0x56]);
+    assert.equal(state.reads, 4);
+    assert.equal(controllerState.signal.aborted, false);
+    assert.equal(state.cancelled, false);
+    assert.equal(responseWrapper.body.cancel, undefined);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-cache response streams multiple non-empty chunks to a combined body buffer', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const { response, state } = createStreamResponse([
+      createStreamChunkStep({ done: false, value: new Uint8Array([0x4d, 0x4c]) }, 1),
+      createStreamChunkStep({ done: false, value: new Uint8Array([0x56, 0x32]) }, 1),
+      { done: true }
+    ]);
+    global.BdApi.Net = undefined;
+    global.AbortController = class {
+      constructor() { return mockAbortControllerWithSignalCapture().controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    plugin._mediaCacheBodyIdleTimeoutMs = 50;
+    plugin._mediaCacheFetchTimeoutMs = 100;
+    plugin.settings.forceLegacyMediaFetching = true;
+    global.fetch = async () => response;
+    const responseWrapper = await plugin.fetchMediaCacheResponse('https://cdn.example/body-multi-chunk');
+    assert.equal(responseWrapper.ok, true);
+    const arrayBuffer = await responseWrapper.arrayBuffer();
+    assert.deepEqual(Array.from(new Uint8Array(arrayBuffer)), [0x4d, 0x4c, 0x56, 0x32]);
+    assert.equal(state.cancelReason, null);
+    assert.equal(state.released, true);
+    assert.equal(state.reads, 3);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('zero-byte stream chunks do not reset the body idle timeout', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const controllerState = mockAbortControllerWithSignalCapture();
+    const { response, state } = createStreamResponse([
+      createStreamChunkStep({ done: false, value: new Uint8Array([]) }, 1),
+      createStreamChunkStep({ done: false, value: new Uint8Array([0xff]) }, 20),
+      { done: true }
+    ]);
+    global.BdApi.Net = undefined;
+    global.AbortController = class {
+      constructor() { return controllerState.controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    plugin._mediaCacheBodyIdleTimeoutMs = 10;
+    plugin._mediaCacheFetchTimeoutMs = 100;
+    plugin.settings.forceLegacyMediaFetching = true;
+    global.fetch = async (_url, options) => {
+      return response;
+    };
+    const responseWrapper = await plugin.fetchMediaCacheResponse('https://cdn.example/body-zero-chunk');
+    assert.equal(responseWrapper.ok, true);
+    let error;
+    try {
+      await responseWrapper.arrayBuffer();
+      assert.fail('body stream should reject when timeout reaches zero-byte chunk then next chunk stall');
+    } catch (caught) {
+      error = caught;
+    }
+    assert.equal(error?.name, 'AbortError');
+    assert.equal(/body timed out/.test(error?.message || ''), true);
+    await delay(1);
+    assert.equal(error.message, 'Media cache response body timed out');
+    assert.equal(state.cancelled, true);
+    assert.equal(state.released, true);
+    assert.equal(state.reads, 2);
+    assert.equal(controllerState.signal.aborted, true);
+    assert.equal(state.cancelReason?.message, 'Media cache response body timed out');
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('no AbortController body stall rejects promptly, releases best effort, and clears active handles', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const state = {
+      reads: 0,
+      cancelled: false,
+      released: false,
+      cancelReason: null
+    };
+    const reader = {
+      async read() {
+        state.reads += 1;
+        if (state.reads === 1) {
+          return { done: false, value: new Uint8Array([0x4d]) };
+        }
+        return new Promise(() => {});
+      },
+      cancel(reason) {
+        state.cancelled = true;
+        state.cancelReason = reason;
+        return new Promise(() => {});
+      },
+      releaseLock() {
+        state.released = true;
+      }
+    };
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-no-abort-controller-body-'));
+    global.BdApi.Net = undefined;
+    global.AbortController = undefined;
+    const plugin = createMediaCachePlugin(cacheDir, {
+      _mediaCacheBodyIdleTimeoutMs: 10,
+      _mediaCacheRetryDelayMs: 0,
+      _mediaCacheMaxAttempts: 1
+    });
+    global.fetch = async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: name => name === 'content-type' ? 'image/png' : null },
+      body: {
+        getReader: () => reader
+      }
+    });
+    plugin.settings.forceLegacyMediaFetching = true;
+    const response = await plugin.fetchMediaCacheResponse('https://cdn.example/no-abort-body-stall');
+    let error;
+    try {
+      await response.arrayBuffer();
+      assert.fail('body fetch must reject on stall when no AbortController exists');
+    } catch (caught) {
+      error = caught;
+    }
+    assert.equal(error?.name, 'AbortError');
+    assert.equal(error?.message, 'Media cache response body timed out');
+    assert.equal(state.cancelled, true);
+    assert.equal(state.released, true);
+    assert.equal(state.cancelReason?.message, 'Media cache response body timed out');
+    await delay(10);
+    assert.equal(plugin._mediaCacheAbortControllers?.size || 0, 0);
+    assert.equal(state.reads, 2);
+    fs.rmSync(cacheDir, { force: true, recursive: true });
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('non-stream media responses still read through arrayBuffer fallback', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const payload = new Uint8Array([0xde, 0xad, 0xbe, 0xef]).buffer;
+    const response = {
+      ok: true,
+      status: 200,
+      headers: { get: name => name === 'content-type' ? 'image/png' : null },
+      arrayBuffer: async () => payload
+    };
+    global.BdApi.Net = undefined;
+    global.AbortController = class {
+      constructor() { return mockAbortControllerWithSignalCapture().controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    plugin._mediaCacheFetchTimeoutMs = 100;
+    plugin.settings.forceLegacyMediaFetching = true;
+    global.fetch = async () => response;
+    const managed = await plugin.fetchMediaCacheResponse('https://cdn.example/non-stream');
+    const arrayBuffer = await managed.arrayBuffer();
+    assert.deepEqual(Array.from(new Uint8Array(arrayBuffer)), [0xde, 0xad, 0xbe, 0xef]);
+    await managed.releaseBody();
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('non-stream media fallback stalls reject promptly and clear active handles', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    global.BdApi.Net = undefined;
+    global.AbortController = undefined;
+    const plugin = createMediaCachePlugin('');
+    plugin.settings.forceLegacyMediaFetching = true;
+    plugin._mediaCacheBodyIdleTimeoutMs = 10;
+    plugin._mediaCacheFetchTimeoutMs = 100;
+    let arrayBufferCalls = 0;
+    global.fetch = () => ({
+      ok: true,
+      status: 200,
+      headers: { get: name => name === 'content-type' ? 'image/png' : null },
+      arrayBuffer: () => {
+        arrayBufferCalls += 1;
+        return new Promise(() => {});
+      }
+    });
+    const response = await plugin.fetchMediaCacheResponse('https://cdn.example/no-abort-fallback');
+    let error;
+    const start = Date.now();
+    try {
+      await response.arrayBuffer();
+      assert.fail('non-stream body read should timeout');
+    } catch (thrown) {
+      error = thrown;
+    }
+    const elapsedMs = Date.now() - start;
+    assert.equal(arrayBufferCalls, 1);
+    assert.equal(error?.name, 'AbortError');
+    assert.equal(error?.message, 'Media cache response body timed out');
+    assert.equal(elapsedMs >= 5 && elapsedMs < 80, true);
+    await delay(10);
+    assert.equal(plugin._mediaCacheAbortControllers?.size || 0, 0);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('cacheImage with stalled stream and no AbortController does not write a file', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const state = {
+      reads: 0,
+      cancelled: false,
+      released: false,
+      cancelReason: null
+    };
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-no-abort-cacheimage-'));
+    global.BdApi.Net = undefined;
+    global.AbortController = undefined;
+    const plugin = createMediaCachePlugin(cacheDir, {
+      _mediaCacheBodyIdleTimeoutMs: 10,
+      _mediaCacheMaxAttempts: 1,
+      _mediaCacheRetryDelayMs: 0
+    });
+    plugin.settings.forceLegacyMediaFetching = true;
+    global.fetch = async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: name => name === 'content-type' ? 'image/png' : null },
+      body: {
+        getReader: () => ({
+          async read() {
+            state.reads += 1;
+            if (state.reads === 1) {
+              return { done: false, value: new Uint8Array([0x4d]) };
+            }
+            return new Promise(() => {});
+          },
+          cancel(reason) {
+            state.cancelled = true;
+            state.cancelReason = reason;
+          },
+          releaseLock() {
+            state.released = true;
+          }
+        })
+      }
+    });
+    await plugin.cacheImage(
+      'https://cdn.example/no-abort-cacheimage.png',
+      0,
+      50,
+      'no-abort-cacheimage-message',
+      'channel',
+      'guild'
+    );
+    await delay(10);
+    assert.equal(state.cancelled, true);
+    assert.equal(state.released, true);
+    assert.equal(state.cancelReason?.message, 'Media cache response body timed out');
+    assert.equal(state.reads, 2);
+    assert.equal(plugin._mediaCacheAbortControllers?.size || 0, 0);
+    assert.equal(fs.existsSync(path.join(cacheDir, '50 (no-abort-cacheimage-message).png')), false);
+    fs.rmSync(cacheDir, { force: true, recursive: true });
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('non-200 cacheImage responses release body before retrying', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-cache-image-retry-'));
+  const events = [];
+  let attempts = 0;
+  try {
+    global.BdApi.Net = undefined;
+    global.AbortController = class {
+      constructor() { return mockAbortControllerWithSignalCapture().controller; }
+    };
+    const plugin = createMediaCachePlugin(cacheDir, {
+      _mediaCacheMaxAttempts: 2,
+      _mediaCacheRetryDelayMs: 0
+    });
+    const payload = new Uint8Array([0xde, 0xad]).buffer;
+    plugin.fetchMediaNetworkResponse = async () => {
+      attempts += 1;
+      events.push(`fetch-${attempts}`);
+      if (attempts === 1) {
+        return {
+          ok: false,
+          status: 500,
+          headers: { get: () => 'image/png' },
+          releaseBody: () => {
+            events.push('release-1');
+          }
+        };
+      }
+      if (attempts === 2) {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => 'image/png' },
+          arrayBuffer: async () => payload
+        };
+      }
+      assert.fail(`unexpected retry attempt ${attempts}`);
+    };
+    await plugin.cacheImage(
+      'https://cdn.example/non-200-retry.png',
+      0,
+      51,
+      'non-200-retry-message',
+      'channel',
+      'guild'
+    );
+    assert.deepEqual(events, ['fetch-1', 'release-1', 'fetch-2']);
+    assert.equal(attempts, 2);
+    assert.equal(fs.existsSync(path.join(cacheDir, '51 (non-200-retry-message).png')), true);
+    fs.rmSync(cacheDir, { force: true, recursive: true });
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('non-aborting environment still supports logical request timeout cancellation', async () => {
+  const originalFetch = global.fetch;
+  const originalNetApi = global.BdApi.Net;
+  const OriginalAbortController = global.AbortController;
+  try {
+    global.BdApi.Net = undefined;
+    global.AbortController = undefined;
+    const plugin = createMediaCachePlugin('');
+    plugin.settings.forceLegacyMediaFetching = true;
+    plugin._mediaCacheFetchTimeoutMs = 5;
+    global.fetch = () => new Promise(() => {});
+    let error;
+    try {
+      await plugin.fetchMediaCacheResponse('https://cdn.example/no-abort-controller');
+      assert.fail('timeout should abort even without native AbortController');
+    } catch (thrown) {
+      error = thrown;
+    }
+    assert.equal(error?.name, 'AbortError');
+    assert.equal(/timed out/.test(error?.message || ''), true);
+    assert.equal(error?.message, 'Media cache request timed out');
+  } finally {
+    global.fetch = originalFetch;
+    global.BdApi.Net = originalNetApi;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('cache-off and stop abort active body reads and prevent late writes', async () => {
+  const originalFetch = global.fetch;
+  const originalDocument = global.document;
+  const OriginalAbortController = global.AbortController;
+  global.document = { querySelector: () => null, removeEventListener() {} };
+  try {
+    for (const action of ['cache-off', 'stop']) {
+      let capturedSignal;
+      const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-body-abort-'));
+      let fetches = 0;
+      const cleanup = () => fs.rmSync(cacheDir, { force: true, recursive: true });
+      const messageId = `${action}-body-message`;
+      global.AbortController = class {
+        constructor() { return mockAbortControllerWithSignalCapture().controller; }
+      };
+      const plugin = createMediaCachePlugin(cacheDir, {
+        _mediaCacheBodyIdleTimeoutMs: 10,
+        _mediaCacheMaxAttempts: 3,
+        _mediaCacheRetryDelayMs: 0
+      });
+      let responseState;
+      global.fetch = async (_url, options) => {
+        capturedSignal = options?.signal;
+        fetches += 1;
+        const created = createStreamResponse([
+          createStreamChunkStep({ done: false, value: new Uint8Array([0x4d]) }, 0),
+          () => new Promise(() => {})
+        ]);
+        responseState = created.state;
+        return created.response;
+      };
+      const write = plugin.cacheImage(
+        `https://cdn.example/${action}-body.png`,
+        0,
+        action === 'cache-off' ? 40 : 41,
+        messageId,
+        'channel',
+        'guild'
+      );
+      await setImmediatePromise();
+      assert.equal(capturedSignal?.aborted, false);
+      if (action === 'cache-off') {
+        plugin.settings.cacheAllImages = false;
+        plugin.handleMediaCachingSetting(false);
+      } else {
+        plugin.stop();
+      }
+      assert.equal(capturedSignal?.aborted, true, `${action} must abort active body fetch`);
+      await write;
+      assert.equal(responseState?.cancelled, true, `${action} must cancel active stream`);
+      assert.equal(fetches, 1, `${action} must perform one fetch with no retries`);
+      assert.equal(fs.existsSync(path.join(cacheDir, `${action === 'cache-off' ? 40 : 41} (${messageId}).png`)), false);
+      cleanup();
+    }
+  } finally {
+    global.fetch = originalFetch;
+    global.document = originalDocument;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('same-instance restart prevents stale body readers from writing cached files', async () => {
+  const originalFetch = global.fetch;
+  const originalDocument = global.document;
+  const OriginalAbortController = global.AbortController;
+  try {
+    global.document = { querySelector: () => null, removeEventListener() {} };
+    global.AbortController = class {
+      constructor() { return mockAbortControllerWithSignalCapture().controller; }
+    };
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-stop-restart-body-'));
+    try {
+      const gate = defer();
+      let responseState;
+      const plugin = createMediaCachePlugin(cacheDir, {
+        _mediaCacheBodyIdleTimeoutMs: 50,
+        _mediaCacheMaxAttempts: 1,
+        _mediaCacheRetryDelayMs: 0
+      });
+      global.fetch = async () => {
+        const { response, state } = createStreamResponse([
+          async () => {
+            await gate.promise;
+            return { done: false, value: new Uint8Array([0x4d]) };
+          },
+          { done: true }
+        ]);
+        responseState = state;
+        return response;
+      };
+      const write = plugin.cacheImage('https://cdn.example/restarted-body-stream.png', 0, 42, 'message', 'channel', 'guild');
+      await setImmediatePromise();
+      plugin.stop();
+      plugin.__started = true;
+      gate.resolve();
+      await write;
+      assert.equal(responseState?.cancelled, true);
+      assert.equal(fs.existsSync(path.join(cacheDir, `42 (message).png`)), false);
+    } finally {
+      fs.rmSync(cacheDir, { force: true, recursive: true });
+    }
+  } finally {
+    global.fetch = originalFetch;
+    global.document = originalDocument;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('404 and 403 responses release the response body before leaving cacheImage', async () => {
+  const originalFetch = global.fetch;
+  const originalNetApi = global.BdApi.Net;
+  for (const status of [403, 404]) {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-non-ok-release-'));
+    const cleanup = () => fs.rmSync(cacheDir, { force: true, recursive: true });
+    try {
+      let released = 0;
+      const plugin = createMediaCachePlugin(cacheDir, {
+        _mediaCacheMaxAttempts: 1
+      });
+      const messageId = `${status}-message`;
+      global.fetch = async () => ({
+        ok: false,
+        status,
+        headers: { get: () => 'image/png' },
+        releaseBody: async () => { released += 1; }
+      });
+      plugin.settings.forceLegacyMediaFetching = true;
+      await plugin.cacheImage(
+        `https://cdn.example/${status}.png`,
+        0,
+        status,
+        messageId,
+        'channel',
+        'guild'
+      );
+      assert.equal(released, 1, `releaseBody must run for HTTP ${status}`);
+      assert.equal(fs.existsSync(path.join(cacheDir, `${status} (${messageId}).png`)), false);
+    } finally {
+      cleanup();
+    }
+  }
+  global.fetch = originalFetch;
+  global.BdApi.Net = originalNetApi;
+});
+
 function defer() {
   let resolve;
   const promise = new Promise(nextResolve => { resolve = nextResolve; });
   return { promise, resolve };
+}
+
+function setImmediatePromise() {
+  return new Promise(resolve => setImmediate(resolve));
 }
 
 function waitForQueuedMediaTasks() {
