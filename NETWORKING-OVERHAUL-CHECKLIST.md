@@ -65,21 +65,26 @@ review, checklist update, and commit must also be complete.
   master is On while retaining each saved child value. It is fully validated,
   committed at 135eeb37baecfbb153784ce46c6767c2ea7362e2, recorded by checklist
   checkpoint c7d4d32bfb9633f302bd433681bf02fb1766598b, and its matching live sync
-  is recorded at 8b7487225e3c1c694b76c89d1f97a7468f874304. The feature branch
-  publication is verified; user-driven `RT-26` checks remain.
+  is recorded at 8b7487225e3c1c694b76c89d1f97a7468f874304. The approved clipboard
+  repair is committed at db781e1c77f9257122ad469405d8bab09f8cdb58 and its
+  exact-hash checklist checkpoint is
+  79ce64b8a1ab16dc55dd6e972fba571a6644944a. Its live copy now has clean
+  hash/hot-reload evidence; user-driven clipboard checks remain before the
+  built-in changelog is amended and the final publication is recorded.
 - **Current tracked task changes:** Stages 1-5D are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/persistence.test.js`, `tests/settings-recovery.test.js`,
-  `tests/source-contracts.test.js`, `README.md`, `TODO.md`,
+  `tests/source-contracts.test.js`, `tests/clipboard.test.js`, `README.md`, `TODO.md`,
   `docs/architecture.md`, `docs/help.md`, `docs/settings.md`, `docs/tests.md`,
   and this checklist.
-- **Live plugin:** The final `2.8.2.9` Debug-linked networking build is live.
+- **Live plugin:** The `2.8.2.9` networking and clipboard-test build is live.
   Repository and live SHA-256 both equal
-  `260a3f8c2c3bf0534b0ad8ef5a91d62fae83cbce088cc9fab3e0a6917d2cd424`.
-  The UTC hot-reload segment at `2026-07-26 17:42:15-17:42:16` shows patch
+  `5683ea4cfb21dcb59959a290c57fa7dbce6cdcb8f79aed82c1e587d08ba0ff20`.
+  The UTC hot-reload segment at `2026-07-26 18:50:20-18:50:22` shows patch
   cleanup, successful reinitialization, UI refresh completion, and immediate
-  later media-cache writes without a matching Logger error. Discord was not
-  relaunched.
+  later media-cache activity without a matching Logger error. Discord was not
+  relaunched. The temporary clipboard trace source, live link, and report are
+  removed.
 - **Publishing authority:** The user explicitly authorized pushing both working
   branches to `origin` on 2026-07-26 and explicitly re-authorized pushing the
   current `fix/native-media-networking` branch after live sync on 2026-07-27.
@@ -87,12 +92,12 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit the validated clipboard replacement, record its exact commit, sync only
-the plugin source into BetterDiscord, verify source/live hash parity and a clean
-hot reload, push the feature branch, then give the user the remaining
-clipboard-only `RT-26` tests. Keep the audited provisional
-Anti-Nuke/Ghost-Ping media-retention work as a separate post-networking stage
-in `TODO.md`; do not implement it on this networking handoff.
+Commit this live-sync evidence, push the feature branch, then give the user the
+remaining clipboard-only `RT-26` tests. After both clipboard paths pass, amend
+the built-in changelog as newly authorized, rerun the suite, resync and publish
+the final checkpoint. Keep the audited provisional Anti-Nuke/Ghost-Ping
+media-retention work as a separate post-networking stage in `TODO.md`; do not
+implement it on this networking handoff.
 
 ### Resume procedure for a new session
 
@@ -812,7 +817,7 @@ media-cache requests.
 - [x] Complete an independent edge-case review and parent final audit.
 - [x] Commit the implementation and record the exact commit and validation
       results here before live sync.
-- [ ] Copy only the plugin file live, confirm hash parity and clean hot reload,
+- [x] Copy only the plugin file live, confirm hash parity and clean hot reload,
       then repeat the controlled stall probe.
 
 Stage 5B plan/result:
@@ -1059,13 +1064,13 @@ Stage 5D plan/result:
 
 Live result:
 
-- Date: 2026-07-27 final Debug-linked `2.8.2.9` live replacement and partial
-  `RT-26` run.
-- Result: **FINAL 2.8.2.9 SYNC, HASH, HOT-RELOAD, NATIVE/CORS,
+- Date: 2026-07-27 current clipboard-linked `2.8.2.9` live replacement and
+  partial `RT-26` run.
+- Result: **CURRENT 2.8.2.9 SYNC, HASH, HOT-RELOAD, NATIVE/CORS,
   SLOW-PROGRESS, CONTROLLED-STALL, FILE-SIZE, DEBUG-OUTPUT, AND UPDATER PASS;
-  REMAINING USER RT-26 TESTING PENDING.**
+  CLIPBOARD USER TESTING AND CHANGELOG AMENDMENT PENDING.**
 - Notes: Repository and live SHA-256 both equal
-  `260a3f8c2c3bf0534b0ad8ef5a91d62fae83cbce088cc9fab3e0a6917d2cd424`.
+  `5683ea4cfb21dcb59959a290c57fa7dbce6cdcb8f79aed82c1e587d08ba0ff20`.
   The current logs prove native Discord-CDN success, Waifugami HTTP 200 with
   1,091,999 bytes in 2.5 seconds, a successful 40-byte progressing body in
   39.8 seconds, the controlled no-progress body aborting through Logger's
@@ -1081,7 +1086,9 @@ Live result:
   delivery, one pending toast without console duplication, and one console
   notice plus one toast for a fresh both-output activation. Manual update
   checks returned HTTP 200 with media force Off and On without entering the
-  media request route. Discord was not relaunched.
+  media request route. The clipboard repair then hot-reloaded cleanly at
+  `18:50:20-18:50:22` UTC with matching source/live bytes. Discord was not
+  relaunched.
 
 Historical result:
 
@@ -1103,10 +1110,12 @@ Historical result:
       runtime matrix and post-sync branch push.
 - [x] Full test suite and final independent audit pass on `2.8.2.9`.
 - [x] `git diff --check` and Markdown parsing pass on the final tree.
-- [ ] Clipboard-repair live hash parity and clean hot reload are verified.
+- [x] Clipboard-repair live hash parity and clean hot reload are verified.
 - [ ] Remaining user-driven `RT-26` behavior result recorded.
 - [x] No unrelated attachment-gate implementation was included.
-- [x] Version and built-in changelog are updated under explicit approval.
+- [x] Version remains `2.8.2.9` as instructed.
+- [ ] After clipboard runtime confirmation, amend the built-in changelog under
+      the user's new explicit approval.
 - [ ] Push the clipboard-repair checkpoint only after the authorized live sync and verify
       local/remote ref alignment.
 - [x] Checklist removal was not requested for this working branch; retain it as
@@ -2119,16 +2128,18 @@ evidence for another session to understand what changed and why.
   validation. Independent final review found no remaining concrete blocker.
 - **Runtime evidence:** The user's screenshots prove the real Logger
   `message` context hook is active and show the missing viewer action that this
-  change repairs. The temporary clipboard trace is no longer needed; its live
-  symlink and generated report are removed.
-- **Failures or blockers:** No static blocker. The local-blob and remote-image
-  clipboard rows still require the authorized live sync and user interaction.
+  change repairs. Source/live SHA-256 now both equal
+  `5683ea4cfb21dcb59959a290c57fa7dbce6cdcb8f79aed82c1e587d08ba0ff20`;
+  the `18:50:20-18:50:22` UTC log segment shows a clean hot reload. The
+  temporary clipboard trace source, live symlink, and generated report are
+  removed.
+- **Failures or blockers:** No static or live-load blocker. The local-blob and
+  remote-image clipboard rows require user interaction.
 - **Commit:** Implementation commit
   db781e1c77f9257122ad469405d8bab09f8cdb58.
-- **Exact next action:** Run final diff/metadata/trace checks, commit and record
-  the exact implementation hash, sync the one plugin file, verify live parity
-  and hot reload, push the feature branch, then give the user the two clipboard
-  tests.
+- **Exact next action:** Commit and push this live-sync evidence, then give the
+  user the two clipboard tests. If both pass, amend the built-in changelog,
+  rerun the full suite, resync, and publish the final checkpoint.
 
 ### Handoff entry template
 
