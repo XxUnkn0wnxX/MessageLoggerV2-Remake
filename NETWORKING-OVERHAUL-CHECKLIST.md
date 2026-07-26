@@ -864,7 +864,7 @@ Stage 5D plan/result:
 - Authorization: update the plugin metadata and built-in changelog before the
   already authorized live sync, then push the current feature branch before
   the final report.
-- Plan amendment commit: `<pending-stage-5d-plan-commit>`.
+- Plan amendment commit: `adf773e81cc189d1f9fa841fb0ef0de1f4cc29c8`.
 
 ## Stage 6 — Live BetterDiscord verification
 
@@ -1501,7 +1501,7 @@ evidence for another session to understand what changed and why.
   amendment; the versioned plugin will receive the same full validation and
   live hash/reload checks as Stage 5C.
 - **Failures or blockers:** None.
-- **Commit:** `<pending-stage-5d-plan-commit>`.
+- **Commit:** `adf773e81cc189d1f9fa841fb0ef0de1f4cc29c8`.
 - **Exact next action:** Finish and review Stage 5C, apply the version/changelog
   update with matching deterministic contracts, then run the full audit before
   committing, live syncing, checkpointing, and pushing the feature branch.
