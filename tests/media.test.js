@@ -78,6 +78,17 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function mediaNetworkDebugMessages(url = null) {
+  return loggerEvents
+    .filter(([level, message]) => (
+      level === 'log'
+      && typeof message === 'string'
+      && message.startsWith('[Debug] Media request #')
+      && (url == null || message.includes(url))
+    ))
+    .map(([, message]) => message);
+}
+
 function createStreamChunkStep(value, delayMs = 0) {
   return async () => {
     if (delayMs > 0) await delay(delayMs);
@@ -718,68 +729,41 @@ test('reportDebugEvent routes to requested output selection and returns dispatch
   assert.equal(notifications.at(-1)[1].timeout, 1500);
 });
 
-test('media-network diagnostics only log to console when the detailed toggle is on', async () => {
+test('media-network diagnostics require both console toggles and never consume IDs or emit toasts while disabled', async () => {
   const originalNetApi = global.BdApi.Net;
   const originalFetch = global.fetch;
   const OriginalAbortController = global.AbortController;
   try {
-    const controllerState = mockAbortControllerWithSignalCapture();
     global.AbortController = class {
-      constructor() { return controllerState.controller; }
+      constructor() { return mockAbortControllerWithSignalCapture().controller; }
     };
-    const plugin = createMediaCachePlugin('');
-    plugin.settings.debugLogging = true;
-    plugin.settings.debugToasts = true;
-    plugin.settings.detailedMediaNetworkDebug = true;
-    plugin.notifyUser = () => {};
-    let fetchCalls = 0;
-    global.BdApi.Net = undefined;
-    global.fetch = () => {
-      fetchCalls += 1;
-      return Promise.resolve(successfulMediaResponse());
-    };
-
-    await plugin.fetchMediaCacheResponse('https://cdn.example/detailed-console');
-    assert.equal(fetchCalls, 1);
-    assert.equal(loggerEvents.some(([level, message]) => (
-      level === 'log'
-      && /\[Debug\] Media request #1/.test(message)
-      && /\(legacy\)/.test(message)
-      && /transport-started/.test(message)
-    )), true);
-    assert.equal(loggerEvents.filter(([level]) => level === 'warn' || level === 'error').length, 0);
-    assert.equal(plugin.settings.detailedMediaNetworkDebug, true);
-  } finally {
-    global.BdApi.Net = originalNetApi;
-    global.fetch = originalFetch;
-    global.AbortController = OriginalAbortController;
-  }
-});
-
-test('media-network diagnostics suppress output without debug logging', async () => {
-  const originalNetApi = global.BdApi.Net;
-  const originalFetch = global.fetch;
-  const OriginalAbortController = global.AbortController;
-  try {
     const plugin = createMediaCachePlugin('');
     const notifications = [];
     plugin.notifyUser = (content, options = {}) => notifications.push([content, options]);
-    plugin.settings.debugLogging = false;
     plugin.settings.debugToasts = true;
-    plugin.settings.detailedMediaNetworkDebug = true;
-    let fetchCalls = 0;
-    global.BdApi.Net = undefined;
+    global.BdApi.Net = {
+      fetch() {
+        return Promise.resolve(successfulMediaResponse());
+      }
+    };
     global.fetch = () => {
-      fetchCalls += 1;
+      assert.fail('renderer should not be used in the diagnostics gate test');
       return Promise.resolve(successfulMediaResponse());
     };
 
-    await plugin.fetchMediaCacheResponse('https://cdn.example/detailed-disabled');
-    assert.equal(fetchCalls, 1);
-    assert.equal(notifications.some(([message]) => typeof message === 'string' && message.includes('Media request #')), false);
-    assert.equal(loggerEvents.some(([level, message]) => (
-      level === 'log' && /\[Debug\] Media request #/.test(message)
-    )), false);
+    plugin.settings.debugLogging = false;
+    plugin.settings.detailedMediaNetworkDebug = true;
+    const masterOff = await plugin.fetchMediaCacheResponse('https://cdn.example/master-off');
+    await masterOff.arrayBuffer();
+
+    plugin.settings.debugLogging = true;
+    plugin.settings.detailedMediaNetworkDebug = false;
+    const childOff = await plugin.fetchMediaCacheResponse('https://cdn.example/child-off');
+    await childOff.arrayBuffer();
+
+    assert.equal(plugin._mediaCacheRequestSerial, 0);
+    assert.deepEqual(mediaNetworkDebugMessages(), []);
+    assert.deepEqual(notifications, []);
   } finally {
     global.BdApi.Net = originalNetApi;
     global.fetch = originalFetch;
@@ -787,59 +771,191 @@ test('media-network diagnostics suppress output without debug logging', async ()
   }
 });
 
-test('media-image caching logs per-request status/bytes/duration without toasts', async t => {
+test('media-network diagnostics report one truthful native lifecycle with exact streamed bytes and no toasts', async () => {
   const originalNetApi = global.BdApi.Net;
   const originalFetch = global.fetch;
   const OriginalAbortController = global.AbortController;
-  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-detailed-'));
-  t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
   try {
-    const controllerState = mockAbortControllerWithSignalCapture();
+    const url = 'https://cdn.example/native-stream?token=full-url';
+    const { response } = createStreamResponse([
+      { done: false, value: new Uint8Array([0x4d, 0x4c]) },
+      { done: false, value: new Uint8Array([0x56, 0x32, 0x21]) },
+      { done: true }
+    ]);
     global.AbortController = class {
-      constructor() { return controllerState.controller; }
+      constructor() { return mockAbortControllerWithSignalCapture().controller; }
     };
-    const messageId = 'media-detailed-success';
-    const attachmentId = 901;
-    const url = 'https://cdn.example/detailed-success.png';
-    const plugin = createMediaCachePlugin(cacheDir, {
-      settings: {
-        cacheAllImages: true,
-        dontSaveData: false,
-        dontLoadArchivedData: false,
-        newSaveAllFileTypes: true,
-        maxCacheFileSize: 0,
-        addUserIdToSavedMediaFilename: false,
-        debugLogging: true,
-        debugToasts: true,
-        detailedMediaNetworkDebug: true,
-        imageCacheDir: cacheDir
-      },
-      messageRecord: {
-        [messageId]: {
-          message: {
-            id: messageId,
-            author: { id: '777' }
-          }
+    const plugin = createMediaCachePlugin('');
+    const notifications = [];
+    plugin.notifyUser = (content, options = {}) => notifications.push([content, options]);
+    plugin.settings.debugLogging = true;
+    plugin.settings.debugToasts = true;
+    plugin.settings.detailedMediaNetworkDebug = true;
+    global.BdApi.Net = {
+      fetch() {
+        return Promise.resolve(response);
+      }
+    };
+    global.fetch = () => assert.fail('renderer should not run for native diagnostics');
+
+    const managed = await plugin.fetchMediaCacheResponse(url, { method: 'post' });
+    const first = await managed.arrayBuffer();
+    const second = await managed.arrayBuffer();
+    await managed.release();
+    assert.deepEqual(Array.from(new Uint8Array(first)), [0x4d, 0x4c, 0x56, 0x32, 0x21]);
+    assert.equal(second, first, 'managed response must reuse the one body read');
+
+    const messages = mediaNetworkDebugMessages(url);
+    const transport = messages.filter(message => message.includes('transport-started'));
+    const acquired = messages.filter(message => message.includes('response acquired'));
+    const terminal = messages.filter(message => message.includes(' terminal '));
+    assert.equal(transport.length, 1);
+    assert.match(transport[0], /Media request #1 POST .+ \(native\) transport-started/);
+    assert.equal(acquired.length, 1);
+    assert.match(acquired[0], /\(native\) response acquired status=200 durationMs=\d+/);
+    assert.equal(terminal.length, 1);
+    assert.match(terminal[0], /\(native\) terminal outcome=success status=200 bytes=5 durationMs=\d+/);
+    assert.equal(messages.some(message => /\(legacy\).*transport-started/.test(message)), false);
+    assert.equal(plugin._mediaCacheRequestSerial, 1);
+    assert.deepEqual(notifications, []);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-network diagnostics announce only legacy for forced and synchronous native fallback routes', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    global.AbortController = class {
+      constructor() { return mockAbortControllerWithSignalCapture().controller; }
+    };
+    const scenarios = [
+      {
+        name: 'forced',
+        configure(plugin) {
+          plugin.settings.forceLegacyMediaFetching = true;
+          global.BdApi.Net = {
+            fetch: () => assert.fail('forced legacy must not call native fetch')
+          };
         }
       },
-      notifyUser: () => {}
-    });
-    let notifications = 0;
-    global.BdApi.Net = undefined;
-    global.fetch = () => {
-      notifications += 1;
-      return Promise.resolve(successfulMediaResponse('image/png'));
+      {
+        name: 'non-thenable',
+        configure(plugin) {
+          global.BdApi.Net = { fetch: () => ({ ok: true }) };
+        }
+      },
+      {
+        name: 'throwing-then',
+        configure(plugin) {
+          const invalidThenable = {};
+          Object.defineProperty(invalidThenable, 'then', {
+            get() { throw new Error('bad then getter'); }
+          });
+          global.BdApi.Net = { fetch: () => invalidThenable };
+        }
+      }
+    ];
+
+    for (const scenario of scenarios) {
+      const url = `https://cdn.example/${scenario.name}`;
+      const plugin = createMediaCachePlugin('');
+      plugin.settings.debugLogging = true;
+      plugin.settings.debugToasts = false;
+      plugin.settings.detailedMediaNetworkDebug = true;
+      scenario.configure(plugin);
+      let rendererCalls = 0;
+      global.fetch = () => {
+        rendererCalls += 1;
+        return Promise.resolve(successfulMediaResponse());
+      };
+
+      const managed = await plugin.fetchMediaCacheResponse(url);
+      await managed.arrayBuffer();
+      const transport = mediaNetworkDebugMessages(url)
+        .filter(message => message.includes('transport-started'));
+      assert.equal(rendererCalls, 1, `${scenario.name} must use renderer fetch once`);
+      assert.equal(transport.length, 1, `${scenario.name} must emit one transport start`);
+      assert.match(transport[0], /\(legacy\) transport-started/);
+      assert.equal(transport.some(message => message.includes('(native)')), false);
+      assert.equal(plugin._mediaCacheRequestSerial, 1);
+    }
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-network diagnostics keep asynchronous native rejection native and report one failure', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    const url = 'https://cdn.example/native-async-rejection';
+    global.AbortController = class {
+      constructor() { return mockAbortControllerWithSignalCapture().controller; }
     };
-    const responsePath = path.join(cacheDir, `${plugin.getMediaCacheFileId(attachmentId, 0, messageId)} (${messageId}).png`);
-    await plugin.cacheImage(url, 0, attachmentId, messageId, 'channel', 'server');
-    assert.equal(fs.existsSync(responsePath), true);
-    assert.equal(notifications, 1);
-    assert.equal(loggerEvents.some(([level, message]) => (
-      level === 'log'
-      && message.includes('completed status=200')
-      && message.includes('bytes=4')
-      && /durationMs=\d+/.test(message)
-    )), true);
+    const plugin = createMediaCachePlugin('');
+    const notifications = [];
+    plugin.notifyUser = (content, options = {}) => notifications.push([content, options]);
+    plugin.settings.debugLogging = true;
+    plugin.settings.debugToasts = true;
+    plugin.settings.detailedMediaNetworkDebug = true;
+    global.BdApi.Net = {
+      fetch: () => Promise.reject(new Error('native async failure'))
+    };
+    let rendererCalls = 0;
+    global.fetch = () => {
+      rendererCalls += 1;
+      return Promise.resolve(successfulMediaResponse());
+    };
+
+    await assert.rejects(() => plugin.fetchMediaCacheResponse(url), /native async failure/);
+    const messages = mediaNetworkDebugMessages(url);
+    assert.equal(messages.filter(message => message.includes('transport-started')).length, 1);
+    assert.equal(messages.some(message => /\(native\) transport-started/.test(message)), true);
+    assert.equal(messages.some(message => /\(legacy\).*transport-started/.test(message)), false);
+    assert.equal(messages.filter(message => message.includes(' terminal ')).length, 1);
+    assert.equal(messages.some(message => /terminal outcome=failed.+bytes=0 durationMs=\d+/.test(message)), true);
+    assert.equal(rendererCalls, 0);
+    assert.equal(plugin._mediaCacheNativeFetchCompatible, true);
+    assert.deepEqual(notifications, []);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('media-network diagnostic failures and hostile status getters cannot change a successful request', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  try {
+    global.AbortController = class {
+      constructor() { return mockAbortControllerWithSignalCapture().controller; }
+    };
+    const plugin = createMediaCachePlugin('');
+    plugin.settings.debugLogging = true;
+    plugin.settings.detailedMediaNetworkDebug = true;
+    plugin.reportDebugEvent = () => {
+      throw new Error('diagnostic sink failed');
+    };
+    const response = successfulMediaResponse();
+    Object.defineProperty(response, 'status', {
+      get() { throw new Error('hostile status getter'); }
+    });
+    global.BdApi.Net = { fetch: () => Promise.resolve(response) };
+    global.fetch = () => assert.fail('renderer should not run after native success');
+
+    const managed = await plugin.fetchMediaCacheResponse('https://cdn.example/safe-diagnostics');
+    const body = await managed.arrayBuffer();
+    assert.deepEqual(Array.from(new Uint8Array(body)), [0x4d, 0x4c, 0x56, 0x32]);
     assert.equal(plugin._mediaCacheRequestSerial, 1);
   } finally {
     global.BdApi.Net = originalNetApi;
@@ -898,8 +1014,11 @@ test('media-cache fetch aborts stalled headers after the configured timeout', as
     global.AbortController = class {
       constructor() { return controllerState.controller; }
     };
+    const url = 'https://cdn.example/header-timeout';
     const plugin = createMediaCachePlugin('');
     plugin.settings.forceLegacyMediaFetching = true;
+    plugin.settings.debugLogging = true;
+    plugin.settings.detailedMediaNetworkDebug = true;
     plugin._mediaCacheFetchTimeoutMs = 5;
     global.fetch = (_url, options) => {
       capturedSignal = options?.signal;
@@ -908,7 +1027,7 @@ test('media-cache fetch aborts stalled headers after the configured timeout', as
     };
     let error;
     try {
-      await plugin.fetchMediaCacheResponse('https://cdn.example/header-timeout');
+      await plugin.fetchMediaCacheResponse(url);
       assert.fail('timeout should abort the header fetch');
     } catch (thrown) {
       error = thrown;
@@ -919,6 +1038,11 @@ test('media-cache fetch aborts stalled headers after the configured timeout', as
     assert.equal(plugin._mediaCacheAbortControllers?.size || 0, 0);
     assert.equal(error?.name, 'AbortError');
     assert.equal(/timed out/.test(error?.message || ''), true);
+    const messages = mediaNetworkDebugMessages(url);
+    assert.equal(messages.filter(message => message.includes('transport-started')).length, 1);
+    assert.equal(messages.filter(message => message.includes('response acquired')).length, 0);
+    assert.equal(messages.filter(message => message.includes(' terminal ')).length, 1);
+    assert.match(messages.find(message => message.includes(' terminal ')), /\(legacy\) terminal outcome=timeout AbortError \(Media cache request timed out\) bytes=0 durationMs=\d+/);
   } finally {
     global.BdApi.Net = originalNetApi;
     global.fetch = originalFetch;
@@ -941,15 +1065,18 @@ test('media-cache fetch aborts body reads after idle timeout and releases the st
     global.AbortController = class {
       constructor() { return controllerState.controller; }
     };
+    const url = 'https://cdn.example/body-timeout';
     const plugin = createMediaCachePlugin('');
     plugin._mediaCacheBodyIdleTimeoutMs = 10;
     plugin._mediaCacheFetchTimeoutMs = 100;
     plugin.settings.forceLegacyMediaFetching = true;
+    plugin.settings.debugLogging = true;
+    plugin.settings.detailedMediaNetworkDebug = true;
     global.fetch = async (_url, options) => {
       capturedSignal = options?.signal;
       return response;
     };
-    const responseWrapper = await plugin.fetchMediaCacheResponse('https://cdn.example/body-timeout');
+    const responseWrapper = await plugin.fetchMediaCacheResponse(url);
     assert.equal(responseWrapper.ok, true);
     let arrayError;
     try {
@@ -966,6 +1093,10 @@ test('media-cache fetch aborts body reads after idle timeout and releases the st
     assert.equal(capturedSignal.aborted, true);
     assert.equal(state.cancelled, true);
     assert.equal(state.released, true);
+    const messages = mediaNetworkDebugMessages(url);
+    assert.equal(messages.filter(message => message.includes('response acquired')).length, 1);
+    assert.equal(messages.filter(message => message.includes(' terminal ')).length, 1);
+    assert.match(messages.find(message => message.includes(' terminal ')), /\(legacy\) terminal outcome=timeout status=200 bytes=1 durationMs=\d+/);
   } finally {
     global.BdApi.Net = originalNetApi;
     global.fetch = originalFetch;
@@ -1173,14 +1304,22 @@ test('non-stream media responses still read through arrayBuffer fallback', async
     global.AbortController = class {
       constructor() { return mockAbortControllerWithSignalCapture().controller; }
     };
+    const url = 'https://cdn.example/non-stream';
     const plugin = createMediaCachePlugin('');
     plugin._mediaCacheFetchTimeoutMs = 100;
     plugin.settings.forceLegacyMediaFetching = true;
+    plugin.settings.debugLogging = true;
+    plugin.settings.detailedMediaNetworkDebug = true;
     global.fetch = async () => response;
-    const managed = await plugin.fetchMediaCacheResponse('https://cdn.example/non-stream');
+    const managed = await plugin.fetchMediaCacheResponse(url);
     const arrayBuffer = await managed.arrayBuffer();
+    const repeated = await managed.arrayBuffer();
     assert.deepEqual(Array.from(new Uint8Array(arrayBuffer)), [0xde, 0xad, 0xbe, 0xef]);
+    assert.equal(repeated, arrayBuffer);
     await managed.releaseBody();
+    const messages = mediaNetworkDebugMessages(url);
+    assert.equal(messages.filter(message => message.includes(' terminal ')).length, 1);
+    assert.match(messages.find(message => message.includes(' terminal ')), /\(legacy\) terminal outcome=success status=200 bytes=4 durationMs=\d+/);
   } finally {
     global.BdApi.Net = originalNetApi;
     global.fetch = originalFetch;
@@ -1314,10 +1453,14 @@ test('non-200 cacheImage responses release body before retrying', async () => {
       _mediaCacheMaxAttempts: 2,
       _mediaCacheRetryDelayMs: 0
     });
+    const url = 'https://cdn.example/non-200-retry.png';
+    plugin.settings.debugLogging = true;
+    plugin.settings.detailedMediaNetworkDebug = true;
     const payload = new Uint8Array([0xde, 0xad]).buffer;
-    plugin.fetchMediaNetworkResponse = async () => {
+    plugin.fetchMediaNetworkResponse = async (_url, _options, requestContext) => {
       attempts += 1;
       events.push(`fetch-${attempts}`);
+      plugin._startMediaNetworkTransport(requestContext, 'legacy');
       if (attempts === 1) {
         return {
           ok: false,
@@ -1339,7 +1482,7 @@ test('non-200 cacheImage responses release body before retrying', async () => {
       assert.fail(`unexpected retry attempt ${attempts}`);
     };
     await plugin.cacheImage(
-      'https://cdn.example/non-200-retry.png',
+      url,
       0,
       51,
       'non-200-retry-message',
@@ -1349,6 +1492,10 @@ test('non-200 cacheImage responses release body before retrying', async () => {
     assert.deepEqual(events, ['fetch-1', 'release-1', 'fetch-2']);
     assert.equal(attempts, 2);
     assert.equal(fs.existsSync(path.join(cacheDir, '51 (non-200-retry-message).png')), true);
+    const terminal = mediaNetworkDebugMessages(url).filter(message => message.includes(' terminal '));
+    assert.equal(terminal.length, 2);
+    assert.match(terminal[0], /Media request #1 .+ \(legacy\) terminal outcome=http-error status=500 bytes=0 durationMs=\d+/);
+    assert.match(terminal[1], /Media request #2 .+ \(legacy\) terminal outcome=success status=200 bytes=2 durationMs=\d+/);
     fs.rmSync(cacheDir, { force: true, recursive: true });
   } finally {
     global.BdApi.Net = originalNetApi;
@@ -1405,6 +1552,9 @@ test('cache-off and stop abort active body reads and prevent late writes', async
         _mediaCacheMaxAttempts: 3,
         _mediaCacheRetryDelayMs: 0
       });
+      const url = `https://cdn.example/${action}-body.png`;
+      plugin.settings.debugLogging = true;
+      plugin.settings.detailedMediaNetworkDebug = true;
       let responseState;
       global.fetch = async (_url, options) => {
         capturedSignal = options?.signal;
@@ -1417,7 +1567,7 @@ test('cache-off and stop abort active body reads and prevent late writes', async
         return created.response;
       };
       const write = plugin.cacheImage(
-        `https://cdn.example/${action}-body.png`,
+        url,
         0,
         action === 'cache-off' ? 40 : 41,
         messageId,
@@ -1437,6 +1587,9 @@ test('cache-off and stop abort active body reads and prevent late writes', async
       assert.equal(responseState?.cancelled, true, `${action} must cancel active stream`);
       assert.equal(fetches, 1, `${action} must perform one fetch with no retries`);
       assert.equal(fs.existsSync(path.join(cacheDir, `${action === 'cache-off' ? 40 : 41} (${messageId}).png`)), false);
+      const terminal = mediaNetworkDebugMessages(url).filter(message => message.includes(' terminal '));
+      assert.equal(terminal.length, 1, `${action} must emit one terminal outcome`);
+      assert.match(terminal[0], /\(legacy\) terminal outcome=cancelled status=200 bytes=1 durationMs=\d+/);
       cleanup();
     }
   } finally {

@@ -9,13 +9,40 @@ Status markers:
 
 ## 📎 Cache All Attachment Types Gate
 
-Status: Known limitation in 2.8.2.8; overhaul paused
+Status: Known limitation in 2.8.2.9; follow-up after the networking release
 
 - [ ] With **Cache media locally** Off, block every attachment type from ordinary Logger attachment capture and local caching, regardless of the saved child value.
 - [ ] With the master On and **Cache all attachment types** Off, preserve established image, embed, sticker, and visual Components V2 handling while blocking every other file type from ordinary attachment history and local caching.
 - [ ] With both switches On, accept any attachment type subject to the existing file-size limit, no-save queue, cache path, and record-based cached-file cleanup.
 - [ ] Keep Anti-Nuke capture independent of ordinary ignores and the child gate while leaving all filesystem writes controlled by the master.
 - [ ] Add deterministic on/off coverage and complete live validation without regressing the established media path.
+
+## 🛡️ Bounded Provisional Recovery Media
+
+Status: Audit complete; separate post-networking hardening stage
+
+Anti-Nuke currently excludes DMs and only recovers records owned by the exact
+deleted guild parent or its child threads. Its early media pre-cache may still
+write eligible files from any guild channel because a future channel deletion
+cannot be predicted. The Anti-Nuke record caps do not bound or clean up those
+provisional files, so never-confirmed and cap-rejected candidates can remain
+orphaned.
+
+- [ ] Keep provisional physical media rather than URL-only references because
+      Discord CDN URLs can expire as a channel disappears.
+- [ ] Scope provisional candidates to guild parent/thread ancestry and never
+      admit DMs.
+- [ ] Apply bounded age, file-count, and byte limits with deterministic
+      eviction.
+- [ ] Promote only files referenced by a confirmed channel-deletion capture,
+      confirmed Ghost Ping, or ordinary saved Logger record.
+- [ ] Delete expired, unconfirmed, and capture-cap-rejected candidates without
+      deleting a file still referenced by another saved record.
+- [ ] Preserve the **Cache media locally**, no-save, file-size, cancellation,
+      and Anti-Nuke ignore-bypass contracts.
+- [ ] Add deterministic DM, unrelated-parent, ignored-guild, confirmation,
+      capture-cap, eviction, and shared-file regression coverage before live
+      testing.
 
 ## 💾 Preserve Data After No-Save Sessions
 

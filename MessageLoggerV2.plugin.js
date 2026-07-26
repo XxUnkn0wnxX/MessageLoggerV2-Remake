@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.8
+ * @version 2.8.2.9
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -65,7 +65,7 @@ const DiscordModules = (() => {
         const result = getter();
         if (result != null) cache[key] = result;
         return result ?? null;
-  } catch (e) {
+      } catch (e) {
         Logger.error(`Failed to load module: ${key}`, e);
         return null;
       }
@@ -309,7 +309,6 @@ module.exports = class MessageLoggerV2 {
     this._mediaCacheRequestSerial = 0;
     this._pendingMediaCacheRequests = new Map();
     this._activeDeferredMediaCacheRequests = new Map();
-    this._mediaNetworkRequestContextByResponse = new WeakMap();
     this._mediaCacheAbortControllers = new Set();
     this._mediaCacheNativeFetchCompatible = null;
     this._mediaCacheLegacyRoutingNoticeState = null;
@@ -536,41 +535,30 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Live display controls',
+        title: 'Native media networking',
         type: 'fixed',
         items: [
-          'Disabling saved-message or edit display now prevents future live mounts across chats, forums, and threads without stopping logging.',
-          'Mount-dependent Jump actions stay hidden while View in Log remains available.',
-          'Hot-unloading the saved archive now removes every archive-owned mount while preserving temporary session records.'
+          'Persistent media caching now uses BetterDiscord native networking by default, allowing cross-origin and mixed-content downloads that Discord renderer fetch can block.',
+          'Forced legacy mode and automatic fallback remain available for missing or synchronously incompatible native networking.',
+          'Update checks and local or remote image-copy networking remain unchanged.'
         ]
       },
       {
-        title: 'Logging, media, and restoration',
+        title: 'Download watchdogs and cancellation',
+        type: 'fixed',
+        items: [
+          'Downloads keep the 15-second initial-response deadline and now use a rolling 30-second body-idle watchdog, so slow transfers continue while bytes arrive.',
+          'The inherited five-second host socket timeout is disabled for media-cache requests.',
+          'Turning Cache media locally off or stopping the plugin cancels active downloads immediately without retries or late file writes.'
+        ]
+      },
+      {
+        title: 'Media network diagnostics',
         type: 'improved',
         items: [
-          'Components V2, embeds, removed uploads, and Anti-Nuke media now retain more complete saved content.',
-          'Ordinary ignores no longer hide saved records or block Anti-Nuke channel snapshots.',
-          'Restored forum starters no longer disturb Discord-owned cards, and later uploads send as replies.',
+          'An opt-in child of Enable debug logging reports each media request ID, method, full URL, transport, status, bytes, timing, and terminal outcome to the console only.',
+          'Detailed media-request diagnostics never emit toasts or change request behavior.',
           'Known limitation: Cache all attachment types remains incomplete for arbitrary non-image files.'
-        ]
-      },
-      {
-        title: 'Linked settings controls',
-        type: 'improved',
-        items: [
-          'Related switches and fields now grey out when their master is disabled while keeping their saved values.',
-          'Links cover saved-message display, edit history, backups, media caching, edit-spam controls, and Anti-Nuke.'
-        ]
-      },
-      {
-        title: 'Settings reliability and layout',
-        type: 'improved',
-        items: [
-          'Accepted settings save immediately, including deleted-message colors with an optional # in either letter case.',
-          'Related controls stay grouped, while Filter Help and Logger Help now use clearer nested spacing, visible filter syntax, and consistent On/Off state labels.',
-          'The notification-mode setting now uses the accurate BdApi notifications wording without the outdated basic qualifier.',
-          'The guild-only local-user toast option now uses its correct Guild settings location and migrates its misplaced legacy DM value.',
-          'Disable saving data now keeps new additions and eligible media requests memory-only while preserving loaded-archive cleanup; save/media and archive-view transitions briefly lock their controls with a warning-orange pulse.'
         ]
       }
     ];
@@ -3800,6 +3788,7 @@ module.exports = class MessageLoggerV2 {
     return this._mediaCacheRequestSerial;
   }
   _createMediaNetworkRequestContext(url, options = {}) {
+    if (!this._isDetailedMediaNetworkDebugEnabled()) return null;
     let safeUrl = '[unprintable-url]';
     let safeMethod = 'GET';
     try {
@@ -3828,13 +3817,10 @@ module.exports = class MessageLoggerV2 {
   }
   _startMediaNetworkTransport(trace, route = 'unknown') {
     if (!trace || !trace.id) return;
-    if (!trace.started) {
-      trace.started = true;
-      trace.route = route || 'unknown';
-      this._reportMediaNetworkDebug(trace, 'transport-started');
-      return;
-    }
-    if (route) trace.route = route;
+    if (trace.started) return;
+    trace.started = true;
+    trace.route = route || 'unknown';
+    this._reportMediaNetworkDebug(trace, 'transport-started');
   }
   _reportMediaNetworkDebug(context, event, details = '') {
     try {
@@ -3847,7 +3833,7 @@ module.exports = class MessageLoggerV2 {
         ? details.trim()
         : details == null ? '' : String(details);
       const detail = detailPrefix ? ` ${detailPrefix}` : '';
-      const extra = detailSuffix ? `${detailPrefix ? ' ' : ' '}${detailSuffix}` : '';
+      const extra = detailSuffix ? ` ${detailSuffix}` : '';
       this.reportDebugEvent(
         `Media request #${context.id} ${destination} (${route})${detail}${extra}`,
         4000,
@@ -3857,10 +3843,26 @@ module.exports = class MessageLoggerV2 {
     }
   }
   _classifyMediaNetworkOutcome(error, abortHandle) {
-    const message = (error && error.message) ? String(error.message) : '';
-    if (message.includes('timed out')) return 'timeout';
-    if ((error && error.name === 'AbortError') || abortHandle?.aborted) return 'cancelled';
+    let message = '';
+    let name = '';
+    try {
+      message = String(error?.message ?? abortHandle?.reason?.message ?? '');
+    } catch {}
+    try {
+      name = String(error?.name ?? abortHandle?.reason?.name ?? '');
+    } catch {}
+    if (message.toLowerCase().includes('timed out')) return 'timeout';
+    if (name === 'AbortError' || abortHandle?.aborted) return 'cancelled';
     return 'failed';
+  }
+  _safeMediaNetworkErrorDetails(error) {
+    try {
+      const name = String(error?.name || 'Error');
+      const message = error?.message == null ? '' : String(error.message);
+      return message ? `${name} (${message})` : name;
+    } catch {
+      return 'Error';
+    }
   }
   _safeMediaNetworkResponseStatus(response) {
     try {
@@ -3871,24 +3873,27 @@ module.exports = class MessageLoggerV2 {
     }
   }
   _reportMediaNetworkOutcome(context, outcome, options = {}) {
-    if (!context || !context.id || context.terminal) return;
-    context.terminal = true;
-    const elapsedMs = context.startedAtMs ? Date.now() - context.startedAtMs : null;
-    const safeBytes = Number.isFinite(context.bytes) ? context.bytes : 0;
-    const status = Number.isFinite(context.responseStatus)
-      ? context.responseStatus
-      : this._safeMediaNetworkResponseStatus(options.response || options.requestResponse);
-    const includeStatus = options.includeStatus !== false && Number.isFinite(status);
-    const statusText = includeStatus ? ` status=${status}` : '';
-    const elapsedText = elapsedMs == null ? '' : ` durationMs=${elapsedMs}`;
-    const bytesText = ` bytes=${safeBytes}`;
-    const extraText = options.extra ? ` ${options.extra}` : '';
-    const destination = `${context.method || 'GET'} ${context.url || '[unprintable-url]'}`;
-    const details = `${outcome}${statusText}${extraText}${bytesText}${elapsedText}`;
-    context.elapsedMs = elapsedMs;
-    context.route = context.route || 'unknown';
-    this._reportMediaNetworkDebug(context, details);
-    return `${context.route} ${destination} ${outcome}${statusText}${bytesText}${elapsedText}`;
+    try {
+      if (!context || !context.id || context.terminal) return;
+      context.terminal = true;
+      const elapsedMs = context.startedAtMs ? Date.now() - context.startedAtMs : null;
+      const safeBytes = Number.isFinite(context.bytes) ? context.bytes : 0;
+      const status = Number.isFinite(context.responseStatus)
+        ? context.responseStatus
+        : this._safeMediaNetworkResponseStatus(options.response || options.requestResponse);
+      const includeStatus = options.includeStatus !== false && Number.isFinite(status);
+      const statusText = includeStatus ? ` status=${status}` : '';
+      const elapsedText = elapsedMs == null ? '' : ` durationMs=${elapsedMs}`;
+      const bytesText = ` bytes=${safeBytes}`;
+      const extraText = options.extra ? ` ${String(options.extra)}` : '';
+      const details = `outcome=${outcome}${statusText}${extraText}${bytesText}${elapsedText}`;
+      context.elapsedMs = elapsedMs;
+      context.route = context.route || 'unknown';
+      this._reportMediaNetworkDebug(context, 'terminal', details);
+      return details;
+    } catch {
+      return `outcome=${outcome}`;
+    }
   }
   queueAutoBackup(delayMs, reason = 'queued') {
     this.saveBackupTimeout = setTimeout(() => this.saveBackup(), delayMs);
@@ -4602,7 +4607,7 @@ module.exports = class MessageLoggerV2 {
               { style: { color: 'var(--text-warning, var(--status-warning))' } },
               'Show detailed media-network diagnostics'
             ),
-            note: 'Console-only per-request media logs (method, URL, route, status, bytes, elapsed). This switch is disabled unless debug logging is enabled and sends no toasts.',
+            note: 'Console-only per-request media logs (method, full URL, route, status, bytes, elapsed, outcome). This switch is disabled unless debug logging is enabled and sends no toasts. Full URLs may contain sensitive query data.',
             id: 'detailedMediaNetworkDebug',
             enableWith: 'debugLogging',
             type: 'switch'
@@ -12132,6 +12137,7 @@ module.exports = class MessageLoggerV2 {
     }
     let netApi;
     let nativeFetch;
+    let response;
     try {
       netApi = this._getMediaCacheNetApi();
       nativeFetch = netApi?.fetch;
@@ -12139,7 +12145,11 @@ module.exports = class MessageLoggerV2 {
       this._startMediaNetworkTransport(context, 'legacy');
       this._mediaCacheNativeFetchCompatible = false;
       this._activateMediaCacheLegacyRoutingNotice();
-      this._reportMediaNetworkDebug(context, 'native fetch getter failed, falling back to legacy renderer fetch', error?.message);
+      this._reportMediaNetworkDebug(
+        context,
+        'native fetch getter failed, falling back to legacy renderer fetch',
+        this._safeMediaNetworkErrorDetails(error)
+      );
       return fetch(url, options);
     }
     if (typeof nativeFetch !== 'function') {
@@ -12150,28 +12160,39 @@ module.exports = class MessageLoggerV2 {
       return fetch(url, options);
     }
 
-    let response;
     try {
-      this._startMediaNetworkTransport(context, 'native');
-      this._reportMediaNetworkDebug(context, 'using BetterDiscord native fetch');
       response = nativeFetch.call(netApi, url, {
         ...options,
         timeout: 0
       });
-      if (response == null || typeof response.then !== 'function') {
+      try {
+        if (response == null || typeof response.then !== 'function') {
+          throw new Error('Native media fetch response is not thenable');
+        }
+      } catch (error) {
         this._startMediaNetworkTransport(context, 'legacy');
-        this._reportMediaNetworkDebug(context, 'native fetch promise check failed, falling back to legacy renderer fetch');
         this._mediaCacheNativeFetchCompatible = false;
         this._activateMediaCacheLegacyRoutingNotice();
+        this._reportMediaNetworkDebug(
+          context,
+          'native fetch promise check failed, falling back to legacy renderer fetch',
+          this._safeMediaNetworkErrorDetails(error)
+        );
         return fetch(url, options);
       }
     } catch (error) {
       this._startMediaNetworkTransport(context, 'legacy');
-      this._reportMediaNetworkDebug(context, 'native fetch threw, falling back to legacy renderer fetch', error?.message);
+      this._reportMediaNetworkDebug(
+        context,
+        'native fetch threw, falling back to legacy renderer fetch',
+        this._safeMediaNetworkErrorDetails(error)
+      );
       this._mediaCacheNativeFetchCompatible = false;
       this._activateMediaCacheLegacyRoutingNotice();
       return fetch(url, options);
     }
+    this._startMediaNetworkTransport(context, 'native');
+    this._reportMediaNetworkDebug(context, 'using BetterDiscord native fetch');
     this._deactivateMediaCacheLegacyRoutingNotice();
     this._mediaCacheNativeFetchCompatible = true;
     return response;
@@ -12259,9 +12280,6 @@ module.exports = class MessageLoggerV2 {
       state.finalizing = true;
       clearBodyTimeout();
       this._mediaCacheAbortControllers?.delete?.(abortHandle);
-      if (requestContext && this._mediaNetworkRequestContextByResponse instanceof WeakMap) {
-        this._mediaNetworkRequestContextByResponse.delete(responseWrapper);
-      }
       const reader = state.reader;
       if (state.reader) {
         state.reader = null;
@@ -12282,21 +12300,18 @@ module.exports = class MessageLoggerV2 {
         try {
           reader.releaseLock();
         } catch {}
-      }).then(async () => {
+      }).then(() => {
         if (!requestContext || requestContext.terminal) return;
+        const status = this._safeMediaNetworkResponseStatus(response);
         if (state.bodyReadCompleted) {
-          this._reportMediaNetworkOutcome(
-            requestContext,
-            'completed',
-            { response: response, includeStatus: true }
-          );
+          this._reportMediaNetworkOutcome(requestContext, 'success', { response, includeStatus: true });
           return;
         }
         if (state.readError) {
           this._reportMediaNetworkOutcome(
             requestContext,
             this._classifyMediaNetworkOutcome(state.readError, abortHandle),
-            { response: response, includeStatus: false }
+            { response, includeStatus: true }
           );
           return;
         }
@@ -12304,14 +12319,18 @@ module.exports = class MessageLoggerV2 {
           this._reportMediaNetworkOutcome(
             requestContext,
             this._classifyMediaNetworkOutcome(null, abortHandle),
-            { response: response, includeStatus: false }
+            { response, includeStatus: true }
           );
+          return;
+        }
+        if (Number.isFinite(status) && status >= 400) {
+          this._reportMediaNetworkOutcome(requestContext, 'http-error', { response, includeStatus: true });
           return;
         }
         this._reportMediaNetworkOutcome(
           requestContext,
           'released',
-          { response: response, includeStatus: false }
+          { response, includeStatus: true }
         );
       });
       state.finalizationPromise = finalizationPromise;
@@ -12400,9 +12419,6 @@ module.exports = class MessageLoggerV2 {
         return finalize({ awaitCleanup: true, cancelReader: true });
       }
     };
-    if (requestContext && requestContext.id) {
-      this._mediaNetworkRequestContextByResponse?.set(responseWrapper, requestContext);
-    }
     return responseWrapper;
   }
   async fetchMediaCacheResponse(url, options = {}) {
@@ -12442,11 +12458,17 @@ module.exports = class MessageLoggerV2 {
         ]);
       }
       if (response && requestContext) {
-        requestContext.responseStatus = response?.status;
-        requestContext.responseStatusText = response?.statusText;
+        requestContext.responseStatus = this._safeMediaNetworkResponseStatus(response);
         requestContext.responseReceivedAtMs = Date.now();
-        requestContext.completedAtMs = Date.now();
-        this._reportMediaNetworkDebug(requestContext, 'response acquired');
+        requestContext.completedAtMs = requestContext.responseReceivedAtMs;
+        const responseStatus = this._safeMediaNetworkResponseStatus(response);
+        const safeStatus = Number.isFinite(responseStatus) ? `status=${responseStatus}` : 'status=n/a';
+        const durationMs = requestContext.startedAtMs ? requestContext.completedAtMs - requestContext.startedAtMs : 0;
+        this._reportMediaNetworkDebug(
+          requestContext,
+          'response acquired',
+          `${safeStatus} durationMs=${durationMs}`
+        );
       }
     } catch (error) {
       if (requestContext) {
@@ -12458,7 +12480,7 @@ module.exports = class MessageLoggerV2 {
           {
             response: null,
             includeStatus: false,
-            extra: `${error?.name || 'Error'}${error?.message ? ` (${error.message})` : ''}`
+            extra: this._safeMediaNetworkErrorDetails(error)
           }
         );
       }
@@ -12477,7 +12499,11 @@ module.exports = class MessageLoggerV2 {
         this._reportMediaNetworkOutcome(
           requestContext,
           this._classifyMediaNetworkOutcome(error, abortHandle),
-          { response: null, includeStatus: false, extra: error.message || '' }
+          {
+            response: null,
+            includeStatus: false,
+            extra: this._safeMediaNetworkErrorDetails(error)
+          }
         );
       }
       throw error;
@@ -12525,18 +12551,13 @@ module.exports = class MessageLoggerV2 {
       ? Math.max(0, configuredRetryDelay)
       : MEDIA_CACHE_RETRY_DELAY_MS;
     let response;
-    let requestContext;
-    let elapsedMs;
     try {
       response = await this.fetchMediaCacheResponse(url);
-      requestContext = this._mediaNetworkRequestContextByResponse?.get(response) || null;
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       if (!response.ok) {
         await (response?.release?.() ?? response?.releaseBody?.() ?? Promise.resolve());
-        if (requestContext) this._reportMediaNetworkOutcome(requestContext, 'completed', { response, includeStatus: true });
         if (response.status === 404 || response.status === 403) {
           Logger.warn(`Image ${attachmentId} unavailable (${response.status}), skipping cache`);
-          if (requestContext) this._reportMediaNetworkOutcome(requestContext, `completed with unrecoverable status ${response?.status}`, { extra: `code=${response?.status}`, includeStatus: false });
           if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
             this.reportDeferredMediaCacheFailure(
               attachmentId,
@@ -12548,11 +12569,6 @@ module.exports = class MessageLoggerV2 {
         attempts++;
         if (attempts >= maxAttempts) {
           Logger.warn(`Failed to get image ${attachmentId} for caching, error code ${response.status}`);
-          if (requestContext) this._reportMediaNetworkOutcome(
-            requestContext,
-            `completed with retry limit exceeded status=${response?.status}`,
-            { includeStatus: false }
-          );
           if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
             this.reportDeferredMediaCacheFailure(
               attachmentId,
@@ -12565,17 +12581,8 @@ module.exports = class MessageLoggerV2 {
         return this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts, writeEpoch);
       }
       const arrayBuffer = await response.arrayBuffer();
-      if (response?.status != null && requestContext) {
-        requestContext.completedAtMs = Date.now();
-      }
-      elapsedMs = requestContext?.completedAtMs && requestContext.startedAtMs
-        ? requestContext.completedAtMs - requestContext.startedAtMs
-        : null;
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       const finalData = new Uint8Array(arrayBuffer);
-      if (requestContext) {
-        requestContext.bytes = finalData.byteLength;
-      }
       let match = /\.[0-9a-z]+$/i.exec(new URL(url).pathname);
       if (match == null) {
         match = [this.contentTypeToExtension(response.headers.get("content-type"))];
@@ -12599,24 +12606,12 @@ module.exports = class MessageLoggerV2 {
       const authorId = this.messageRecord[messageId]?.message?.author?.id || this.cachedMessagesMap.get(messageId)?.author?.id;
       this.nodeModules.fs.writeFileSync(filePath + `/${fileId} (${messageId}${(this.settings.addUserIdToSavedMediaFilename && authorId) ? (" by " + authorId) : ""
       })${fileExtension}`, finalData, { encoding: null });
-        Logger.log(`Cached image: ${fileId}${fileExtension}`);
-      if (requestContext) {
-        this._reportMediaNetworkOutcome(requestContext, 'completed', {
-          response,
-          includeStatus: true
-        });
-      }
+      Logger.log(`Cached image: ${fileId}${fileExtension}`);
     } catch (e) {
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       attempts++;
       if (attempts >= maxAttempts) {
         Logger.error(`Failed to cache image ${attachmentId}:`, e.message);
-        if (requestContext) {
-          this._reportMediaNetworkOutcome(
-            requestContext,
-            `failed with ${e?.name || 'Error'}${e?.message ? ` (${e.message})` : ''} after ${attempts} attempts`
-          );
-        }
         if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
           this.reportDeferredMediaCacheFailure(attachmentId, e);
         }

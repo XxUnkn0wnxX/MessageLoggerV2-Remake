@@ -20,11 +20,11 @@ function readDefaultSettings() {
 }
 
 test('plugin metadata and updater remain pointed at the maintained main branch', () => {
-  assert.match(source, /@version 2\.8\.2\.8/);
+  assert.match(source, /@version 2\.8\.2\.9/);
   assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
-  assert.match(source, /title: 'Live display controls'[\s\S]*title: 'Linked settings controls'[\s\S]*title: 'Settings reliability and layout'/);
-  assert.doesNotMatch(source, /title: 'Notification hardening'|title: 'Date formatting and deletion tooltips'/);
+  assert.match(source, /title: 'Native media networking'[\s\S]*title: 'Download watchdogs and cancellation'[\s\S]*title: 'Media network diagnostics'/);
+  assert.doesNotMatch(source, /title: 'Live display controls'|title: 'Settings reliability and layout'/);
 });
 
 test('all fresh-install settings defaults remain stable', () => {
@@ -307,16 +307,15 @@ test('the BdApi notification setting omits the outdated basic qualifier', () => 
   assert.doesNotMatch(source, /BdApi basic notifications/i);
 });
 
-test('the current changelog covers the release fixes and known attachment limitation', () => {
-  assert.match(source, /Filter Help and Logger Help now use clearer nested spacing, visible filter syntax, and consistent On\/Off state labels/);
-  assert.match(source, /accurate BdApi notifications wording without the outdated basic qualifier/);
-  assert.match(source, /guild-only local-user toast option now uses its correct Guild settings location/);
-  assert.match(source, /keeps new additions and eligible media requests memory-only while preserving loaded-archive cleanup/);
-  assert.match(source, /save\/media and archive-view transitions briefly lock their controls with a warning-orange pulse/);
-  assert.match(source, /Logging, media, and restoration/);
-  assert.match(source, /Components V2, embeds, removed uploads, and Anti-Nuke media now retain more complete saved content/);
-  assert.match(source, /Ordinary ignores no longer hide saved records or block Anti-Nuke channel snapshots/);
-  assert.match(source, /Restored forum starters no longer disturb Discord-owned cards, and later uploads send as replies/);
+test('the current changelog covers the networking release and known attachment limitation', () => {
+  assert.match(source, /Persistent media caching now uses BetterDiscord native networking by default/);
+  assert.match(source, /Forced legacy mode and automatic fallback remain available/);
+  assert.match(source, /Update checks and local or remote image-copy networking remain unchanged/);
+  assert.match(source, /rolling 30-second body-idle watchdog/);
+  assert.match(source, /inherited five-second host socket timeout is disabled/);
+  assert.match(source, /stopping the plugin cancels active downloads immediately without retries or late file writes/);
+  assert.match(source, /request ID, method, full URL, transport, status, bytes, timing, and terminal outcome/);
+  assert.match(source, /Detailed media-request diagnostics never emit toasts or change request behavior/);
   assert.match(source, /Known limitation: Cache all attachment types remains incomplete for arbitrary non-image files/);
   assert.match(source, /Known limitation: intended to cache videos, audio, and other files, but arbitrary non-image types may stay CDN-backed when On or remain Logger references when Off/);
 });
@@ -372,6 +371,14 @@ test('media networking documentation preserves the selector boundary and officia
     /Networking: media routing is using the old Discord renderer fetch\(\) method\.[^\n]*once per legacy-routing activation[^\n]*pending notice/
   );
   assert.match(
+    settingsDocs,
+    /\| Show detailed media-network diagnostics \| Off \|[^\n]*request ID, method, full URL, native\/legacy route, response status, received bytes, elapsed time, and terminal outcome[^\n]*never emits toasts[^\n]*console exports as sensitive/
+  );
+  assert.match(
+    settingsDocs,
+    /\| Show debug messages as toasts \| Off \|[^\n]*Detailed per-request media diagnostics are deliberately excluded/
+  );
+  assert.match(
     testsDocs,
     /\| AT-47 \| Media networking \|[^\n]*native promise rejection and HTTP failure never start a second renderer request[^\n]*clipboard copying retain their direct native\/blob transport split/
   );
@@ -379,6 +386,23 @@ test('media networking documentation preserves the selector boundary and officia
     testsDocs,
     /\| RT-26 \| Media networking \|[^\n]*Waifugami cross-origin URL[^\n]*HTTP\/mixed-content media URL[^\n]*console-only, toast-only, both, and disabled Debug output[^\n]*remote image copy still uses direct BetterDiscord networking/
   );
+});
+
+test('detailed media-network diagnostics are linked, lazy, and console-only', () => {
+  const diagnostics = source.slice(
+    source.indexOf('  _nextMediaNetworkRequestId() {'),
+    source.indexOf('  queueAutoBackup(delayMs, reason =')
+  );
+  const debugSettings = source.slice(
+    source.indexOf("id: 'ml2-settings-debug'"),
+    source.indexOf('    const actions = {', source.indexOf("id: 'ml2-settings-debug'"))
+  );
+
+  assert.match(debugSettings, /id: 'debugLogging',[\s\S]*full URL, route, status, bytes, elapsed, outcome[\s\S]*sends no toasts[\s\S]*sensitive query data[\s\S]*id: 'detailedMediaNetworkDebug',[\s\S]*enableWith: 'debugLogging',[\s\S]*id: 'debugToasts'/);
+  assert.match(diagnostics, /_createMediaNetworkRequestContext\(url, options = \{\}\) \{\s*if \(!this\._isDetailedMediaNetworkDebugEnabled\(\)\) return null;/);
+  assert.match(diagnostics, /return !!\(this\.settings\?\.debugLogging && this\.settings\?\.detailedMediaNetworkDebug\);/);
+  assert.match(diagnostics, /this\.reportDebugEvent\([\s\S]*\{ console: true, toast: false \}\s*\)/);
+  assert.doesNotMatch(diagnostics, /notifyUser\(|debugToasts/);
 });
 
 test('Ignore bots covers automated sources while ephemeral Components V2 stays excluded', () => {

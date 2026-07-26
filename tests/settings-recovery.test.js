@@ -58,6 +58,7 @@ test('archive-load preference defaults safely and normalizes malformed values', 
   assert.equal(missing.dontSaveData, true);
   assert.equal(missing.dontLoadArchivedData, false);
   assert.equal(missing.forceLegacyMediaFetching, false);
+  assert.equal(missing.detailedMediaNetworkDebug, false);
 
   const enabled = { dontSaveData: false, dontLoadArchivedData: true };
   normalizeRecovered(plugin, enabled);
@@ -65,13 +66,21 @@ test('archive-load preference defaults safely and normalizes malformed values', 
 
   const malformed = { dontSaveData: true, dontLoadArchivedData: 'yes' };
   malformed.forceLegacyMediaFetching = 'true';
+  malformed.detailedMediaNetworkDebug = 'true';
   normalizeRecovered(plugin, malformed);
   assert.equal(malformed.dontLoadArchivedData, false);
   assert.equal(malformed.forceLegacyMediaFetching, false);
+  assert.equal(malformed.detailedMediaNetworkDebug, false);
 
-  const explicit = { dontSaveData: false, forceLegacyMediaFetching: true };
+  const explicit = {
+    dontSaveData: false,
+    forceLegacyMediaFetching: true,
+    debugLogging: false,
+    detailedMediaNetworkDebug: true
+  };
   normalizeRecovered(plugin, explicit);
   assert.equal(explicit.forceLegacyMediaFetching, true);
+  assert.equal(explicit.detailedMediaNetworkDebug, true, 'stored child preference survives while console debug is inactive');
 });
 
 test('legacy configs gain shortcut defaults while valid custom and cleared bindings survive normalization', () => {
@@ -129,6 +138,7 @@ test('a valid legacy file initializes missing settings without corruption classi
   assert.equal(settings.autoBackupIntervalSeconds, 20);
   assert.equal(settings.editSpamThreshold, 10);
   assert.equal(settings.debugLogging, false);
+  assert.equal(settings.detailedMediaNetworkDebug, false);
   assert.equal(settings.debugToasts, false);
   assert.deepEqual(settings.openLogsKeybind, ['Control', 'm']);
   assert.deepEqual(settings.openFilteredLogsKeybind, ['Control', 'n']);

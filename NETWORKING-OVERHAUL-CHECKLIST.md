@@ -44,7 +44,7 @@ review, checklist update, and commit must also be complete.
   separate and tracks `origin/fix/attachment-gate`. Its standalone handoff
   commit is protected by the local-only `local/attachment-gate-handoff` tag.
   Do not merge or implement that feature as part of this networking branch.
-- **Implementation state:** Stages 1-5B are implemented and pass their focused
+- **Implementation state:** Stages 1-5D are implemented and pass their focused
   and full automated gates. Persistent media-cache downloads use the central
   selector; updater and clipboard behavior are independently locked to their
   existing transports; exact output-aware legacy-routing diagnostics are
@@ -53,11 +53,14 @@ review, checklist update, and commit must also be complete.
   with no fixed total download deadline. Stop or **Cache media locally** Off
   cancels active response/body work without retrying or writing late. Stage 5B
   passes numeric `timeout: 0` so the host's inherited five-second socket timer
-  no longer preempts those Logger watchdogs. Stage 5C remains under corrective
-  audit; Stage 5D release metadata is not yet applied.
-- **Current tracked task changes:** Stages 1-5A are limited to
+  no longer preempts those Logger watchdogs. Stage 5C now emits truthful,
+  console-only per-attempt diagnostics with one managed terminal outcome, and
+  Stage 5D updates the release to `2.8.2.9`. The accepted implementation is
+  awaiting its commit, final live replacement, checkpoint, and branch push.
+- **Current tracked task changes:** Stages 1-5D are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/settings-recovery.test.js`, `tests/source-contracts.test.js`,
+  `README.md`, `TODO.md`, `docs/architecture.md`, `docs/help.md`,
   `docs/settings.md`, `docs/tests.md`, and this checklist.
 - **Live plugin:** An implementation worker prematurely copied intermediate
   commit 16e5355a0c73eab7146f34a62c1f74e5195af89e before the required Stage 5C
@@ -74,15 +77,13 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Correct the rejected Stage 5C diagnostics so transport attribution and the
-single managed-body terminal event satisfy the committed contract, then add
-the missing deterministic coverage and complete an independent audit. Apply
-Stage 5D by bumping to `2.8.2.9` and replacing the built-in changelog, run the
-complete validation, commit and record it, then replace the premature live
-copy with only the final plugin file. Verify live hash and hot reload, commit
-that checkpoint, push `fix/native-media-networking` to `origin`, verify
-local/remote ref alignment, and give the user the remaining native, legacy,
-cancellation, controlled-stall, update, and clipboard `RT-26` tests.
+Commit and record the accepted Stage 5C/5D implementation, then replace the
+premature live copy with only the final `2.8.2.9` plugin file. Verify live hash
+and hot reload, commit that checkpoint, push `fix/native-media-networking` to
+`origin`, verify local/remote ref alignment, and give the user the remaining
+native, legacy, cancellation, controlled-stall, update, and clipboard `RT-26`
+tests. Keep the audited provisional Anti-Nuke/Ghost-Ping media-retention work
+as a separate post-networking stage in `TODO.md`.
 
 ### Resume procedure for a new session
 
@@ -800,25 +801,25 @@ changing their networking, retry, cache, notification, or persistence behavior.
 - [x] Require both the master console switch and the child switch at runtime.
       Detailed media events must always be console-only and must never use
       debug toasts, even when toast debugging is enabled.
-- [ ] Give each actual network attempt its own request ID and log method, full
+- [x] Give each actual network attempt its own request ID and log method, full
       URL, truthful native/legacy transport, response status, received bytes,
       elapsed time, and terminal success/cancel/timeout/failure state.
-- [ ] Keep transport attribution correct across forced legacy mode, compatibility
+- [x] Keep transport attribution correct across forced legacy mode, compatibility
       fallback, native synchronous incompatibility, and native asynchronous
       rejection. Never claim a native attempt before a synchronous fallback.
-- [ ] Reuse existing response bytes and lifecycle state. Do not clone or
+- [x] Reuse existing response bytes and lifecycle state. Do not clone or
       re-read bodies, inspect response bodies for diagnostics, log headers, or
       let a logging failure change media behavior.
 - [x] Preserve the existing activation-scoped legacy-routing notice and its
       existing console/toast routing contract.
-- [ ] Add deterministic coverage for settings defaults/repair/dependency,
+- [x] Add deterministic coverage for settings defaults/repair/dependency,
       master/child/toast truth tables, native and legacy attribution, status,
       exact byte counts, retries, cancellations/timeouts/failures, and
       duplicate-terminal suppression.
-- [ ] Document the setting, output contract, and the privacy warning that full
+- [x] Document the setting, output contract, and the privacy warning that full
       URLs may contain signed or query data and exported console logs should be
       handled accordingly.
-- [ ] Run focused tests, full `npm test`, `npm run check`, `git diff --check`,
+- [x] Run focused tests, full `npm test`, `npm run check`, `git diff --check`,
       Markdown parsing, independent review, and the parent final audit.
 - [ ] Commit the implementation and record its exact commit and validation
       results here before live sync.
@@ -854,21 +855,35 @@ Stage 5C plan/result:
   while diagnostics were disabled, and insufficient edge coverage. The worker
   also changed this checklist, committed, and synced that intermediate plugin
   live contrary to the sequencing gate. Treat it only as audit history.
+- Accepted correction result: native is announced only after a valid thenable;
+  synchronous native incompatibility announces only legacy; one request ID is
+  allocated only when both console switches are effective; the managed
+  response emits one terminal outcome with status and exact or partial bytes;
+  and diagnostics are failure-isolated and forcibly console-only.
+- Accepted deterministic validation: focused media/settings/source-contract
+  suites passed `147/147`; full `npm test` passed `379/379`; the media suite
+  passed ten repeated runs; `npm run check`, `git diff --check`, and Markdown
+  parsing passed.
+- Accepted independent review: the production audit found no blocking or
+  non-blocking defect. A separate release audit found only stale `TODO.md`
+  wording, which was reported first and corrected before this checkpoint.
+- Accepted implementation commit: pending; record its full hash immediately
+  after committing this result.
 
 ## Stage 5D — Networking release metadata
 
 - [x] Obtain the user's explicit request to increment the plugin version and
       replace the built-in changelog before live sync.
-- [ ] Increment `@version` from `2.8.2.8` to `2.8.2.9`; do not change data
+- [x] Increment `@version` from `2.8.2.8` to `2.8.2.9`; do not change data
       schema or unrelated release metadata.
-- [ ] Replace `getChanges()` with a concise summary of this networking branch:
+- [x] Replace `getChanges()` with a concise summary of this networking branch:
       native media routing and legacy fallback/override, the Logger-owned
       initial/body watchdogs and inherited five-second timeout correction,
       immediate cache-off/plugin-stop cancellation, deterministic cleanup, and
       opt-in console-only detailed request diagnostics.
-- [ ] Retain a clear note that **Cache all attachment types** still has its
+- [x] Retain a clear note that **Cache all attachment types** still has its
       known arbitrary non-image limitation and is not fixed by this branch.
-- [ ] Update deterministic changelog/version contracts and any directly stale
+- [x] Update deterministic changelog/version contracts and any directly stale
       release-number wording without expanding into unrelated documentation.
 - [ ] Include release metadata in the final full-suite validation, final audit,
       implementation commit, live hash check, and branch push.
@@ -883,6 +898,11 @@ Stage 5D plan/result:
   already authorized live sync, then push the current feature branch before
   the final report.
 - Plan amendment commit: adf773e81cc189d1f9fa841fb0ef0de1f4cc29c8.
+- Implementation result: plugin metadata is `2.8.2.9`; the built-in changelog
+  now covers native routing/fallback, Logger-owned watchdogs, inherited socket
+  timeout correction, immediate cancellation, console-only diagnostics, and
+  the still-open all-attachment-types limitation. Directly stale release
+  wording was updated without changing the data schema.
 
 ## Stage 6 — Live BetterDiscord verification
 
@@ -997,6 +1017,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-27 | Stage 5B | The public stall probe failed twice at about six seconds and a controlled localhost response failed at exactly five seconds. BetterDiscord's `timeout: null` becomes an unspecified Node request timeout, exposing the modern global agent's five-second socket timeout. Replace only the native media-cache override with `timeout: 0`, leaving Logger's 15-second initial and rolling 30-second body watchdogs authoritative. | Trace-first runtime evidence, supported-host source comparison, explicit `timeout: 0` control test, and user approval to fix and auto-sync |
 | 2026-07-27 | Stage 5C audit | Two implementation commits passed their existing tests but remained unsuitable for release: the first had false/early route attribution and missing body-terminal evidence; the second retained false native-start output, incomplete status/outcome contracts, and weak edge coverage. The second was also copied live prematurely, so it must be replaced by the final audited build. | Parent call-path review before accepting the live result |
 | 2026-07-27 | Cache-policy audit | Ordinary media caching follows author and location policy, but Anti-Nuke deliberately pre-caches ignored guild media. Two pre-existing strict-parity gaps also remain: ignored local/self updates can cache new media for an existing cached message, and a filtered partial update under the Ghost Ping override can cache media before a ghost ping is confirmed. Removed-attachment caching separately bypasses normal type/size checks. No policy code was changed because the user requested an audit report only and this networking branch remains scoped to transport re-plumbing. | Read-only source trace plus focused policy/Anti-Nuke/contracts result `95/95` |
+| 2026-07-27 | Anti-Nuke retention audit | DMs cannot enter Anti-Nuke pre-cache, and a confirmed channel deletion adopts/captures only the exact guild parent and its child threads. Eligible ignored or muted media from any guild channel can still be physically pre-cached in case that channel is later deleted. The `15` thread / `45` message / `15` attachment capture caps do not bound, age, or clean those provisional files, so never-confirmed and cap-rejected files can remain orphaned. URL-only staging is unsafe because CDN URLs can expire as the parent disappears. | User designated a separate post-networking hardening stage: bounded provisional physical storage, promote confirmed nuke/Ghost-Ping or ordinary-record files, and delete expired/rejected candidates without touching shared references |
 
 ## Handoff activity log
 
@@ -1601,6 +1622,59 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Correct the two audited gaps, harden logging so it
   cannot affect networking, expand focused coverage, then apply Stage 5D and
   run the complete pre-live audit.
+
+### 2026-07-27 — Accepted Stage 5C/5D pre-live implementation
+
+- **Completed:** Corrected detailed media diagnostics, expanded deterministic
+  lifecycle coverage, updated the plugin to `2.8.2.9`, replaced its built-in
+  changelog, updated directly affected documentation, and completed two
+  independent pre-live audits.
+- **Decisions:** Allocate request IDs only while both console switches are
+  effective; announce native only after validating its thenable; let the
+  managed response own one terminal status/byte/outcome line; keep all detailed
+  events console-only and failure-isolated. Leave updater, clipboard,
+  eligibility, retry, persistence, and legacy-notice contracts unchanged.
+- **Files changed:** `MessageLoggerV2.plugin.js`, `README.md`, `TODO.md`,
+  `docs/architecture.md`, `docs/help.md`, `docs/settings.md`, `docs/tests.md`,
+  `tests/media.test.js`, `tests/settings-recovery.test.js`,
+  `tests/source-contracts.test.js`, and this checklist.
+- **Tests and exact results:** Focused media/settings/source-contract suites
+  passed `147/147`; full `npm test` passed `379/379`; the media suite passed
+  ten repeated runs; `npm run check`, `git diff --check`, and all changed
+  Markdown parsing passed.
+- **Runtime evidence:** No final sync yet. The live plugin is still the
+  premature intermediate `2.8.2.8` copy and must be overwritten only after
+  this accepted implementation is committed.
+- **Failures or blockers:** The production audit found none. The release audit
+  found one stale `TODO.md` version/paused note; it was reported before being
+  corrected. Runtime-only `RT-26` checks remain after final sync.
+- **Commit:** pending; replace this marker with the full implementation hash in
+  the immediate checklist checkpoint.
+- **Exact next action:** Run the final validation on this exact tree, commit it,
+  record the full hash, then sync only the plugin, verify hash/log evidence,
+  checkpoint, push the feature branch, and provide the user test list.
+
+### 2026-07-27 — Provisional recovery-media retention audit
+
+- **Completed:** Traced Anti-Nuke pre-cache scope, confirmed deletion scope,
+  capture budgets, physical-file retention, and existing cleanup behavior.
+- **Decisions:** Keep this outside the networking release. Record a separate
+  post-networking stage in `TODO.md`; do not change cache admission or recovery
+  policy on this branch.
+- **Files changed:** `TODO.md` and this checklist only; the behavior audit was
+  read-only.
+- **Tests and exact results:** Existing focused policy/Anti-Nuke/contracts
+  coverage passed `95/95`; the final full suite passed `379/379`.
+- **Runtime evidence:** Not required for the deterministic scope/retention
+  finding.
+- **Failures or blockers:** DMs are excluded and recovery cannot mix unrelated
+  parents, but provisional physical guild-media files have no Anti-Nuke
+  age/byte/count eviction and are not removed when no deletion is confirmed or
+  capture caps reject them. URL-only staging would risk expired CDN URLs.
+- **Commit:** pending with the accepted Stage 5C/5D implementation.
+- **Exact next action:** After networking runtime checks are complete, design
+  bounded provisional storage that promotes confirmed nuke/Ghost-Ping or
+  ordinary-record files and safely deletes expired/rejected candidates.
 
 ### Handoff entry template
 

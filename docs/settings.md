@@ -86,7 +86,7 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Auto backup interval (seconds) | 20 | Waits this many seconds after saved data changes before refreshing the backup. Accepts whole numbers from 10 through 86,400; for example, `300` is five minutes. Blank is valid and saves the 20-second default. Other invalid drafts remain unsaved and are marked with a red field border and inline error instead of a toast. Invalid settings or manual config edits reset to 20 at startup. |
 | Cache media locally | On | Master switch for caching attachments, embed images, Components V2 thumbnails/media galleries, and stickers. While **Disable saving data** is on, eligible logger media requests remain in a memory-only queue and no media files are created. The queue drains only after the primary archive save succeeds; disabling media caching or reloading first discards it. A download allows 15 seconds for the initial response, then uses a rolling 30-second no-data watchdog: it may continue longer while non-empty bytes keep arriving. Turning this switch Off or stopping the plugin immediately cancels active media work without a retry or late file write. |
 | Add user id to saved media filename | Off | Includes the author ID in hierarchical cache filenames. |
-| Cache all attachment types | Off | Known limitation in 2.8.2.8: arbitrary non-image files may remain CDN-backed or uncached when On and may still appear as attachment references when Off. Established image, embed, sticker, and visual Components V2 caching remains supported by **Cache media locally**. |
+| Cache all attachment types | Off | Known limitation in 2.8.2.9: arbitrary non-image files may remain CDN-backed or uncached when On and may still appear as attachment references when Off. Established image, embed, sticker, and visual Components V2 caching remains supported by **Cache media locally**. |
 | Max cache file size (MB, 0 = no limit) | `0` MB | Skips larger attachment files; blank or `0` disables the limit. Embed images and stickers are unaffected. |
 | Media cache path (optional) | Empty | Uses a custom existing directory instead of `MLV2_IMAGE_CACHE`. |
 | Aggresive message caching | On (locked) | Legacy setting retained for compatibility. It must remain enabled on this fork so message history is available for reliable forum and thread restoration. A saved `false` value is reset to `true` at startup. |
@@ -239,13 +239,13 @@ Message-history caching and hierarchical media storage are core behavior with no
 
 ## 🐞 Debug
 
-The Debug category title and both setting labels use Discord's native warning color so the opt-in controls remain visible in light and dark themes.
+The Debug category title and all three setting labels use Discord's native warning color so the opt-in controls remain visible in light and dark themes.
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Enable debug logging | Off | Writes automatic-backup lifecycle events, edit-spam diagnostics, deleted/edited channel-entry counter increases, and media-networking diagnostics to the console. Counter output includes the new total, increase, server, and channel; edit-spam output shows each username's current/threshold counter, cooldown start, 10-second warning, final reset, and early settings reset without printing user IDs. |
-| Show detailed media-network diagnostics | Off | When enabled with **Enable debug logging**, writes per media request details (method, URL, route, status, bytes, elapsed) to the console only. This does not emit toasts and never changes request routing or caching logic. |
-| Show debug messages as toasts | Off | Sends the same backup, edit-spam, channel-entry counter, and media-networking diagnostics through the selected BetterDiscord-notification or custom-toast mode. Debug alerts are warning-colored, expire without pausing on hover, and dismiss on a left- or right-click. This control is independent of console debug logging. |
+| Enable debug logging | Off | Writes automatic-backup lifecycle events, edit-spam diagnostics, deleted/edited channel-entry counter increases, the legacy-routing notice, and—when its child is enabled—detailed media-request diagnostics to the console. Counter output includes the new total, increase, server, and channel; edit-spam output shows each username's current/threshold counter, cooldown start, 10-second warning, final reset, and early settings reset without printing user IDs. |
+| Show detailed media-network diagnostics | Off | When enabled with **Enable debug logging**, writes one console-only lifecycle for each media-network attempt: request ID, method, full URL, native/legacy route, response status, received bytes, elapsed time, and terminal outcome. Its saved value remains On while greyed under a disabled master, but it is ineffective until console debug logging is enabled again. It never emits toasts or changes request behavior. Full URLs can contain signed tokens or other query data, so treat console exports as sensitive. |
+| Show debug messages as toasts | Off | Sends backup, edit-spam, channel-entry counter, and the activation-scoped legacy-routing notice through the selected BetterDiscord-notification or custom-toast mode. Detailed per-request media diagnostics are deliberately excluded because they can be noisy. Debug alerts are warning-colored, expire without pausing on hover, and dismiss on a left- or right-click. This control is independent of console debug logging. |
 
 **Settings that can generate Debug output when the relevant event occurs:**
 
@@ -257,6 +257,7 @@ The Debug category title and both setting labels use Discord's native warning co
 - **Show amount of new deleted messages when entering a channel**: every enabled Deleted counter increase, including one combined increase for a bulk purge.
 - **Show amount of new edited messages when entering a channel**: every enabled Edited counter increase.
 - **Force legacy media fetching** and automatic native-compatibility fallback: report `Networking: media routing is using the old Discord renderer fetch() method.` once per legacy-routing activation to each enabled Debug output. An output enabled later receives its one pending notice; requests, retries, and files do not repeat it.
+- **Show detailed media-network diagnostics**: while the main console Debug switch is also enabled, report each media attempt and its single terminal result to the console only. This never follows the toast setting.
 
 Debug output does not change backup timing, persistence, counter behavior, edit blocking, media routing, or normal error reporting.
 
