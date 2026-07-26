@@ -380,11 +380,15 @@ test('media networking documentation preserves the selector boundary and officia
   );
   assert.match(
     testsDocs,
-    /\| AT-47 \| Media networking \|[^\n]*native promise rejection and HTTP failure never start a second renderer request[^\n]*clipboard copying retain their direct native\/blob transport split[^\n]*Ordinary messages keep Discord's one native \*\*Copy image\*\* action[^\n]*Logger viewer adds one \*\*Copy media\*\* action[^\n]*videos and non-image files retain link\/save behavior/
+    /\| AT-47 \| Media networking \|[^\n]*native promise rejection and HTTP failure never start a second renderer request[^\n]*clipboard copying remain outside the media selector[^\n]*Ordinary live messages keep Discord's one native \*\*Copy image\*\* action[^\n]*\*\*Cache media locally\*\* is On[^\n]*exact standard JPG\/JPEG[^\n]*GIF uses the native file bridge[^\n]*files admitted only by \*\*Cache all attachment types\*\* receive no Logger copy action/
   );
   assert.match(
     testsDocs,
-    /\| RT-26 \| Media networking \|[^\n]*Waifugami cross-origin URL[^\n]*HTTP\/mixed-content media URL[^\n]*disabled output \(master Off\)[^\n]*console-only output \(master On and toast child Off\)[^\n]*both outputs \(master On and toast child On\)[^\n]*one possible toast-only delivery[^\n]*ordinary non-deleted image[^\n]*deleted\/restored live image[^\n]*Logger viewer must expose one \*\*Copy media\*\* action[^\n]*video or non-image file/
+    /\| AT-48 \| Plugin-disable presentation cleanup \|[^\n]*Logger-restored message rows[^\n]*Surviving native thread cards are refreshed rather than deleted[^\n]*Saved records, indexes, cached files, and Discord-owned messages remain unchanged[^\n]*teardown and unpatching still complete/
+  );
+  assert.match(
+    testsDocs,
+    /\| RT-26 \| Media networking \|[^\n]*Waifugami cross-origin URL[^\n]*HTTP\/mixed-content media URL[^\n]*disabled output \(master Off\)[^\n]*console-only output \(master On and toast child Off\)[^\n]*both outputs \(master On and toast child On\)[^\n]*one possible toast-only delivery[^\n]*ordinary live image[^\n]*physically cached restored static image[^\n]*cached GIF[^\n]*system clipboard[^\n]*cache master Off[^\n]*missing local file[^\n]*all-file-only attachment/
   );
 });
 

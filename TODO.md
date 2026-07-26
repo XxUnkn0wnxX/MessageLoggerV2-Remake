@@ -32,12 +32,18 @@ orphaned.
       Discord CDN URLs can expire as a channel disappears.
 - [ ] Scope provisional candidates to guild parent/thread ancestry and never
       admit DMs.
+- [ ] Keep only the newest Anti-Nuke provisional attachments allowed by its
+      configured attachment limit, and add separate configurable maximum ages
+      for Anti-Nuke and Ghost-Ping candidates.
 - [ ] Apply bounded age, file-count, and byte limits with deterministic
       eviction.
 - [ ] Promote only files referenced by a confirmed channel-deletion capture,
       confirmed Ghost Ping, or ordinary saved Logger record.
 - [ ] Delete expired, unconfirmed, and capture-cap-rejected candidates without
       deleting a file still referenced by another saved record.
+- [ ] Run provisional age/limit cleanup regardless of **Delete cached files
+      with log records**. That switch controls media removed with real records;
+      it must never disable orphan/provisional maintenance.
 - [ ] Preserve the **Cache media locally**, no-save, file-size, cancellation,
       and Anti-Nuke ignore-bypass contracts.
 - [ ] Add deterministic DM, unrelated-parent, ignored-guild, confirmation,

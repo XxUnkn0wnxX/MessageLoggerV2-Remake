@@ -35,9 +35,11 @@ review, checklist update, and commit must also be complete.
 - **Working branch:** `fix/native-media-networking`
 - **Branch base:** a5eadbe736f5a0cf4b7a3730bf9950ade17ad752
   (`docs: prepare 2.8.2.8 release notes`)
-- **Upstream status:** The current local feature branch and
-  `origin/fix/native-media-networking` are aligned. The completed implementation
-  and live-sync history was first published through
+- **Upstream status:** The local feature branch is nine commits ahead of
+  `origin/fix/native-media-networking` at
+  c25c5c9bcb812af20f51d4cde953573bc455e2ad while the final combined build is
+  validated and live-synced. The completed earlier implementation and
+  live-sync history was first published through
   e84bfaaf6fffc4b809f7e4fb6fe70ef6ac5c5897. `develop`, `main`,
   `origin/develop`, and `origin/main` all remain untouched at
   a5eadbe736f5a0cf4b7a3730bf9950ade17ad752.
@@ -65,19 +67,23 @@ review, checklist update, and commit must also be complete.
   master is On while retaining each saved child value. It is fully validated,
   committed at 135eeb37baecfbb153784ce46c6767c2ea7362e2, recorded by checklist
   checkpoint c7d4d32bfb9633f302bd433681bf02fb1766598b, and its matching live sync
-  is recorded at 8b7487225e3c1c694b76c89d1f97a7468f874304. The approved clipboard
-  repair is committed at db781e1c77f9257122ad469405d8bab09f8cdb58 and its
-  exact-hash checklist checkpoint is
-  79ce64b8a1ab16dc55dd6e972fba571a6644944a. Its live copy now has clean
-  hash/hot-reload evidence; user-driven clipboard checks remain before the
-  built-in changelog is amended and the final publication is recorded.
+  is recorded at 8b7487225e3c1c694b76c89d1f97a7468f874304. The initial clipboard
+  repair at db781e1c77f9257122ad469405d8bab09f8cdb58 was followed by the
+  cache-scoped local-file implementation at
+  15705f0fdc6a82fbb4c472e3c9ff53ceb3ca8fb4 and plugin-disable presentation
+  cleanup at f312df53c334fe912cc9073d1c6f5ce6e78bb102. Their combined live copy
+  and user-driven clipboard/disable checks remain before the built-in
+  changelog is amended.
 - **Current tracked task changes:** Stages 1-5D are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/persistence.test.js`, `tests/settings-recovery.test.js`,
-  `tests/source-contracts.test.js`, `tests/clipboard.test.js`, `README.md`, `TODO.md`,
+  `tests/source-contracts.test.js`, `tests/clipboard.test.js`,
+  `tests/records.test.js`, `README.md`, `TODO.md`,
   `docs/architecture.md`, `docs/help.md`, `docs/settings.md`, `docs/tests.md`,
   and this checklist.
-- **Live plugin:** The `2.8.2.9` networking and clipboard-test build is live.
+- **Live plugin:** The earlier `2.8.2.9` networking and initial clipboard-test
+  build is live; the cache-scoped clipboard plus disable-cleanup build is not
+  yet synced.
   Repository and live SHA-256 both equal
   `5683ea4cfb21dcb59959a290c57fa7dbce6cdcb8f79aed82c1e587d08ba0ff20`.
   The UTC hot-reload segment at `2026-07-26 18:50:20-18:50:22` shows patch
@@ -92,12 +98,12 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit this live-sync evidence, push the feature branch, then give the user the
-remaining clipboard-only `RT-26` tests. After both clipboard paths pass, amend
-the built-in changelog as newly authorized, rerun the suite, resync and publish
-the final checkpoint. Keep the audited provisional Anti-Nuke/Ghost-Ping
-media-retention work as a separate post-networking stage in `TODO.md`; do not
-implement it on this networking handoff.
+Finish the documentation/checklist checkpoint, run the final full suite and
+audit, sync the combined plugin, verify source/live hashes and hot reload, then
+push the feature branch and give the user the short clipboard/disable runtime
+matrix. Amend the built-in changelog only after the user confirms clipboard
+runtime behavior. Keep provisional Anti-Nuke/Ghost-Ping retention as a separate
+post-networking stage.
 
 ### Resume procedure for a new session
 
@@ -166,6 +172,9 @@ recorded as an amendment before implementation.
 - [x] Stage 5A response-body inactivity hardening implemented and verified.
 - [x] Post-hardening final audit completed and pre-live report prepared.
 - [x] Live plugin sync separately authorized, completed, and hash-verified.
+- [x] Cache-scoped clipboard hardening implemented and verified.
+- [x] Plugin-disable presentation cleanup implemented and verified.
+- [ ] Combined clipboard/disable build live-synced and hash-verified.
 - [ ] User `RT-26` live behavior result received and recorded.
 - [x] Final implementation committed.
 
@@ -1051,10 +1060,25 @@ Stage 5D plan/result:
         200 at `18:16:36` UTC with force Off and `18:17:18` UTC with force On.
         Neither check received a media request ID or entered detailed media
         diagnostics.
-  - [ ] Verify local `blob:` clipboard copying still uses renderer `fetch()` and
-    works with the media force setting both off and on.
-  - [ ] Verify remote-image clipboard copying still uses direct native
-        networking and works with the media force setting both off and on.
+  - [x] Supersede the old local-`blob:` and remote-image clipboard checks.
+        Logger clipboard actions now require the exact physical local cache
+        file and perform no media-network request, so **Force legacy media
+        fetching** is irrelevant to copying.
+  - [ ] Verify a physically cached restored static image copies from both the
+        live mount and Logger viewer, pastes into another app, and emits one
+        green success toast per copy.
+  - [ ] Verify a physically cached GIF exposes **Copy media** on both Logger
+        surfaces, places the original GIF file on the system clipboard, and
+        emits one green success toast.
+  - [ ] Turn **Cache media locally** Off and confirm Logger copy actions plus
+        Discord's native row disappear only from Logger-restored media while
+        an ordinary live image keeps Discord's native action.
+  - [ ] Confirm a missing local file, placeholder, video, and all-file-only
+        attachment receive no Logger clipboard action.
+  - [ ] Disable Logger while restored rows/tints and any available forum,
+        sidebar, or thread-browser clones are visible. Confirm they disappear
+        without deleting records/files, then re-enable and confirm they can
+        mount again.
   - [x] Runtime defect found before those checks: current Discord did not invoke
         Logger's old `image-context` patch, and the Logger viewer's custom menu
         exposed no image copy action. The approved narrow replacement is now
@@ -1064,11 +1088,12 @@ Stage 5D plan/result:
 
 Live result:
 
-- Date: 2026-07-27 current clipboard-linked `2.8.2.9` live replacement and
-  partial `RT-26` run.
-- Result: **CURRENT 2.8.2.9 SYNC, HASH, HOT-RELOAD, NATIVE/CORS,
+- Date: 2026-07-27 earlier clipboard-linked `2.8.2.9` live replacement and
+  partial `RT-26` run; combined clipboard/disable sync pending.
+- Result: **EARLIER 2.8.2.9 SYNC, HASH, HOT-RELOAD, NATIVE/CORS,
   SLOW-PROGRESS, CONTROLLED-STALL, FILE-SIZE, DEBUG-OUTPUT, AND UPDATER PASS;
-  CLIPBOARD USER TESTING AND CHANGELOG AMENDMENT PENDING.**
+  COMBINED CLIPBOARD/DISABLE SYNC, USER TESTING, AND CHANGELOG AMENDMENT
+  PENDING.**
 - Notes: Repository and live SHA-256 both equal
   `5683ea4cfb21dcb59959a290c57fa7dbce6cdcb8f79aed82c1e587d08ba0ff20`.
   The current logs prove native Discord-CDN success, Waifugami HTTP 200 with
@@ -1110,7 +1135,8 @@ Historical result:
       runtime matrix and post-sync branch push.
 - [x] Full test suite and final independent audit pass on `2.8.2.9`.
 - [x] `git diff --check` and Markdown parsing pass on the final tree.
-- [x] Clipboard-repair live hash parity and clean hot reload are verified.
+- [ ] Combined clipboard/disable live hash parity and clean hot reload are
+      verified.
 - [ ] Remaining user-driven `RT-26` behavior result recorded.
 - [x] No unrelated attachment-gate implementation was included.
 - [x] Version remains `2.8.2.9` as instructed.
@@ -2257,12 +2283,37 @@ evidence for another session to understand what changed and why.
   of the rebuilt GIF, cache-off, toast, and disable paths remains pending until
   the combined build is live-synced.
 - **Failures or blockers:** Clipboard implementation has no remaining static
-  blocker. Plugin-disable presentation cleanup is still being implemented
-  before the combined live build.
+  blocker. The plugin-disable cleanup was completed in the following entry.
 - **Commit:** Clipboard implementation
   15705f0fdc6a82fbb4c472e3c9ff53ceb3ca8fb4.
-- **Exact next action:** Implement and test presentation-only cleanup on
-  plugin stop, run the final full audit, then sync and push the combined build.
+- **Exact next action:** Superseded by the completed plugin-disable cleanup
+  below.
+
+### 2026-07-27 — Plugin-disable presentation cleanup completed
+
+- **Completed:** `stop()` now captures the currently presented saved deletions
+  and clears Logger-owned restored rows, forum/thread/sidebar/browser clones,
+  copied controls, tints, adjusted browser height, and open context menus before
+  unpatching. Surviving native thread cards are refreshed. Records, indexes,
+  cached files, and Discord-owned messages are preserved.
+- **Decisions:** Keep cleanup presentation-only and failure-isolated. A failed
+  capture or cleanup cannot prevent the remaining shutdown/unpatch sequence.
+- **Files changed:** `MessageLoggerV2.plugin.js`, `tests/records.test.js`, and
+  `tests/source-contracts.test.js`.
+- **Tests and exact results:** PASS — focused cleanup coverage passed `133/133`;
+  final pre-documentation `npm test` passed `394/394`; syntax and
+  `git diff --check` passed. Independent review passed. Parent review corrected
+  two draft issues before the final run: capture was moved inside its own
+  fail-safe boundary, and structural roots now remove clones and still dispatch
+  the Logger cleanup event.
+- **Runtime evidence:** Pending the authorized combined live sync and user
+  disable/re-enable check.
+- **Failures or blockers:** No static blocker. Discord-owned DOM lifecycle
+  behavior still needs the short live check.
+- **Commit:** Plugin-disable cleanup implementation
+  f312df53c334fe912cc9073d1c6f5ce6e78bb102.
+- **Exact next action:** Commit the updated test/docs contract, rerun the full
+  suite and final audit, then sync and push the combined build.
 
 ### Handoff entry template
 
