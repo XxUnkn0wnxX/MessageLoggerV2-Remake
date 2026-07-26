@@ -87,14 +87,14 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Give the user the remaining file-size, debug-output, update, and clipboard
-`RT-26` tests and wait for their runtime results. Default native routing,
-cross-origin and mixed-content requests, slow body progress, controlled body
-inactivity, cache-master and plugin-stop cancellation, forced legacy, native
-return, and activation-scoped notice de-duplication now have current live
-evidence. Keep the audited provisional Anti-Nuke/Ghost-Ping media-retention
-work as a separate post-networking stage in `TODO.md`; do not implement it on
-this networking handoff.
+Give the user the remaining debug-output, update, and clipboard `RT-26` tests
+and wait for their runtime results. Default native routing, cross-origin and
+mixed-content requests, slow body progress, controlled body inactivity,
+file-size enforcement, cache-master and plugin-stop cancellation, forced
+legacy, native return, and activation-scoped notice de-duplication now have
+current live evidence. Keep the audited provisional Anti-Nuke/Ghost-Ping
+media-retention work as a separate post-networking stage in `TODO.md`; do not
+implement it on this networking handoff.
 
 ### Resume procedure for a new session
 
@@ -969,7 +969,12 @@ Stage 5D plan/result:
     controlled `http://127.0.0.1:32109/stall` probe reached Logger's body
     watchdog and returned `AbortError: Media cache response body timed out` at
     exactly 30.0 seconds.
-  - [ ] Verify media-cache file-size limits.
+  - [x] Verify media-cache file-size limits. With the accepted whole-number
+        limit set to 1 MB, a real 2.12 MB Discord image attachment emitted
+        `Skipping cache for MessageLogger-size-limit-test-2.2MB.jpg: 2.12MB
+        exceeds limit` immediately after message creation. No deletion was
+        required and no media-cache network request was started for that
+        attachment.
   - [x] Verify abort/cancellation behavior:
     - [x] Turning **Cache media locally** Off cancelled native request `#160`
           immediately after three received bytes. It emitted one
@@ -1001,8 +1006,8 @@ Stage 5D plan/result:
     media force setting both off and on.
   - [ ] Verify local `blob:` clipboard copying still uses renderer `fetch()` and
     works with the media force setting both off and on.
-  - Verify remote-image clipboard copying still uses direct native networking
-    and works with the media force setting both off and on.
+  - [ ] Verify remote-image clipboard copying still uses direct native
+        networking and works with the media force setting both off and on.
   - Record any runtime-only findings and amend earlier stages if necessary.
 
 Live result:
@@ -1010,8 +1015,8 @@ Live result:
 - Date: 2026-07-27 final Debug-linked `2.8.2.9` live replacement and partial
   `RT-26` run.
 - Result: **FINAL 2.8.2.9 SYNC, HASH, HOT-RELOAD, NATIVE/CORS,
-  SLOW-PROGRESS, AND CONTROLLED-STALL PASS; REMAINING USER RT-26 TESTING
-  PENDING.**
+  SLOW-PROGRESS, CONTROLLED-STALL, AND FILE-SIZE PASS; REMAINING USER RT-26
+  TESTING PENDING.**
 - Notes: Repository and live SHA-256 both equal
   `260a3f8c2c3bf0534b0ad8ef5a91d62fae83cbce088cc9fab3e0a6917d2cd424`.
   The current logs prove native Discord-CDN success, Waifugami HTTP 200 with
@@ -1023,7 +1028,9 @@ Live result:
   and the plugin re-enabled successfully. Two forced-legacy probes passed,
   emitted one activation-scoped routing notice, and the next post-toggle probe
   returned directly to native. A plain-HTTP image then passed through native
-  routing with HTTP 200 and 8,090 bytes. Discord was not relaunched.
+  routing with HTTP 200 and 8,090 bytes. A 2.12 MB attachment was rejected
+  immediately by the 1 MB cache limit without deletion or a media-cache fetch.
+  Discord was not relaunched.
 
 Historical result:
 
@@ -1945,6 +1952,29 @@ evidence for another session to understand what changed and why.
   fc9741e8d15aa8ac3b8a12452ad9cd9743233a2c.
 - **Exact next action:** After this commit record is pushed, prepare the
   smallest safe file-size-limit test.
+
+### 2026-07-27 — Media-cache file-size runtime check
+
+- **Completed:** Uploaded a real 2.12 MB Discord JPEG attachment in an allowed
+  channel while the maximum cache file size was set to the accepted
+  whole-number value of 1 MB.
+- **Decisions:** Message creation is sufficient for this check. Deleting the
+  message is not required because Logger applies the attachment-size gate
+  before starting the media-cache download.
+- **Files changed:** This checklist only.
+- **Tests and exact results:** PASS — Logger emitted
+  `Skipping cache for MessageLogger-size-limit-test-2.2MB.jpg: 2.12MB exceeds
+  limit` immediately after the message was sent. No media request for that
+  attachment followed.
+- **Runtime evidence:** Both current BetterDiscord `debug.log` and
+  `console.log` contain the upload and skip events at `18:07:48-18:07:53` UTC.
+  Other nearby media requests were unrelated emoji and image traffic.
+- **Failures or blockers:** None for attachment file-size enforcement.
+  Debug-output, updater, and clipboard checks remain.
+- **Commit:** Pending this runtime-evidence commit; replace this text with its
+  exact hash in the immediate checklist checkpoint.
+- **Exact next action:** Record and push this evidence, then run the
+  debug-output matrix.
 
 ### Handoff entry template
 
