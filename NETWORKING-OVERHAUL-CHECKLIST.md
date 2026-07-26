@@ -2698,6 +2698,25 @@ evidence for another session to understand what changed and why.
   branch, verify local/tracking/direct-remote parity, then ask the user to
   right-click the restored PNG/JPEG and select **Copy image**.
 
+### 2026-07-27 — Live-mounted image clipboard hook publication
+
+- **Completed:** Pushed the validated implementation and live-sync evidence to
+  `origin/fix/native-media-networking`.
+- **Decisions:** Do not merge branches or change release metadata before the
+  remaining user-driven clipboard check.
+- **Files changed:** This publication evidence only.
+- **Tests and exact results:** Publication reused the exact source that passed
+  focused `75/75`, full `396/396`, syntax, diff, Markdown, and review gates.
+- **Runtime evidence:** Local `HEAD`, the local tracking ref, and direct remote
+  `ls-remote` all matched
+  96012c3038667174526c8c5239f2eda273901db9 immediately after push.
+- **Failures or blockers:** None in publication.
+- **Commit:** Published live-sync checkpoint
+  96012c3038667174526c8c5239f2eda273901db9; this evidence-only follow-up is
+  the next branch tip.
+- **Exact next action:** Ask the user to retry the restored live PNG/JPEG
+  **Copy image** action and confirm Logger's green success toast appears.
+
 ### Handoff entry template
 
 ```text
