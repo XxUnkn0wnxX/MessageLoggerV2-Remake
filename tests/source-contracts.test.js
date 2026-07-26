@@ -1519,6 +1519,7 @@ test('media routing converges through cacheImage and cacheMessageImages across e
   assert.match(networkSlice, /return fetch\(url, options\);/);
   assert.match(cacheSlice, /this\.fetchMediaNetworkResponse\(url, requestOptions\)/);
   assert.match(cacheSlice, /this\.fetchMediaNetworkResponse\(url, \{\s*\.\.\.requestOptions,\s*signal: controller\.signal/);
+  assert.match(networkSlice, /nativeFetch\.call\(netApi,\s*url,\s*\{[\s\S]*timeout:\s*0/);
   assert.match(imageCacheSlice, /let response;[\s\S]*response = await this\.fetchMediaCacheResponse\(url\);/);
   assert.match(deferredSlice, /Promise\.resolve\(this\.cacheImage\(/);
   assert.match(removedSlice, /this\.cacheImage\(url, i, attachmentId, messageId, channelId, guildId\);/);

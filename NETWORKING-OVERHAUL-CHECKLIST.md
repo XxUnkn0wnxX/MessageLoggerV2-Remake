@@ -67,12 +67,13 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Implement the user-approved Stage 5B plugin-side `timeout: 0` override, add
-regression coverage that preserves all caller options and scopes the change to
-native media-cache requests, run the full validation and final audit, commit
-the result, then automatically sync only `MessageLoggerV2.plugin.js`. Verify
-live hash/reload evidence and repeat the controlled local stall probe before
-closing the remaining Stage 6 gate.
+Commit and record the completed Stage 5B `timeout: 0` implementation. Then
+document and commit the user-approved Stage 5C detailed media-network console
+diagnostics plan before implementing it. Complete deterministic tests and a
+final audit for both stages, automatically sync only
+`MessageLoggerV2.plugin.js`, verify live hash/reload evidence, and finish the
+remaining user-driven Stage 6 checks, including native, legacy, cancellation,
+and the controlled local stall probe.
 
 ### Resume procedure for a new session
 
@@ -737,16 +738,16 @@ media-cache requests.
 - [x] Verify independently that explicit `timeout: 0` survives the controlled
       35-second response gap.
 - [x] Obtain user approval for the plugin-only fix and automatic live sync.
-- [ ] Change only the native media-cache request override from `timeout: null`
+- [x] Change only the native media-cache request override from `timeout: null`
       to `timeout: 0`.
-- [ ] Preserve caller options, the 15-second initial-response watchdog, the
+- [x] Preserve caller options, the 15-second initial-response watchdog, the
       rolling 30-second body-inactivity watchdog, transport selection, retries,
       updater networking, clipboard networking, and every cache behavior.
-- [ ] Add deterministic regression coverage for the exact timeout override and
+- [x] Add deterministic regression coverage for the exact timeout override and
       unchanged media-only boundary.
-- [ ] Run focused media/source-contract tests, full `npm test`, `npm run check`,
+- [x] Run focused media/source-contract tests, full `npm test`, `npm run check`,
       `git diff --check`, and checklist Markdown parsing.
-- [ ] Complete an independent edge-case review and parent final audit.
+- [x] Complete an independent edge-case review and parent final audit.
 - [ ] Commit the implementation and record the exact commit and validation
       results here before live sync.
 - [ ] Copy only the plugin file live, confirm hash parity and clean hot reload,
@@ -764,6 +765,16 @@ Stage 5B plan/result:
   updater, clipboard, attachment-gate, release-metadata, or unrelated plugin
   change.
 - Plan commit: `486fc1b214729338bbd59e0c24aee0d6d4b5218a`.
+- Implementation result: the native call now receives exactly `timeout: 0`;
+  caller-supplied options remain unchanged and Logger's own watchdogs retain
+  timeout ownership.
+- Deterministic validation: focused media/source-contract tests passed
+  `128/128`; full `npm test` passed `373/373`; `npm run check`,
+  `git diff --check`, and checklist `cmark` parsing passed.
+- Independent review: no blocking or non-blocking findings. Both supported
+  BetterDiscord implementations forward numeric zero to `http.request`, and
+  the change remains confined to the native media-cache route.
+- Implementation commit: `<pending-implementation-commit>`.
 
 ## Stage 6 — Live BetterDiscord verification
 
@@ -1337,6 +1348,29 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit and record this approved plan, implement the
   narrow override with regression coverage, complete validation/review, then
   auto-sync the single plugin file as authorized.
+
+### 2026-07-27 — Stage 5B native socket-timeout implementation
+
+- **Completed:** Replaced the native media-cache `timeout: null` override with
+  numeric `timeout: 0`, updated deterministic media/source contracts, ran the
+  complete validation matrix, and completed an independent supported-host and
+  edge-case review.
+- **Decisions:** Keep every Logger watchdog and all legacy, retry, updater,
+  clipboard, cache-gate, and persistence behavior unchanged.
+- **Files changed:** `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
+  `tests/source-contracts.test.js`, and this checklist.
+- **Tests and exact results:** Focused media/source-contract suites passed
+  `128/128`; full `npm test` passed `373/373`; `npm run check`,
+  `git diff --check`, and checklist `cmark` parsing passed.
+- **Runtime evidence:** No new live sync has occurred yet. The pre-change
+  controlled evidence remains a five-second inherited abort versus successful
+  35-second completion with explicit numeric zero.
+- **Failures or blockers:** None found in deterministic or independent review.
+  The post-sync controlled stall result remains runtime-only.
+- **Commit:** `<pending-implementation-commit>`.
+- **Exact next action:** Commit this implementation, record its exact hash in
+  both Stage 5B locations, then add and commit Stage 5C's detailed
+  media-network diagnostics plan before changing that behavior.
 
 ### Handoff entry template
 

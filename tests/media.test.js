@@ -123,7 +123,7 @@ function createStreamResponse(readPlan = [], options = {}) {
   };
 }
 
-test('media-cache transport uses native fetch by default with unchanged options and forced timeout null', async () => {
+test('media-cache transport uses native fetch by default with unchanged options and forced timeout 0', async () => {
   const originalNetApi = global.BdApi.Net;
   const originalFetch = global.fetch;
   const OriginalAbortController = global.AbortController;
@@ -160,7 +160,7 @@ test('media-cache transport uses native fetch by default with unchanged options 
     assert.equal(nativeReceiver, global.BdApi.Net);
     assert.equal(nativeRequest.url, 'https://cdn.example/media');
     assert.ok(nativeRequest.requestInit);
-    assert.equal(nativeRequest.requestInit.timeout, null);
+    assert.equal(nativeRequest.requestInit.timeout, 0);
     assert.equal(nativeRequest.requestInit.signal, controllerState.signal);
     assert.equal(nativeRequest.requestInit.headers, options.headers);
     assert.equal(nativeRequest.requestInit.method, options.method);
@@ -717,7 +717,7 @@ test('reportDebugEvent routes to requested output selection and returns dispatch
   assert.equal(notifications.at(-1)[1].timeout, 1500);
 });
 
-test('media-cache fetch preserves caller options while forcing native timeout null', async () => {
+test('media-cache fetch preserves caller options while forcing native timeout 0', async () => {
   const originalNetApi = global.BdApi.Net;
   const originalFetch = global.fetch;
   const OriginalAbortController = global.AbortController;
@@ -745,8 +745,8 @@ test('media-cache fetch preserves caller options while forcing native timeout nu
     assert.equal(response.ok, true);
     assert.equal(nativeInit.method, options.method);
     assert.equal(nativeInit.headers, sharedHeaders);
-    assert.equal(nativeInit.timeout, null);
-    assert.notEqual(options.timeout, null);
+    assert.equal(nativeInit.timeout, 0);
+    assert.equal(options.timeout, 1000);
     assert.equal(plugin._mediaCacheNativeFetchCompatible, true);
   } finally {
     global.BdApi.Net = originalNetApi;

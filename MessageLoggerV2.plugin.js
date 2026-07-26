@@ -12038,7 +12038,7 @@ module.exports = class MessageLoggerV2 {
     try {
       response = nativeFetch.call(netApi, url, {
         ...options,
-        timeout: null
+        timeout: 0
       });
       if (response == null || typeof response.then !== 'function') {
         this._mediaCacheNativeFetchCompatible = false;
