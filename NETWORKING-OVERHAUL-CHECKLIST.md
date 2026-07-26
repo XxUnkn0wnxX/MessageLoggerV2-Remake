@@ -2454,7 +2454,8 @@ evidence for another session to understand what changed and why.
   helper is linked.
 - **Failures or blockers:** No sync blocker. Static image copy now needs the
   user repeat.
-- **Commit:** Recorded by the following checklist checkpoint.
+- **Commit:** Live-sync evidence commit
+  7cc64a0877d46384551088f9691d14f92b399c00.
 - **Exact next action:** Commit this evidence, record its hash, push and verify
   refs, then ask the user to retry the same cached static image.
 
