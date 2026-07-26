@@ -2717,6 +2717,32 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Ask the user to retry the restored live PNG/JPEG
   **Copy image** action and confirm Logger's green success toast appears.
 
+### 2026-07-27 — CMD+R image-context regression trace
+
+- **Completed:** The user confirmed the restored live cached-image copy and
+  Logger success toast work immediately after plugin hot sync, then confirmed
+  CMD+R returns that same mounted image to Discord's native toast path.
+- **Decisions:** Treat this as a fresh-start lifecycle/DOM-shape regression,
+  not a clipboard writer failure. Keep the current source unchanged until a
+  disposable `image-context` trace captures the exact post-reload target,
+  ancestors, record/presentation state, cache resolution, and final menu.
+- **Files changed:** This checklist planning entry only. The disposable helper
+  remains ignored under `tmp/` and will be removed from the live plugins folder
+  after the trace.
+- **Tests and exact results:** No product behavior changed. The last validated
+  source remains focused `75/75` and full `396/396`.
+- **Runtime evidence:** Repository and live SHA-256 still match
+  `f2188f289a083bedc11d4df517a8035091a4549101b57b0f2673652172480a0f`.
+  Fresh startup at `21:00:52 UTC` logged patch application and UI refresh
+  without a Logger error, so the next probe targets dispatch/DOM ownership
+  rather than plugin load or file drift.
+- **Failures or blockers:** One post-CMD+R right-click trace is required.
+- **Commit:** Pending trace-plan checkpoint.
+- **Exact next action:** Install and enable
+  `MessageLoggerImageContextReloadTrace`, right-click the affected restored
+  image once, inspect its report, then unlink and remove the helper before
+  implementing the exact regression fix.
+
 ### Handoff entry template
 
 ```text
