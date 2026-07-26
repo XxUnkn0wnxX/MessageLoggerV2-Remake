@@ -63,8 +63,8 @@ review, checklist update, and commit must also be complete.
   amendment now makes both child switches effective only while the console
   master is On while retaining each saved child value. It is fully validated,
   committed at 135eeb37baecfbb153784ce46c6767c2ea7362e2, recorded by checklist
-  checkpoint c7d4d32bfb9633f302bd433681bf02fb1766598b, and live with matching
-  source bytes. The branch push remains.
+  checkpoint c7d4d32bfb9633f302bd433681bf02fb1766598b, and its matching live sync
+  is recorded at 8b7487225e3c1c694b76c89d1f97a7468f874304. The branch push remains.
 - **Current tracked task changes:** Stages 1-5D are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/persistence.test.js`, `tests/settings-recovery.test.js`,
@@ -1764,9 +1764,10 @@ evidence for another session to understand what changed and why.
   found stale Debug matrix wording and missing saved-child recovery coverage;
   both were corrected before the full pass. User-driven `RT-26` checks remain.
 - **Commit:** 135eeb37baecfbb153784ce46c6767c2ea7362e2; checklist checkpoint
-  c7d4d32bfb9633f302bd433681bf02fb1766598b.
-- **Exact next action:** Commit the final live evidence, record that commit,
-  push the feature branch, and verify local/remote ref alignment.
+  c7d4d32bfb9633f302bd433681bf02fb1766598b; live-sync checkpoint
+  8b7487225e3c1c694b76c89d1f97a7468f874304.
+- **Exact next action:** Push the feature branch and verify local/remote ref
+  alignment.
 
 ### Handoff entry template
 
