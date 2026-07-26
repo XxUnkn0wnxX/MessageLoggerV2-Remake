@@ -1072,10 +1072,9 @@ Stage 5D plan/result:
         an ordinary live image keeps Discord's native action.
   - [ ] Confirm a missing local file, placeholder, video, and all-file-only
         attachment receive no Logger clipboard action.
-  - [ ] Disable Logger while restored rows/tints and any available forum,
-        sidebar, or thread-browser clones are visible. Confirm they disappear
-        without deleting records/files, then re-enable and confirm they can
-        mount again.
+  - [x] Disable Logger while restored rows/tints and any available forum,
+        sidebar, or thread-browser clones are visible. The user confirmed the
+        Logger-owned live presentation unmounted immediately on disable.
   - [x] Runtime defect found before those checks: current Discord did not invoke
         Logger's old `image-context` patch, and the Logger viewer's custom menu
         exposed no image copy action. The approved narrow replacement is now
@@ -1088,8 +1087,9 @@ Live result:
 - Date: 2026-07-27 combined clipboard/disable `2.8.2.9` live replacement and
   partial `RT-26` run.
 - Result: **CURRENT 2.8.2.9 SYNC, HASH, HOT-RELOAD, NATIVE/CORS,
-  SLOW-PROGRESS, CONTROLLED-STALL, FILE-SIZE, DEBUG-OUTPUT, AND UPDATER PASS;
-  CLIPBOARD/DISABLE USER TESTING AND CHANGELOG AMENDMENT PENDING.**
+  SLOW-PROGRESS, CONTROLLED-STALL, FILE-SIZE, DEBUG-OUTPUT, UPDATER, AND
+  PLUGIN-DISABLE CLEANUP PASS; CLIPBOARD USER TESTING AND CHANGELOG AMENDMENT
+  PENDING.**
 - Notes: Repository and live SHA-256 both equal
   `83f47ce110f1d179a36e1d6db839dfbb75f304a033e8d8d8eb50e08a9e055a4c`.
   The current logs prove native Discord-CDN success, Waifugami HTTP 200 with
@@ -1110,7 +1110,9 @@ Live result:
   media request route. The final cache-scoped clipboard and disable-cleanup
   build plus the static binary-read correction hot-reloaded cleanly at
   `19:56:23-19:56:24` UTC with matching source/live bytes and no new matching
-  Logger error. Discord was not relaunched.
+  Logger error. The user then confirmed Logger-owned live presentation
+  unmounted immediately when the plugin was disabled. Discord was not
+  relaunched.
 
 Historical result:
 
@@ -2502,6 +2504,23 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit this decision, run the clean full baseline,
   then remove file-copy fallbacks and add focused native-format/menu
   regressions before any live sync.
+
+### 2026-07-27 — Plugin-disable runtime confirmation
+
+- **Completed:** The user disabled Logger with restored presentation visible
+  and confirmed the Logger-owned live mounts disappeared immediately.
+- **Decisions:** Accept the shutdown presentation cleanup as runtime-passed;
+  no additional disable-path code change is needed.
+- **Files changed:** This checklist only.
+- **Tests and exact results:** The implementation remains covered by the clean
+  `394/394` baseline, including the three shutdown failure-isolation tests.
+- **Runtime evidence:** Direct user confirmation: restored live presentation
+  unmounted when Logger was disabled.
+- **Failures or blockers:** None for plugin-disable cleanup.
+- **Commit:** Implementation
+  f312df53c334fe912cc9073d1c6f5ce6e78bb102; runtime-evidence commit pending.
+- **Exact next action:** Finish the approved native-only clipboard correction
+  and its remaining live checks.
 
 ### Handoff entry template
 
