@@ -61,21 +61,23 @@ review, checklist update, and commit must also be complete.
   first final live replacement is recorded by
   fd8e027b7e67b4985f3d911555d39c9c630c7c41. A final user-requested Debug
   amendment now makes both child switches effective only while the console
-  master is On while retaining each saved child value. It is fully validated
-  and committed at 135eeb37baecfbb153784ce46c6767c2ea7362e2; the replacement
-  live sync and branch push remain.
+  master is On while retaining each saved child value. It is fully validated,
+  committed at 135eeb37baecfbb153784ce46c6767c2ea7362e2, recorded by checklist
+  checkpoint c7d4d32bfb9633f302bd433681bf02fb1766598b, and live with matching
+  source bytes. The branch push remains.
 - **Current tracked task changes:** Stages 1-5D are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/persistence.test.js`, `tests/settings-recovery.test.js`,
   `tests/source-contracts.test.js`, `README.md`, `TODO.md`,
   `docs/architecture.md`, `docs/help.md`, `docs/settings.md`, `docs/tests.md`,
   and this checklist.
-- **Live plugin:** The accepted `2.8.2.9` networking build is live at SHA-256
-  `d7cfc616ac9d2bcf36d67a496a0d13e4de63168fd99dad50adfd279b4425ef37`,
-  but it predates the final Debug master-link amendment and therefore no
-  longer matches the working tree. The replacement must still copy only
-  `MessageLoggerV2.plugin.js`, verify parity, and inspect the hot-reload log.
-  Discord must not be relaunched.
+- **Live plugin:** The final `2.8.2.9` Debug-linked networking build is live.
+  Repository and live SHA-256 both equal
+  `260a3f8c2c3bf0534b0ad8ef5a91d62fae83cbce088cc9fab3e0a6917d2cd424`.
+  The UTC hot-reload segment at `2026-07-26 17:42:15-17:42:16` shows patch
+  cleanup, successful reinitialization, UI refresh completion, and immediate
+  later media-cache writes without a matching Logger error. Discord was not
+  relaunched.
 - **Publishing authority:** The user explicitly authorized pushing both working
   branches to `origin` on 2026-07-26 and explicitly re-authorized pushing the
   current `fix/native-media-networking` branch after live sync on 2026-07-27.
@@ -83,8 +85,7 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Record the Debug master-link implementation commit, replace the live plugin,
-verify source/hash/reload evidence, checkpoint that sync, push
+Commit this final live-sync evidence, record its full hash, push
 `fix/native-media-networking`, and verify local/remote ref alignment. Then give
 the user the remaining native, legacy, cancellation, controlled-stall, update,
 and clipboard `RT-26` tests. Keep the audited provisional Anti-Nuke/Ghost-Ping
@@ -1754,16 +1755,18 @@ evidence for another session to understand what changed and why.
   only one input path, so the initial multi-file command was rejected for its
   arguments; each changed documentation file then parsed successfully in an
   individual loop.
-- **Runtime evidence:** Not yet replaced live. The current live plugin is the
-  preceding accepted networking build and must be overwritten after this
-  amendment commit.
+- **Runtime evidence:** Repository/live SHA-256 both equal
+  `260a3f8c2c3bf0534b0ad8ef5a91d62fae83cbce088cc9fab3e0a6917d2cd424`.
+  The UTC `debug.log` segment at `17:42:15-17:42:16` shows patch removal,
+  successful reinitialization, UI refresh completion, and subsequent cached
+  media without a matching Logger error. Discord was not relaunched.
 - **Failures or blockers:** Independent review found no production defect. It
   found stale Debug matrix wording and missing saved-child recovery coverage;
   both were corrected before the full pass. User-driven `RT-26` checks remain.
-- **Commit:** 135eeb37baecfbb153784ce46c6767c2ea7362e2.
-- **Exact next action:** Record this full implementation hash, then copy only
-  the plugin live, verify byte/hash parity and the hot-reload segment,
-  checkpoint the result, and push the feature branch.
+- **Commit:** 135eeb37baecfbb153784ce46c6767c2ea7362e2; checklist checkpoint
+  c7d4d32bfb9633f302bd433681bf02fb1766598b.
+- **Exact next action:** Commit the final live evidence, record that commit,
+  push the feature branch, and verify local/remote ref alignment.
 
 ### Handoff entry template
 
