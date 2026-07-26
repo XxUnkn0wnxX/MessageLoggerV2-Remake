@@ -35,10 +35,10 @@ review, checklist update, and commit must also be complete.
 - **Working branch:** `fix/native-media-networking`
 - **Branch base:** a5eadbe736f5a0cf4b7a3730bf9950ade17ad752
   (`docs: prepare 2.8.2.8 release notes`)
-- **Upstream status:** The binary-read correction is live and awaiting its
-  authorized push to `origin/fix/native-media-networking`; local/tracking/direct
-  remote parity must be rechecked before reporting. The completed earlier
-  implementation and live-sync history was first published through
+- **Upstream status:** The binary-read correction was published through
+  fb514813a9c8851f7c5ff69153c7e1678c2467d4; local, tracking, and direct remote
+  refs matched exactly after that push. The completed earlier implementation
+  and live-sync history was first published through
   e84bfaaf6fffc4b809f7e4fb6fe70ef6ac5c5897. `develop`, `main`,
   `origin/develop`, and `origin/main` all remain untouched at
   a5eadbe736f5a0cf4b7a3730bf9950ade17ad752.
@@ -97,10 +97,9 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Push the live-synced static clipboard binary-read fix, verify all branch refs,
-then ask the user to repeat static image copy. Amend the built-in changelog only
-after runtime confirmation. Keep provisional Anti-Nuke/Ghost-Ping retention as
-a separate post-networking stage.
+Ask the user to repeat static image copy and inspect the resulting log. Amend
+the built-in changelog only after runtime confirmation. Keep provisional
+Anti-Nuke/Ghost-Ping retention as a separate post-networking stage.
 
 ### Resume procedure for a new session
 
@@ -2458,6 +2457,23 @@ evidence for another session to understand what changed and why.
   7cc64a0877d46384551088f9691d14f92b399c00.
 - **Exact next action:** Commit this evidence, record its hash, push and verify
   refs, then ask the user to retry the same cached static image.
+
+### 2026-07-27 — Static clipboard binary-read publication
+
+- **Completed:** Pushed the validated and live-synced correction to the
+  existing feature branch.
+- **Decisions:** Keep `develop`, `main`, version, and changelog untouched until
+  runtime confirmation.
+- **Files changed:** This publication note only.
+- **Tests and exact results:** Publication reused the synced product tree that
+  passed focused `73/73` and full `394/394`.
+- **Runtime evidence:** Local `HEAD`, the tracking ref, and direct remote ref
+  all matched fb514813a9c8851f7c5ff69153c7e1678c2467d4 after push.
+- **Failures or blockers:** None in publication.
+- **Commit:** Published binary-read checkpoint
+  fb514813a9c8851f7c5ff69153c7e1678c2467d4.
+- **Exact next action:** Ask the user to retry static copy, then inspect the
+  current logs before marking the clipboard path confirmed.
 
 ### Handoff entry template
 
