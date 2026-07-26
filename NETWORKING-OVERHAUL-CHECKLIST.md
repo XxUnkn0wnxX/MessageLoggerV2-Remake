@@ -77,7 +77,9 @@ review, checklist update, and commit must also be complete.
   the approved native-only correction removed file-copy fallbacks, limited
   Logger copying to cached PNG/JPG/JPEG media, and made multi-image matching
   exact or fail closed. Focused `73/73` and full `394/394` tests pass; final
-  live replacement remains pending.
+  implementation commit
+  7a7f32b426174d12f2e2ab1e490da0f78e9618e9 is complete and the live
+  replacement remains pending.
 - **Current tracked task changes:** Stages 1-5D are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/persistence.test.js`, `tests/settings-recovery.test.js`,
@@ -101,12 +103,11 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit the fully audited native-only clipboard correction, record its exact
-hash, then live-sync only the plugin, verify hash parity and clean hot reload,
-push the feature branch, and give the user the short PNG/JPEG plus negative
-format matrix. Amend the built-in changelog only after runtime confirmation.
-Keep provisional Anti-Nuke/Ghost-Ping retention as a separate post-networking
-stage.
+Commit this exact-hash checklist evidence, then live-sync only the plugin,
+verify hash parity and clean hot reload, push the feature branch, and give the
+user the short PNG/JPEG plus negative-format matrix. Amend the built-in
+changelog only after runtime confirmation. Keep provisional
+Anti-Nuke/Ghost-Ping retention as a separate post-networking stage.
 
 ### Resume procedure for a new session
 
@@ -180,7 +181,8 @@ recorded as an amendment before implementation.
 - [x] Combined clipboard/disable build live-synced and hash-verified.
 - [x] Static-image clipboard binary-read runtime defect fixed and resynced.
 - [x] Native-only clipboard correction implemented and fully audited.
-- [ ] Native-only clipboard correction committed, live-synced, and pushed.
+- [x] Native-only clipboard correction committed.
+- [ ] Native-only clipboard correction live-synced and pushed.
 - [ ] User `RT-26` live behavior result received and recorded.
 - [x] Final implementation committed.
 
@@ -1209,7 +1211,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-27 | Stage 6 legacy/native toggle | Two manual probes and concurrent ordinary media work used forced renderer fetch successfully while exactly one activation-scoped routing notice appeared. Turning force Off made the next probe use BetterDiscord native fetch immediately. | User-run `RT-26` probes plus current BetterDiscord `debug.log` and `console.log` |
 | 2026-07-27 | Stage 6 mixed content | A plain-HTTP image requested from Discord's HTTPS page used BetterDiscord native fetch and completed HTTP 200 / 8,090 bytes without renderer mixed-content blocking. | User-run `RT-26` probe plus current BetterDiscord `debug.log` and `console.log` |
 | 2026-07-27 | Clipboard compatibility | Finder/Explorer-style file clipboard data cannot be reproduced through the cross-compatible Discord plugin APIs. Logger therefore uses only Discord's native image bridge for cached PNG/JPG/JPEG, adds no mounted fallback, and hides its action for every unsupported format. | User-approved native-only decision recorded by ac235510c36ddd906597f0ccb265774cafea0ced |
-| 2026-07-27 | Clipboard final audit | A broad whole-message target containing multiple saved images could previously choose the first matching DOM image. The issue was reported before correction; direct image/image-overlay identity now wins, while an ambiguous target exposes no Logger action. | Parent correction, focused `73/73`, full `394/394`, and independent final PASS |
+| 2026-07-27 | Clipboard final audit | A broad whole-message target containing multiple saved images could previously choose the first matching DOM image. The issue was reported before correction; direct image/image-overlay identity now wins, while an ambiguous target exposes no Logger action. | Implementation 7a7f32b426174d12f2e2ab1e490da0f78e9618e9, focused `73/73`, full `394/394`, and independent final PASS |
 | 2026-07-27 | Disable runtime | Ordinary restored presentation and a separate forum post/thread both unmounted immediately when Logger was disabled. | User runtime confirmation recorded by 8e6e60d12cdcd961e3318e056f7c43b15f07246b and this follow-up |
 
 ## Handoff activity log
@@ -2573,11 +2575,11 @@ evidence for another session to understand what changed and why.
   broad target with multiple images could select the first match by DOM order.
   This was reported before correction, then fixed with exact-overlay priority
   and ambiguity rejection. No automated or static blocker remains.
-- **Commit:** Implementation commit pending; its exact hash will be recorded in
-  the immediate checklist evidence commit.
-- **Exact next action:** Commit this validated implementation, record its exact
-  hash, then live-sync only the plugin, verify hash/hot reload, push the feature
-  branch, and give the user the remaining short runtime matrix.
+- **Commit:** Implementation
+  7a7f32b426174d12f2e2ab1e490da0f78e9618e9.
+- **Exact next action:** Commit this exact-hash checklist evidence, then
+  live-sync only the plugin, verify hash/hot reload, push the feature branch,
+  and give the user the remaining short runtime matrix.
 
 ### Handoff entry template
 
