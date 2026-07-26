@@ -1157,6 +1157,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-27 | Stage 5C audit | Two implementation commits passed their existing tests but remained unsuitable for release: the first had false/early route attribution and missing body-terminal evidence; the second retained false native-start output, incomplete status/outcome contracts, and weak edge coverage. The second was also copied live prematurely, so it must be replaced by the final audited build. | Parent call-path review before accepting the live result |
 | 2026-07-27 | Cache-policy audit | Ordinary media caching follows author and location policy, but Anti-Nuke deliberately pre-caches ignored guild media. Two pre-existing strict-parity gaps also remain: ignored local/self updates can cache new media for an existing cached message, and a filtered partial update under the Ghost Ping override can cache media before a ghost ping is confirmed. Removed-attachment caching separately bypasses normal type/size checks. No policy code was changed because the user requested an audit report only and this networking branch remains scoped to transport re-plumbing. | Read-only source trace plus focused policy/Anti-Nuke/contracts result `95/95` |
 | 2026-07-27 | Anti-Nuke retention audit | DMs cannot enter Anti-Nuke pre-cache, and a confirmed channel deletion adopts/captures only the exact guild parent and its child threads. Eligible ignored or muted media from any guild channel can still be physically pre-cached in case that channel is later deleted. The `15` thread / `45` message / `15` attachment capture caps do not bound, age, or clean those provisional files, so never-confirmed and cap-rejected files can remain orphaned. URL-only staging is unsafe because CDN URLs can expire as the parent disappears. | User designated a separate post-networking hardening stage: bounded provisional physical storage, promote confirmed nuke/Ghost-Ping or ordinary-record files, and delete expired/rejected candidates without touching shared references |
+| 2026-07-27 | Provisional retention contract | Anti-Nuke and Ghost-Ping pre-cache files must be tracked as provisional until a matching saved record confirms them. Anti-Nuke retains only the newest provisional attachments allowed by its configured attachment cap; both Anti-Nuke and Ghost Ping receive configurable maximum ages. Expired, over-limit, rejected, and otherwise orphaned provisional files are automatically deleted on bounded maintenance passes. Any file referenced by a real saved Logger record is protected. This provisional cleanup is always active and is not gated by **Delete cached media with log records**, which remains a separate saved-record deletion preference. | Explicit user requirement for the post-networking storage-hardening stage |
 | 2026-07-27 | Debug master linkage | `debugLogging` is the effective master for both the detailed-media child and the debug-toast child. Turning the master Off greys both and suppresses their output without changing either saved value; turning it On restores only children already saved On. A saved toast Off never auto-enables. The activation-scoped legacy notice flushes both routes immediately only when the saved toast child is On. No plugin version or built-in changelog text changed for this amendment. | Final user clarification plus supported BetterDiscord `enableWith` behavior, deterministic recovery/routing tests, and independent review |
 | 2026-07-27 | Stage 6 partial runtime | Current detailed logs prove default native routing, Waifugami cross-origin success, a 39.8-second progressing response completing without a total deadline, and a controlled no-progress response reaching Logger's rolling 30-second body watchdog. The earlier one-off HTTPBin `Error: aborted` was a remote/transport interruption rather than Logger's watchdog and the same detailed probe then passed. | User-run `RT-26` probes plus current BetterDiscord `debug.log` and `console.log` |
 | 2026-07-27 | Stage 6 cache-off cancellation | Turning **Cache media locally** Off during an active progressing native body cancelled it immediately after three bytes, emitted exactly one cancelled terminal event, and produced no retry or late completion after the original response window elapsed. | User-run `RT-26` probe plus current BetterDiscord `debug.log` and `console.log` |
@@ -2199,6 +2200,33 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit this plan, record its exact hash, then implement
   both bounded fixes with focused regressions and the full test suite before
   any live sync.
+
+### 2026-07-27 — Deferred provisional-media retention contract
+
+- **Completed:** Recorded the required post-networking Anti-Nuke and Ghost-Ping
+  pre-cache lifecycle; no retention code was changed in this networking stage.
+- **Decisions:** Track pre-cached files as provisional until an actual saved
+  record references them. Retain only the newest Anti-Nuke provisional
+  attachments allowed by the configured Anti-Nuke attachment cap. Add separate
+  configurable maximum ages for Anti-Nuke and Ghost-Ping candidates, then run
+  bounded automatic cleanup so expired, over-limit, rejected, and unconfirmed
+  orphan files are deleted. Promotion to a real Logger record protects the
+  referenced file from provisional cleanup. **Delete cached media with log
+  records** remains a separate preference for removing media alongside real
+  records and must never disable provisional cleanup.
+- **Files changed:** This checklist only.
+- **Tests and exact results:** Documentation-only checkpoint; implementation
+  tests are deferred with the separate retention stage.
+- **Runtime evidence:** The user's cache directory growth plus the prior source
+  audit confirm provisional files currently have no age/count cleanup.
+- **Failures or blockers:** Defaults, bounds, and the exact meaning of an age
+  value of `0` still require an implementation plan before that later stage.
+- **Commit:** Retention-contract commit pending; its exact hash will be recorded
+  by the following checklist checkpoint.
+- **Exact next action:** Finish networking/clipboard and live verification
+  first. Then design and test the provisional manifest, promotion, age/count
+  trimming, reference protection, and startup/periodic maintenance as a
+  separate stage.
 
 ### Handoff entry template
 
