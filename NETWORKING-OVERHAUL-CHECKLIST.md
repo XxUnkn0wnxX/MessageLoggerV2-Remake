@@ -42,11 +42,11 @@ review, checklist update, and commit must also be complete.
   separate and tracks `origin/fix/attachment-gate`. Its standalone handoff
   commit is protected by the local-only `local/attachment-gate-handoff` tag.
   Do not merge or implement that feature as part of this networking branch.
-- **Implementation state:** Audit and design only. No networking behavior,
-  setting, test, documentation, version, changelog, or live-plugin source has
-  been changed.
-- **Current tracked task changes:** Documentation-only checklist/handoff
-  commits; no plugin implementation.
+- **Implementation state:** Audit/design and this tracked handoff only. No
+  plugin behavior, setting, test, product documentation, version, changelog, or
+  live-plugin source has been changed.
+- **Current tracked task changes:** Checklist/handoff documentation only; no
+  plugin implementation.
 - **Live plugin:** Not updated for this task because implementation has not
   started.
 - **Publishing authority:** The user explicitly authorized pushing both working
@@ -75,6 +75,44 @@ the Stage 0 baseline gate before editing plugin behavior.
 9. Before every later commit, update this file so the recorded commit, tests,
    failures, changed files, and next action match reality.
 
+### Session reconstruction references
+
+Current root task session/thread:
+
+- Session ID:
+  `019f8e91-06a7-7683-aa18-bdf936727474`
+- Local rollout:
+  `$HOME/.codex/sessions/2026/07/23/rollout-2026-07-23T20-41-36-019f8e91-06a7-7683-aa18-bdf936727474.jsonl`
+
+Earlier completed-session handoff:
+
+- Session ID:
+  `019f8d43-e4c7-7d53-9e2a-f52cb62a03a1`
+- Handoff:
+  `tmp/MessageLoggerV2SessionHandoff-019f8d43.md`
+- Local rollout:
+  `$HOME/.codex/sessions/2026/07/23/rollout-2026-07-23T14-37-44-019f8d43-e4c7-7d53-9e2a-f52cb62a03a1.jsonl`
+
+Supporting networking fetch-inventory explorer:
+
+- Session ID:
+  `019f9e65-b51a-7792-9614-9bd92451993b`
+- Local rollout:
+  `$HOME/.codex/sessions/2026/07/26/rollout-2026-07-26T22-28-13-019f9e65-b51a-7792-9614-9bd92451993b.jsonl`
+
+These references are optional local provenance for reconstructing why decisions
+were made. This tracked file is the complete branch handoff and remains usable
+if the local rollouts or ignored `tmp/` handoff are absent.
+
+### Plan authority
+
+The latest **Approved contract**, **Debug reporting**, **Behavior that must
+remain unchanged**, **Amendments and discoveries**, and **Handoff activity
+log** entries are authoritative for this branch. They supersede the earlier
+exploratory idea of routing every plugin-owned remote request through one
+selector. A newer explicit user instruction wins over this file and must be
+recorded as an amendment before implementation.
+
 ## Current status
 
 - [x] Networking scope audited without changing plugin behavior.
@@ -102,32 +140,50 @@ included:
   slowly; those remain ordinary server/network failures rather than transport
   compatibility failures.
 
-The intended default is BetterDiscord's native networking API, which performs
-the remote request outside the restricted Discord renderer request path. The
-legacy method remains available for explicit compatibility testing and for
-BetterDiscord versions that do not expose a compatible native API.
+The intended default for persistent media-cache downloads is BetterDiscord's
+native networking API, which performs the remote request outside the restricted
+Discord renderer request path. The legacy method remains available for explicit
+media-cache compatibility testing and for BetterDiscord versions that do not
+expose a compatible native API.
+
+The existing updater and clipboard transports are outside this overhaul:
+
+- update checks continue calling `BdApi.Net.fetch()` directly;
+- remote-image clipboard reads continue calling `BdApi.Net.fetch()` directly;
+- local `blob:` clipboard reads continue calling renderer `fetch()` directly.
+
+This narrower boundary is deliberate. A live Discord-console probe proved that
+the current raw updater URL succeeds through `BdApi.Net.fetch()` but fails
+through renderer `fetch()` because of the renderer's network restrictions.
 
 ## Approved contract
 
-- [ ] Add an Advanced setting named **Force legacy networking**.
+- [ ] Add an Advanced setting named **Force legacy media fetching**.
 - [ ] Default the setting to `false`.
-- [ ] With the setting off, use `BdApi.Net.fetch()` when it is available and
-      compatible.
-- [ ] With the setting on, route plugin-owned remote requests through the legacy
-      Discord renderer `fetch()` method.
-- [ ] Automatically route to legacy networking when `BdApi.Net.fetch()` is
-      missing or synchronously incompatible.
-- [ ] Keep all transport selection inside one central network handler.
-- [ ] Leave no direct `BdApi.Net.fetch()` or renderer `fetch()` selection in
-      individual callers.
-- [ ] Do not switch the entire session to legacy mode for an ordinary HTTP
+- [ ] With the setting off, use `BdApi.Net.fetch()` for persistent media-cache
+      downloads when it is available and compatible.
+- [ ] With the setting on, route only persistent media-cache downloads through
+      the legacy Discord renderer `fetch()` method.
+- [ ] Automatically route media-cache downloads to legacy networking when
+      `BdApi.Net.fetch()` is missing or synchronously incompatible.
+- [ ] Keep media-cache transport selection inside one central media network
+      handler.
+- [ ] Keep update checks on their existing direct `BdApi.Net.fetch()` call.
+- [ ] Keep remote-image clipboard reads on their existing direct
+      `BdApi.Net.fetch()` call.
+- [ ] Keep local `blob:` clipboard reads on renderer `fetch()` regardless of
+      the force setting because they are local object-URL reads.
+- [ ] Do not switch the media-cache session to legacy mode for an ordinary HTTP
       failure, timeout, abort, DNS failure, 403, 404, or one bad URL.
-- [ ] Keep renderer `fetch()` reachable only through the central handler's
-      forced/compatibility legacy branch.
+- [ ] Keep remote renderer `fetch()` reachable only through the media handler's
+      forced/compatibility legacy branch; local `blob:` reads are the explicit
+      non-network exception.
 
 ### Transport matrix
 
-| Force legacy | Native API state | Selected transport |
+This matrix applies only to persistent media-cache downloads.
+
+| Force legacy media fetching | Native API state | Selected media transport |
 |---|---|---|
 | Off | Available and compatible | `BdApi.Net.fetch()` |
 | Off | Missing or incompatible | Legacy renderer `fetch()` |
@@ -142,20 +198,18 @@ BetterDiscord versions that do not expose a compatible native API.
   session.
 - Do not interpret a rejected request promise, HTTP response status, timeout, or
   abort as proof that the BetterDiscord API itself is incompatible.
-- Do not try the legacy method after every remote failure; doing so would
-  duplicate requests and reintroduce the same renderer restrictions this work
+- Do not try the legacy method after every media request failure; doing so would
+  duplicate downloads and reintroduce the same renderer restrictions this work
   is meant to avoid.
 - Use only native options common to the local BetterDiscord fork and mainstream
   BetterDiscord. Do not rely unconditionally on fork-only networking options.
 
-## Central handler coverage
+## Media-cache handler coverage
 
-Every explicit remote HTTP(S) request owned by MessageLogger must use the
-central handler:
+Every persistent media-cache remote download must use the central media
+handler:
 
-- [ ] Plugin update checks.
 - [ ] Persistent media-cache downloads.
-- [ ] Remote-image reads for **Copy to Clipboard**.
 - [ ] Deferred media-cache queue replays.
 - [ ] Removed-attachment recovery downloads.
 - [ ] Normal attachment, embed, component-media, and sticker downloads.
@@ -173,8 +227,9 @@ central handler:
       stickers through `cacheImage()`.
 - [x] Anti-Nuke calls `cacheMessageImages()` and does not have a separate
       downloader.
-- [x] The image-context **Copy to Clipboard** action currently selects a fetch
-      implementation independently.
+- [x] The image-context **Copy to Clipboard** action intentionally keeps its
+      existing independent choice: renderer `fetch()` for local `blob:` URLs
+      and `BdApi.Net.fetch()` for remote URLs.
 - [x] No Axios, Node HTTP/HTTPS, Electron `net`, external request library, or
       separate XHR downloader was found.
 
@@ -184,7 +239,7 @@ Line numbers are orientation aids and may move; symbol names are authoritative.
 
 | Approximate line | Symbol/path | Current behavior |
 |---|---|---|
-| 576 | `checkNewUpdate()` | Calls `BdApi.Net.fetch()` directly for plugin source. |
+| 576 | `checkNewUpdate()` | Intentionally remains a direct `BdApi.Net.fetch()` call for plugin source. |
 | 977 | `imageCacheServerSimulator` | Resolves synthetic cache keys to local files and returns local object URLs. |
 | 3670 | `reportDebugEvent()` | Independently routes the same debug event to console and/or toast/notification. |
 | 4311 | Advanced settings category | Planned location for the force-legacy switch. |
@@ -195,7 +250,7 @@ Line numbers are orientation aids and may move; symbol names are authoritative.
 | 12035 | `cacheMessageImages()` | Enumerates qualifying attachments, embeds, components, and stickers. |
 | 13222 | Anti-Nuke pre-cache helper | Calls `cacheMessageImages()` before ordinary policy returns. |
 | 13626 | Normal incoming-message cache path | Calls `cacheMessageImages()`. |
-| 17271 | Image context-menu local request | Downloads or reads image bytes for **Copy to Clipboard** and currently chooses a transport itself. |
+| 17271 | Image context-menu local request | Intentionally retains renderer `fetch()` for local `blob:` reads and `BdApi.Net.fetch()` for remote clipboard reads. |
 
 ### Expected implementation shape
 
@@ -203,21 +258,28 @@ The final names may be adjusted for consistency, but responsibility must remain
 separated:
 
 ```text
-plugin-owned remote caller
-  -> central fetchNetworkResponse(url, options)
-       -> native BdApi.Net.fetch()       [default]
-       -> legacy renderer fetch()        [forced or API incompatible]
-
-media cache caller
+media-cache caller
   -> fetchMediaCacheResponse(url)
        -> cache-specific timeout/abort bookkeeping
-       -> central fetchNetworkResponse(...)
+       -> central fetchMediaNetworkResponse(...)
+            -> native BdApi.Net.fetch()    [default]
+            -> legacy renderer fetch()     [forced or API incompatible]
        -> existing Response processing and filesystem write
+
+update checker
+  -> direct BdApi.Net.fetch()              [unchanged]
+
+remote clipboard image
+  -> direct BdApi.Net.fetch()              [unchanged]
+
+local blob clipboard image
+  -> direct renderer fetch()               [unchanged local read]
 ```
 
 `fetchMediaCacheResponse()` should continue owning cache-specific cancellation
-and timeout behavior. The lower network handler should own transport selection
-and legacy-mode reporting. Callers must not repeat those decisions.
+and timeout behavior. The lower media network handler should own media
+transport selection and legacy-mode reporting. Non-cache callers must retain
+their audited direct behavior.
 
 ## Local data that must stay local
 
@@ -228,10 +290,9 @@ must not be sent through networking merely to read it again:
 - [ ] Keep `blob:` object URLs local.
 - [ ] Keep `data:` resources and the local error placeholder local.
 - [ ] Keep cache file writes, deletion, reveal-in-folder, and cleanup local.
-- [ ] Make **Copy to Clipboard** use existing cached bytes or the resolved local
-      file where possible.
-- [ ] Use the central network handler only when clipboard copying genuinely
-      requires a remote download.
+- [ ] Keep **Copy to Clipboard** on its current split: local `blob:` reads use
+      renderer `fetch()` and remote reads use `BdApi.Net.fetch()`.
+- [ ] Do not route either clipboard branch through the media-cache handler.
 - [ ] Continue revoking locally created object URLs during cleanup.
 
 `http://localhost:7474/...` is only a synthetic cache lookup key. The plugin
@@ -244,9 +305,10 @@ The MessageLogger image-context menu adds its own **Copy to Clipboard** action.
 It currently obtains image bytes, converts them to a `Uint8Array`, and passes
 them to `DiscordNative.clipboard.copyImage()`.
 
-- For a genuinely remote source, it must use the central remote network handler.
-- For a MessageLogger-owned cached/blob source, prefer resolving the existing
-  cache entry and reading the local bytes rather than fetching its object URL.
+- For a genuinely remote source, preserve the existing direct
+  `BdApi.Net.fetch()` call.
+- For a MessageLogger-owned cached/blob source, preserve the existing local
+  renderer `fetch()` call regardless of the media force setting.
 - It does not add a logger record or write a new cache file.
 - Preserve the existing user-facing failure notification and console error.
 
@@ -259,6 +321,10 @@ them to `DiscordNative.clipboard.copyImage()`.
       downloader.
 - [x] Browser loading from `<img src>` or `<video src>` is Chromium element
       loading, not an explicit MessageLogger `fetch()` call.
+- [x] Plugin update checks and remote clipboard reads remain direct
+      `BdApi.Net.fetch()` consumers outside the media-cache selector.
+- [x] Local `blob:` clipboard reads remain direct renderer `fetch()` consumers
+      outside remote networking.
 - [ ] Do not broaden this transport change into a renderer prefetch/blob
       conversion redesign without a separate user decision.
 
@@ -266,7 +332,7 @@ them to `DiscordNative.clipboard.copyImage()`.
 
 Use this exact message for both forced and automatic legacy selection:
 
-> Network: routing plugin requests through the legacy Discord renderer fetch()
+> Networking: media routing is using the old Discord renderer fetch()
 > method.
 
 - [ ] Route the message through the existing debug console/toast controls.
@@ -304,6 +370,9 @@ without causing per-request spam.
 - [ ] Forum, post, thread, and restored-message behavior.
 - [ ] Anti-Nuke capture ordering and ignore-policy bypass behavior.
 - [ ] Persisted message/schema compatibility.
+- [ ] Direct `BdApi.Net.fetch()` update checks.
+- [ ] Direct `BdApi.Net.fetch()` remote clipboard reads.
+- [ ] Direct renderer `fetch()` local `blob:` clipboard reads.
 
 ## Expected tracked files
 
@@ -331,18 +400,29 @@ these compatibility targets is allowed when required:
 ## Planned deterministic coverage
 
 - [ ] Default setting is `false` and normalizes missing older values safely.
-- [ ] Advanced setting placement, label, note, and action behavior are stable.
-- [ ] Native available + force off selects `BdApi.Net.fetch()`.
-- [ ] Force on selects legacy renderer `fetch()` even when native exists.
-- [ ] Native API missing selects legacy renderer `fetch()`.
-- [ ] Synchronous native incompatibility selects legacy for the session.
-- [ ] Ordinary asynchronous request rejection does not change global mode.
-- [ ] Native call receives compatible headers, abort signal, and timeout-related
-      behavior required by its caller.
-- [ ] Update checks, cache downloads, and remote clipboard reads all enter the
-      central handler.
-- [ ] No caller retains a direct transport decision.
-- [ ] Cached/blob clipboard reads stay local.
+- [ ] Advanced **Force legacy media fetching** placement, note, and action
+      behavior are stable.
+- [ ] Native available + force off selects `BdApi.Net.fetch()` for persistent
+      media-cache downloads.
+- [ ] Force on selects legacy renderer `fetch()` for persistent media-cache
+      downloads even when native exists.
+- [ ] Native API missing selects legacy renderer `fetch()` for persistent
+      media-cache downloads.
+- [ ] Synchronous native incompatibility selects legacy media fetching for the
+      session.
+- [ ] Ordinary asynchronous media request rejection does not change the
+      session's selected media transport.
+- [ ] Native media calls receive compatible headers, abort signals, and
+      timeout-related behavior required by the cache caller.
+- [ ] All persistent media-cache downloads enter the central media handler.
+- [ ] The update checker retains its direct `BdApi.Net.fetch()` call and is
+      unaffected by the media force setting.
+- [ ] Remote clipboard reads retain their direct `BdApi.Net.fetch()` call and
+      are unaffected by the media force setting.
+- [ ] Local `blob:` clipboard reads retain renderer `fetch()` and are
+      unaffected by the media force setting.
+- [ ] A source audit permits only those documented non-cache direct calls and
+      proves there is no alternate remote persistent-cache downloader.
 - [ ] Forced and automatic legacy selection use the exact same message.
 - [ ] Console and toast routes remain independent.
 - [ ] Debug reporting is silent with both debug flags off.
@@ -369,10 +449,11 @@ Baseline result:
 
 ## Stage 1 — Setting and transport contracts
 
-- [ ] Add the defaulted boolean setting.
-- [ ] Add it to the Advanced settings UI with concise compatibility wording.
+- [ ] Add the defaulted `Force legacy media fetching` boolean setting.
+- [ ] Add it to the Advanced settings UI with concise media-cache compatibility
+      wording.
 - [ ] Confirm older settings normalize the missing value to `false`.
-- [ ] Add central transport-selection state and helpers.
+- [ ] Add media-only transport-selection state and helpers.
 - [ ] Add source/settings regression coverage.
 - [ ] Run the focused settings and source-contract suites.
 - [ ] Run `npm test`.
@@ -385,18 +466,20 @@ Stage 1 commit/result:
 - Tests:
 - Notes:
 
-## Stage 2 — Central network handler
+## Stage 2 — Central media network handler
 
-- [ ] Implement the one low-level plugin network handler.
-- [ ] Preserve caller-supplied headers, signals, and compatible options.
-- [ ] Route the update checker through it.
+- [ ] Implement one low-level media-cache network handler.
+- [ ] Preserve media caller headers, signals, and compatible options.
 - [ ] Route the media-cache response function through it.
-- [ ] Route remote clipboard reads through it.
-- [ ] Remove direct transport decisions from all callers.
-- [ ] Re-run a repository search proving no direct fetch calls remain outside
-      the handler.
-- [ ] Add native, forced-legacy, and automatic-fallback tests.
-- [ ] Prove ordinary request failures do not change the global transport mode.
+- [ ] Prove all persistent media-cache callers still converge through
+      `cacheImage()` and `fetchMediaCacheResponse()`.
+- [ ] Preserve the update checker and both clipboard branches exactly as the
+      documented direct non-cache transports.
+- [ ] Re-run a repository search proving no alternate remote persistent-cache
+      fetch remains outside the media handler.
+- [ ] Add native, forced-legacy, and automatic media-fallback tests.
+- [ ] Prove ordinary media request failures do not change the session's media
+      transport mode.
 - [ ] Run focused tests, `npm test`, and `git diff --check`.
 - [ ] Commit only after the stage passes.
 
@@ -407,14 +490,17 @@ Stage 2 commit/result:
 - Remaining direct-fetch audit:
 - Notes:
 
-## Stage 3 — Local clipboard path
+## Stage 3 — Preserve non-cache fetch boundaries
 
-- [ ] Resolve MessageLogger-owned cached/blob images back to existing local
-      bytes or their cache file where possible.
-- [ ] Keep local clipboard reads out of remote networking.
-- [ ] Retain remote clipboard support through the central handler.
+- [ ] Keep update checks on their direct `BdApi.Net.fetch()` call.
+- [ ] Keep remote clipboard reads on their direct `BdApi.Net.fetch()` call.
+- [ ] Keep local `blob:` clipboard reads on renderer `fetch()`.
+- [ ] Prove the media force setting does not alter any of those three paths.
+- [ ] Keep both clipboard branches out of the media-cache handler.
 - [ ] Preserve clipboard failure logging and user notification behavior.
-- [ ] Add local, remote, and failure regression coverage where deterministic.
+- [ ] Preserve update-check parsing, failure, and notification behavior.
+- [ ] Add source-contract and deterministic regression coverage for these
+      boundaries where practical.
 - [ ] Run focused tests, `npm test`, and `git diff --check`.
 - [ ] Commit only after the stage passes.
 
@@ -427,7 +513,11 @@ Stage 3 commit/result:
 ## Stage 4 — Debug routing and de-duplication
 
 - [ ] Implement the exact shared legacy-routing message.
-- [ ] Cover automatic detection, forced activation, and forced startup.
+- [ ] Confirm the shared console/toast text is exactly:
+      `Networking: media routing is using the old Discord renderer fetch()
+      method.`
+- [ ] Cover automatic media compatibility detection, forced activation, and
+      forced startup.
 - [ ] Cover console-only, toast-only, both, and neither.
 - [ ] Prove retries and multiple downloads do not create message spam.
 - [ ] Prove a later debug-output enable can receive one pending notice.
@@ -442,8 +532,11 @@ Stage 4 commit/result:
 
 ## Stage 5 — Documentation and static final review
 
-- [ ] Document the Advanced setting and automatic fallback.
-- [ ] Document the debug event.
+- [ ] Document the Advanced media-fetching setting and automatic media
+      fallback.
+- [ ] Document the exact media-routing debug event.
+- [ ] Document that updater and clipboard transports are intentionally outside
+      the media selector.
 - [ ] Update the official automated/runtime test matrix.
 - [ ] Keep the networking notes brief and avoid attachment-overhaul promises.
 - [ ] Confirm no version bump.
@@ -475,9 +568,12 @@ Stage 5 commit/result:
 - [ ] Verify the force toggle can return to native routing immediately.
 - [ ] Verify console-only, toast-only, both, and disabled debug output.
 - [ ] Verify only one routing notice appears per legacy activation.
-- [ ] Verify plugin update checks through the handler.
-- [ ] Verify cached-image clipboard copying remains local.
-- [ ] Verify remote-image clipboard copying through the handler.
+- [ ] Verify update checks still use direct native networking and work with the
+      media force setting both off and on.
+- [ ] Verify local `blob:` clipboard copying still uses renderer `fetch()` and
+      works with the media force setting both off and on.
+- [ ] Verify remote-image clipboard copying still uses direct native networking
+      and works with the media force setting both off and on.
 - [ ] Record any runtime-only findings and amend earlier stages if necessary.
 
 Live result:
@@ -506,11 +602,14 @@ Record changes to the plan here instead of silently changing the agreed scope.
 
 | Date | Stage | Amendment or discovery | Reason/approval |
 |---|---|---|---|
-| 2026-07-26 | Audit | One central handler will cover every explicit plugin-owned remote request, not only media-cache downloads. | User clarification |
+| 2026-07-26 | Audit | The initial design proposed one handler for every explicit plugin-owned remote request. This was superseded by the later media-only scope decision below. | Earlier user clarification, retained as history |
 | 2026-07-26 | Audit | Cached files and blob-backed clipboard data stay local where possible. | User clarification |
 | 2026-07-26 | Audit | `localhost:7474` is a synthetic cache key, not a listening service. | Static source audit |
 | 2026-07-26 | Handoff | The tracked checklist will also be the growing, commit-by-commit session handoff. | User requirement |
 | 2026-07-26 | Handoff | Publish both working branches to `origin`; rename the attachment branch to `fix/attachment-gate`. | User instruction |
+| 2026-07-26 | Audit | A Discord-console probe of the raw updater URL failed through renderer `fetch()` in 88 ms but succeeded through `BdApi.Net.fetch()` with HTTP 200, version `2.8.2.8`, 815109 bytes, in 69 ms. | Runtime evidence in ignored `tmp/discord.com-1785071943229.log` |
+| 2026-07-26 | Scope | The selector and force toggle govern only persistent media-cache downloads. Update checks and remote clipboard reads remain direct native calls; local `blob:` clipboard reads remain direct renderer calls. | Final user decision after runtime probe |
+| 2026-07-26 | Debug | Forced and automatic legacy media selection use: `Networking: media routing is using the old Discord renderer fetch() method.` | User wording requirement |
 
 ## Handoff activity log
 
@@ -527,7 +626,9 @@ evidence for another session to understand what changed and why.
 - **Decisions:** One central handler will own all plugin remote transport
   selection. Native BetterDiscord networking is the default; a new Advanced
   switch or native API incompatibility selects legacy renderer networking.
-  Local cached clipboard data stays local.
+  Local cached clipboard data stays local. This was the initial broad design;
+  the later runtime transport-scope entry below supersedes it for updater and
+  clipboard requests.
 - **Files changed:** `NETWORKING-OVERHAUL-CHECKLIST.md` only.
 - **Tests:** PASS — `npm test` reported 339 passed and 0 failed;
   `git diff --check` passed.
@@ -552,6 +653,35 @@ evidence for another session to understand what changed and why.
 - **Blockers:** None for publication. Implementation remains paused.
 - **Next:** Publish `fix/native-media-networking`, keep it checked out, and wait
   for the user to resume Stage 0.
+
+### 2026-07-26 — Runtime transport scope correction
+
+- **Completed:** Inspected the ignored Discord-console probe log, re-audited the
+  direct updater, media-cache, and clipboard fetch paths, and narrowed the
+  planned selector to persistent media-cache downloads only.
+- **Decisions:** Update checks remain direct `BdApi.Net.fetch()` calls. Remote
+  clipboard reads remain direct `BdApi.Net.fetch()` calls. Local `blob:`
+  clipboard reads remain direct renderer `fetch()` calls because they read
+  local object URLs. Only the persistent media-cache pipeline uses the new
+  selector, force setting, and compatibility fallback.
+- **Debug text:** Console and toast reporting will use the exact shared message
+  `Networking: media routing is using the old Discord renderer fetch()
+  method.` when forced or automatic legacy media routing activates.
+- **Files changed:** `NETWORKING-OVERHAUL-CHECKLIST.md` only.
+- **Tests and exact results:** PASS — `npm test` reported 339 passed and 0
+  failed. Final `git diff --check` and privacy checks are required immediately
+  before this handoff update is committed.
+- **Runtime evidence:** Renderer updater fetch failed with
+  `TypeError: Failed to fetch` after 88 ms. Native `BdApi.Net.fetch()` returned
+  HTTP 200, detected plugin version `2.8.2.8`, and transferred 815109 bytes in
+  69 ms.
+- **Failures or blockers:** None. Plugin implementation remains intentionally
+  paused.
+- **Commit:** The documentation-only commit containing this activity entry;
+  resolve its exact hash from the current branch history.
+- **Exact next action:** After this checklist-only update is committed and
+  pushed, leave `fix/native-media-networking` paused until the user explicitly
+  resumes implementation.
 
 ### Handoff entry template
 
