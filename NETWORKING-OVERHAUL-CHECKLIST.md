@@ -2356,7 +2356,8 @@ evidence for another session to understand what changed and why.
   Logger error. No MessageLogger trace/probe/clipboard helper is linked.
 - **Failures or blockers:** No sync blocker. Clipboard and presentation
   behavior now need the short user-driven Discord checks.
-- **Commit:** Recorded by the following checklist checkpoint.
+- **Commit:** Live-sync evidence commit
+  e2ef2424bc586d6d54803f2813c5e3adc7b4c23e.
 - **Exact next action:** Commit this live evidence, record its exact hash, push
   the feature branch, verify refs, and hand the runtime matrix to the user.
 
