@@ -1398,3 +1398,117 @@ test('component-only records receive a visible Logger viewer fallback before emp
     'the component fallback must mark the row as visible before empty-body pruning'
   );
 });
+
+test('checkNewUpdate uses direct updater fetch and skips media helper routes', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const plugin = createPlugin({ settings: { forceLegacyMediaFetching: true } });
+  let updateRequest;
+  let updateFetches = 0;
+  plugin.fetchMediaNetworkResponse = () => assert.fail('media network helper must not be used for update checks');
+  plugin.fetchMediaCacheResponse = () => assert.fail('media cache helper must not be used for update checks');
+  try {
+    global.BdApi.Net = {
+      fetch(url, requestOptions) {
+        updateFetches += 1;
+        updateRequest = { url, requestOptions };
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          statusText: 'No update check'
+        });
+      }
+    };
+    const updateStart = source.slice(
+      source.indexOf('  async checkNewUpdate(showNoUpdateNotice = false) {'),
+      source.indexOf('  performUpdate(remoteContent, remoteVersion)')
+    );
+    assert.match(updateStart, /const response = await BdApi\.Net\.fetch\(updateUrl,\s*\{\s*headers:\s*\{\s*'User-Agent':\s*'BetterDiscord'\s*\}\s*\}\);/);
+    assert.doesNotMatch(updateStart, /fetchMediaNetworkResponse|fetchMediaCacheResponse/);
+    assert.doesNotMatch(updateStart, /forceLegacyMediaFetching/);
+    assert.match(updateStart, /const remoteContent = await response\.text\(\);[\s\S]*getVersionFromContent\(remoteContent\)[\s\S]*checkVersionNewer\(currentVersion, remoteVersion\)[\s\S]*performUpdate\(remoteContent, remoteVersion\)/);
+    assert.match(updateStart, /if \(!response\.ok\)[\s\S]*if \(showNoUpdateNotice\)[\s\S]*Failed to check for updates \(\$\{response\.status\}\)/);
+    assert.match(updateStart, /catch \(error\)[\s\S]*Logger\.error\('Update check failed:', error\)[\s\S]*Failed to check for updates/);
+    await plugin.checkNewUpdate(false);
+    assert.equal(updateFetches, 1);
+    assert.equal(plugin.alreadyTestedForUpdate, false);
+    assert.equal(updateRequest.url.endsWith(`${plugin.getName()}.plugin.js`), true);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+  }
+});
+
+test('image-copy context keeps blob/router fetch split and copies clipboard bytes with failure reporting', () => {
+  const localRequestStart = source.indexOf('const localRequest = {');
+  const copyContext = source.slice(
+    localRequestStart,
+    source.indexOf('this.getSavedThreadRemovalLabel(record),', localRequestStart)
+  );
+  assert.equal(localRequestStart >= 0, true);
+  assert.ok(copyContext.length > 0);
+  assert.match(copyContext, /const fetchFn = url\.startsWith\(["']blob:\s*["']\)\s*\?\s*fetch\s*:\s*BdApi\.Net\.fetch/);
+  assert.match(copyContext, /const responseBuffer = await response\.arrayBuffer\(\);[\s\S]*new Uint8Array\(responseBuffer\)/);
+  assert.match(copyContext, /DiscordNative\.clipboard\.copyImage\(data\.chunksArr, "image\.png"\);/);
+  assert.match(copyContext, /this\.notifyUser\('Failed to copy\. Details in the console\.', \{\s*type: 'error'\s*\}\);[\s\S]*Logger\.error\(data\);/);
+  assert.doesNotMatch(copyContext, /fetchMediaNetworkResponse|fetchMediaCacheResponse/);
+  assert.doesNotMatch(copyContext, /forceLegacyMediaFetching/);
+});
+
+test('media routing converges through cacheImage and cacheMessageImages across enumeration, deferred, removed, and anti-nuke paths', () => {
+  const networkSlice = source.slice(
+    source.indexOf('  fetchMediaNetworkResponse(url, options = {})'),
+    source.indexOf('  async fetchMediaCacheResponse(url, options = {})')
+  );
+  const cacheSlice = source.slice(
+    source.indexOf('  async fetchMediaCacheResponse(url, options = {})'),
+    source.indexOf('  getMediaCacheTransportSelection()')
+  );
+  const imageCacheSlice = source.slice(
+    source.indexOf('  async cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts = 0, writeEpoch = this._mediaCacheWriteEpoch || 0) {'),
+    source.indexOf('  contentTypeToExtension(contentType) {')
+  );
+  const antiNukeSlice = source.slice(
+    source.indexOf('      const cacheSupportedMessageMediaForAntiNuke = message => {'),
+    source.indexOf('      if (dispatch.type === \'MESSAGE_CREATE\') cacheSupportedMessageMediaForAntiNuke(dispatch.message);')
+  );
+  const deferredSlice = source.slice(
+    source.indexOf('  queuePendingMediaCacheRequest(url, attachmentIdx, attachmentId, messageId, channelId, serverId) {'),
+    source.indexOf('  cleanUpStaleDataTempFiles() {')
+  );
+  const removedSlice = source.slice(
+    source.indexOf('_getChangedAttachments(oldAttachments, newAttachments, messageId, channelId, guildId) {'),
+    source.indexOf('_ensureChannelCached(channelId)')
+  );
+  const updatePayloadSlice = source.slice(
+    source.indexOf('  syncMessageUpdatePayload(update, previous, records = [], options = {}) {'),
+    source.indexOf('  getStickerMedia(sticker) {')
+  );
+  const dispatchSlice = source.slice(
+    source.indexOf('      } else if (dispatch.type == \'MESSAGE_CREATE\' && this.hasSupportedMessagePayload(dispatch.message)'),
+    source.indexOf('      } else return callDefault(...args);')
+  );
+
+  assert.match(networkSlice, /return fetch\(url, options\);/);
+  assert.match(cacheSlice, /this\.fetchMediaNetworkResponse\(url, requestOptions\)/);
+  assert.match(cacheSlice, /this\.fetchMediaNetworkResponse\(url, \{\s*\.\.\.requestOptions,\s*signal: controller\.signal/);
+  assert.match(imageCacheSlice, /const response = await this\.fetchMediaCacheResponse\(url\);/);
+  assert.match(deferredSlice, /Promise\.resolve\(this\.cacheImage\(/);
+  assert.match(removedSlice, /this\.cacheImage\(url, i, attachmentId, messageId, channelId, guildId\);/);
+  assert.match(updatePayloadSlice, /this\.cacheMessageImages\(current, \{\s*queueWhileNoSave: records\.some\(Boolean\)\s*\|\|\s*!!this\.messageRecord\?\.?\[current\.id\]\s*\}\);/);
+  assert.match(dispatchSlice, /this\.cacheMessageImages\(dispatch\.message, \{\s*queueWhileNoSave: false\s*\}\);/);
+  assert.match(antiNukeSlice, /this\.cacheMessageImages\(cacheMessage, { queueWhileNoSave: false }\);/);
+});
+
+test('renderer fetch usage outside fetchMediaNetworkResponse remains constrained to blob/local copy path', () => {
+  const fetchStart = source.indexOf('  fetchMediaNetworkResponse(url, options = {})');
+  const fetchEnd = source.indexOf('  async fetchMediaCacheResponse(url, options = {})');
+  assert.ok(fetchStart >= 0);
+  assert.ok(fetchEnd > fetchStart);
+  const mediaFetcher = source.slice(fetchStart, fetchEnd);
+  const nonMediaFetcher = source.slice(0, fetchStart) + source.slice(fetchEnd);
+  assert.ok((mediaFetcher.match(/\bfetch\(/g) || []).length >= 1);
+  assert.equal((nonMediaFetcher.match(/(^|[^.])\bfetch\(/g) || []).length, 0);
+  assert.equal((source.match(/BdApi\.Net\.fetch\(/g) || []).length, 1);
+  assert.equal((source.match(/nativeFetch\.call\(/g) || []).length, 1);
+  assert.match(source, /const fetchFn = url\.startsWith\(["']blob:["']\)\s*\?\s*fetch\s*:\s*BdApi\.Net\.fetch;/);
+  assert.match(source, /DiscordNative\.clipboard\.copyImage\(data\.chunksArr, "image\.png"\);/);
+});

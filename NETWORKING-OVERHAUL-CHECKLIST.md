@@ -44,11 +44,11 @@ review, checklist update, and commit must also be complete.
   separate and tracks `origin/fix/attachment-gate`. Its standalone handoff
   commit is protected by the local-only `local/attachment-gate-handoff` tag.
   Do not merge or implement that feature as part of this networking branch.
-- **Implementation state:** Stage 2's central media network handler is
-  implemented and passes its focused and full automated gates. Persistent
-  media-cache downloads now default to native BetterDiscord networking while
-  synchronous API incompatibility or the force setting selects renderer
-  networking. Output-aware legacy-routing diagnostics remain Stage 4 work.
+- **Implementation state:** Stage 3's non-cache boundary contracts are
+  implemented and pass their focused and full automated gates. Persistent
+  media-cache downloads use the central selector; updater and clipboard
+  behavior are independently locked to their existing transports.
+  Output-aware legacy-routing diagnostics remain Stage 4 work.
 - **Current tracked task changes:** Stages 1-2 are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/settings-recovery.test.js`, `tests/source-contracts.test.js`, and this
@@ -61,11 +61,11 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit the passing Stage 2 implementation, record that exact commit hash in
-this checklist through the immediate checklist checkpoint, then add Stage 3
-source contracts that freeze updater and clipboard transports outside the
-media selector. Do not sync the plugin live; the user requested a pre-live
-report and separate authorization before that copy.
+Commit the passing Stage 3 boundary contracts, record that exact commit hash in
+this checklist through the immediate checklist checkpoint, then implement
+Stage 4's exact output-aware, de-duplicated legacy-routing diagnostic. Do not
+sync the plugin live; the user requested a pre-live report and separate
+authorization before that copy.
 
 ### Resume procedure for a new session
 
@@ -294,14 +294,14 @@ their audited direct behavior.
 The networking handler is for remote fetches/downloads. Existing local data
 must not be sent through networking merely to read it again:
 
-- [ ] Read already-cached files from the filesystem.
-- [ ] Keep `blob:` object URLs local.
-- [ ] Keep `data:` resources and the local error placeholder local.
-- [ ] Keep cache file writes, deletion, reveal-in-folder, and cleanup local.
-- [ ] Keep **Copy to Clipboard** on its current split: local `blob:` reads use
+- [x] Read already-cached files from the filesystem.
+- [x] Keep `blob:` object URLs local.
+- [x] Keep `data:` resources and the local error placeholder local.
+- [x] Keep cache file writes, deletion, reveal-in-folder, and cleanup local.
+- [x] Keep **Copy to Clipboard** on its current split: local `blob:` reads use
       renderer `fetch()` and remote reads use `BdApi.Net.fetch()`.
-- [ ] Do not route either clipboard branch through the media-cache handler.
-- [ ] Continue revoking locally created object URLs during cleanup.
+- [x] Do not route either clipboard branch through the media-cache handler.
+- [x] Continue revoking locally created object URLs during cleanup.
 
 `http://localhost:7474/...` is only a synthetic cache lookup key. The plugin
 does not start a server or listen on port 7474. Its simulator parses the key,
@@ -333,7 +333,7 @@ them to `DiscordNative.clipboard.copyImage()`.
       `BdApi.Net.fetch()` consumers outside the media-cache selector.
 - [x] Local `blob:` clipboard reads remain direct renderer `fetch()` consumers
       outside remote networking.
-- [ ] Do not broaden this transport change into a renderer prefetch/blob
+- [x] Do not broaden this transport change into a renderer prefetch/blob
       conversion redesign without a separate user decision.
 
 ## Debug reporting
@@ -378,9 +378,9 @@ without causing per-request spam.
 - [ ] Forum, post, thread, and restored-message behavior.
 - [ ] Anti-Nuke capture ordering and ignore-policy bypass behavior.
 - [ ] Persisted message/schema compatibility.
-- [ ] Direct `BdApi.Net.fetch()` update checks.
-- [ ] Direct `BdApi.Net.fetch()` remote clipboard reads.
-- [ ] Direct renderer `fetch()` local `blob:` clipboard reads.
+- [x] Direct `BdApi.Net.fetch()` update checks.
+- [x] Direct `BdApi.Net.fetch()` remote clipboard reads.
+- [x] Direct renderer `fetch()` local `blob:` clipboard reads.
 
 ## Expected tracked files
 
@@ -422,14 +422,14 @@ these compatibility targets is allowed when required:
       session's selected media transport.
 - [x] Native media calls receive compatible headers, abort signals, and
       timeout-related behavior required by the cache caller.
-- [ ] All persistent media-cache downloads enter the central media handler.
-- [ ] The update checker retains its direct `BdApi.Net.fetch()` call and is
+- [x] All persistent media-cache downloads enter the central media handler.
+- [x] The update checker retains its direct `BdApi.Net.fetch()` call and is
       unaffected by the media force setting.
-- [ ] Remote clipboard reads retain their direct `BdApi.Net.fetch()` call and
+- [x] Remote clipboard reads retain their direct `BdApi.Net.fetch()` call and
       are unaffected by the media force setting.
-- [ ] Local `blob:` clipboard reads retain renderer `fetch()` and are
+- [x] Local `blob:` clipboard reads retain renderer `fetch()` and are
       unaffected by the media force setting.
-- [ ] A source audit permits only those documented non-cache direct calls and
+- [x] A source audit permits only those documented non-cache direct calls and
       proves there is no alternate remote persistent-cache downloader.
 - [ ] Forced and automatic legacy selection use the exact same message.
 - [ ] Console and toast routes remain independent.
@@ -527,23 +527,32 @@ Stage 2 commit/result:
 
 ## Stage 3 — Preserve non-cache fetch boundaries
 
-- [ ] Keep update checks on their direct `BdApi.Net.fetch()` call.
-- [ ] Keep remote clipboard reads on their direct `BdApi.Net.fetch()` call.
-- [ ] Keep local `blob:` clipboard reads on renderer `fetch()`.
-- [ ] Prove the media force setting does not alter any of those three paths.
-- [ ] Keep both clipboard branches out of the media-cache handler.
-- [ ] Preserve clipboard failure logging and user notification behavior.
-- [ ] Preserve update-check parsing, failure, and notification behavior.
-- [ ] Add source-contract and deterministic regression coverage for these
+- [x] Keep update checks on their direct `BdApi.Net.fetch()` call.
+- [x] Keep remote clipboard reads on their direct `BdApi.Net.fetch()` call.
+- [x] Keep local `blob:` clipboard reads on renderer `fetch()`.
+- [x] Prove the media force setting does not alter any of those three paths.
+- [x] Keep both clipboard branches out of the media-cache handler.
+- [x] Preserve clipboard failure logging and user notification behavior.
+- [x] Preserve update-check parsing, failure, and notification behavior.
+- [x] Add source-contract and deterministic regression coverage for these
       boundaries where practical.
-- [ ] Run focused tests, `npm test`, and `git diff --check`.
-- [ ] Commit only after the stage passes.
+- [x] Run focused tests, `npm test`, and `git diff --check`.
+- [x] Commit only after the stage passes.
 
 Stage 3 commit/result:
 
-- Commit:
-- Tests:
-- Notes:
+- Commit: pending this passing stage commit; its exact hash will be recorded by
+  the immediate checklist checkpoint.
+- Tests: PASS — `node --test tests/source-contracts.test.js` completed with 61
+  passed, 0 failed; full `npm test` completed with 353 passed, 0 failed;
+  `node --check MessageLoggerV2.plugin.js` passed within the full suite;
+  `git diff --check` passed.
+- Notes: Four source contracts use symbol-bounded slices and one updater
+  behavior mock to freeze the intentional transport split. They also retain
+  updater parsing/error notices, clipboard byte-copy/error feedback, the sole
+  cache write chain, deferred/removed/normal/Anti-Nuke convergence, and the
+  absence of a second persistent-cache downloader. No product source changed
+  in Stage 3.
 
 ## Stage 4 — Debug routing and de-duplication
 
@@ -648,6 +657,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-26 | Compatibility | Both BetterDiscord targets support native `headers`, `signal`, and `timeout`; native media calls must pass `timeout: null` so the host's 8-second default does not replace the logger's existing 15-second timeout. Fork-only `maxResponseBytes` and `httpsOnly` options remain out of scope. | Read-only comparison of local `develop` and `upstream-development` |
 | 2026-07-26 | Resume | Resume implementation, keep every checklist addition/amendment current, preserve all existing functionality, run every focused/full check before deployment, then report and stop before live sync until the user separately authorizes it. | Current user instruction |
 | 2026-07-26 | Stage 2 | The central media selector is non-async and latches legacy mode only for a missing/non-callable native API, a synchronous invocation throw, or an unusable thenable shape. A rejected native promise or HTTP failure remains an ordinary request failure and never starts a second renderer request. | Approved compatibility boundary plus deterministic regression evidence |
+| 2026-07-26 | Stage 3 | Updater and clipboard transports are now protected by symbol-bounded source contracts plus a direct updater behavior mock; no product code was changed for this stage. | Approved media-only scope and regression evidence |
 
 ## Handoff activity log
 
@@ -800,6 +810,31 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Add Stage 3 source contracts proving update checks,
   remote clipboard reads, and local `blob:` clipboard reads remain independent
   of the media-only selector.
+
+### 2026-07-26 — Stage 3 non-cache transport boundaries
+
+- **Completed:** Added deterministic contracts for the updater's direct native
+  request, local/remote clipboard split, clipboard byte conversion and failure
+  feedback, the complete persistent-cache convergence chain, and the permitted
+  renderer/native request inventory.
+- **Decisions:** Keep Stage 3 test-only. The already-correct updater and
+  clipboard implementations remain byte-for-byte untouched. Use bounded symbol
+  slices instead of line numbers or a whole-file schema fingerprint.
+- **Files changed:** `tests/source-contracts.test.js` and
+  `NETWORKING-OVERHAUL-CHECKLIST.md`.
+- **Tests and exact results:** PASS — focused source-contract run: 61 passed, 0
+  failed; full `npm test`: 353 passed, 0 failed; plugin syntax passed within the
+  full suite; `git diff --check` passed.
+- **Runtime evidence:** No new runtime probe was needed; the earlier Discord
+  updater transport probe remains the scope evidence.
+- **Failures or blockers:** None. Parent review removed two unrelated static
+  assertions and strengthened the updater parsing/error and force-setting
+  independence contracts before commit.
+- **Commit:** Pending this passing stage commit; the immediate checklist
+  checkpoint will replace this sentence with the exact hash.
+- **Exact next action:** Implement and deterministically verify the exact
+  output-aware legacy-routing notice without altering request, retry, updater,
+  clipboard, or cache-write behavior.
 
 ### Handoff entry template
 
