@@ -1567,11 +1567,21 @@ test('saved-media clipboard paths replace only deleted native actions and add on
   assert.match(copyContext, /id: 'mlv2-copy-media'[\s\S]*label: 'Copy media'/);
   assert.doesNotMatch(copyContext, /fetchMediaNetworkResponse|fetchMediaCacheResponse/);
   assert.doesNotMatch(copyContext, /forceLegacyMediaFetching/);
-  assert.match(source, /ContextMenu\.patch\('image-context'/);
-  assert.match(source, /const getImageContextLoggerRecord = target =>/);
+  assert.match(source, /ContextMenu\.patch\(\/\^image-context\$\//);
+  const legacyMessageContextPatch = source.slice(
+    source.indexOf("this.unpatches.push(ContextMenu.patch('message',"),
+    source.indexOf('this.unpatches.push(ContextMenu.patch(/^image-context$/')
+  );
+  assert.doesNotMatch(legacyMessageContextPatch, /replaceNativeSavedMediaCopyAction\(ret, record, props\.target, menu\);/);
+  assert.match(source, /const getMountedLoggerRecord = target =>/);
   assert.match(source, /\[id\^="chat-messages-"\]/);
   assert.match(source, /if \(!record\?\.delete_data\) return null;[\s\S]*shouldPresentSavedMessage\(channelId, messageId\)/);
-  assert.match(source, /this\.replaceNativeSavedMediaCopyAction\(ret, record, props\.target, menu\)/);
+  assert.match(source, /this\.unpatches\.push\(ContextMenu\.patch\('message'/);
+  assert.match(source, /this\.unpatches\.push\(ContextMenu\.patch\(\/\^message\$\//);
+  assert.match(source, /const record = getMountedLoggerRecord\(props\?\.target\)/);
+  assert.match(source, /if \(!record\) return;/);
+  assert.match(source, /if \(messageId && String\(record\.message\?\.id \?\? ''\) !== String\(messageId\)\) return;/);
+  assert.match(source, /if \(channelId && String\(record\.message\?\.channel_id \?\? ''\) !== String\(channelId\)\) return;/);
   assert.match(source, /this\.replaceNativeSavedMediaCopyAction\(ret, record, props\?\.target\)/);
   assert.match(source, /this\.addLoggerViewerCopyMediaItem\(menuItems, e\.target, record\)/);
 });

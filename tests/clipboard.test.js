@@ -176,7 +176,10 @@ function installContextMenuBuilder() {
 function installContextMenuPatchCapture() {
   const patches = {};
   ContextMenu.patch = (contextName, callback) => {
-    patches[contextName] = callback;
+    const key = typeof contextName === 'string'
+      ? contextName
+      : `regex:${contextName?.source ?? String(contextName)}`;
+    patches[key] = callback;
     return () => {};
   };
   return patches;
@@ -726,6 +729,84 @@ test('an existing Logger copy action removes a native duplicate before menu reus
   assert.notEqual(menu[0].props.action, originalNativeAction);
 });
 
+test('dedicated message regex callback updates mounted logger rows only', () => {
+  const patchedMenus = installContextMenuPatchCapture();
+  const record = createRecord();
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      restoreDeletedMessages: true,
+      showDeletedMessages: true,
+      showPurgedMessages: false
+    },
+    unpatches: [],
+    messageRecord: { [MESSAGE_ID]: record },
+    deletedMessageSet: new Map([[CHANNEL_ID, new Set([MESSAGE_ID])]])
+  });
+  installCachedFiles(plugin, [{
+    cacheId: ATTACHMENT_ID,
+    extension: '.png',
+    path: '/tmp/cache/media.png'
+  }]);
+
+  const copied = [];
+  plugin.copyMediaToClipboard = source => {
+    copied.push(source);
+    return Promise.resolve(true);
+  };
+  plugin.patchContextMenus();
+  const messageRegexPatch = patchedMenus['regex:^message$'];
+  assert.equal(typeof messageRegexPatch, 'function');
+
+  const nativeAction = () => {};
+  const thirdPartyAction = () => {};
+  const mountedTarget = createImage({
+    closest: selector => selector === '[id^="chat-messages-"]'
+      ? { id: `chat-messages-${CHANNEL_ID}-${MESSAGE_ID}` }
+      : null
+  });
+  const mountedMenu = [
+    createNativeCopyItem({ action: nativeAction }),
+    {
+      props: {
+        id: 'third-party-copy-file',
+        label: 'Copy image',
+        action: thirdPartyAction
+      }
+    }
+  ];
+  const mountedTree = { props: { children: mountedMenu } };
+  messageRegexPatch(mountedTree, {
+    message: { id: MESSAGE_ID },
+    channel: { id: CHANNEL_ID },
+    target: mountedTarget
+  });
+
+  const mountedActions = flattenMenuItems(mountedTree)
+    .filter(item => item.label === 'Copy image');
+  assert.equal(mountedActions.length, 1);
+  assert.notEqual(mountedActions[0].action, nativeAction);
+  assert.notEqual(mountedActions[0].action, thirdPartyAction);
+  mountedActions[0].action();
+  assert.equal(copied.length, 1);
+
+  const unmountedMenu = [{
+    props: {
+      id: 'another-plugin-copy',
+      label: 'Copy image',
+      action: thirdPartyAction
+    }
+  }];
+  const unmountedTree = { props: { children: unmountedMenu } };
+  messageRegexPatch(unmountedTree, {
+    message: { id: MESSAGE_ID },
+    channel: { id: CHANNEL_ID },
+    target: createImage({ closest: () => null })
+  });
+  assert.equal(unmountedMenu[0].props.action, thirdPartyAction);
+  assert.equal(copied.length, 1);
+});
+
 test('image-context menu replaces copy media for restored logger media rows only', () => {
   const patchedMenus = installContextMenuPatchCapture();
   const record = createRecord();
@@ -752,7 +833,7 @@ test('image-context menu replaces copy media for restored logger media rows only
     return Promise.resolve(true);
   };
   plugin.patchContextMenus();
-  const onOpenImageContext = patchedMenus['image-context'];
+  const onOpenImageContext = patchedMenus['regex:^image-context$'];
   assert.equal(typeof onOpenImageContext, 'function');
 
   const loggerMessageNode = {
@@ -794,7 +875,7 @@ test('image-context menu ignores unsupported rows and exact match failures', () 
     path: '/tmp/cache/media.png'
   }]);
   plugin.patchContextMenus();
-  const onOpenImageContext = patchedMenus['image-context'];
+  const onOpenImageContext = patchedMenus['regex:^image-context$'];
   assert.equal(typeof onOpenImageContext, 'function');
   const unchangedAction = () => {};
   const menu = [createNativeCopyItem({ action: unchangedAction })];

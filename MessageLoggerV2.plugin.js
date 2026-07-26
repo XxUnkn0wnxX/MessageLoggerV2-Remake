@@ -18077,7 +18077,7 @@ module.exports = class MessageLoggerV2 {
       if (deleteGroupIndex < 0) return false;
       return insertLoggerGroupAt(menu, deleteGroupIndex + 1, loggerSubmenu);
     };
-    const getImageContextLoggerRecord = target => {
+    const getMountedLoggerRecord = target => {
       const messageNode = target?.closest?.('[id^="chat-messages-"]');
       const match = messageNode?.id?.match?.(/^chat-messages-(\d+)-(\d+)$/);
       if (!match) return null;
@@ -18209,7 +18209,6 @@ module.exports = class MessageLoggerV2 {
       const messageId = props.message.id;
       const channelId = props.channel.id;
       const record = this.messageRecord[messageId];
-      this.replaceNativeSavedMediaCopyAction(ret, record, props.target, menu);
       addSavedRecordItems(newItems, addElement, record, messageId, channelId, {
         menu,
         pruneNativeDeletedOptions: true,
@@ -18275,9 +18274,18 @@ module.exports = class MessageLoggerV2 {
         items: [loggerSubmenu]
       }]));
     }));
-    this.unpatches.push(ContextMenu.patch('image-context', (ret, props) => {
-      const record = getImageContextLoggerRecord(props?.target);
+    this.unpatches.push(ContextMenu.patch(/^image-context$/, (ret, props) => {
+      const record = getMountedLoggerRecord(props?.target);
       if (!record) return;
+      this.replaceNativeSavedMediaCopyAction(ret, record, props?.target);
+    }));
+    this.unpatches.push(ContextMenu.patch(/^message$/, (ret, props) => {
+      const record = getMountedLoggerRecord(props?.target);
+      if (!record) return;
+      const messageId = props?.message?.id;
+      const channelId = props?.channel?.id;
+      if (messageId && String(record.message?.id ?? '') !== String(messageId)) return;
+      if (channelId && String(record.message?.channel_id ?? '') !== String(channelId)) return;
       this.replaceNativeSavedMediaCopyAction(ret, record, props?.target);
     }));
     const handleWhiteBlackList = (newItems, id) => {
