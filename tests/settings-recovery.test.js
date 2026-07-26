@@ -11,6 +11,7 @@ const defaults = {
   autoBackupIntervalSeconds: 20,
   editSpamThreshold: 10,
   debugLogging: false,
+  detailedMediaNetworkDebug: false,
   debugToasts: false,
   dontSaveData: false,
   dontLoadArchivedData: false,

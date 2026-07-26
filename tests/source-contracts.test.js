@@ -33,6 +33,7 @@ test('all fresh-install settings defaults remain stable', () => {
     autoBackup: false,
     autoBackupIntervalSeconds: 20,
     debugLogging: false,
+    detailedMediaNetworkDebug: false,
     debugToasts: false,
     dontSaveData: false,
     dontLoadArchivedData: false,
@@ -350,7 +351,8 @@ test('settings documentation retains audited group order and current UI labels',
     'Block spam edit notifications (if enabled)',
     'Display open logs button next to the search box top right in channels',
     'Disable toasts for local user (yourself)',
-    'Force legacy media fetching'
+    'Force legacy media fetching',
+    'Show detailed media-network diagnostics'
   ]) {
     assert.ok(settingsDocs.includes(`| ${label} |`), `${label} is missing from the settings reference`);
   }
@@ -436,7 +438,8 @@ test('settings dependencies match the approved master controls', () => {
     ['antiNukeToasts', 'antiNukeEnabled'],
     ['antiNukeThreadCap', 'antiNukeEnabled'],
     ['antiNukeMessageCap', 'antiNukeEnabled'],
-    ['antiNukeAttachmentCap', 'antiNukeEnabled']
+    ['antiNukeAttachmentCap', 'antiNukeEnabled'],
+    ['detailedMediaNetworkDebug', 'debugLogging']
   ]);
   assert.doesNotMatch(settingsConfig, /id: 'ignoreLocalEdits',[\s\S]{0,80}(?:enableWith|disableWith):/);
   assert.doesNotMatch(settingsConfig, /id: 'newCacheAllImagesPath',[\s\S]{0,80}(?:enableWith|disableWith):/);
@@ -1484,7 +1487,7 @@ test('media routing converges through cacheImage and cacheMessageImages across e
   assert.match(source, /const MEDIA_CACHE_FETCH_TIMEOUT_MS = 15 \* 1000;/);
   assert.match(source, /const MEDIA_CACHE_BODY_IDLE_TIMEOUT_MS = 30 \* 1000;/);
   const networkSlice = source.slice(
-    source.indexOf('  fetchMediaNetworkResponse(url, options = {})'),
+    source.indexOf('  fetchMediaNetworkResponse(url, options = {}, requestContext = null) {'),
     source.indexOf('  async fetchMediaCacheResponse(url, options = {})')
   );
   const cacheSlice = source.slice(
@@ -1517,8 +1520,8 @@ test('media routing converges through cacheImage and cacheMessageImages across e
   );
 
   assert.match(networkSlice, /return fetch\(url, options\);/);
-  assert.match(cacheSlice, /this\.fetchMediaNetworkResponse\(url, requestOptions\)/);
-  assert.match(cacheSlice, /this\.fetchMediaNetworkResponse\(url, \{\s*\.\.\.requestOptions,\s*signal: controller\.signal/);
+  assert.match(cacheSlice, /this\.fetchMediaNetworkResponse\([\s\S]*requestContext\)/);
+  assert.match(cacheSlice, /this\.fetchMediaNetworkResponse\([\s\S]*\{\s*\.\.\.requestOptions,[\s\S]*signal:\s*controller\.signal[\s\S]*requestContext\)/);
   assert.match(networkSlice, /nativeFetch\.call\(netApi,\s*url,\s*\{[\s\S]*timeout:\s*0/);
   assert.match(imageCacheSlice, /let response;[\s\S]*response = await this\.fetchMediaCacheResponse\(url\);/);
   assert.match(deferredSlice, /Promise\.resolve\(this\.cacheImage\(/);
@@ -1529,7 +1532,7 @@ test('media routing converges through cacheImage and cacheMessageImages across e
 });
 
 test('renderer fetch usage outside fetchMediaNetworkResponse remains constrained to blob/local copy path', () => {
-  const fetchStart = source.indexOf('  fetchMediaNetworkResponse(url, options = {})');
+  const fetchStart = source.indexOf('  fetchMediaNetworkResponse(url, options = {}, requestContext');
   const fetchEnd = source.indexOf('  async fetchMediaCacheResponse(url, options = {})');
   assert.ok(fetchStart >= 0);
   assert.ok(fetchEnd > fetchStart);

@@ -244,6 +244,7 @@ The Debug category title and both setting labels use Discord's native warning co
 | Setting | Default | Behavior |
 | --- | --- | --- |
 | Enable debug logging | Off | Writes automatic-backup lifecycle events, edit-spam diagnostics, deleted/edited channel-entry counter increases, and media-networking diagnostics to the console. Counter output includes the new total, increase, server, and channel; edit-spam output shows each username's current/threshold counter, cooldown start, 10-second warning, final reset, and early settings reset without printing user IDs. |
+| Show detailed media-network diagnostics | Off | When enabled with **Enable debug logging**, writes per media request details (method, URL, route, status, bytes, elapsed) to the console only. This does not emit toasts and never changes request routing or caching logic. |
 | Show debug messages as toasts | Off | Sends the same backup, edit-spam, channel-entry counter, and media-networking diagnostics through the selected BetterDiscord-notification or custom-toast mode. Debug alerts are warning-colored, expire without pausing on hover, and dismiss on a left- or right-click. This control is independent of console debug logging. |
 
 **Settings that can generate Debug output when the relevant event occurs:**

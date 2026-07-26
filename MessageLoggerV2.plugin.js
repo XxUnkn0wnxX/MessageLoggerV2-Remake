@@ -306,6 +306,7 @@ module.exports = class MessageLoggerV2 {
     // fetch from an earlier settings state or same-instance restart must never become eligible
     // to write merely because media caching was enabled again before the fetch settled.
     this._mediaCacheWriteEpoch = 0;
+    this._mediaCacheRequestSerial = 0;
     this._pendingMediaCacheRequests = new Map();
     this._activeDeferredMediaCacheRequests = new Map();
     this._mediaCacheAbortControllers = new Set();
@@ -740,6 +741,7 @@ module.exports = class MessageLoggerV2 {
       autoBackup: false,
       autoBackupIntervalSeconds: 20,
       debugLogging: false,
+      detailedMediaNetworkDebug: false,
       debugToasts: false,
       dontSaveData: false,
       dontLoadArchivedData: false,
@@ -3792,6 +3794,40 @@ module.exports = class MessageLoggerV2 {
       toast: reportedToast
     };
   }
+  _nextMediaNetworkRequestId() {
+    this._mediaCacheRequestSerial += 1;
+    return this._mediaCacheRequestSerial;
+  }
+  _createMediaNetworkRequestContext(url, options = {}) {
+    const method = typeof options?.method === 'string' && options.method
+      ? options.method.toUpperCase()
+      : 'GET';
+    return {
+      id: this._nextMediaNetworkRequestId(),
+      url,
+      method,
+      route: 'unknown',
+      startedAtMs: Date.now(),
+      attempt: 0
+    };
+  }
+  _isDetailedMediaNetworkDebugEnabled() {
+    return !!(this.settings?.debugLogging && this.settings?.detailedMediaNetworkDebug);
+  }
+  _reportMediaNetworkDebug(context, event, details = '') {
+    if (!this._isDetailedMediaNetworkDebugEnabled()) return;
+    if (!context || !context.id) return;
+    const attemptLabel = Number.isInteger(context.attempt) ? `attempt ${context.attempt}` : 'attempt unknown';
+    const route = context.route || 'unknown';
+    const prefix = `Media request #${context.id}`;
+    const destination = `${context.method} ${context.url}`;
+    const suffix = details ? `: ${details}` : '';
+    this.reportDebugEvent(
+      `${prefix} [${attemptLabel}] ${destination} (${route}) ${event}${suffix}`,
+      4000,
+      { console: true, toast: false }
+    );
+  }
   queueAutoBackup(delayMs, reason = 'queued') {
     this.saveBackupTimeout = setTimeout(() => this.saveBackup(), delayMs);
     this.reportDebugEvent(`Automatic backup ${reason}. Starting in ${this.formatBackupDebugDelay(delayMs)}.`);
@@ -4497,6 +4533,17 @@ module.exports = class MessageLoggerV2 {
             id: 'debugLogging',
             type: 'switch',
             action: 'reportLegacyRoutingDebugLoggingState'
+          },
+          {
+            name: React.createElement(
+              'span',
+              { style: { color: 'var(--text-warning, var(--status-warning))' } },
+              'Show detailed media-network diagnostics'
+            ),
+            note: 'Console-only per-request media logs (method, URL, route, status, bytes, elapsed). This switch is disabled unless debug logging is enabled and sends no toasts.',
+            id: 'detailedMediaNetworkDebug',
+            enableWith: 'debugLogging',
+            type: 'switch'
           },
           {
             name: React.createElement(
@@ -12013,9 +12060,14 @@ module.exports = class MessageLoggerV2 {
     if (!record) return this.cachedMessageRecord.find(m => m.id == id);
     return record.message;
   }
-  fetchMediaNetworkResponse(url, options = {}) {
+  fetchMediaNetworkResponse(url, options = {}, requestContext = null) {
+    const context = requestContext || this._createMediaNetworkRequestContext(url, options);
+    context.attempt += 1;
+    this._reportMediaNetworkDebug(context, 'routing check');
     if (this.settings?.forceLegacyMediaFetching || this._mediaCacheNativeFetchCompatible === false) {
+      context.route = 'legacy';
       this._activateMediaCacheLegacyRoutingNotice();
+      this._reportMediaNetworkDebug(context, 'forced legacy routing (renderer fetch)');
       return fetch(url, options);
     }
     let netApi;
@@ -12024,28 +12076,38 @@ module.exports = class MessageLoggerV2 {
       netApi = this._getMediaCacheNetApi();
       nativeFetch = netApi?.fetch;
     } catch (error) {
+      context.route = 'legacy';
       this._mediaCacheNativeFetchCompatible = false;
       this._activateMediaCacheLegacyRoutingNotice();
+      this._reportMediaNetworkDebug(context, 'native fetch getter failed, falling back to legacy renderer fetch', error?.message);
       return fetch(url, options);
     }
     if (typeof nativeFetch !== 'function') {
+      context.route = 'legacy';
       this._mediaCacheNativeFetchCompatible = false;
       this._activateMediaCacheLegacyRoutingNotice();
+      this._reportMediaNetworkDebug(context, 'native fetch was not a function, falling back to legacy renderer fetch');
       return fetch(url, options);
     }
 
     let response;
     try {
+      context.route = 'native';
+      this._reportMediaNetworkDebug(context, 'using BetterDiscord native fetch');
       response = nativeFetch.call(netApi, url, {
         ...options,
         timeout: 0
       });
       if (response == null || typeof response.then !== 'function') {
+        context.route = 'legacy';
+        this._reportMediaNetworkDebug(context, 'native fetch promise check failed, falling back to legacy renderer fetch');
         this._mediaCacheNativeFetchCompatible = false;
         this._activateMediaCacheLegacyRoutingNotice();
         return fetch(url, options);
       }
     } catch (error) {
+      context.route = 'legacy';
+      this._reportMediaNetworkDebug(context, 'native fetch threw, falling back to legacy renderer fetch', error?.message);
       this._mediaCacheNativeFetchCompatible = false;
       this._activateMediaCacheLegacyRoutingNotice();
       return fetch(url, options);
@@ -12238,6 +12300,8 @@ module.exports = class MessageLoggerV2 {
   }
   async fetchMediaCacheResponse(url, options = {}) {
     const requestOptions = options && typeof options === 'object' ? { ...options } : {};
+    const requestContext = this._createMediaNetworkRequestContext(url, requestOptions);
+    this._reportMediaNetworkDebug(requestContext, 'start');
     const configuredTimeout = Number(this._mediaCacheFetchTimeoutMs);
     const timeoutMs = Number.isFinite(configuredTimeout)
       ? Math.max(1, configuredTimeout)
@@ -12255,18 +12319,42 @@ module.exports = class MessageLoggerV2 {
       timeout = setTimeout(() => abortHandle.abort('Media cache request timed out'), timeoutMs);
       if (controller) {
         response = await Promise.race([
-          this.fetchMediaNetworkResponse(url, {
-            ...requestOptions,
-            signal: controller.signal
-          }),
+          this.fetchMediaNetworkResponse(
+            url,
+            {
+              ...requestOptions,
+              signal: controller.signal
+            },
+            requestContext
+          ),
           abortHandle.promise
         ]);
       } else {
         response = await Promise.race([
-          this.fetchMediaNetworkResponse(url, requestOptions),
+          this.fetchMediaNetworkResponse(url, requestOptions, requestContext),
           abortHandle.promise
         ]);
       }
+      if (response && requestContext) {
+        requestContext.responseStatus = response?.status;
+        requestContext.responseStatusText = response?.statusText;
+        requestContext.responseReceivedAtMs = Date.now();
+        requestContext.completedAtMs = Date.now();
+        this._reportMediaNetworkDebug(requestContext, 'response received');
+      }
+      if (response == null && abortHandle.reason) {
+        this._reportMediaNetworkDebug(requestContext, `response missing: ${abortHandle.reason?.message || abortHandle.reason}`);
+      }
+    } catch (error) {
+      if (requestContext) {
+        requestContext.error = error;
+        requestContext.completedAtMs = Date.now();
+        this._reportMediaNetworkDebug(
+          requestContext,
+          `failed while routing: ${error?.name || 'Error'}${error?.message ? ` (${error.message})` : ''}`
+        );
+      }
+      throw error;
     } finally {
       clearTimeout(timeout);
       if (response == null) {
@@ -12278,7 +12366,11 @@ module.exports = class MessageLoggerV2 {
       if (!error.name) error.name = 'AbortError';
       throw error;
     }
-    return this._createManagedMediaCacheResponse(response, abortHandle, bodyTimeoutMs);
+    const responseWrapper = this._createManagedMediaCacheResponse(response, abortHandle, bodyTimeoutMs);
+    if (requestContext && responseWrapper && typeof responseWrapper === 'object') {
+      responseWrapper.__mlv2MediaNetworkContext = requestContext;
+    }
+    return responseWrapper;
   }
   getMediaCacheTransportSelection() {
     if (this.settings?.forceLegacyMediaFetching) {
@@ -12320,13 +12412,21 @@ module.exports = class MessageLoggerV2 {
       ? Math.max(0, configuredRetryDelay)
       : MEDIA_CACHE_RETRY_DELAY_MS;
     let response;
+    let requestContext;
+    let elapsedMs;
     try {
       response = await this.fetchMediaCacheResponse(url);
+      requestContext = response?.__mlv2MediaNetworkContext;
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       if (!response.ok) {
+        this._reportMediaNetworkDebug(requestContext, `HTTP ${response.status}`);
         await (response?.release?.() ?? response?.releaseBody?.() ?? Promise.resolve());
         if (response.status === 404 || response.status === 403) {
           Logger.warn(`Image ${attachmentId} unavailable (${response.status}), skipping cache`);
+          this._reportMediaNetworkDebug(
+            requestContext,
+            `completed with unrecoverable status ${response.status}`
+          );
           if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
             this.reportDeferredMediaCacheFailure(
               attachmentId,
@@ -12338,6 +12438,10 @@ module.exports = class MessageLoggerV2 {
         attempts++;
         if (attempts >= maxAttempts) {
           Logger.warn(`Failed to get image ${attachmentId} for caching, error code ${response.status}`);
+          this._reportMediaNetworkDebug(
+            requestContext,
+            `completed with retry limit exceeded (status=${response.status})`
+          );
           if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
             this.reportDeferredMediaCacheFailure(
               attachmentId,
@@ -12350,8 +12454,17 @@ module.exports = class MessageLoggerV2 {
         return this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts, writeEpoch);
       }
       const arrayBuffer = await response.arrayBuffer();
+      if (response?.status != null && requestContext) {
+        requestContext.completedAtMs = Date.now();
+      }
+      elapsedMs = requestContext?.completedAtMs && requestContext.startedAtMs
+        ? requestContext.completedAtMs - requestContext.startedAtMs
+        : null;
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       const finalData = new Uint8Array(arrayBuffer);
+      if (requestContext) {
+        requestContext.bytes = finalData.byteLength;
+      }
       let match = /\.[0-9a-z]+$/i.exec(new URL(url).pathname);
       if (match == null) {
         match = [this.contentTypeToExtension(response.headers.get("content-type"))];
@@ -12376,11 +12489,19 @@ module.exports = class MessageLoggerV2 {
       this.nodeModules.fs.writeFileSync(filePath + `/${fileId} (${messageId}${(this.settings.addUserIdToSavedMediaFilename && authorId) ? (" by " + authorId) : ""
       })${fileExtension}`, finalData, { encoding: null });
       Logger.log(`Cached image: ${fileId}${fileExtension}`);
+      this._reportMediaNetworkDebug(
+        requestContext,
+        `completed with status ${response.status}${requestContext?.bytes != null ? ` bytes=${requestContext.bytes}` : ''}${elapsedMs != null ? ` durationMs=${elapsedMs}` : ''}`
+      );
     } catch (e) {
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       attempts++;
       if (attempts >= maxAttempts) {
         Logger.error(`Failed to cache image ${attachmentId}:`, e.message);
+        this._reportMediaNetworkDebug(
+          requestContext,
+          `failed with ${e?.name || 'Error'}${e?.message ? ` (${e.message})` : ''} after ${attempts} attempts`
+        );
         if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
           this.reportDeferredMediaCacheFailure(attachmentId, e);
         }
