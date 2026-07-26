@@ -821,7 +821,7 @@ changing their networking, retry, cache, notification, or persistence behavior.
       handled accordingly.
 - [x] Run focused tests, full `npm test`, `npm run check`, `git diff --check`,
       Markdown parsing, independent review, and the parent final audit.
-- [ ] Commit the implementation and record its exact commit and validation
+- [x] Commit the implementation and record its exact commit and validation
       results here before live sync.
 - [ ] Sync only the plugin file live, confirm hash parity and clean hot reload,
       then use the new diagnostics during the remaining Stage 6 runtime checks.
@@ -867,8 +867,8 @@ Stage 5C plan/result:
 - Accepted independent review: the production audit found no blocking or
   non-blocking defect. A separate release audit found only stale `TODO.md`
   wording, which was reported first and corrected before this checkpoint.
-- Accepted implementation commit: pending; record its full hash immediately
-  after committing this result.
+- Accepted implementation commit:
+  15eb75b7c5e9125cab64bb8e657721f223ab914f.
 
 ## Stage 5D — Networking release metadata
 
@@ -1648,8 +1648,7 @@ evidence for another session to understand what changed and why.
 - **Failures or blockers:** The production audit found none. The release audit
   found one stale `TODO.md` version/paused note; it was reported before being
   corrected. Runtime-only `RT-26` checks remain after final sync.
-- **Commit:** pending; replace this marker with the full implementation hash in
-  the immediate checklist checkpoint.
+- **Commit:** 15eb75b7c5e9125cab64bb8e657721f223ab914f.
 - **Exact next action:** Run the final validation on this exact tree, commit it,
   record the full hash, then sync only the plugin, verify hash/log evidence,
   checkpoint, push the feature branch, and provide the user test list.
@@ -1671,7 +1670,7 @@ evidence for another session to understand what changed and why.
   parents, but provisional physical guild-media files have no Anti-Nuke
   age/byte/count eviction and are not removed when no deletion is confirmed or
   capture caps reject them. URL-only staging would risk expired CDN URLs.
-- **Commit:** pending with the accepted Stage 5C/5D implementation.
+- **Commit:** 15eb75b7c5e9125cab64bb8e657721f223ab914f.
 - **Exact next action:** After networking runtime checks are complete, design
   bounded provisional storage that promotes confirmed nuke/Ghost-Ping or
   ordinary-record files and safely deletes expired/rejected candidates.
