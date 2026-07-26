@@ -67,12 +67,12 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit the user-approved Stage 5C detailed media-network console diagnostics
-plan, record its exact commit, then implement it with deterministic coverage
-and documentation. Complete the full validation and final audit, automatically
-sync only `MessageLoggerV2.plugin.js`, verify live hash/reload evidence, and
-finish the remaining user-driven Stage 6 checks, including native, legacy,
-cancellation, and the controlled local stall probe.
+Implement the committed Stage 5C detailed media-network console diagnostics
+with deterministic coverage and documentation. Complete the full validation
+and final audit, commit and record the result, automatically sync only
+`MessageLoggerV2.plugin.js`, verify live hash/reload evidence, and finish the
+remaining user-driven Stage 6 checks, including native, legacy, cancellation,
+and the controlled local stall probe.
 
 ### Resume procedure for a new session
 
@@ -827,7 +827,7 @@ Stage 5C plan/result:
   sensitive signed/query values.
 - Request identity: one monotonic ID per actual HTTP attempt, so retries remain
   distinguishable and concurrent native/legacy activity is attributable.
-- Plan commit: `<pending-stage-5c-plan-commit>`.
+- Plan commit: `1ecd08c189893f538725f7d6034fd005b8f09b2b`.
 
 ## Stage 6 — Live BetterDiscord verification
 
@@ -1442,7 +1442,7 @@ evidence for another session to understand what changed and why.
   exists yet.
 - **Failures or blockers:** None. Full URLs may expose signed/query values in
   exported console logs, so that risk must be documented with the setting.
-- **Commit:** `<pending-stage-5c-plan-commit>`.
+- **Commit:** `1ecd08c189893f538725f7d6034fd005b8f09b2b`.
 - **Exact next action:** Commit this plan, record its exact hash, then delegate
   the bounded implementation and focused tests before parent integration,
   full-suite validation, independent audit, and authorized live sync.
