@@ -35,10 +35,11 @@ review, checklist update, and commit must also be complete.
 - **Working branch:** `fix/native-media-networking`
 - **Branch base:** a5eadbe736f5a0cf4b7a3730bf9950ade17ad752
   (`docs: prepare 2.8.2.8 release notes`)
-- **Upstream status:** The binary-read correction was published through
-  fb514813a9c8851f7c5ff69153c7e1678c2467d4; local, tracking, and direct remote
-  refs matched exactly after that push. The completed earlier implementation
-  and live-sync history was first published through
+- **Upstream status:** The native-only implementation and live-sync evidence
+  were published through d01f1e6567c27cbc2f42a90b2fd4a94b90596317;
+  local, tracking, and direct remote refs matched exactly after that push. The
+  completed earlier implementation and live-sync history was first published
+  through
   e84bfaaf6fffc4b809f7e4fb6fe70ef6ac5c5897. `develop`, `main`,
   `origin/develop`, and `origin/main` all remain untouched at
   a5eadbe736f5a0cf4b7a3730bf9950ade17ad752.
@@ -102,11 +103,10 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit the live-sync evidence, push the feature branch, verify local/tracking
-and direct-remote refs, then give the user the short PNG/JPEG plus
-negative-format matrix. Amend the built-in changelog only after runtime
-confirmation. Keep provisional Anti-Nuke/Ghost-Ping retention as a separate
-post-networking stage.
+Commit and push this publication evidence, then give the user the short
+PNG/JPEG plus negative-format matrix. Amend the built-in changelog only after
+runtime confirmation. Keep provisional Anti-Nuke/Ghost-Ping retention as a
+separate post-networking stage.
 
 ### Resume procedure for a new session
 
@@ -182,7 +182,7 @@ recorded as an amendment before implementation.
 - [x] Native-only clipboard correction implemented and fully audited.
 - [x] Native-only clipboard correction committed.
 - [x] Native-only clipboard correction live-synced.
-- [ ] Native-only clipboard correction pushed.
+- [x] Native-only clipboard correction pushed.
 - [ ] User `RT-26` live behavior result received and recorded.
 - [x] Final implementation committed.
 
@@ -2613,6 +2613,29 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit this exact-hash follow-up, push the feature
   branch, verify local/tracking/direct-remote refs, then give the user the
   final short test list.
+
+### 2026-07-27 — Native-only clipboard publication
+
+- **Completed:** Pushed the validated native-only clipboard implementation and
+  its live-sync evidence to the existing
+  `origin/fix/native-media-networking` branch.
+- **Decisions:** Do not merge into `develop` or `main`; do not change version
+  or built-in changelog until the final clipboard runtime check passes.
+- **Files changed:** This publication evidence only after the synced product
+  tree.
+- **Tests and exact results:** Publication reused the exact live-synced source
+  tree that passed focused `73/73`, full `394/394`, syntax, diff, Markdown, and
+  independent review gates.
+- **Runtime evidence:** Local `HEAD`, local
+  `origin/fix/native-media-networking`, and direct `git ls-remote` all matched
+  d01f1e6567c27cbc2f42a90b2fd4a94b90596317 immediately after the push.
+- **Failures or blockers:** None in publication. Only the short PNG/JPEG and
+  unsupported-format runtime matrix remains.
+- **Commit:** Published native-only checkpoint
+  d01f1e6567c27cbc2f42a90b2fd4a94b90596317; this evidence-only follow-up is
+  the next branch tip.
+- **Exact next action:** Give the user the short runtime matrix, record those
+  results, and amend the built-in changelog only after success is confirmed.
 
 ### Handoff entry template
 
