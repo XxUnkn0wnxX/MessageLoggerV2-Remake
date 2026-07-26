@@ -103,10 +103,12 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit and push this publication evidence, then give the user the short
-PNG/JPEG plus negative-format matrix. Amend the built-in changelog only after
-runtime confirmation. Keep provisional Anti-Nuke/Ghost-Ping retention as a
-separate post-networking stage.
+Commit this compatibility checkpoint, live-sync the tested plugin, verify
+source/live hash parity and reload logs, then push the feature branch. Ask the
+user to retry the mounted PNG/JPEG copy with ImageUtilities enabled both before
+and after CMD+R. Amend the built-in changelog only after runtime confirmation.
+Keep provisional Anti-Nuke/Ghost-Ping retention as a separate post-networking
+stage.
 
 ### Resume procedure for a new session
 
@@ -183,6 +185,10 @@ recorded as an amendment before implementation.
 - [x] Native-only clipboard correction committed.
 - [x] Native-only clipboard correction live-synced.
 - [x] Native-only clipboard correction pushed.
+- [x] Post-CMD+R ImageUtilities compatibility trace completed.
+- [x] Mounted-media copy ownership compatibility fix implemented and tested.
+- [x] Mounted-media copy ownership compatibility fix committed.
+- [ ] Mounted-media copy ownership compatibility fix live-synced and pushed.
 - [ ] User `RT-26` live behavior result received and recorded.
 - [x] Final implementation committed.
 
@@ -2737,11 +2743,53 @@ evidence for another session to understand what changed and why.
   without a Logger error, so the next probe targets dispatch/DOM ownership
   rather than plugin load or file drift.
 - **Failures or blockers:** One post-CMD+R right-click trace is required.
-- **Commit:** Pending trace-plan checkpoint.
+- **Commit:** Trace-plan checkpoint
+  7473c387836b8cfea887e26c032a46207ed8d3e3.
 - **Exact next action:** Install and enable
   `MessageLoggerImageContextReloadTrace`, right-click the affected restored
   image once, inspect its report, then unlink and remove the helper before
   implementing the exact regression fix.
+
+### 2026-07-27 — Generic mounted-media menu compatibility fix
+
+- **Completed:** The post-CMD+R trace proved the affected restored image opens
+  the `message` menu, resolves to the exact Logger-mounted row, remains eligible
+  for presentation, and resolves its physical cached JPG correctly. The final
+  menu still contained a later `Copy image` action. Disabling ImageUtilities
+  made Logger's copy route survive CMD+R, confirming a menu-patch ordering
+  compatibility issue rather than a clipboard or cache failure.
+- **Decisions:** Keep Logger's existing named `message` patch ordering for its
+  submenu and delete actions. Move only saved-media copy ownership into exact
+  non-global regex patches, because both BetterDiscord `develop` and
+  `upstream-development` run all named context-menu patches before regex
+  patches. BDFDB registers ImageUtilities and similar normal plugin hooks as
+  named patches. Match any existing `Copy image` or `Copy media` action by the
+  existing generic ID/label rules; do not hardcode ImageUtilities. Replace or
+  remove actions only when the target belongs to an actively presented
+  Logger-mounted deleted row with matching message/channel IDs. Preserve the
+  existing cache-master, physical-file, and PNG/JPG/JPEG gates.
+- **Files changed:** `MessageLoggerV2.plugin.js`,
+  `tests/clipboard.test.js`, `tests/source-contracts.test.js`, and this
+  checklist. The disposable trace source, live symlink, saved trace excerpt,
+  and generated live report were removed after the cause was confirmed.
+- **Tests and exact results:** PASS — focused clipboard/source tests `76/76`;
+  full `npm test` `397/397`; plugin syntax and `git diff --check` passed.
+  Independent review returned PASS for named-versus-regex ordering, generic
+  third-party matching, mounted-row ownership, unchanged cache/file-format
+  gates, duplicate removal, ordinary-message isolation, and compatibility with
+  both BetterDiscord targets.
+- **Runtime evidence:** ImageUtilities `onMessageContextMenu()` injects its copy
+  row through BDFDB's named BetterDiscord patch. BetterDiscord then runs exact
+  regex patches after every named patch. The regression test models an
+  arbitrary third-party `Copy image` action and proves Logger replaces exactly
+  one action on its mounted row while leaving an unmounted action untouched.
+- **Failures or blockers:** No automated or review blocker. A live test with
+  ImageUtilities enabled, including one CMD+R retry, is still required.
+- **Commit:** Validated implementation
+  2847b1c64ecaa8ab47bed4506d57e87eee02c33d.
+- **Exact next action:** Commit this checklist checkpoint, live-sync only the
+  plugin, verify hash/reload logs, push the branch, then ask the user to repeat
+  the restored PNG/JPEG copy before and after CMD+R with ImageUtilities enabled.
 
 ### Handoff entry template
 
