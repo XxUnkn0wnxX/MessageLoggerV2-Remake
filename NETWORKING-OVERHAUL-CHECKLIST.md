@@ -2031,8 +2031,8 @@ evidence for another session to understand what changed and why.
   updater route.
 - **Failures or blockers:** None for updater isolation or force independence.
   Local and remote clipboard checks remain.
-- **Commit:** Pending this runtime-evidence commit; replace this text with its
-  exact hash in the immediate checklist checkpoint.
+- **Commit:** Updater runtime-evidence checkpoint
+  a74d1639f6cb3b9875305f8338723c3ed561f4c0.
 - **Exact next action:** Record and push this evidence, then run local `blob:`
   clipboard copying with media force Off and On.
 
