@@ -1941,10 +1941,10 @@ evidence for another session to understand what changed and why.
   and one successful terminal outcome.
 - **Failures or blockers:** None for mixed-content transport. File-size limits
   are the next media-cache check.
-- **Commit:** Pending this mixed-content runtime-evidence commit; record its
-  exact hash immediately after commit.
-- **Exact next action:** Commit and record this checkpoint, push the branch,
-  then prepare the smallest safe file-size-limit test.
+- **Commit:** Mixed-content runtime-evidence checkpoint
+  fc9741e8d15aa8ac3b8a12452ad9cd9743233a2c.
+- **Exact next action:** After this commit record is pushed, prepare the
+  smallest safe file-size-limit test.
 
 ### Handoff entry template
 
