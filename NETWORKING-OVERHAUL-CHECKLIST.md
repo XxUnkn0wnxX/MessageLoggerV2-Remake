@@ -1261,7 +1261,7 @@ evidence for another session to understand what changed and why.
   confirmed Logger defect.
 - **Failures or blockers:** The 30-second body-inactivity behavior still needs
   one clean live retest. No code fix is authorized or indicated by this result.
-- **Commit:** `<pending-initial-rt26-results-checkpoint>`.
+- **Commit:** `90abbad3ae35e8d8f1819ba178d462ffa7467301`.
 - **Exact next action:** Ask the user to rerun only the 70-second/two-byte stall
   probe. If the endpoint aborts early again, replace it with a controlled local
   or helper-plugin stall probe.
