@@ -88,14 +88,14 @@ review, checklist update, and commit must also be complete.
   `tests/records.test.js`, `README.md`, `TODO.md`,
   `docs/architecture.md`, `docs/help.md`, `docs/settings.md`, `docs/tests.md`,
   and this checklist.
-- **Live plugin:** The native-only `2.8.2.9` build is live. Repository and live
-  SHA-256 both equal
-  `7a4ae6fc0374779451b2c68d679e8c978fe1901b9bae9bb2fe61300a3cbf7b58`.
-  The UTC hot-reload segment at `2026-07-26 20:39:34-20:39:40` shows patch
-  cleanup, successful reinitialization, UI refresh completion, and fresh
-  media-cache work without a matching Logger error. Discord was not relaunched.
-  No MessageLogger trace/probe/clipboard helper is linked in the live plugin
-  directory.
+- **Live plugin:** The mounted-media compatibility build remains version
+  `2.8.2.9` and is live. Repository and live SHA-256 both equal
+  `ec166890dc9ee56c011a1c4f1d1ca637d5fa37916e62a0ab5d112dc5348b1be6`.
+  The UTC hot-reload segment at `2026-07-26 21:25:25-21:25:28` shows patch
+  cleanup, successful reapplication, UI refresh completion, and fresh cache
+  work without a matching Logger error. Discord was not relaunched. The
+  disposable reload trace source, symlink, excerpt, and generated report are
+  removed.
 - **Publishing authority:** The user explicitly authorized pushing both working
   branches to `origin` on 2026-07-26 and explicitly re-authorized pushing the
   current `fix/native-media-networking` branch after live sync on 2026-07-27.
@@ -103,12 +103,11 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit this compatibility checkpoint, live-sync the tested plugin, verify
-source/live hash parity and reload logs, then push the feature branch. Ask the
-user to retry the mounted PNG/JPEG copy with ImageUtilities enabled both before
-and after CMD+R. Amend the built-in changelog only after runtime confirmation.
-Keep provisional Anti-Nuke/Ghost-Ping retention as a separate post-networking
-stage.
+Commit the live-sync evidence and push the feature branch. Verify local,
+tracking, and direct remote refs, then ask the user to retry the mounted
+PNG/JPEG copy with ImageUtilities enabled both before and after CMD+R. Amend
+the built-in changelog only after runtime confirmation. Keep provisional
+Anti-Nuke/Ghost-Ping retention as a separate post-networking stage.
 
 ### Resume procedure for a new session
 
@@ -188,7 +187,9 @@ recorded as an amendment before implementation.
 - [x] Post-CMD+R ImageUtilities compatibility trace completed.
 - [x] Mounted-media copy ownership compatibility fix implemented and tested.
 - [x] Mounted-media copy ownership compatibility fix committed.
-- [ ] Mounted-media copy ownership compatibility fix live-synced and pushed.
+- [x] Mounted-media copy ownership compatibility fix live-synced and
+      hash-verified.
+- [ ] Mounted-media copy ownership compatibility fix pushed.
 - [ ] User `RT-26` live behavior result received and recorded.
 - [x] Final implementation committed.
 
@@ -2790,6 +2791,35 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit this checklist checkpoint, live-sync only the
   plugin, verify hash/reload logs, push the branch, then ask the user to repeat
   the restored PNG/JPEG copy before and after CMD+R with ImageUtilities enabled.
+
+### 2026-07-27 — Mounted-media compatibility live sync
+
+- **Completed:** Re-ran the complete pre-sync gate and replaced only the live
+  `MessageLoggerV2.plugin.js` with the committed mounted-media compatibility
+  build.
+- **Decisions:** Keep version `2.8.2.9` and the built-in changelog unchanged
+  until the final ImageUtilities-on CMD+R runtime check passes.
+- **Files changed:** Live `MessageLoggerV2.plugin.js` plus this checklist
+  evidence only.
+- **Tests and exact results:** PASS — final pre-sync `npm test` `397/397`;
+  plugin syntax, `git diff --check`, and Markdown parsing passed. This reused
+  the independently reviewed implementation.
+- **Runtime evidence:** Sync began at `2026-07-26 21:25:24 UTC`. Repository and
+  live SHA-256 both equal
+  `ec166890dc9ee56c011a1c4f1d1ca637d5fa37916e62a0ab5d112dc5348b1be6`.
+  The new log segment shows old patch cleanup at `21:25:25`, patch
+  reapplication and initialization at `21:25:26`, UI refresh completion, and
+  fresh cache work through `21:25:28` without a matching Logger error. The
+  disposable trace helper and generated files remain removed.
+- **Failures or blockers:** No sync blocker. The user must confirm the restored
+  PNG/JPEG action uses Logger's toast with ImageUtilities enabled immediately
+  and after CMD+R.
+- **Commit:** Implementation
+  2847b1c64ecaa8ab47bed4506d57e87eee02c33d; pre-sync checklist checkpoint
+  c9ffe9ccfc49f34f3559660fa4c118879e08dab6.
+- **Exact next action:** Commit this live-sync evidence, push the branch,
+  verify local/tracking/direct-remote parity, and give the user the two-step
+  runtime check.
 
 ### Handoff entry template
 
