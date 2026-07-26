@@ -737,7 +737,9 @@ Stage 5A commit/result:
     `Access-Control-Allow-Origin` header when rechecked on 2026-07-27. A stable
     backup with the same missing CORS header is
     `https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png`.
-  - Verify an HTTP/mixed-content media URL.
+  - Verify an HTTP/mixed-content media URL:
+    `http://httpbin.org/image/png` returned HTTP 200 `image/png` without an
+    HTTPS redirect when rechecked on 2026-07-27.
   - Verify slow progress with
     `https://httpbin.org/drip?duration=40&numbytes=40&delay=0&code=200`;
     it sends one byte per second and should complete after about 40 seconds.
@@ -1225,13 +1227,15 @@ evidence for another session to understand what changed and why.
 - **Files changed:** This checklist only.
 - **Tests and exact results:** Waifugami HTTP 200 `image/png`, 1,091,999 bytes,
   no `Access-Control-Allow-Origin`; Google image HTTP 200 `image/png`, 13,504
-  bytes, no `Access-Control-Allow-Origin`; eight-second httpbin sample emitted
+  bytes, no `Access-Control-Allow-Origin`; plain-HTTP httpbin image HTTP 200
+  `image/png` without an HTTPS redirect; eight-second httpbin sample emitted
   one-byte chunks at roughly one-second intervals.
 - **Runtime evidence:** Endpoint/header/chunk timing verified outside Discord;
   user invocation inside Discord remains pending.
 - **Failures or blockers:** None. If DevTools console use is inconvenient, a
   disposable helper plugin can expose the same two probes.
 - **Commit:** `32b0df1b61116855a4dcfba2ac952b4b3497e02d`.
+- **HTTP test-resource follow-up:** `<pending-stage6-http-resource-checkpoint>`.
 - **Exact next action:** Give the user the exact pasteable probes and wait for
   their results.
 
