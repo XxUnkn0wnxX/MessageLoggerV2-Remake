@@ -56,20 +56,20 @@ review, checklist update, and commit must also be complete.
   no longer preempts those Logger watchdogs. Stage 5C now emits truthful,
   console-only per-attempt diagnostics with one managed terminal outcome, and
   Stage 5D updates the release to `2.8.2.9`. The accepted implementation is
-  awaiting its commit, final live replacement, checkpoint, and branch push.
+  committed at 15eb75b7c5e9125cab64bb8e657721f223ab914f, recorded by
+  checkpoint d25576f84aa62b41c2149fae30b7b809f86a3e1d, and live with matching
+  source bytes. The final live checkpoint and branch push remain.
 - **Current tracked task changes:** Stages 1-5D are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/settings-recovery.test.js`, `tests/source-contracts.test.js`,
   `README.md`, `TODO.md`, `docs/architecture.md`, `docs/help.md`,
   `docs/settings.md`, `docs/tests.md`, and this checklist.
-- **Live plugin:** An implementation worker prematurely copied intermediate
-  commit 16e5355a0c73eab7146f34a62c1f74e5195af89e before the required Stage 5C
-  correction, Stage 5D version/changelog update, and final audit. Repository
-  and live SHA-256 currently match at
-  `e98585152b39b30c32b7ad46418d6e9bf454afd2cb1478db4a5c165a7c9bfcd1`,
-  but this is not the approved release candidate and the user was told not to
-  test it. Replace it with the fully validated `2.8.2.9` plugin before final
-  runtime testing and reporting.
+- **Live plugin:** The premature intermediate `2.8.2.8` copy was replaced with
+  the accepted `2.8.2.9` plugin. Repository and live SHA-256 both equal
+  `d7cfc616ac9d2bcf36d67a496a0d13e4de63168fd99dad50adfd279b4425ef37`.
+  The current UTC log segment shows cleanup, reinitialization, patch
+  completion, and later successful cache writes without a matching startup
+  exception. Discord was not relaunched.
 - **Publishing authority:** The user explicitly authorized pushing both working
   branches to `origin` on 2026-07-26 and explicitly re-authorized pushing the
   current `fix/native-media-networking` branch after live sync on 2026-07-27.
@@ -77,9 +77,7 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit and record the accepted Stage 5C/5D implementation, then replace the
-premature live copy with only the final `2.8.2.9` plugin file. Verify live hash
-and hot reload, commit that checkpoint, push `fix/native-media-networking` to
+Commit this final live checkpoint, push `fix/native-media-networking` to
 `origin`, verify local/remote ref alignment, and give the user the remaining
 native, legacy, cancellation, controlled-stall, update, and clipboard `RT-26`
 tests. Keep the audited provisional Anti-Nuke/Ghost-Ping media-retention work
@@ -823,7 +821,7 @@ changing their networking, retry, cache, notification, or persistence behavior.
       Markdown parsing, independent review, and the parent final audit.
 - [x] Commit the implementation and record its exact commit and validation
       results here before live sync.
-- [ ] Sync only the plugin file live, confirm hash parity and clean hot reload,
+- [x] Sync only the plugin file live, confirm hash parity and clean hot reload,
       then use the new diagnostics during the remaining Stage 6 runtime checks.
 - [ ] After live sync and the final checklist checkpoint, push
       `fix/native-media-networking` to `origin` and verify local/remote ref
@@ -907,11 +905,11 @@ Stage 5D plan/result:
 ## Stage 6 — Live BetterDiscord verification
 
 - [x] The user separately authorized final live sync on 2026-07-27.
-- [ ] Replace the premature intermediate copy with the final validated
+- [x] Replace the premature intermediate copy with the final validated
       `2.8.2.9` `MessageLoggerV2.plugin.js`.
-- [ ] Verify final repository/live SHA-256 parity.
+- [x] Verify final repository/live SHA-256 parity.
 - [x] Do not relaunch Discord.
-- [ ] Confirm the final hot-reloaded plugin initializes without a matching
+- [x] Confirm the final hot-reloaded plugin initializes without a matching
       startup/runtime error in the current logs.
 - [ ] Complete and record the remaining user-driven `RT-26` behavior checks:
   - [ ] Verify default native routing with a normal Discord CDN URL.
@@ -956,6 +954,17 @@ Stage 5D plan/result:
 
 Live result:
 
+- Date: 2026-07-27 final Stage 5C/5D live replacement.
+- Result: **FINAL 2.8.2.9 SYNC, HASH, AND BASIC HOT-RELOAD PASS; USER RT-26
+  TESTING PENDING.**
+- Notes: Repository and live SHA-256 both equal
+  `d7cfc616ac9d2bcf36d67a496a0d13e4de63168fd99dad50adfd279b4425ef37`.
+  The current log advanced with cleanup, reinitialization, patch completion,
+  and successful `Cached image` entries without a matching startup exception.
+  Discord was not relaunched.
+
+Historical result:
+
 - Date: 2026-07-27 earlier authorized pre-Stage-5B live sync.
 - BetterDiscord/runtime version: Not separately probed.
 - Result: **HISTORICAL BASIC HOT-RELOAD PASS; FINAL SYNC/TESTING PENDING.**
@@ -970,13 +979,14 @@ Live result:
 
 ## Final branch gate
 
-- [ ] Stages 5C and 5D are complete with every checklist item resolved.
-- [ ] Full test suite and final independent audit pass on `2.8.2.9`.
-- [ ] `git diff --check` and Markdown parsing pass on the final tree.
-- [ ] Final live hash parity and clean hot reload are verified.
+- [x] Stages 5C and 5D are complete except for the separately listed user
+      runtime matrix and post-sync branch push.
+- [x] Full test suite and final independent audit pass on `2.8.2.9`.
+- [x] `git diff --check` and Markdown parsing pass on the final tree.
+- [x] Final live hash parity and clean hot reload are verified.
 - [ ] Remaining user-driven `RT-26` behavior result recorded.
 - [x] No unrelated attachment-gate implementation was included.
-- [ ] Version and built-in changelog are updated under explicit approval.
+- [x] Version and built-in changelog are updated under explicit approval.
 - [ ] Push the final checkpoint only after the authorized live sync and verify
       local/remote ref alignment.
 - [x] Checklist removal was not requested for this working branch; retain it as
@@ -1674,6 +1684,32 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** After networking runtime checks are complete, design
   bounded provisional storage that promotes confirmed nuke/Ghost-Ping or
   ordinary-record files and safely deletes expired/rejected candidates.
+
+### 2026-07-27 — Final 2.8.2.9 live replacement
+
+- **Completed:** Replaced the premature live `2.8.2.8` copy with the accepted
+  repository `2.8.2.9` plugin, byte-compared both files, verified SHA-256
+  parity, and inspected the current hot-reload log segment.
+- **Decisions:** Copy only `MessageLoggerV2.plugin.js`; do not relaunch Discord
+  or install test files/helpers into the live plugins directory.
+- **Files changed:** Live `MessageLoggerV2.plugin.js` plus this checklist. The
+  accepted repository implementation remains
+  15eb75b7c5e9125cab64bb8e657721f223ab914f, with its recorded checklist
+  checkpoint d25576f84aa62b41c2149fae30b7b809f86a3e1d.
+- **Tests and exact results:** The exact pre-sync repository tree passed full
+  `npm test` `379/379`, `npm run check`, `git diff --check`, changed Markdown
+  parsing, and ten repeated media-suite runs.
+- **Runtime evidence:** Repository/live SHA-256 both equal
+  `d7cfc616ac9d2bcf36d67a496a0d13e4de63168fd99dad50adfd279b4425ef37`.
+  The current UTC log segment shows cleanup, successful reinitialization,
+  patch completion, and later cache writes without a matching startup error.
+- **Failures or blockers:** No basic load blocker. The controlled stall,
+  cancellation, legacy/debug routing, updater, and clipboard checks remain
+  user-driven `RT-26` work.
+- **Commit:** pending final live checkpoint.
+- **Exact next action:** Commit this live checkpoint, push the current feature
+  branch, verify local/remote ref alignment, then give the user the concise
+  remaining test instructions and wait for results.
 
 ### Handoff entry template
 
