@@ -695,7 +695,9 @@ Stage 5A commit/result:
 
 - Plan commit: `ab5f56ebc3c1195a23597794f1bcdf9a0a0d1ba2`
   (`docs: plan media body inactivity watchdog`).
-- Cancellation-scope clarification commit: `<pending-scope-commit>`.
+- Cancellation-scope clarification commit:
+  `f17a96e42348d725adcc578fb0ec3b489011afb0`
+  (`docs: clarify media watchdog cancellation scope`).
 - Implementation commit: `<pending-implementation-commit>`.
 - Tests: PENDING.
 - Notes: The approved policy measures inactivity rather than total transfer
@@ -1092,7 +1094,8 @@ evidence for another session to understand what changed and why.
   setting is `newSaveAllFileTypes`; the master is `cacheAllImages`.
 - **Failures or blockers:** The child toggle remains a documented known
   limitation for a later, separately scoped repair.
-- **Commit:** `<pending-scope-commit>`.
+- **Commit:** `f17a96e42348d725adcc578fb0ec3b489011afb0`
+  (`docs: clarify media watchdog cancellation scope`).
 - **Exact next action:** Commit and record this clarification, then begin the
   bounded Stage 5A implementation without changing the child setting.
 
