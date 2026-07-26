@@ -1551,7 +1551,7 @@ test('saved-media clipboard paths replace only deleted native actions and add on
   assert.match(copyContext, /const resolvePath = this\.imageCacheServerSimulator\?\._resolveImagePath/);
   assert.match(copyContext, /if \(!localPath \|\| !fs\.existsSync\(localPath\)\) continue;/);
   assert.match(copyContext, /copyMode: extension === '\.gif' \? 'file' : 'image'/);
-  assert.match(copyContext, /const rawBytes = fs\.readFileSync\(localPath\)/);
+  assert.match(copyContext, /const rawBytes = fs\.readFileSync\(localPath, null\)/);
   assert.match(copyContext, /if \(source\.copyMode === 'file'\)[\s\S]*clipboard\.copyFile\(localPath\)/);
   assert.match(copyContext, /clipboard\.copyImage\(bytes, 'image\.png'\)/);
   assert.match(copyContext, /clipboard\.copyFile\(localPath\)/);

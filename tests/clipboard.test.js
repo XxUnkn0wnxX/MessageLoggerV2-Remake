@@ -75,10 +75,12 @@ function installCachedFiles(plugin, mappings = []) {
     ...(plugin.nodeModules || {}),
     fs: {
       existsSync: path => files.has(path),
-      readFileSync(path) {
-        reads.push(path);
+      readFileSync(path, encoding) {
+        reads.push(`${path}:${encoding === undefined ? 'default' : String(encoding)}`);
         if (!files.has(path)) throw new Error(`Missing test cache file: ${path}`);
-        return files.get(path);
+        const file = files.get(path);
+        if (encoding === null) return file;
+        return Buffer.from(file).toString('binary');
       }
     }
   };
@@ -319,7 +321,8 @@ test('clipboard writes static images as image data and GIFs as the original loca
 
     assert.deepEqual(imageWrites, [{ bytes: [4, 5, 6], source: 'image.png' }]);
     assert.deepEqual(fileWrites, ['/tmp/cache/media.gif']);
-    assert.deepEqual(cache.reads, ['/tmp/cache/media.png'], 'file copy must not decode/read the GIF');
+    assert.deepEqual(cache.reads, ['/tmp/cache/media.png:null']);
+    assert.equal(cache.reads[0].endsWith(':null'), true, 'static image copy must read as binary');
     assert.deepEqual(notifications, [
       ['Image was copied to the Clipboard', { type: 'success' }],
       ['Media was copied to the Clipboard', { type: 'success' }]

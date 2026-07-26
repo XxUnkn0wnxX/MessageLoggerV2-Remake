@@ -16421,7 +16421,7 @@ module.exports = class MessageLoggerV2 {
       if (typeof fs.readFileSync !== 'function') {
         throw new Error('Clipboard media file API is unavailable');
       }
-      const rawBytes = fs.readFileSync(localPath);
+      const rawBytes = fs.readFileSync(localPath, null);
       const bytes = rawBytes instanceof Uint8Array
         ? rawBytes
         : rawBytes instanceof ArrayBuffer
