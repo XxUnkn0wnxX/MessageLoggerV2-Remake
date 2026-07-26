@@ -730,33 +730,39 @@ Stage 5A commit/result:
 - [x] Confirmed the hot-reloaded plugin initialized and resumed media caching
       without a startup error in the current `debug.log`.
 - [ ] Complete and record the remaining user-driven `RT-26` behavior checks:
-  - Verify default native routing with a normal Discord CDN URL.
-  - Verify the previously failing Waifugami cross-origin URL:
+  - [ ] Verify default native routing with a normal Discord CDN URL.
+  - [x] Verify the previously failing Waifugami cross-origin URL:
     `https://www.waifugami.com/catalog/81448138f5f163ccdba4acc69819f280/1dacb10f0623c67cb7dbb37587d8b38a/images/76135`.
     It returned HTTP 200 `image/png` without an
     `Access-Control-Allow-Origin` header when rechecked on 2026-07-27. A stable
     backup with the same missing CORS header is
     `https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png`.
-  - Verify an HTTP/mixed-content media URL:
+    The live Logger probe completed with HTTP 200 and 1,091,999 bytes in 2.5
+    seconds.
+  - [ ] Verify an HTTP/mixed-content media URL:
     `http://httpbin.org/image/png` returned HTTP 200 `image/png` without an
     HTTPS redirect when rechecked on 2026-07-27.
-  - Verify slow progress with
+  - [x] Verify slow progress with
     `https://httpbin.org/drip?duration=40&numbytes=40&delay=0&code=200`;
-    it sends one byte per second and should complete after about 40 seconds.
-  - Verify body inactivity with
+    the live Logger probe completed all 40 bytes in 42.0 seconds, confirming
+    that continuing body progress keeps the request alive.
+  - [ ] Verify body inactivity with
     `https://httpbin.org/drip?duration=70&numbytes=2&delay=0&code=200`;
     it sends one byte immediately, then leaves a roughly 35-second gap, so the
     logger should abort after about 30 seconds without progress.
-  - Verify media-cache file-size limits.
-  - Verify abort/cancellation behavior when caching is disabled or the plugin
+    The first live attempt was inconclusive because the request returned a
+    generic `Error: aborted` after 6.0 seconds, before the Logger watchdog
+    deadline.
+  - [ ] Verify media-cache file-size limits.
+  - [ ] Verify abort/cancellation behavior when caching is disabled or the plugin
     stops.
-  - Verify forced legacy routing.
-  - Verify the force toggle can return to native routing immediately.
-  - Verify console-only, toast-only, both, and disabled debug output.
-  - Verify only one routing notice appears per legacy activation.
-  - Verify update checks still use direct native networking and work with the
+  - [ ] Verify forced legacy routing.
+  - [ ] Verify the force toggle can return to native routing immediately.
+  - [ ] Verify console-only, toast-only, both, and disabled debug output.
+  - [ ] Verify only one routing notice appears per legacy activation.
+  - [ ] Verify update checks still use direct native networking and work with the
     media force setting both off and on.
-  - Verify local `blob:` clipboard copying still uses renderer `fetch()` and
+  - [ ] Verify local `blob:` clipboard copying still uses renderer `fetch()` and
     works with the media force setting both off and on.
   - Verify remote-image clipboard copying still uses direct native networking
     and works with the media force setting both off and on.
@@ -1239,6 +1245,26 @@ evidence for another session to understand what changed and why.
   `51624f181299276dc12669cd2522198afaa8736f`.
 - **Exact next action:** Give the user the exact pasteable probes and wait for
   their results.
+
+### 2026-07-27 — Initial RT-26 live probe results
+
+- **Completed:** Read the current exported BetterDiscord `console.log` and
+  recorded only the live results it proves.
+- **Files changed:** This checklist only.
+- **Tests and exact results:** The Waifugami request passed with HTTP 200,
+  1,091,999 bytes, and 2.5 seconds. The progressing httpbin request passed with
+  all 40 bytes in 42.0 seconds.
+- **Runtime evidence:** The body-stall request returned a generic
+  `Error: aborted` after 6.0 seconds. There was no matching plugin stop or
+  cache-disable event, and the overlapping 40-second progress probe remained
+  alive and completed. Treat the stall attempt as inconclusive rather than a
+  confirmed Logger defect.
+- **Failures or blockers:** The 30-second body-inactivity behavior still needs
+  one clean live retest. No code fix is authorized or indicated by this result.
+- **Commit:** `<pending-initial-rt26-results-checkpoint>`.
+- **Exact next action:** Ask the user to rerun only the 70-second/two-byte stall
+  probe. If the endpoint aborts early again, replace it with a controlled local
+  or helper-plugin stall probe.
 
 ### Handoff entry template
 
