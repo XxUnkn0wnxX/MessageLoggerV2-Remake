@@ -9,6 +9,7 @@ const ReactDOM = {};
 const Plugins = {};
 const DOM = {};
 const Patcher = {};
+const ContextMenu = {};
 const Webpack = {Filters: {}};
 const Components = {
   KeybindInput() {},
@@ -65,7 +66,7 @@ class MockBdApi {
       DOM,
       Patcher,
       Components,
-      ContextMenu: {},
+      ContextMenu,
       Utils: {},
       Hooks: {},
       ReactUtils: {},
@@ -97,6 +98,7 @@ function resetHarness() {
   for (const key of Object.keys(Plugins)) delete Plugins[key];
   for (const key of Object.keys(DOM)) delete DOM[key];
   for (const key of Object.keys(Patcher)) delete Patcher[key];
+  for (const key of Object.keys(ContextMenu)) delete ContextMenu[key];
   for (const key of Object.keys(Webpack)) {
     if (key !== 'Filters') delete Webpack[key];
   }
@@ -108,6 +110,7 @@ module.exports = {
   DOM,
   Logger,
   Components,
+  ContextMenu,
   Patcher,
   Plugins,
   React,

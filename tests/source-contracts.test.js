@@ -1494,26 +1494,37 @@ test('checkNewUpdate uses direct updater fetch and skips media helper routes', a
 
 test('saved-media clipboard paths replace only deleted native actions and add one viewer action', () => {
   const copyContext = source.slice(
-    source.indexOf('  getClipboardMediaSource(target, record) {'),
+    source.indexOf('  _getClipboardMediaSourceKey(value) {'),
     source.indexOf('  createMessageGroup(message, isStart) {')
   );
-  assert.match(copyContext, /image\?\.tagName === 'IMG'/);
+  assert.match(copyContext, /target\.tagName === 'IMG'/);
   assert.match(copyContext, /querySelectorAll\?\.\('img'\)/);
-  assert.match(copyContext, /const mediaIds = this\.getRecordCachedMediaIds\(record\)/);
-  assert.match(copyContext, /mediaIds\.has\(imageId\)/);
-  assert.match(copyContext, /mediaSources\.has\(sourceKey\(source\)\)/);
-  assert.match(copyContext, /const response = isLocalSource[\s\S]*await fetch\(source\)[\s\S]*await BdApi\.Net\.fetch\(source\)/);
-  assert.match(copyContext, /response\.status !== 200[\s\S]*new Uint8Array\(await response\.arrayBuffer\(\)\)/);
+  assert.match(copyContext, /const supportedExtensions = \['\.jpg', '\.jpeg', '\.png', '\.gif', '\.bmp', '\.webp', '\.avif', '\.tif', '\.tiff'\]/);
+  assert.match(copyContext, /standardImage: this\.isImage\(attachment\?\.url \|\| ''\)/);
+  assert.match(copyContext, /standardImage: !entry\.cacheIndex\.endsWith\(':file'\) && this\.isComponentImageMedia\(entry\)/);
+  assert.match(copyContext, /entriesById\.get\(imageId\)[\s\S]*entriesBySource\.get\(this\._getClipboardMediaSourceKey\(source\)\)/);
+  assert.match(copyContext, /source === this\.errorImage/);
+  assert.equal(copyContext.includes("|| !/^(?:blob:|data:image\\/|https?:)/i.test(source);"), true);
+  assert.match(copyContext, /if \(!this\.settings\?\.cacheAllImages\) return null;/);
+  assert.match(copyContext, /const resolvePath = this\.imageCacheServerSimulator\?\._resolveImagePath/);
+  assert.match(copyContext, /if \(!localPath \|\| !fs\.existsSync\(localPath\)\) continue;/);
+  assert.match(copyContext, /copyMode: extension === '\.gif' \? 'file' : 'image'/);
+  assert.match(copyContext, /const rawBytes = fs\.readFileSync\(localPath\)/);
+  assert.match(copyContext, /if \(source\.copyMode === 'file'\)[\s\S]*clipboard\.copyFile\(localPath\)/);
   assert.match(copyContext, /clipboard\.copyImage\(bytes, 'image\.png'\)/);
+  assert.match(copyContext, /clipboard\.copyFile\(localPath\)/);
+  assert.match(copyContext, /Image was copied to the Clipboard/);
+  assert.match(copyContext, /Media was copied to the Clipboard/);
   assert.match(copyContext, /this\.notifyUser\('Failed to copy\. Details in the console\.', \{\s*type: 'error'\s*\}\);[\s\S]*Logger\.error\('Media clipboard copy failed:', error\)/);
   assert.match(copyContext, /if \(!record\?\.delete_data\) return false/);
   assert.match(copyContext, /id === 'copy-image'[\s\S]*id === 'copy-media'/);
   assert.match(copyContext, /React\?\.cloneElement[\s\S]*parentArray\[parentIndex\] = replacementNode/);
   assert.match(copyContext, /id: 'mlv2-copy-media'[\s\S]*label: 'Copy media'/);
+  assert.match(copyContext, /ContextMenu\?\.buildMenuChildren[\s\S]*type: 'group'[\s\S]*items: \[item\]/);
   assert.doesNotMatch(copyContext, /fetchMediaNetworkResponse|fetchMediaCacheResponse/);
   assert.doesNotMatch(copyContext, /forceLegacyMediaFetching/);
   assert.doesNotMatch(source, /ContextMenu\.patch\('image-context'/);
-  assert.match(source, /this\.replaceNativeSavedMediaCopyAction\(ret, record, props\.target\)/);
+  assert.match(source, /this\.replaceNativeSavedMediaCopyAction\(ret, record, props\.target, menu\)/);
   assert.match(source, /this\.addLoggerViewerCopyMediaItem\(menuItems, e\.target, record\)/);
 });
 
@@ -1574,8 +1585,8 @@ test('renderer fetch usage outside fetchMediaNetworkResponse remains constrained
   const nonMediaFetcher = source.slice(0, fetchStart) + source.slice(fetchEnd);
   assert.ok((mediaFetcher.match(/\breturn fetch\(/g) || []).length >= 1);
   assert.equal((nonMediaFetcher.match(/\breturn fetch\(/g) || []).length, 0);
-  assert.equal((source.match(/BdApi\.Net\.fetch\(/g) || []).length, 2);
+  assert.equal((source.match(/BdApi\.Net\.fetch\(/g) || []).length, 1);
   assert.equal((source.match(/nativeFetch\.call\(/g) || []).length, 1);
-  assert.match(source, /const response = isLocalSource[\s\S]*await fetch\(source\)[\s\S]*await BdApi\.Net\.fetch\(source\)/);
+  assert.match(mediaFetcher, /nativeFetch\.call\(netApi,\s*url,\s*\{/);
   assert.match(source, /clipboard\.copyImage\(bytes, 'image\.png'\);/);
 });

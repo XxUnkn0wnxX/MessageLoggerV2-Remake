@@ -16046,93 +16046,249 @@ module.exports = class MessageLoggerV2 {
     }
     return classes.join(' ');
   }
-  getClipboardMediaSource(target, record) {
+  _getClipboardMediaSourceKey(value) {
+    if (typeof value !== 'string' || !value) return '';
+    if (!/^https?:/i.test(value)) return value;
+    try {
+      const parsed = new URL(value);
+      return `${parsed.origin}${parsed.pathname}`;
+    } catch {
+      return value;
+    }
+  }
+  _getRecordClipboardMediaEntries(record) {
+    const message = record?.message;
+    if (!message?.id) return [];
+    const supportedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.avif', '.tif', '.tiff'];
+    const entries = [];
+    const addEntry = (media, options = {}) => {
+      if (!media || typeof media !== 'object') return;
+      const urls = new Set([
+        options.url,
+        media.url,
+        media.proxy_url,
+        media.proxyUrl,
+        media.src,
+        media.href
+      ].filter(value => typeof value === 'string' && value));
+      const extensions = [];
+      const addExtension = value => {
+        if (typeof value !== 'string' || !value) return;
+        let candidate = value;
+        try {
+          if (/^https?:/i.test(value)) candidate = new URL(value).pathname;
+        } catch {}
+        const extension = candidate.split(/[?#]/, 1)[0].match(/\.[0-9a-z]+$/i)?.[0]?.toLowerCase();
+        if (extension && supportedExtensions.includes(extension) && !extensions.includes(extension)) {
+          extensions.push(extension);
+        }
+      };
+      urls.forEach(addExtension);
+      addExtension(media.filename);
+      const contentTypeExtension = this.contentTypeToExtension(
+        media.content_type || media.contentType || ''
+      )?.toLowerCase();
+      if (supportedExtensions.includes(contentTypeExtension) && !extensions.includes(contentTypeExtension)) {
+        extensions.push(contentTypeExtension);
+      }
+      const cacheIds = Array.from(new Set(
+        (options.cacheIds || []).map(value => String(value || '')).filter(Boolean)
+      ));
+      if (!cacheIds.length) return;
+      const domIds = new Set([
+        ...(options.domIds || []),
+        ...cacheIds
+      ].map(value => String(value || '')).filter(Boolean));
+      entries.push({
+        media,
+        cacheIds,
+        domIds,
+        sourceKeys: new Set(Array.from(urls, value => this._getClipboardMediaSourceKey(value))),
+        extensions,
+        standardImage: options.standardImage !== false,
+        hidden: !!media.hidden
+      });
+    };
+    const attachments = message.attachments || [];
+    attachments.forEach((attachment, index) => {
+      const id = attachment?.id;
+      addEntry(attachment, {
+        cacheIds: [
+          this.getMediaCacheFileId(id, index, message.id),
+          id
+        ],
+        domIds: [id],
+        standardImage: this.isImage(attachment?.url || '')
+      });
+    });
+    this.getRecordRemovedAttachments(record).forEach((attachment, index) => {
+      const id = attachment?.id;
+      addEntry(attachment, {
+        cacheIds: [
+          id,
+          this.getMediaCacheFileId(id, index, message.id)
+        ],
+        domIds: [id],
+        standardImage: this.isImage(attachment?.url || '')
+      });
+    });
+    this.getMessageStickerItems(message).forEach((sticker, index) => {
+      const stickerMedia = this.getStickerMedia(sticker);
+      if (!stickerMedia) return;
+      addEntry(stickerMedia, {
+        cacheIds: [this.getMediaCacheFileId(stickerMedia.id, index, message.id)],
+        domIds: [stickerMedia.id],
+        standardImage: true
+      });
+    });
+    for (let embedIndex = 0; embedIndex < (message.embeds || []).length; embedIndex++) {
+      for (const entry of this.getIndexedEmbedImageMedia(message.embeds[embedIndex], embedIndex)) {
+        const cacheId = this.getMediaCacheFileId(entry.sourceId, entry.cacheIndex, message.id);
+        addEntry(entry.media, {
+          url: entry.url,
+          cacheIds: [cacheId],
+          domIds: [entry.sourceId, cacheId],
+          standardImage: true
+        });
+      }
+    }
+    for (const entry of this.getIndexedComponentMedia(message.components)) {
+      const cacheId = this.getMediaCacheFileId(entry.sourceId, entry.cacheIndex, message.id);
+      addEntry(entry.media, {
+        url: entry.url,
+        cacheIds: [cacheId],
+        domIds: [entry.sourceId, cacheId],
+        standardImage: !entry.cacheIndex.endsWith(':file') && this.isComponentImageMedia(entry)
+      });
+    }
+    return entries;
+  }
+  _findRecordSavedMediaImage(target, record) {
     if (!target || !record?.message?.id) return null;
     const messageId = String(record.message.id);
-    const mediaIds = this.getRecordCachedMediaIds(record);
-    const sourceKey = value => {
-      if (typeof value !== 'string' || !value) return '';
-      try {
-        const parsed = new URL(value);
-        return `${parsed.origin}${parsed.pathname}`;
-      } catch {
-        return value;
-      }
-    };
-    const mediaSources = new Set();
-    const addMediaSource = value => {
-      const key = sourceKey(value);
-      if (key) mediaSources.add(key);
-    };
-    for (const attachment of [
-      ...(record.message.attachments || []),
-      ...this.getRecordRemovedAttachments(record)
-    ]) {
-      addMediaSource(attachment?.url);
-      addMediaSource(attachment?.proxy_url || attachment?.proxyUrl);
+    const entries = this._getRecordClipboardMediaEntries(record);
+    if (!entries.length) return null;
+    const entriesById = new Map();
+    const entriesBySource = new Map();
+    for (const entry of entries) {
+      entry.domIds.forEach(id => entriesById.set(id, entry));
+      entry.sourceKeys.forEach(key => entriesBySource.set(key, entry));
     }
-    for (const sticker of this.getMessageStickerItems(record.message)) {
-      addMediaSource(this.getStickerMedia(sticker)?.url);
-    }
-    for (const embed of record.message.embeds || []) {
-      for (const media of this.getIndexedEmbedImageMedia(embed)) addMediaSource(media.url);
-    }
-    for (const media of this.getIndexedComponentMedia(record.message.components)) addMediaSource(media.url);
     const candidates = [];
-    const addCandidate = image => {
-      if (image?.tagName === 'IMG' && !candidates.includes(image)) candidates.push(image);
-    };
-    const addImagesFrom = node => {
-      addCandidate(node);
-      const images = node?.querySelectorAll?.('img');
-      if (images && typeof images[Symbol.iterator] === 'function') {
-        for (const image of images) addCandidate(image);
-      } else {
-        addCandidate(node?.querySelector?.('img'));
+    if (target.tagName === 'IMG') {
+      candidates.push(target);
+    } else {
+      let node = target;
+      for (let depth = 0; node && depth < 4 && !candidates.length; depth++) {
+        const images = node.querySelectorAll?.('img');
+        if (images?.length === 1) candidates.push(images[0]);
+        else if (images?.length > 1) break;
+        else {
+          const image = node.querySelector?.('img');
+          if (image) candidates.push(image);
+        }
+        node = node.parentElement;
       }
-    };
-    let ancestor = target;
-    for (let depth = 0; ancestor && depth < 4; depth++) {
-      addImagesFrom(ancestor);
-      ancestor = ancestor.parentElement;
     }
-    addImagesFrom(target.closest?.('[data-ml2-attachment-message-id]'));
     for (const image of candidates) {
-      if (image.classList?.contains?.(this.style?.imageError)) continue;
       const attachmentHost = image.closest?.('[data-ml2-attachment-message-id]');
       const ownerMessageId = image.messageId
         ?? image.dataset?.ml2AttachmentMessageId
         ?? attachmentHost?.dataset?.ml2AttachmentMessageId;
+      if (ownerMessageId !== undefined && ownerMessageId !== null
+        && String(ownerMessageId) !== messageId) continue;
       const imageId = String(image.id || '');
       const source = image.currentSrc || image.src;
-      if (typeof source !== 'string' || !/^(?:blob:|data:image\/|https?:)/i.test(source)) continue;
-      if (source === this.errorImage) continue;
-      const ownsImage = ownerMessageId !== undefined && ownerMessageId !== null
-        ? String(ownerMessageId) === messageId
-        : (!!imageId && mediaIds.has(imageId)) || mediaSources.has(sourceKey(source));
-      if (ownsImage) return source;
+      const entry = (imageId && entriesById.get(imageId))
+        || entriesBySource.get(this._getClipboardMediaSourceKey(source));
+      if (!entry) continue;
+      const blocked = entry.hidden
+        || image.classList?.contains?.(this.style?.imageError)
+        || source === this.errorImage
+        || typeof source !== 'string'
+        || !/^(?:blob:|data:image\/|https?:)/i.test(source);
+      return { image, entry, source, blocked };
     }
     return null;
   }
+  _resolveCachedClipboardMedia(targetMedia, record) {
+    if (!targetMedia || targetMedia.blocked || !targetMedia.entry?.standardImage) return null;
+    if (!this.settings?.cacheAllImages) return null;
+    const message = record?.message;
+    if (!message?.id || !message?.channel_id) return null;
+    const fs = this.nodeModules?.fs;
+    const resolvePath = this.imageCacheServerSimulator?._resolveImagePath;
+    if (typeof fs?.existsSync !== 'function' || typeof resolvePath !== 'function') return null;
+    const supportedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.avif', '.tif', '.tiff'];
+    const extensions = Array.from(new Set([
+      ...(targetMedia.entry.extensions || []),
+      ...supportedExtensions
+    ]));
+    for (const cacheId of targetMedia.entry.cacheIds || []) {
+      for (const extension of extensions) {
+        const localPath = resolvePath.call(
+          this.imageCacheServerSimulator,
+          cacheId,
+          extension,
+          message.channel_id,
+          message.id
+        );
+        if (!localPath || !fs.existsSync(localPath)) continue;
+        return {
+          localPath,
+          source: targetMedia.source,
+          extension,
+          copyMode: extension === '.gif' ? 'file' : 'image'
+        };
+      }
+    }
+    return null;
+  }
+  getClipboardMediaSource(target, record) {
+    return this._resolveCachedClipboardMedia(
+      this._findRecordSavedMediaImage(target, record),
+      record
+    );
+  }
   async copyMediaToClipboard(source) {
     try {
-      if (typeof source !== 'string' || !/^(?:blob:|data:image\/|https?:)/i.test(source)) {
+      if (!source || typeof source !== 'object' || !source.localPath
+        || !['image', 'file'].includes(source.copyMode)) {
         throw new Error('Clipboard media source is unavailable');
       }
-      const isLocalSource = /^(?:blob:|data:image\/)/i.test(source);
-      const response = isLocalSource
-        ? await fetch(source)
-        : await BdApi.Net.fetch(source);
-      if (!response || response.status !== 200 || typeof response.arrayBuffer !== 'function') {
-        throw new Error(`Clipboard media returned HTTP ${response?.status ?? 'unknown'}`);
+      const fs = this.nodeModules?.fs;
+      if (typeof fs?.existsSync !== 'function' || !fs.existsSync(source.localPath)) {
+        throw new Error('Clipboard media file is unavailable');
       }
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (!bytes.byteLength) throw new Error('Clipboard media response was empty');
       const clipboard = typeof DiscordNative !== 'undefined' ? DiscordNative?.clipboard : null;
+      const localPath = String(source.localPath).trim();
+      if (source.copyMode === 'file') {
+        if (typeof clipboard?.copyFile !== 'function') {
+          throw new Error('Discord file clipboard API is unavailable');
+        }
+        clipboard.copyFile(localPath);
+        this.notifyUser('Media was copied to the Clipboard', { type: 'success' });
+        return true;
+      }
+      if (typeof fs.readFileSync !== 'function') {
+        throw new Error('Clipboard media file API is unavailable');
+      }
+      const rawBytes = fs.readFileSync(localPath);
+      const bytes = rawBytes instanceof Uint8Array
+        ? rawBytes
+        : rawBytes instanceof ArrayBuffer
+          ? new Uint8Array(rawBytes)
+          : ArrayBuffer.isView(rawBytes)
+            ? new Uint8Array(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength)
+            : null;
+      if (!bytes?.byteLength) {
+        throw new Error('Clipboard media file was empty');
+      }
       if (typeof clipboard?.copyImage !== 'function') {
         throw new Error('Discord image clipboard API is unavailable');
       }
       clipboard.copyImage(bytes, 'image.png');
+      this.notifyUser('Image was copied to the Clipboard', { type: 'success' });
       return true;
     } catch (error) {
       this.notifyUser('Failed to copy. Details in the console.', { type: 'error' });
@@ -16152,65 +16308,135 @@ module.exports = class MessageLoggerV2 {
       || id === 'copy-media'
       || /^Copy (?:image|media)$/i.test(label.trim());
   }
-  replaceNativeSavedMediaCopyAction(tree, record, target) {
+  replaceNativeSavedMediaCopyAction(tree, record, target, menu = null) {
     if (!record?.delete_data) return false;
-    const source = this.getClipboardMediaSource(target, record);
-    if (!source) return false;
+    const targetMedia = this._findRecordSavedMediaImage(target, record);
+    if (!targetMedia) return false;
+    const source = this._resolveCachedClipboardMedia(targetMedia, record);
+    const hasLoggerCopyAction = (node, seen = new Set()) => {
+      if (node == null || typeof node === 'boolean') return false;
+      if (Array.isArray(node)) return node.some(child => hasLoggerCopyAction(child, seen));
+      if (typeof node !== 'object' || seen.has(node)) return false;
+      seen.add(node);
+      if ((node.props || node)?.id === 'mlv2-copy-media') return true;
+      return hasLoggerCopyAction(node.props?.children, seen);
+    };
     const seen = new Set();
+    let changed = false;
+    let replacedNative = false;
+    const loggerActionPresent = hasLoggerCopyAction(tree);
+    const tryReplaceNativeAction = (node, parentArray, parentIndex) => {
+      if (!parentArray || parentIndex < 0) return false;
+      const props = node.props || {};
+      const actionKey = typeof props.action === 'function'
+        ? 'action'
+        : typeof props.onClick === 'function'
+          ? 'onClick'
+          : null;
+      if (!actionKey) return false;
+      const replacement = () => {
+        ContextMenu.close?.();
+        void this.copyMediaToClipboard(source);
+      };
+      try {
+        props[actionKey] = replacement;
+        if (props[actionKey] === replacement) return true;
+      } catch {
+        // Fall back to cloning for frozen action props.
+      }
+      try {
+        const replacementNode = typeof React?.cloneElement === 'function'
+          ? React.cloneElement(node, { [actionKey]: replacement })
+          : { ...node, props: { ...props, [actionKey]: replacement } };
+        parentArray[parentIndex] = replacementNode;
+        return parentArray[parentIndex]?.props?.[actionKey] === replacement;
+      } catch {
+        return false;
+      }
+    };
     const visit = (node, parentArray = null, parentIndex = -1) => {
       if (node == null || typeof node === 'boolean') return false;
       if (Array.isArray(node)) {
-        for (let index = 0; index < node.length; index++) {
-          if (visit(node[index], node, index)) return true;
+        for (let index = node.length - 1; index >= 0; index--) {
+          visit(node[index], node, index);
         }
-        return false;
+        return;
       }
       if (typeof node !== 'object' || seen.has(node)) return false;
       seen.add(node);
+      if ((node.props || node)?.id === 'mlv2-copy-media') return false;
       if (this.isNativeClipboardMediaAction(node)) {
-        const props = node.props || {};
-        const replacement = () => {
-          void this.copyMediaToClipboard(source);
-        };
-        const actionKey = typeof props.action === 'function'
-          ? 'action'
-          : typeof props.onClick === 'function'
-            ? 'onClick'
-            : null;
-        if (!actionKey) return false;
-        let mutationError = null;
-        try {
-          props[actionKey] = replacement;
-          if (props[actionKey] === replacement) return true;
-        } catch (error) {
-          mutationError = error;
-        }
-        if (parentArray && parentIndex >= 0) {
-          try {
-            const replacementNode = typeof React?.cloneElement === 'function'
-              ? React.cloneElement(node, { [actionKey]: replacement })
-              : { ...node, props: { ...props, [actionKey]: replacement } };
-            parentArray[parentIndex] = replacementNode;
-            if (parentArray[parentIndex]?.props?.[actionKey] === replacement) return true;
-          } catch (error) {
-            mutationError = error;
+        if (source) {
+          if (loggerActionPresent) {
+            if (parentArray && parentIndex >= 0) {
+              parentArray.splice(parentIndex, 1);
+              changed = true;
+            }
+            return false;
           }
+          if (!replacedNative && tryReplaceNativeAction(node, parentArray, parentIndex)) {
+            replacedNative = true;
+            changed = true;
+            return false;
+          }
+          if (parentArray && parentIndex >= 0) {
+            parentArray.splice(parentIndex, 1);
+            changed = true;
+          }
+          return false;
         }
-        Logger.error(
-          'Could not patch Discord media clipboard action:',
-          mutationError || new Error('Discord menu item is immutable')
-        );
+
+        if (parentArray && parentIndex >= 0) {
+          parentArray.splice(parentIndex, 1);
+          changed = true;
+        }
         return false;
       }
       return visit(node.props?.children);
     };
-    return visit(tree);
+    visit(tree);
+    if (!source || replacedNative || loggerActionPresent) return changed;
+    const menuChildren = Array.isArray(menu)
+      ? menu
+      : Array.isArray(tree?.props?.children)
+        ? tree.props.children
+        : null;
+    const alreadyAdded = menuChildren?.some(item => {
+      const props = item?.props || item;
+      return props?.id === 'mlv2-copy-media';
+    });
+    if (!menuChildren || alreadyAdded) return changed;
+    const fileSource = { ...source, copyMode: 'file' };
+    const item = {
+      id: 'mlv2-copy-media',
+      type: 'item',
+      label: 'Copy media',
+      action: () => {
+        ContextMenu.close?.();
+        void this.copyMediaToClipboard(fileSource);
+      }
+    };
+    if (typeof ContextMenu?.buildMenuChildren === 'function') {
+      menuChildren.push(...ContextMenu.buildMenuChildren([{
+        type: 'group',
+        items: [item]
+      }]));
+    } else {
+      menuChildren.push(item);
+    }
+    if (menuChildren.length) {
+      changed = true;
+    }
+    return changed;
   }
   addLoggerViewerCopyMediaItem(menuItems, target, record) {
     if (!Array.isArray(menuItems)) return false;
     const source = this.getClipboardMediaSource(target, record);
-    if (!source || menuItems.some(item => item?.id === 'mlv2-copy-media')) return false;
-    menuItems.push({
+    if (!source || menuItems.some(item => {
+      const props = item?.props || item;
+      return props?.id === 'mlv2-copy-media';
+    })) return false;
+    const menuItem = {
       id: 'mlv2-copy-media',
       type: 'item',
       label: 'Copy media',
@@ -16218,7 +16444,8 @@ module.exports = class MessageLoggerV2 {
         ContextMenu.close?.();
         void this.copyMediaToClipboard(source);
       }
-    });
+    };
+    menuItems.push(menuItem);
     return true;
   }
   createMessageGroup(message, isStart) {
@@ -17836,7 +18063,7 @@ module.exports = class MessageLoggerV2 {
       const messageId = props.message.id;
       const channelId = props.channel.id;
       const record = this.messageRecord[messageId];
-      this.replaceNativeSavedMediaCopyAction(ret, record, props.target);
+      this.replaceNativeSavedMediaCopyAction(ret, record, props.target, menu);
       addSavedRecordItems(newItems, addElement, record, messageId, channelId, {
         menu,
         pruneNativeDeletedOptions: true,
