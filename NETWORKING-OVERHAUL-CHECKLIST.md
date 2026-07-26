@@ -35,9 +35,10 @@ review, checklist update, and commit must also be complete.
 - **Working branch:** `fix/native-media-networking`
 - **Branch base:** `a5eadbe736f5a0cf4b7a3730bf9950ade17ad752`
   (`docs: prepare 2.8.2.8 release notes`)
-- **Upstream status:** Published as `origin/fix/native-media-networking` on
-  2026-07-26 with local upstream tracking. `develop` and `main` both still point
-  to the same released base commit and track their matching `origin` branches.
+- **Upstream status:** `origin/fix/native-media-networking` remains at the
+  published handoff commit `54a1f385`; local Stage 1 work is intentionally
+  ahead and has not been pushed. `develop` and `main` both still point to the
+  same released base commit and track their matching `origin` branches.
 - **Paused attachment work:** The renamed `fix/attachment-gate` remains
   separate and tracks `origin/fix/attachment-gate`. Its standalone handoff
   commit is protected by the local-only `local/attachment-gate-handoff` tag.
@@ -469,8 +470,8 @@ Baseline result:
 
 Stage 1 commit/result:
 
-- Commit: Pending the immediately following Stage 1 implementation commit; its
-  exact hash will be added by the checklist checkpoint before Stage 2 begins.
+- Commit: `cedf3a65bf020abe3608642b63a62e4a6cb1633b`
+  (`feat: add media fetch transport setting`).
 - Tests: PASS — focused
   `node --test tests/settings-recovery.test.js tests/source-contracts.test.js tests/media.test.js`
   completed with 108 passed, 0 failed; full `npm test` completed with 340
@@ -745,8 +746,8 @@ evidence for another session to understand what changed and why.
   of the established AbortController path. Parent review rejected that draft
   before commit; the final Stage 1 diff restores the existing request path
   byte-for-byte and has no known blocker.
-- **Commit:** Pending the Stage 1 implementation commit; record its exact hash
-  in the next checklist-only checkpoint before Stage 2 begins.
+- **Commit:** `cedf3a65bf020abe3608642b63a62e4a6cb1633b`
+  (`feat: add media fetch transport setting`).
 - **Exact next action:** Commit Stage 1, record its hash, then implement the
   central media-only network handler and its deterministic transport coverage.
 
