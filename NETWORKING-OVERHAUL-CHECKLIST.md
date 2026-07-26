@@ -1826,10 +1826,10 @@ evidence for another session to understand what changed and why.
 - **Failures or blockers:** None in these four checks. Mixed-content,
   file-size, cache-disable/plugin-stop cancellation, forced legacy/native
   return, debug-output matrix, updater, and clipboard checks remain.
-- **Commit:** Pending this runtime-evidence checklist commit; record its exact
-  hash immediately after commit.
-- **Exact next action:** Commit and record this runtime checkpoint, push the
-  branch, then give the user the cache-disable cancellation test.
+- **Commit:** Runtime-evidence checkpoint
+  72e0409865932ca7314b74824199acb43d41e8d5.
+- **Exact next action:** After this commit record is pushed, give the user the
+  cache-disable cancellation test.
 
 ### Handoff entry template
 
