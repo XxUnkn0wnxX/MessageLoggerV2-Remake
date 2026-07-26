@@ -2475,6 +2475,34 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Ask the user to retry static copy, then inspect the
   current logs before marking the clipboard path confirmed.
 
+### 2026-07-27 — Native-only clipboard compatibility decision
+
+- **Completed:** Compared Finder's GIF clipboard formats with Discord's
+  `copyFile()` result and tested every self-contained renderer route before
+  changing Logger again.
+- **Decisions:** Keep Logger self-contained and compatible with mainstream
+  BetterDiscord. Do not add a fork-only clipboard bridge. Remove Logger's
+  file-copy fallback and never add **Copy media** when Discord supplies no
+  native copy action. For Logger's own viewer, expose the action only for
+  cached PNG/JPEG media accepted by Discord's native image clipboard path.
+  Ordinary live Discord messages remain Discord-owned.
+- **Files changed:** This checklist only at this planning checkpoint.
+- **Tests and exact results:** Product baseline runs immediately after this
+  checkpoint; no product behavior changed here.
+- **Runtime evidence:** Finder writes a file URL plus filename text. Discord's
+  current macOS `copyFile()` bridge writes only `public.file-url`; a preceding
+  text write is erased. `execCommand("copy")` retained only filename text, and
+  the live renderer reported
+  `ClipboardItem.supports("text/uri-list") === false`. The disposable
+  `MessageLoggerSystemClipboardProbe` source and live symlink were removed.
+- **Failures or blockers:** Exact Finder/Explorer-style system-file copying is
+  unavailable through the cross-compatible plugin APIs. Unsupported formats
+  must therefore have no Logger clipboard action.
+- **Commit:** Planning checkpoint commit pending.
+- **Exact next action:** Commit this decision, run the clean full baseline,
+  then remove file-copy fallbacks and add focused native-format/menu
+  regressions before any live sync.
+
 ### Handoff entry template
 
 ```text
