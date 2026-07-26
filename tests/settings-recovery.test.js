@@ -67,19 +67,23 @@ test('archive-load preference defaults safely and normalizes malformed values', 
   const malformed = { dontSaveData: true, dontLoadArchivedData: 'yes' };
   malformed.forceLegacyMediaFetching = 'true';
   malformed.detailedMediaNetworkDebug = 'true';
+  malformed.debugToasts = 'yes';
   normalizeRecovered(plugin, malformed);
   assert.equal(malformed.dontLoadArchivedData, false);
   assert.equal(malformed.forceLegacyMediaFetching, false);
   assert.equal(malformed.detailedMediaNetworkDebug, false);
+  assert.equal(malformed.debugToasts, false);
 
   const explicit = {
     dontSaveData: false,
     forceLegacyMediaFetching: true,
     debugLogging: false,
+    debugToasts: true,
     detailedMediaNetworkDebug: true
   };
   normalizeRecovered(plugin, explicit);
   assert.equal(explicit.forceLegacyMediaFetching, true);
+  assert.equal(explicit.debugToasts, true, 'debug toast child remains enabled while master remains off');
   assert.equal(explicit.detailedMediaNetworkDebug, true, 'stored child preference survives while console debug is inactive');
 });
 

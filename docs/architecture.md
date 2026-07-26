@@ -24,7 +24,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
   - Toggling compares the requested filter with the actual logger state: matching views close; different views close then reopen.
   - Reopening waits for native media, tracked MessageLogger modals, and logger user popouts. This includes media opened from normal Discord messages, but no other Discord panel.
   - A transition token cancels stale rapid reopens; no global modal or layer clearing is used.
-- The standalone warning-colored Debug group keeps console and routed diagnostics independently opt-in. `reportDebugEvent` accepts automatic-backup lifecycle events plus edit-spam counters and cooldown events, and sends UI feedback through `notifyUser`.
+- The standalone warning-colored Debug group keeps console and routed diagnostics linked by the console master switch. `reportDebugEvent` accepts automatic-backup lifecycle events plus edit-spam counters and cooldown events, and sends UI feedback through `notifyUser`.
 - `reportSettingState` keeps console detail and routed alerts aligned.
 - `reportMajorSettingChange` covers only broad logging, persistence, media, update, and destructive settings. Enabled states are info; disabled states use the theme-neutral presentation.
 - Per-setting replacement keys discard obsolete alerts after rapid changes.

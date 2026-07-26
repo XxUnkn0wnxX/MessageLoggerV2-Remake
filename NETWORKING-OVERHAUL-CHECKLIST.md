@@ -55,21 +55,26 @@ review, checklist update, and commit must also be complete.
   passes numeric `timeout: 0` so the host's inherited five-second socket timer
   no longer preempts those Logger watchdogs. Stage 5C now emits truthful,
   console-only per-attempt diagnostics with one managed terminal outcome, and
-  Stage 5D updates the release to `2.8.2.9`. The accepted implementation is
-  committed at 15eb75b7c5e9125cab64bb8e657721f223ab914f, recorded by
-  checkpoint d25576f84aa62b41c2149fae30b7b809f86a3e1d, and live with matching
-  source bytes. The final live checkpoint and branch push remain.
+  Stage 5D updates the release to `2.8.2.9`. The accepted networking
+  implementation is committed at 15eb75b7c5e9125cab64bb8e657721f223ab914f,
+  recorded by checkpoint d25576f84aa62b41c2149fae30b7b809f86a3e1d, and its
+  first final live replacement is recorded by
+  fd8e027b7e67b4985f3d911555d39c9c630c7c41. A final user-requested Debug
+  amendment now makes both child switches effective only while the console
+  master is On while retaining each saved child value. It is fully validated
+  but still needs its commit, replacement live sync, and branch push.
 - **Current tracked task changes:** Stages 1-5D are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
-  `tests/settings-recovery.test.js`, `tests/source-contracts.test.js`,
-  `README.md`, `TODO.md`, `docs/architecture.md`, `docs/help.md`,
-  `docs/settings.md`, `docs/tests.md`, and this checklist.
-- **Live plugin:** The premature intermediate `2.8.2.8` copy was replaced with
-  the accepted `2.8.2.9` plugin. Repository and live SHA-256 both equal
-  `d7cfc616ac9d2bcf36d67a496a0d13e4de63168fd99dad50adfd279b4425ef37`.
-  The current UTC log segment shows cleanup, reinitialization, patch
-  completion, and later successful cache writes without a matching startup
-  exception. Discord was not relaunched.
+  `tests/persistence.test.js`, `tests/settings-recovery.test.js`,
+  `tests/source-contracts.test.js`, `README.md`, `TODO.md`,
+  `docs/architecture.md`, `docs/help.md`, `docs/settings.md`, `docs/tests.md`,
+  and this checklist.
+- **Live plugin:** The accepted `2.8.2.9` networking build is live at SHA-256
+  `d7cfc616ac9d2bcf36d67a496a0d13e4de63168fd99dad50adfd279b4425ef37`,
+  but it predates the final Debug master-link amendment and therefore no
+  longer matches the working tree. The replacement must still copy only
+  `MessageLoggerV2.plugin.js`, verify parity, and inspect the hot-reload log.
+  Discord must not be relaunched.
 - **Publishing authority:** The user explicitly authorized pushing both working
   branches to `origin` on 2026-07-26 and explicitly re-authorized pushing the
   current `fix/native-media-networking` branch after live sync on 2026-07-27.
@@ -77,11 +82,13 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit this final live checkpoint, push `fix/native-media-networking` to
-`origin`, verify local/remote ref alignment, and give the user the remaining
-native, legacy, cancellation, controlled-stall, update, and clipboard `RT-26`
-tests. Keep the audited provisional Anti-Nuke/Ghost-Ping media-retention work
-as a separate post-networking stage in `TODO.md`.
+Commit the validated Debug master-link amendment, record its full commit hash,
+replace the live plugin, verify source/hash/reload evidence, checkpoint that
+sync, push `fix/native-media-networking`, and verify local/remote ref alignment.
+Then give the user the remaining native, legacy, cancellation,
+controlled-stall, update, and clipboard `RT-26` tests. Keep the audited
+provisional Anti-Nuke/Ghost-Ping media-retention work as a separate
+post-networking stage in `TODO.md`.
 
 ### Resume procedure for a new session
 
@@ -271,7 +278,7 @@ Line numbers are orientation aids and may move; symbol names are authoritative.
 |---|---|---|
 | 576 | `checkNewUpdate()` | Intentionally remains a direct `BdApi.Net.fetch()` call for plugin source. |
 | 977 | `imageCacheServerSimulator` | Resolves synthetic cache keys to local files and returns local object URLs. |
-| 3670 | `reportDebugEvent()` | Independently routes the same debug event to console and/or toast/notification. |
+| 3670 | `reportDebugEvent()` | Routes console output through the Debug master and toast/notification output only while both the master and saved toast child are enabled. |
 | 4311 | Advanced settings category | Planned location for the force-legacy switch. |
 | 7189 | `flushPendingMediaCacheRequests()` | Replays queued downloads through `cacheImage()`. |
 | 8588 | `_getChangedAttachments()` | Sends removed attachments through `cacheImage()`. |
@@ -367,10 +374,11 @@ Use this exact message for both forced and automatic legacy selection:
 
 - [x] Route the message through the existing debug console/toast controls.
 - [x] With `debugLogging` enabled, print it once to the console.
-- [x] With `debugToasts` enabled, show it once through the configured debug
-      notification route.
+- [x] With `debugLogging` and the saved `debugToasts` child enabled, show it
+      once through the configured debug notification route.
 - [x] With both enabled, emit once to each output.
-- [x] With both disabled, remain silent.
+- [x] With the master disabled, remain silent even when either child retains a
+      saved On value.
 - [x] Emit once when automatic compatibility detection activates legacy mode.
 - [x] Emit immediately when the force toggle changes from off to on.
 - [x] Emit once at startup when forced mode was already saved.
@@ -378,13 +386,18 @@ Use this exact message for both forced and automatic legacy selection:
 - [x] Do not repeat it per request, file, retry, or failure.
 - [x] If legacy mode was selected while a debug output was disabled, allow that
       output to receive one notice when it is subsequently enabled.
+- [x] Re-enabling the master restores each child's saved effective state:
+      a saved toast On receives its pending notice, while a saved toast Off
+      remains Off and is never rewritten.
 
-The existing `reportDebugEvent()` helper already provides independent
-`debugLogging` and `debugToasts` routing. Reuse or extend that established route
-instead of introducing a competing notification implementation. De-duplication
-state must be per legacy-mode activation and sufficiently output-aware that a
-debug output which was disabled at detection can receive one later notice
-without causing per-request spam.
+The existing `reportDebugEvent()` helper remains the one shared router.
+`debugLogging` is now the Debug master: `debugToasts` and
+`detailedMediaNetworkDebug` keep their persisted values while greyed, but both
+are ineffective while the master is Off. Re-enabling the master restores only
+the children whose saved values were already On. De-duplication state must be
+per legacy-mode activation and sufficiently output-aware that a debug output
+which was disabled at detection can receive one later notice without causing
+per-request spam.
 
 ## Behavior that must remain unchanged
 
@@ -454,8 +467,10 @@ these compatibility targets is allowed when required:
 - [x] A source audit permits only those documented non-cache direct calls and
       proves there is no alternate remote persistent-cache downloader.
 - [x] Forced and automatic legacy selection use the exact same message.
-- [x] Console and toast routes remain independent.
-- [x] Debug reporting is silent with both debug flags off.
+- [x] Console output remains the Debug master while per-destination delivery
+      and de-duplication stay output-aware.
+- [x] Debug reporting is silent whenever the master is Off, including while a
+      child retains a saved On value.
 - [x] Multiple files and retries do not repeat the notice.
 - [x] Existing media timeout, abort, retry, status, file-size, and write-epoch
       tests remain green.
@@ -601,7 +616,10 @@ Stage 3 commit/result:
       method.`
 - [x] Cover automatic media compatibility detection, forced activation, and
       forced startup.
-- [x] Cover console-only, toast-only, both, and neither.
+- [x] Historical Stage 4 coverage proved console-only, toast-only, both, and
+      neither under the then-independent switches. The later Debug master-link
+      amendment supersedes that settings matrix while retaining destination
+      de-duplication.
 - [x] Prove retries and multiple downloads do not create message spam.
 - [x] Prove a later debug-output enable can receive one pending notice.
 - [x] Run focused tests, `npm test`, and `git diff --check`.
@@ -942,7 +960,9 @@ Stage 5D plan/result:
     stops.
   - [ ] Verify forced legacy routing.
   - [ ] Verify the force toggle can return to native routing immediately.
-  - [ ] Verify console-only, toast-only, both, and disabled debug output.
+  - [ ] Verify disabled (master Off), console-only (master On/toast child Off),
+        and both (master On/toast child On) debug output, plus the one
+        destination-specific pending toast after console delivery.
   - [ ] Verify only one routing notice appears per legacy activation.
   - [ ] Verify update checks still use direct native networking and work with the
     media force setting both off and on.
@@ -1028,6 +1048,7 @@ Record changes to the plan here instead of silently changing the agreed scope.
 | 2026-07-27 | Stage 5C audit | Two implementation commits passed their existing tests but remained unsuitable for release: the first had false/early route attribution and missing body-terminal evidence; the second retained false native-start output, incomplete status/outcome contracts, and weak edge coverage. The second was also copied live prematurely, so it must be replaced by the final audited build. | Parent call-path review before accepting the live result |
 | 2026-07-27 | Cache-policy audit | Ordinary media caching follows author and location policy, but Anti-Nuke deliberately pre-caches ignored guild media. Two pre-existing strict-parity gaps also remain: ignored local/self updates can cache new media for an existing cached message, and a filtered partial update under the Ghost Ping override can cache media before a ghost ping is confirmed. Removed-attachment caching separately bypasses normal type/size checks. No policy code was changed because the user requested an audit report only and this networking branch remains scoped to transport re-plumbing. | Read-only source trace plus focused policy/Anti-Nuke/contracts result `95/95` |
 | 2026-07-27 | Anti-Nuke retention audit | DMs cannot enter Anti-Nuke pre-cache, and a confirmed channel deletion adopts/captures only the exact guild parent and its child threads. Eligible ignored or muted media from any guild channel can still be physically pre-cached in case that channel is later deleted. The `15` thread / `45` message / `15` attachment capture caps do not bound, age, or clean those provisional files, so never-confirmed and cap-rejected files can remain orphaned. URL-only staging is unsafe because CDN URLs can expire as the parent disappears. | User designated a separate post-networking hardening stage: bounded provisional physical storage, promote confirmed nuke/Ghost-Ping or ordinary-record files, and delete expired/rejected candidates without touching shared references |
+| 2026-07-27 | Debug master linkage | `debugLogging` is the effective master for both the detailed-media child and the debug-toast child. Turning the master Off greys both and suppresses their output without changing either saved value; turning it On restores only children already saved On. A saved toast Off never auto-enables. The activation-scoped legacy notice flushes both routes immediately only when the saved toast child is On. No plugin version or built-in changelog text changed for this amendment. | Final user clarification plus supported BetterDiscord `enableWith` behavior, deterministic recovery/routing tests, and independent review |
 
 ## Handoff activity log
 
@@ -1706,10 +1727,43 @@ evidence for another session to understand what changed and why.
 - **Failures or blockers:** No basic load blocker. The controlled stall,
   cancellation, legacy/debug routing, updater, and clipboard checks remain
   user-driven `RT-26` work.
-- **Commit:** pending final live checkpoint.
-- **Exact next action:** Commit this live checkpoint, push the current feature
-  branch, verify local/remote ref alignment, then give the user the concise
-  remaining test instructions and wait for results.
+- **Commit:** fd8e027b7e67b4985f3d911555d39c9c630c7c41.
+- **Exact next action:** Superseded by the later user-requested Debug
+  master-link amendment below. Validate and commit that amendment before
+  replacing the live plugin and pushing the feature branch.
+
+### 2026-07-27 — Debug toast child linked to console master
+
+- **Completed:** Linked **Show debug messages as toasts** to **Enable debug
+  logging** in both the settings UI and runtime router, retained its persisted
+  value while the master is Off, corrected the pending legacy-routing notice
+  edge, and updated deterministic coverage plus directly affected docs.
+- **Decisions:** Master Off makes both Debug children ineffective without
+  rewriting their config values. Master On restores only a child already saved
+  On. A saved toast Off never auto-enables. Detailed media-request diagnostics
+  remain console-only and never follow the toast route. Keep plugin version
+  `2.8.2.9` and the existing built-in changelog unchanged for this amendment.
+- **Files changed:** `MessageLoggerV2.plugin.js`, `docs/architecture.md`,
+  `docs/help.md`, `docs/settings.md`, `docs/tests.md`,
+  `tests/media.test.js`, `tests/persistence.test.js`,
+  `tests/settings-recovery.test.js`, `tests/source-contracts.test.js`, and this
+  checklist.
+- **Tests and exact results:** Focused media/settings-recovery/source-contract
+  coverage passed `149/149`; final full `npm test` passed `381/381`;
+  `npm run check` and `git diff --check` passed. The installed `cmark` accepts
+  only one input path, so the initial multi-file command was rejected for its
+  arguments; each changed documentation file then parsed successfully in an
+  individual loop.
+- **Runtime evidence:** Not yet replaced live. The current live plugin is the
+  preceding accepted networking build and must be overwritten after this
+  amendment commit.
+- **Failures or blockers:** Independent review found no production defect. It
+  found stale Debug matrix wording and missing saved-child recovery coverage;
+  both were corrected before the full pass. User-driven `RT-26` checks remain.
+- **Commit:** pending Debug master-link implementation commit.
+- **Exact next action:** Commit this amendment, record the full hash, then copy
+  only the plugin live, verify byte/hash parity and the hot-reload segment,
+  checkpoint the result, and push the feature branch.
 
 ### Handoff entry template
 

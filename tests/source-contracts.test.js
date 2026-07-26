@@ -384,7 +384,7 @@ test('media networking documentation preserves the selector boundary and officia
   );
   assert.match(
     testsDocs,
-    /\| RT-26 \| Media networking \|[^\n]*Waifugami cross-origin URL[^\n]*HTTP\/mixed-content media URL[^\n]*console-only, toast-only, both, and disabled Debug output[^\n]*remote image copy still uses direct BetterDiscord networking/
+    /\| RT-26 \| Media networking \|[^\n]*Waifugami cross-origin URL[^\n]*HTTP\/mixed-content media URL[^\n]*disabled output \(master Off\)[^\n]*console-only output \(master On and toast child Off\)[^\n]*both outputs \(master On and toast child On\)[^\n]*one possible toast-only delivery[^\n]*remote image copy still uses direct BetterDiscord networking/
   );
 });
 
@@ -463,7 +463,8 @@ test('settings dependencies match the approved master controls', () => {
     ['antiNukeThreadCap', 'antiNukeEnabled'],
     ['antiNukeMessageCap', 'antiNukeEnabled'],
     ['antiNukeAttachmentCap', 'antiNukeEnabled'],
-    ['detailedMediaNetworkDebug', 'debugLogging']
+    ['detailedMediaNetworkDebug', 'debugLogging'],
+    ['debugToasts', 'debugLogging']
   ]);
   assert.doesNotMatch(settingsConfig, /id: 'ignoreLocalEdits',[\s\S]{0,80}(?:enableWith|disableWith):/);
   assert.doesNotMatch(settingsConfig, /id: 'newCacheAllImagesPath',[\s\S]{0,80}(?:enableWith|disableWith):/);
@@ -1085,8 +1086,8 @@ test('automatic backup interval is configurable and bounded in settings and conf
 test('backup and edit-spam diagnostics remain opt-in under their warning-colored Debug category', () => {
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Debug'[\s\S]*id: 'ml2-settings-debug'[\s\S]*collapsible: true[\s\S]*shown: false/);
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Enable debug logging[\s\S]*id: 'debugLogging'[\s\S]*type: 'switch'/);
-  assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Show debug messages as toasts[\s\S]*id: 'debugToasts'[\s\S]*type: 'switch'/);
-  assert.match(source, /reportDebugEvent\(message, timeout = 4000, outputSelection = null\)[\s\S]*const output = this\._normalizeDebugEventOutputSelection\(outputSelection\);[\s\S]*if \(output\.console && this\.settings\?\.debugLogging\)[\s\S]*Logger\.log\(`\[Debug\] \$\{message\}`\)[\s\S]*if \(output\.toast && this\.settings\?\.debugToasts\)[\s\S]*this\.notifyUser\(message,[\s\S]*title: 'Message Logger Debug'[\s\S]*type: 'warning'/);
+  assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Show debug messages as toasts[\s\S]*id: 'debugToasts'[\s\S]*enableWith: 'debugLogging'[\s\S]*type: 'switch'/);
+  assert.match(source, /reportDebugEvent\(message, timeout = 4000, outputSelection = null\)[\s\S]*const output = this\._normalizeDebugEventOutputSelection\(outputSelection\);[\s\S]*if \(output\.console && this\.settings\?\.debugLogging\)[\s\S]*Logger\.log\(`\[Debug\] \$\{message\}`\)[\s\S]*if \(output\.toast && this\.settings\?\.debugLogging && this\.settings\?\.debugToasts\)[\s\S]*this\.notifyUser\(message,[\s\S]*title: 'Message Logger Debug'[\s\S]*type: 'warning'/);
   assert.match(source, /Log automatic-backup, edit-spam, channel-entry, and networking diagnostics to the console\./);
   assert.match(source, /id: 'debugLogging',[\s\S]*action: 'reportLegacyRoutingDebugLoggingState'/);
   assert.match(source, /id: 'debugToasts',[\s\S]*action: 'reportLegacyRoutingDebugToastsState'/);

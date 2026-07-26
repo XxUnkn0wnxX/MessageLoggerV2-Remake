@@ -155,7 +155,7 @@ Guilds and DMs have separate notification controls. These affect alerts, not whe
 | **Message sent**, **Message edited**, **Message deleted**, and **Ghost pings** under DMs | Allows that DM alert when its other author and scope gates pass. | Suppresses that DM alert without changing logging. |
 | **Disable toasts for local user (yourself)** | Suppresses eligible guild alerts for actions initiated by this Discord client. | Allows those local-action guild alerts when their event toggle and other gates pass. |
 | **Show nuke detection toasts** | Alerts only after Anti Nuke actually captures records from a deleted parent channel. | Anti Nuke can keep capturing silently. |
-| **Show debug messages as toasts** | Sends eligible Debug events through the selected BetterDiscord-notification or custom-toast route. | Suppresses only Debug toasts; **Enable debug logging** remains independent. |
+| **Show debug messages as toasts** | Sends eligible Debug events through the selected BetterDiscord-notification or custom-toast route. | Sends only when **Enable debug logging** is on. |
 | **Use BdApi notifications instead of custom toasts** | Routes enabled alerts through BetterDiscord notifications. | Routes enabled alerts through plugin custom toasts; it does not disable them. |
 | **Block spam edit notifications** | Rate-limits eligible edit alerts per author after the configured threshold. | Applies no edit-spam rate limit; the guild/DM **Message edited** toggle still decides whether edit alerts are enabled. |
 
@@ -245,7 +245,7 @@ The Debug category title and all three setting labels use Discord's native warni
 | --- | --- | --- |
 | Enable debug logging | Off | Writes automatic-backup lifecycle events, edit-spam diagnostics, deleted/edited channel-entry counter increases, the legacy-routing notice, and—when its child is enabled—detailed media-request diagnostics to the console. Counter output includes the new total, increase, server, and channel; edit-spam output shows each username's current/threshold counter, cooldown start, 10-second warning, final reset, and early settings reset without printing user IDs. |
 | Show detailed media-network diagnostics | Off | When enabled with **Enable debug logging**, writes one console-only lifecycle for each media-network attempt: request ID, method, full URL, native/legacy route, response status, received bytes, elapsed time, and terminal outcome. Its saved value remains On while greyed under a disabled master, but it is ineffective until console debug logging is enabled again. It never emits toasts or changes request behavior. Full URLs can contain signed tokens or other query data, so treat console exports as sensitive. |
-| Show debug messages as toasts | Off | Sends backup, edit-spam, channel-entry counter, and the activation-scoped legacy-routing notice through the selected BetterDiscord-notification or custom-toast mode. Detailed per-request media diagnostics are deliberately excluded because they can be noisy. Debug alerts are warning-colored, expire without pausing on hover, and dismiss on a left- or right-click. This control is independent of console debug logging. |
+| Show debug messages as toasts | Off | Sends backup, edit-spam, channel-entry counter, and the activation-scoped legacy-routing notice through the selected BetterDiscord-notification or custom-toast mode. Detailed per-request media diagnostics are deliberately excluded because they can be noisy. Debug alerts are warning-colored, expire without pausing on hover, and dismiss on a left- or right-click. This control is only active when console debug logging is enabled. |
 
 **Settings that can generate Debug output when the relevant event occurs:**
 
@@ -256,7 +256,7 @@ The Debug category title and all three setting labels use Discord's native warni
 - **Edit spam threshold**: active timer-reset details when the value changes while edit-spam blocking is enabled.
 - **Show amount of new deleted messages when entering a channel**: every enabled Deleted counter increase, including one combined increase for a bulk purge.
 - **Show amount of new edited messages when entering a channel**: every enabled Edited counter increase.
-- **Force legacy media fetching** and automatic native-compatibility fallback: report `Networking: media routing is using the old Discord renderer fetch() method.` once per legacy-routing activation to each enabled Debug output. An output enabled later receives its one pending notice; requests, retries, and files do not repeat it.
+- **Force legacy media fetching** and automatic native-compatibility fallback: report `Networking: media routing is using the old Discord renderer fetch() method.` once per legacy-routing activation to each enabled Debug output. An output enabled later—or re-enabling the debug master with its child still on—receives its one pending notice; requests, retries, and files do not repeat it.
 - **Show detailed media-network diagnostics**: while the main console Debug switch is also enabled, report each media attempt and its single terminal result to the console only. This never follows the toast setting.
 
 Debug output does not change backup timing, persistence, counter behavior, edit blocking, media routing, or normal error reporting.

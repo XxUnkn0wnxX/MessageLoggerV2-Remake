@@ -118,7 +118,7 @@ test('backup saves use an independent atomic destination', async t => {
   );
 });
 
-test('backup debug console and routed-toast controls are independent and disabled by default', () => {
+test('backup debug console remains master for routed toasts and both are disabled by default', () => {
   const notifications = [];
   const plugin = createPlugin({
     settings: { debugLogging: false, debugToasts: false },
@@ -136,21 +136,10 @@ test('backup debug console and routed-toast controls are independent and disable
 
   plugin.settings.debugLogging = false;
   plugin.settings.debugToasts = true;
-  plugin.reportDebugEvent('toast-only event', 2500);
+  const masterOff = plugin.reportDebugEvent('master-off toast request', 2500);
+  assert.deepEqual(masterOff, { console: false, toast: false });
   assert.equal(loggerEvents.length, 1);
-  assert.deepEqual(notifications.at(-1), [
-    'Message Logger Debug',
-    'toast-only event',
-    'warning',
-    [],
-    2500,
-    {
-      replaceKey: null,
-      pauseOnHover: false,
-      instantDismiss: true,
-      routeOverride: null
-    }
-  ]);
+  assert.equal(notifications.length, 0);
 
   plugin.settings.debugLogging = true;
   plugin.reportDebugEvent('combined event');
@@ -165,7 +154,7 @@ test('debug warning alerts honor the selected native-notification or custom-toas
   const plugin = createPlugin({
     _notificationRouterReady: true,
     settings: {
-      debugLogging: false,
+      debugLogging: true,
       debugToasts: true,
       useNotificationsInstead: true
     },
@@ -188,6 +177,11 @@ test('debug warning alerts honor the selected native-notification or custom-toas
   assert.equal(customToasts[0][1].type, 'warning');
   assert.equal(customToasts[0][1].pauseOnHover, false);
   assert.equal(customToasts[0][1].instantDismiss, true);
+
+  plugin.settings.debugLogging = false;
+  plugin.reportDebugEvent('suppressed route');
+  assert.equal(nativeNotifications.length, 1);
+  assert.equal(customToasts.length, 1);
 });
 
 test('system and UI feedback defaults to wall-clock expiry and whole-card dismissal', () => {

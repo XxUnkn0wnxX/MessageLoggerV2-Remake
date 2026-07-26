@@ -588,6 +588,79 @@ test('media-cache transport notices follow active-delivered routing and dedupe u
   assert.deepEqual(fifth, { console: false, toast: false });
 });
 
+test('legacy-routing notice flushes both destinations when master is re-enabled with toast child on', () => {
+  const plugin = createMediaCachePlugin('');
+  const notifications = [];
+  plugin.notifyUser = (content, options = {}) => notifications.push([content, options]);
+
+  plugin.settings.forceLegacyMediaFetching = true;
+  plugin._initializeMediaCacheLegacyRoutingNoticeState();
+  plugin.settings.debugLogging = false;
+  plugin.settings.debugToasts = true;
+  plugin.settings.debugLogging = true;
+
+  const first = plugin.reportLegacyRoutingOutputStateChange(
+    true,
+    { console: true, toast: false }
+  );
+  assert.deepEqual(first, { console: true, toast: true });
+  assert.deepEqual(loggerEvents, [['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]]);
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0][0], MEDIA_CACHE_LEGACY_ROUTING_NOTICE);
+  assert.equal(plugin.settings.debugToasts, true, 're-enabling the master must not rewrite the saved child value');
+
+  const second = plugin.reportLegacyRoutingOutputStateChange(
+    true,
+    { console: true, toast: false }
+  );
+  assert.deepEqual(second, { console: false, toast: false });
+  assert.deepEqual(loggerEvents, [['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]]);
+  assert.equal(notifications.length, 1);
+
+  const third = plugin._flushMediaCacheLegacyRoutingNoticeForOutputSelection();
+  assert.deepEqual(third, { console: false, toast: false });
+  assert.deepEqual(loggerEvents, [['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]]);
+  assert.equal(notifications.length, 1);
+});
+
+test('legacy-routing notice stays console-only when master is re-enabled with toast child off', () => {
+  const plugin = createMediaCachePlugin('');
+  const notifications = [];
+  plugin.notifyUser = (content, options = {}) => notifications.push([content, options]);
+
+  plugin.settings.forceLegacyMediaFetching = true;
+  plugin._initializeMediaCacheLegacyRoutingNoticeState();
+  plugin.settings.debugLogging = false;
+  plugin.settings.debugToasts = true;
+
+  const preMaster = plugin.reportLegacyRoutingOutputStateChange(
+    true,
+    { console: false, toast: true }
+  );
+  assert.deepEqual(preMaster, { console: false, toast: false });
+  assert.equal(notifications.length, 0);
+
+  plugin.settings.debugToasts = false;
+  plugin.settings.debugLogging = true;
+  const first = plugin.reportLegacyRoutingOutputStateChange(
+    true,
+    { console: true, toast: false }
+  );
+  assert.deepEqual(first, { console: true, toast: false });
+  assert.deepEqual(loggerEvents, [
+    ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+  ]);
+  assert.equal(notifications.length, 0);
+  assert.equal(plugin.settings.debugToasts, false);
+
+  const second = plugin._flushMediaCacheLegacyRoutingNoticeForOutputSelection();
+  assert.deepEqual(second, { console: false, toast: false });
+  assert.deepEqual(loggerEvents, [
+    ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+  ]);
+  assert.equal(notifications.length, 0);
+});
+
 test('media cache force toggle reports immediately and preserves a latched native incompatibility', () => {
   const plugin = createMediaCachePlugin('');
   const originalNetApi = global.BdApi.Net;
@@ -712,15 +785,15 @@ test('reportDebugEvent routes to requested output selection and returns dispatch
   plugin.settings.debugLogging = false;
   plugin.settings.debugToasts = true;
   const toastOnly = plugin.reportDebugEvent('toast-only', 2200, 'toast');
-  assert.deepEqual(toastOnly, { console: false, toast: true });
-  assert.equal(notifications.at(-1)[1].timeout, 2200);
+  assert.deepEqual(toastOnly, { console: false, toast: false });
+  assert.equal(notifications.length, 1);
 
   plugin.settings.debugLogging = false;
   plugin.settings.debugToasts = false;
   const none = plugin.reportDebugEvent('neither', 4000, 'none');
   assert.deepEqual(none, { console: false, toast: false });
   assert.equal(loggerEvents.length, 2);
-  assert.equal(notifications.length, 2);
+  assert.equal(notifications.length, 1);
 
   plugin.settings.debugLogging = true;
   plugin.settings.debugToasts = true;

@@ -3739,7 +3739,12 @@ module.exports = class MessageLoggerV2 {
   }
   reportLegacyRoutingOutputStateChange(enabled, outputSelection) {
     if (!enabled) return { console: false, toast: false };
-    return this._flushMediaCacheLegacyRoutingNoticeForOutputSelection(outputSelection);
+    const requested = this._normalizeDebugEventOutputSelection(outputSelection);
+    const output = {
+      console: requested.console,
+      toast: requested.toast || (requested.console && !requested.toast && this.settings?.debugToasts)
+    };
+    return this._flushMediaCacheLegacyRoutingNoticeForOutputSelection(output);
   }
   _initializeMediaCacheLegacyRoutingNoticeState() {
     this._mediaCacheLegacyRoutingNoticeState = null;
@@ -3758,9 +3763,9 @@ module.exports = class MessageLoggerV2 {
   }
   reportDebugEvent(message, timeout = 4000, outputSelection = null) {
     // Debug output is intentionally opt-in for automatic-backup, edit-spam timer,
-    // channel-entry counter, and media-networking events. The two settings are independent so
-    // developers can use either the console, the selected notification/toast route, or both
-    // without affecting errors.
+    // channel-entry counter, and media-networking events. Toast routing is linked to the
+    // console master switch, so all report destinations can be disabled at once by turning
+    // off Enable debug logging.
     // All debug notifications deliberately use the warning type so they share the same
     // attention color as the Debug category in both light and dark Discord themes.
     const output = this._normalizeDebugEventOutputSelection(outputSelection);
@@ -3770,7 +3775,7 @@ module.exports = class MessageLoggerV2 {
       Logger.log(`[Debug] ${message}`);
       reportedConsole = true;
     }
-    if (output.toast && this.settings?.debugToasts) {
+    if (output.toast && this.settings?.debugLogging && this.settings?.debugToasts) {
       this.notifyUser(message, {
         title: 'Message Logger Debug',
         type: 'warning',
@@ -4618,8 +4623,9 @@ module.exports = class MessageLoggerV2 {
               { style: { color: 'var(--text-warning, var(--status-warning))' } },
               'Show debug messages as toasts'
             ),
-            note: 'Show the same diagnostics through the selected alert mode.',
+            note: 'Show eligible debug events through the selected alert mode when debug logging is enabled.',
             id: 'debugToasts',
+            enableWith: 'debugLogging',
             type: 'switch',
             action: 'reportLegacyRoutingDebugToastsState'
           }
