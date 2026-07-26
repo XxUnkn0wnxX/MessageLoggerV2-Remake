@@ -505,8 +505,8 @@ Stage 1 commit/result:
 
 Stage 2 commit/result:
 
-- Commit: pending this passing stage commit; its exact hash will be recorded by
-  the immediate checklist checkpoint.
+- Commit: `3c13374bb1a387cbb6ae13e7294cabb1317c99e5`
+  (`feat: route media cache through native networking`).
 - Tests: PASS — `node --test tests/media.test.js` completed with 47 passed, 0
   failed; full `npm test` completed with 349 passed, 0 failed;
   `node --check MessageLoggerV2.plugin.js` passed within the full suite;
@@ -795,8 +795,8 @@ evidence for another session to understand what changed and why.
   preserve renderer `credentials`, which is not a shared BetterDiscord native
   option; parent review removed that assertion before commit. No product code
   relied on it.
-- **Commit:** Pending this passing stage commit; the immediate checklist
-  checkpoint will replace this sentence with the exact hash.
+- **Commit:** `3c13374bb1a387cbb6ae13e7294cabb1317c99e5`
+  (`feat: route media cache through native networking`).
 - **Exact next action:** Add Stage 3 source contracts proving update checks,
   remote clipboard reads, and local `blob:` clipboard reads remain independent
   of the media-only selector.
