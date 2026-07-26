@@ -49,7 +49,7 @@ review, checklist update, and commit must also be complete.
   selector; updater and clipboard behavior are independently locked to their
   existing transports; exact output-aware legacy-routing diagnostics are
   de-duplicated per activation and per output.
-- **Current tracked task changes:** Stages 1-2 are limited to
+- **Current tracked task changes:** Stages 1-4 are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/settings-recovery.test.js`, `tests/source-contracts.test.js`, and this
   checklist.
@@ -571,8 +571,8 @@ Stage 3 commit/result:
 
 Stage 4 commit/result:
 
-- Commit: Pending the passing Stage 4 implementation commit; its exact hash will
-  be recorded by the immediate checklist checkpoint.
+- Commit: `3ef7e6caae738d298ebada5bcab2241204d87571`
+  (`feat: report legacy media routing`).
 - Tests: PASS — `node --check MessageLoggerV2.plugin.js`; focused
   `node --test tests/media.test.js tests/source-contracts.test.js
   tests/persistence.test.js` reported 150 passed, 0 failed; full `npm test`
@@ -881,8 +881,8 @@ evidence for another session to understand what changed and why.
   before commit: one had the wrong exact notice, reset the compatibility latch,
   and lacked tests; the next improperly routed clipboard reads through the
   media selector. Parent review removed both regressions. No blocker remains.
-- **Commit:** Pending the passing Stage 4 implementation commit; the exact hash
-  will be recorded by the immediate checklist checkpoint.
+- **Commit:** `3ef7e6caae738d298ebada5bcab2241204d87571`
+  (`feat: report legacy media routing`).
 - **Exact next action:** Commit Stage 4, record its exact hash, then document the
   setting/debug event and complete the final pre-live static and automated
   review. Do not copy the plugin live.
