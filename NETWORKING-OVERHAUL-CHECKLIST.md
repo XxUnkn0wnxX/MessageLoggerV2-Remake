@@ -35,7 +35,7 @@ review, checklist update, and commit must also be complete.
 - **Working branch:** `fix/native-media-networking`
 - **Branch base:** a5eadbe736f5a0cf4b7a3730bf9950ade17ad752
   (`docs: prepare 2.8.2.8 release notes`)
-- **Upstream status:** The local feature branch is nine commits ahead of
+- **Upstream status:** The local feature branch is ten commits ahead of
   `origin/fix/native-media-networking` at
   c25c5c9bcb812af20f51d4cde953573bc455e2ad while the final combined build is
   validated and live-synced. The completed earlier implementation and
@@ -2314,6 +2314,36 @@ evidence for another session to understand what changed and why.
   f312df53c334fe912cc9073d1c6f5ce6e78bb102.
 - **Exact next action:** Commit the updated test/docs contract, rerun the full
   suite and final audit, then sync and push the combined build.
+
+### 2026-07-27 — Combined build final pre-live audit
+
+- **Completed:** Updated the official automated/live matrices for the
+  cache-scoped clipboard and plugin-disable cleanup. Added the deferred
+  provisional-media rule to `TODO.md`: age/limit cleanup remains active
+  regardless of **Delete cached files with log records** because that switch is
+  scoped only to media removed with real saved records.
+- **Decisions:** Keep version `2.8.2.9` and the built-in changelog unchanged
+  until the user confirms clipboard runtime behavior. Do not implement
+  provisional retention on this networking branch.
+- **Files changed:** `NETWORKING-OVERHAUL-CHECKLIST.md`, `TODO.md`,
+  `docs/tests.md`, and `tests/source-contracts.test.js`.
+- **Tests and exact results:** PASS — final `npm test` passed `394/394`;
+  `git diff --check` passed; `cmark` parsed the checklist, test matrix, and
+  TODO successfully. The source-contract-focused run passed `64/64`.
+- **Runtime evidence:** No trace/probe/clipboard helper is linked in the live
+  BetterDiscord plugins directory. Repository SHA-256 is
+  `ac4cacb705b54bfcd8ddff7a239f9fefed12bea9ac80fdf116a868b3e7faa379`;
+  the older live SHA-256 remains
+  `5683ea4cfb21dcb59959a290c57fa7dbce6cdcb8f79aed82c1e587d08ba0ff20`
+  until the authorized replacement.
+- **Failures or blockers:** No automated or static blocker. The remaining
+  checkboxes are deliberately Discord runtime checks that require the combined
+  live build.
+- **Commit:** Documentation/test-contract checkpoint
+  73ec42e5ce7cf8a201f8b0bfaf33afb03237026b.
+- **Exact next action:** Commit this audit note, live-sync only
+  `MessageLoggerV2.plugin.js`, verify hash/hot reload, record the evidence, push
+  the feature branch, and give the user the short runtime matrix.
 
 ### Handoff entry template
 
