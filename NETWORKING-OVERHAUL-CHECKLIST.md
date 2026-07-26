@@ -2190,8 +2190,8 @@ evidence for another session to understand what changed and why.
 - **Failures or blockers:** Three product gaps are confirmed: no success toast,
   no working GIF/file clipboard path or cache-only menu gate, and incomplete
   live-presentation teardown on plugin disable.
-- **Commit:** Checklist-plan commit pending; its exact hash will be recorded by
-  the following checklist checkpoint before implementation.
+- **Commit:** Checklist-plan commit
+  49510011be628cee3225a2c1e63c50b4656436fd.
 - **Exact next action:** Commit this plan, record its exact hash, then implement
   both bounded fixes with focused regressions and the full test suite before
   any live sync.
