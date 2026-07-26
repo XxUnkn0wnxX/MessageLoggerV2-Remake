@@ -35,12 +35,10 @@ review, checklist update, and commit must also be complete.
 - **Working branch:** `fix/native-media-networking`
 - **Branch base:** a5eadbe736f5a0cf4b7a3730bf9950ade17ad752
   (`docs: prepare 2.8.2.8 release notes`)
-- **Upstream status:** The native-only implementation and live-sync evidence
-  were published through d01f1e6567c27cbc2f42a90b2fd4a94b90596317;
-  local, tracking, and direct remote refs matched exactly after that push. The
-  completed earlier implementation and live-sync history was first published
-  through
-  e84bfaaf6fffc4b809f7e4fb6fe70ef6ac5c5897. `develop`, `main`,
+- **Upstream status:** The mounted-media compatibility implementation,
+  checklist checkpoint, and live-sync evidence were published through
+  10bcc1b36b327db9ef59a1a8ea45b8f44f62c537; local, tracking, and direct
+  remote refs matched exactly after that push. `develop`, `main`,
   `origin/develop`, and `origin/main` all remain untouched at
   a5eadbe736f5a0cf4b7a3730bf9950ade17ad752.
 - **Paused attachment work:** The renamed `fix/attachment-gate` remains
@@ -77,10 +75,12 @@ review, checklist update, and commit must also be complete.
   Discord's file bridge was not a portable Finder/Explorer-style clipboard,
   the approved native-only correction removed file-copy fallbacks, limited
   Logger copying to cached PNG/JPG/JPEG media, and made multi-image matching
-  exact or fail closed. Focused `73/73` and full `394/394` tests pass; final
+  exact or fail closed. The later generic menu-order compatibility fix keeps
+  ordinary messages untouched, limits ownership to actively presented
+  Logger-mounted rows, and runs its media-only replacement after standard
+  named plugin hooks. Focused `76/76` and full `397/397` tests pass; final
   implementation commit
-  7a7f32b426174d12f2e2ab1e490da0f78e9618e9 is complete and the live
-  replacement remains pending.
+  2847b1c64ecaa8ab47bed4506d57e87eee02c33d is complete and live.
 - **Current tracked task changes:** Stages 1-5D are limited to
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
   `tests/persistence.test.js`, `tests/settings-recovery.test.js`,
@@ -103,11 +103,10 @@ review, checklist update, and commit must also be complete.
 
 ### Exact next action
 
-Commit the live-sync evidence and push the feature branch. Verify local,
-tracking, and direct remote refs, then ask the user to retry the mounted
-PNG/JPEG copy with ImageUtilities enabled both before and after CMD+R. Amend
-the built-in changelog only after runtime confirmation. Keep provisional
-Anti-Nuke/Ghost-Ping retention as a separate post-networking stage.
+Ask the user to retry the mounted PNG/JPEG copy with ImageUtilities enabled,
+then repeat after CMD+R. Record the result and amend the built-in changelog only
+after runtime confirmation. Keep provisional Anti-Nuke/Ghost-Ping retention as
+a separate post-networking stage.
 
 ### Resume procedure for a new session
 
@@ -189,7 +188,7 @@ recorded as an amendment before implementation.
 - [x] Mounted-media copy ownership compatibility fix committed.
 - [x] Mounted-media copy ownership compatibility fix live-synced and
       hash-verified.
-- [ ] Mounted-media copy ownership compatibility fix pushed.
+- [x] Mounted-media copy ownership compatibility fix pushed.
 - [ ] User `RT-26` live behavior result received and recorded.
 - [x] Final implementation committed.
 
@@ -2820,6 +2819,29 @@ evidence for another session to understand what changed and why.
 - **Exact next action:** Commit this live-sync evidence, push the branch,
   verify local/tracking/direct-remote parity, and give the user the two-step
   runtime check.
+
+### 2026-07-27 — Mounted-media compatibility publication
+
+- **Completed:** Pushed the trace-plan checkpoint, compatibility
+  implementation, implementation checklist, and live-sync evidence to
+  `origin/fix/native-media-networking`.
+- **Decisions:** Do not merge branches or amend release metadata until the user
+  confirms the ImageUtilities-on runtime behavior before and after CMD+R.
+- **Files changed:** This publication evidence only.
+- **Tests and exact results:** Publication reused the exact live-synced source
+  that passed focused `76/76`, full `397/397`, syntax, diff, Markdown, and
+  independent review gates.
+- **Runtime evidence:** Local `HEAD`, local
+  `origin/fix/native-media-networking`, and direct `git ls-remote` all matched
+  10bcc1b36b327db9ef59a1a8ea45b8f44f62c537 immediately after the push.
+- **Failures or blockers:** None in publication. Only the two-click live check
+  remains.
+- **Commit:** Published live-sync checkpoint
+  10bcc1b36b327db9ef59a1a8ea45b8f44f62c537; this evidence-only follow-up is
+  the next branch tip.
+- **Exact next action:** Ask the user to copy the restored PNG/JPEG with
+  ImageUtilities enabled, confirm Logger's toast, press CMD+R, and repeat the
+  same copy once more.
 
 ### Handoff entry template
 
