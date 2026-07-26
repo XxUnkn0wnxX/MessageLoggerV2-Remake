@@ -2669,6 +2669,35 @@ evidence for another session to understand what changed and why.
   live-sync only the plugin, verify reload/hash parity, and push the branch
   before asking the user to retest.
 
+### 2026-07-27 — Live-mounted image clipboard hook live sync
+
+- **Completed:** Replaced the live plugin with the final audited
+  `image-context` hook build after all automated gates passed.
+- **Decisions:** Keep version `2.8.2.9` and the built-in changelog unchanged
+  until the user confirms this last clipboard path. No trace helper or test
+  server is needed for the immediate retest.
+- **Files changed:** Live `MessageLoggerV2.plugin.js` plus this checklist
+  evidence only.
+- **Tests and exact results:** The synced source passed focused
+  clipboard/source tests `75/75`, full `npm test` `396/396`, plugin syntax,
+  `git diff --check`, Markdown parsing, and independent review.
+- **Runtime evidence:** Final sync began at `2026-07-26 20:58:37 UTC`.
+  Repository and live SHA-256 both equal
+  `f2188f289a083bedc11d4df517a8035091a4549101b57b0f2673652172480a0f`.
+  Logs show patch removal, UI cleanup, patch reapplication, UI refresh, and
+  fresh cache writes. No Logger error followed the reload. One empty
+  `WINDOW:ERROR` at `20:58:39` had no message, source, or Logger stack and
+  matches the recurring client-only noise already seen during prior reloads.
+  The background network-stall test server is stopped.
+- **Failures or blockers:** No live-sync blocker. The restored live PNG/JPEG
+  copy and Logger success toast require the user's click confirmation.
+- **Commit:** Implementation
+  e425b24f01fd7179f69f7f1508c1c7d8a78b8080; exact-hash checklist checkpoint
+  b8d05dd9d3d62ded2d8101660bcbac2e2ffe0c38.
+- **Exact next action:** Commit this live-sync evidence, push the feature
+  branch, verify local/tracking/direct-remote parity, then ask the user to
+  right-click the restored PNG/JPEG and select **Copy image**.
+
 ### Handoff entry template
 
 ```text
