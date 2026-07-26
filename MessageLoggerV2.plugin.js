@@ -411,10 +411,22 @@ module.exports = class MessageLoggerV2 {
     if (!this.__started) return;
     // Archival removals are the one write-through exception while new data saving is disabled.
     // Flush their detached disk-only journal before teardown invalidates every data write.
+    let archivePresentationState = { visibleDeletionMounts: [] };
+    try {
+      archivePresentationState = this.captureArchiveLoadPresentationState?.()
+        || archivePresentationState;
+    } catch (error) {
+      Logger.warn('Could not capture archive presentation state during plugin shutdown.', error);
+    }
     try {
       this.flushNoSavePersistedRemovals?.();
     } catch (error) {
       Logger.error('Could not flush pending archival removals during plugin shutdown.', error);
+    }
+    try {
+      this.cleanupArchivePresentationForDisable?.(archivePresentationState);
+    } catch (error) {
+      Logger.warn('Could not clear archive presentation state during plugin shutdown.', error);
     }
     this.__started = false;
     try {
@@ -6192,6 +6204,142 @@ module.exports = class MessageLoggerV2 {
       visibleDeletionMounts,
       openForumThreadLogIds: new Set(this._forumThreadLogRefreshers?.keys?.() || [])
     };
+  }
+  cleanupArchivePresentationForDisable(previousState = null) {
+    if (typeof document === 'undefined') return false;
+    const state = previousState || this.captureArchiveLoadPresentationState();
+    if (!state) return false;
+    const threadBrowserParents = new Set();
+    const seenDispatches = new Set();
+    const removeNode = (node) => {
+      if (!node) return;
+      try { node.remove?.(); } catch (error) {}
+    };
+    const queueThreadBrowserParent = (node) => {
+      if (!node?.parentElement?.style) return;
+      threadBrowserParents.add(node.parentElement);
+    };
+    const restoreThreadBrowserHeights = () => {
+      for (const parent of threadBrowserParents) {
+        try {
+          const nativeSection = Array.from(parent.children || []).find(node =>
+            !node?.hasAttribute?.('data-ml2-restored-thread-browser-section')
+            && /joined threads/i.test(node?.textContent || '')
+          );
+          const nativeCards = Array.from(parent.querySelectorAll?.('div[role="button"]') || [])
+            .filter(node =>
+              !node?.hasAttribute?.('data-ml2-restored-thread-browser-card')
+              && node?.querySelector?.('h2 [class*="threadName_"]')
+              && node?.querySelector?.('[id^="message-content-"]')
+            );
+          const nativeHeight = (nativeSection?.getBoundingClientRect?.().height || 0)
+            + nativeCards.reduce(
+              (height, card) => height + (card.getBoundingClientRect?.().height || 0),
+              0
+            );
+          parent.style.height = nativeHeight > 0 ? `${nativeHeight}px` : '';
+        } catch (error) {
+          try { parent.style.height = ''; } catch {}
+          Logger.warn('Could not restore a thread-browser height during plugin shutdown.', error);
+        }
+      }
+    };
+    try {
+      for (const mount of state.visibleDeletionMounts || []) {
+        const id = String(mount.id || '');
+        const channelId = String(mount.channelId || '');
+        if (!id || !channelId) continue;
+        if (mount.structuralRoot) {
+          try {
+            this.removeRestoredForumThreadMountsFromDom?.(id);
+          } catch (error) {
+            Logger.warn(`Could not remove Logger structural-root clones for ${id}.`, error);
+          }
+        }
+        let channel = null;
+        try {
+          channel = this.tools?.getChannel?.(channelId);
+        } catch (error) {
+          Logger.warn(`Could not resolve channel ${channelId} during Logger cleanup.`, error);
+        }
+        const keepNativeThreadCard = !mount.structuralRoot
+          && [10, 11, 12].includes(Number(channel?.type))
+          && (mount.survivingThreadMessage === true || id === channelId);
+        if (keepNativeThreadCard) {
+          try {
+            this._invalidateAndRecache?.(channelId);
+          } catch (error) {
+            Logger.warn(`Could not refresh surviving native thread ${channelId}.`, error);
+          }
+          continue;
+        }
+        const dispatchKey = `${channelId}:${id}`;
+        if (seenDispatches.has(dispatchKey)) continue;
+        seenDispatches.add(dispatchKey);
+        try {
+          this.dispatcher?.dispatch?.({
+            type: 'MESSAGE_DELETE',
+            id,
+            channelId,
+            ML2: true
+          });
+        } catch (error) {
+          Logger.warn(`Could not dispatch Logger cleanup delete for ${id}.`, error);
+        }
+      }
+      const removeLoggerNodes = (selector) => {
+        let nodes = [];
+        try {
+          nodes = Array.from(document.querySelectorAll(selector));
+        } catch (error) {
+          Logger.warn(`Could not query Logger cleanup selector ${selector}.`, error);
+          return;
+        }
+        const isNativeHost = selector.includes('native-delete-host');
+        if (selector.includes('thread-browser-card') || selector.includes('thread-browser-section')) {
+          nodes.forEach(queueThreadBrowserParent);
+        }
+        for (const node of nodes) {
+          if (isNativeHost) {
+            try { this.cleanupCopiedNativeDeleteControls?.(node, true); } catch (error) {}
+          }
+          removeNode(node);
+        }
+      };
+      [
+        '[data-ml2-native-delete-host="true"]',
+        '[data-ml2-restored-forum-thread]',
+        '[data-ml2-restored-forum-card]',
+        '[data-ml2-restored-thread-entry]',
+        '[data-ml2-restored-thread-browser-card]',
+        '[data-ml2-restored-thread-browser-section]'
+      ].forEach(removeLoggerNodes);
+      for (const tintClass of [
+        this.style?.deleted,
+        this.style?.deletedAlt,
+        this.style?.deletedForumText
+      ].filter(Boolean)) {
+        let tintedNodes = [];
+        try {
+          tintedNodes = Array.from(document.querySelectorAll(`.${tintClass}`));
+        } catch (error) {
+          Logger.warn(`Could not query Logger tint class ${tintClass}.`, error);
+        }
+        for (const node of tintedNodes) {
+          node?.classList?.remove?.(tintClass);
+        }
+      }
+      restoreThreadBrowserHeights();
+      this.setRestoredDeleteShiftActive?.(false);
+      try { ContextMenu.close?.(); } catch (error) {}
+      return true;
+    } catch (error) {
+      Logger.warn('Could not fully clear Logger-owned presentation during disable.', error);
+      try { restoreThreadBrowserHeights(); } catch (restoreError) {}
+      try { this.setRestoredDeleteShiftActive?.(false); } catch (restoreError) {}
+      try { ContextMenu.close?.(); } catch (restoreError) {}
+      return false;
+    }
   }
   removeRestoredForumThreadMountsFromDom(threadId) {
     const id = String(threadId || '');

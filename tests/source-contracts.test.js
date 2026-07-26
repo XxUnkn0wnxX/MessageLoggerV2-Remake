@@ -1492,6 +1492,44 @@ test('checkNewUpdate uses direct updater fetch and skips media helper routes', a
   }
 });
 
+test('plugin stop clears Logger live presentation before unpatching without deleting saved state', () => {
+  const stopContext = source.slice(
+    source.indexOf('  stop() {'),
+    source.indexOf('  checkVersionNewer(current, remote) {')
+  );
+  const captureIndex = stopContext.indexOf('this.captureArchiveLoadPresentationState?.()');
+  const cleanupIndex = stopContext.indexOf('this.cleanupArchivePresentationForDisable?.(archivePresentationState)');
+  const stoppedIndex = stopContext.indexOf('this.__started = false');
+  const unpatchIndex = stopContext.indexOf('for (const unpatch of this.unpatches)');
+  assert.ok(captureIndex >= 0);
+  assert.ok(captureIndex < cleanupIndex);
+  assert.ok(cleanupIndex < stoppedIndex);
+  assert.ok(stoppedIndex < unpatchIndex);
+
+  const cleanupContext = source.slice(
+    source.indexOf('  cleanupArchivePresentationForDisable(previousState = null) {'),
+    source.indexOf('  removeRestoredForumThreadMountsFromDom(threadId) {')
+  );
+  assert.match(cleanupContext, /type: 'MESSAGE_DELETE'[\s\S]*ML2: true/);
+  assert.match(cleanupContext, /const keepNativeThreadCard = !mount\.structuralRoot[\s\S]*this\._invalidateAndRecache\?\.\(channelId\)/);
+  assert.match(cleanupContext, /this\.removeRestoredForumThreadMountsFromDom\?\.\(id\)/);
+  for (const attribute of [
+    'data-ml2-native-delete-host',
+    'data-ml2-restored-forum-thread',
+    'data-ml2-restored-forum-card',
+    'data-ml2-restored-thread-entry',
+    'data-ml2-restored-thread-browser-card',
+    'data-ml2-restored-thread-browser-section'
+  ]) {
+    assert.match(cleanupContext, new RegExp(attribute));
+  }
+  assert.match(cleanupContext, /this\.style\?\.deleted[\s\S]*this\.style\?\.deletedAlt[\s\S]*this\.style\?\.deletedForumText/);
+  assert.match(cleanupContext, /this\.cleanupCopiedNativeDeleteControls\?\.\(node, true\)/);
+  assert.match(cleanupContext, /this\.setRestoredDeleteShiftActive\?\.\(false\)/);
+  assert.match(cleanupContext, /ContextMenu\.close\?\.\(\)/);
+  assert.doesNotMatch(cleanupContext, /deleteMessageFromRecords|deleteCachedFiles|saveData\(/);
+});
+
 test('saved-media clipboard paths replace only deleted native actions and add one viewer action', () => {
   const copyContext = source.slice(
     source.indexOf('  _getClipboardMediaSourceKey(value) {'),

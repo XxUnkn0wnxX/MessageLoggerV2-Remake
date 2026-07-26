@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const {
   confirmationEvents,
+  ContextMenu,
   createPlugin,
   loggerEvents,
   Patcher,
@@ -622,6 +623,234 @@ test('forum upload state resets during stop', () => {
   assert.equal(plugin._forumUploadAsReplyBypassTokens.size, 0);
   assert.equal(aborted, true);
   assert.equal(plugin._forumUploadAsReplyAbortController, null);
+});
+
+test('stop restores archive presentation state and clears logger-only DOM artifacts', () => {
+  const previousDocument = global.document;
+  const cleanupCopies = [];
+  const dispatched = [];
+  const invalidated = [];
+  const structuralRemovals = [];
+  const removed = [];
+  const classRemovals = [];
+  const shiftCalls = [];
+  const stopOrder = [];
+  let closedMenus = 0;
+  const nativeSection = {
+    textContent: 'Joined Threads',
+    hasAttribute() { return false; },
+    getBoundingClientRect() { return { height: 12 }; }
+  };
+  const nativeCard = {
+    hasAttribute() { return false; },
+    querySelector(selector) {
+      return selector === 'h2 [class*="threadName_"]'
+        || selector === '[id^="message-content-"]'
+        ? {}
+        : null;
+    },
+    getBoundingClientRect() { return { height: 40 }; }
+  };
+  const threadBrowserParent = {
+    style: { height: '180px' },
+    children: [nativeSection],
+    querySelectorAll(selector) {
+      return selector === 'div[role="button"]' ? [nativeCard] : [];
+    }
+  };
+  const style = {
+    deleted: 'logger-deleted',
+    deletedAlt: 'logger-deleted-alt',
+    deletedForumText: 'logger-deleted-forum'
+  };
+  const threadRecordId = 'thread-channel';
+  const structuralRecordId = '444';
+  const normalMessageId = 'normal-message';
+  const normalChannelId = 'normal-channel';
+  const createQueryNode = (name) => ({
+    label: name,
+    remove() {
+      removed.push(name);
+    }
+  });
+  const createClassNode = cls => ({
+    classList: {
+      remove(value) {
+        classRemovals.push(value);
+      }
+    }
+  });
+  const nativeHost = createQueryNode('native-host');
+  const nodes = {
+    '[data-ml2-native-delete-host="true"]': [nativeHost],
+    '[data-ml2-restored-forum-thread]': [createQueryNode('restored-forum-thread')],
+    '[data-ml2-restored-forum-card]': [createQueryNode('restored-forum-card')],
+    '[data-ml2-restored-thread-entry]': [createQueryNode('restored-thread-entry')],
+    '[data-ml2-restored-thread-browser-card]': [Object.assign(createQueryNode('restored-thread-browser-card'), {
+      parentElement: threadBrowserParent
+    })],
+    '[data-ml2-restored-thread-browser-section]': [Object.assign(createQueryNode('restored-thread-browser-section'), {
+      parentElement: threadBrowserParent
+    })],
+    '.logger-deleted': [createClassNode(style.deleted)],
+    '.logger-deleted-alt': [createClassNode(style.deletedAlt)],
+    '.logger-deleted-forum': [createClassNode(style.deletedForumText)]
+  };
+
+  global.document = {
+    addEventListener() {},
+    removeEventListener() {},
+    querySelector() { return null; },
+    querySelectorAll(selector) {
+      return nodes[selector] || [];
+    }
+  };
+
+  const plugin = createPlugin({
+    settings: { dontSaveData: true },
+    __started: true,
+    messageRecord: {
+      [threadRecordId]: {
+        message: { id: threadRecordId, channel_id: threadRecordId },
+        delete_data: { forum_thread_message_delete: true, hidden: false }
+      },
+      [normalMessageId]: {
+        message: { id: normalMessageId, channel_id: normalChannelId },
+        delete_data: { hidden: false }
+      },
+      [structuralRecordId]: {
+        message: { id: structuralRecordId, channel_id: structuralRecordId },
+        delete_data: { forum_thread_delete: true, hidden: false }
+      }
+    },
+    deletedMessageRecord: {
+      [threadRecordId]: [threadRecordId],
+      [normalChannelId]: [normalMessageId],
+      [structuralRecordId]: [structuralRecordId]
+    },
+    purgedMessageRecord: {},
+    purgedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
+    dispatcher: { dispatch: event => dispatched.push(event) },
+    tools: {
+      getChannel: id => ({
+        id,
+        type: id === threadRecordId || id === structuralRecordId ? 11 : 0
+      })
+    },
+    shouldPresentSavedMessage: () => true,
+    _invalidateAndRecache: channelId => invalidated.push(channelId),
+    cleanupCopiedNativeDeleteControls(host, force) {
+      cleanupCopies.push([host, force]);
+    },
+    setRestoredDeleteShiftActive(value) {
+      shiftCalls.push(value);
+    },
+    removeRestoredForumThreadMountsFromDom(id) {
+      structuralRemovals.push(id);
+    },
+    removeOpenLogsButton() {},
+    _clearNativeNotificationQueue() {},
+    forceUpdateUI() {},
+    _replaceableToasts: null,
+    _copiedDeleteControlRoots: new Map()
+  });
+  plugin.style = style;
+  plugin._messageUpdateRegistry = null;
+  const cleanupPresentation = plugin.cleanupArchivePresentationForDisable.bind(plugin);
+  plugin.cleanupArchivePresentationForDisable = state => {
+    stopOrder.push(`cleanup:${plugin.__started}`);
+    return cleanupPresentation(state);
+  };
+  plugin.unpatches = [() => stopOrder.push(`unpatch:${plugin.__started}`)];
+  ContextMenu.close = () => { closedMenus++; };
+  const recordsBefore = structuredClone(plugin.messageRecord);
+  const indexesBefore = structuredClone(plugin.deletedMessageRecord);
+
+  try {
+    plugin.stop();
+  } finally {
+    global.document = previousDocument;
+  }
+
+  assert.deepEqual(invalidated, [threadRecordId]);
+  assert.deepEqual(
+    dispatched.map(event => [event.type, event.id, event.channelId, event.ML2]).sort(),
+    [
+      ['MESSAGE_DELETE', normalMessageId, normalChannelId, true],
+      ['MESSAGE_DELETE', structuralRecordId, structuralRecordId, true]
+    ].sort()
+  );
+  assert.deepEqual(structuralRemovals, [structuralRecordId]);
+  assert.equal(removed.includes('native-host'), true);
+  assert.equal(removed.includes('restored-forum-thread'), true);
+  assert.equal(removed.includes('restored-forum-card'), true);
+  assert.equal(removed.includes('restored-thread-entry'), true);
+  assert.equal(removed.includes('restored-thread-browser-card'), true);
+  assert.equal(removed.includes('restored-thread-browser-section'), true);
+  assert.equal(shiftCalls.includes(false), true);
+  assert.equal(cleanupCopies.length, 1);
+  assert.equal(cleanupCopies[0][0], nativeHost);
+  assert.equal(cleanupCopies[0][1], true);
+  assert.equal(threadBrowserParent.style.height, '52px');
+  assert.equal(classRemovals.includes(style.deleted), true);
+  assert.equal(classRemovals.includes(style.deletedAlt), true);
+  assert.equal(classRemovals.includes(style.deletedForumText), true);
+  assert.equal(closedMenus, 1);
+  assert.deepEqual(stopOrder, ['cleanup:true', 'unpatch:false']);
+  assert.deepEqual(plugin.messageRecord, recordsBefore);
+  assert.deepEqual(plugin.deletedMessageRecord, indexesBefore);
+});
+
+test('stop remains fail-safe when presentation capture throws', () => {
+  const plugin = createPlugin({
+    __started: true,
+    settings: { dontSaveData: true },
+    captureArchiveLoadPresentationState() {
+      throw new Error('presentation unavailable');
+    },
+    cleanupArchivePresentationForDisable(state) {
+      assert.deepEqual(state, { visibleDeletionMounts: [] });
+    },
+    removeOpenLogsButton() {},
+    _clearNativeNotificationQueue() {},
+    forceUpdateUI() {},
+    unpatches: []
+  });
+
+  assert.doesNotThrow(() => plugin.stop());
+  assert.equal(plugin.__started, false);
+});
+
+test('stop still unpatches when presentation cleanup throws', () => {
+  const previousDocument = global.document;
+  let unpatched = false;
+  global.document = {
+    querySelector() { return null; },
+    removeEventListener() {}
+  };
+  const plugin = createPlugin({
+    __started: true,
+    settings: { dontSaveData: true },
+    captureArchiveLoadPresentationState() {
+      return { visibleDeletionMounts: [] };
+    },
+    cleanupArchivePresentationForDisable() {
+      throw new Error('cleanup unavailable');
+    },
+    removeOpenLogsButton() {},
+    _clearNativeNotificationQueue() {},
+    forceUpdateUI() {},
+    unpatches: [() => { unpatched = true; }]
+  });
+
+  try {
+    assert.doesNotThrow(() => plugin.stop());
+  } finally {
+    global.document = previousDocument;
+  }
+  assert.equal(plugin.__started, false);
+  assert.equal(unpatched, true);
 });
 
 test('hidden records and unanchored deleted forum or thread roots have no jump mount point', t => {
