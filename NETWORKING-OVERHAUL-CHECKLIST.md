@@ -271,9 +271,10 @@ handler:
       stickers through `cacheImage()`.
 - [x] Anti-Nuke calls `cacheMessageImages()` and does not have a separate
       downloader.
-- [x] The image-context **Copy to Clipboard** action intentionally keeps its
-      existing independent choice: renderer `fetch()` for local `blob:` URLs
-      and `BdApi.Net.fetch()` for remote URLs.
+- [x] The old image-context **Copy to Clipboard** implementation was statically
+      present and kept its fetch split, but `RT-26` proved that current Discord
+      no longer invokes that hook. The approved replacement is tracked under
+      **Clipboard behavior** and Stage 6 below.
 - [x] No Axios, Node HTTP/HTTPS, Electron `net`, external request library, or
       separate XHR downloader was found.
 
@@ -313,11 +314,18 @@ media-cache caller
 update checker
   -> direct BdApi.Net.fetch()              [unchanged]
 
-remote clipboard image
-  -> direct BdApi.Net.fetch()              [unchanged]
+normal Discord image
+  -> Discord-owned native Copy image       [unchanged]
 
-local blob clipboard image
-  -> direct renderer fetch()               [unchanged local read]
+deleted/restored Discord image
+  -> patched native Copy image action
+       -> shared Logger clipboard reader
+            -> direct BdApi.Net.fetch()     [remote]
+            -> direct renderer fetch()      [local blob]
+
+Logger viewer image
+  -> Logger Copy image action
+       -> same shared Logger clipboard reader
 ```
 
 `fetchMediaCacheResponse()` should continue owning cache-specific cancellation
@@ -334,7 +342,7 @@ must not be sent through networking merely to read it again:
 - [x] Keep `blob:` object URLs local.
 - [x] Keep `data:` resources and the local error placeholder local.
 - [x] Keep cache file writes, deletion, reveal-in-folder, and cleanup local.
-- [x] Keep **Copy to Clipboard** on its current split: local `blob:` reads use
+- [ ] Keep **Copy image** on the existing fetch split: local `blob:` reads use
       renderer `fetch()` and remote reads use `BdApi.Net.fetch()`.
 - [x] Do not route either clipboard branch through the media-cache handler.
 - [x] Continue revoking locally created object URLs during cleanup.
@@ -345,16 +353,27 @@ reads the matching cache file with `fs`, and returns a local `blob:` URL.
 
 ### Clipboard behavior
 
-The MessageLogger image-context menu adds its own **Copy to Clipboard** action.
-It currently obtains image bytes, converts them to a `Uint8Array`, and passes
-them to `DiscordNative.clipboard.copyImage()`.
+`RT-26` found that the old `image-context` patch is no longer called by current
+Discord. The Logger viewer also builds its own context menu and had no image
+copy action. The user approved this self-contained replacement:
 
-- For a genuinely remote source, preserve the existing direct
-  `BdApi.Net.fetch()` call.
-- For a MessageLogger-owned cached/blob source, preserve the existing local
-  renderer `fetch()` call regardless of the media force setting.
-- It does not add a logger record or write a new cache file.
-- Preserve the existing user-facing failure notification and console error.
+- [ ] Leave Discord's native **Copy image** action untouched for ordinary,
+      non-deleted messages.
+- [ ] For deleted/restored live message mounts only, patch the existing native
+      Discord **Copy image** action so Logger reads the saved image source.
+      Preserve one visible action rather than adding a duplicate.
+- [ ] Add one Logger-owned **Copy image** action to image attachments in the
+      Logger viewer.
+- [ ] Share one byte-copy helper across both Logger-owned paths. Remote sources
+      use direct `BdApi.Net.fetch()`; local `blob:` sources use renderer
+      `fetch()`; neither path uses the media-cache transport selector.
+- [ ] Pass successful bytes to `DiscordNative.clipboard.copyImage()` and never
+      invoke the native writer after a failed or non-200 read.
+- [ ] Preserve one user-facing failure notification plus a console error.
+- [ ] Keep clipboard reads independent from **Force legacy media fetching**,
+      media diagnostics, cache writes, and Logger record creation.
+- [ ] Remove the obsolete `image-context` clipboard patch. Do not implement the
+      separate future **Reveal in folder** feature as part of this fix.
 
 ## Boundaries that are not plugin HTTP calls
 
@@ -1021,6 +1040,11 @@ Stage 5D plan/result:
     works with the media force setting both off and on.
   - [ ] Verify remote-image clipboard copying still uses direct native
         networking and works with the media force setting both off and on.
+  - [x] Runtime defect found before those checks: current Discord did not invoke
+        Logger's old `image-context` patch, and the Logger viewer's custom menu
+        exposed no image copy action. The user approved the narrow replacement
+        documented above; clipboard runtime rows remain blocked until it is
+        implemented, fully tested, and synced live.
   - Record any runtime-only findings and amend earlier stages if necessary.
 
 Live result:
@@ -2035,6 +2059,31 @@ evidence for another session to understand what changed and why.
   a74d1639f6cb3b9875305f8338723c3ed561f4c0.
 - **Exact next action:** Record and push this evidence, then run local `blob:`
   clipboard copying with media force Off and On.
+
+### 2026-07-27 — Clipboard runtime defect and approved replacement
+
+- **Completed:** Reproduced the missing Logger clipboard action in the Logger
+  viewer and traced current Discord context-menu callbacks for the saved
+  deleted/restored image.
+- **Decisions:** Keep the plugin self-contained. Leave ordinary Discord
+  messages on Discord's own native action; replace that native action only for
+  deleted/restored Logger records, and add one Logger-owned action in the
+  viewer. Both paths will share the existing local-blob/remote-network split.
+- **Files changed:** This checklist only at this planning checkpoint.
+- **Tests and exact results:** FAIL as expected — the viewer had no image copy
+  action. The visible live-chat action was Discord's own action, while Logger's
+  old `image-context` handler was not reached.
+- **Runtime evidence:** `MessageLoggerClipboardTrace` was enabled and the user
+  opened both menus. Its report contains only the startup header; neither
+  `image-context` nor the helper's message hook received the image-menu event.
+  The screenshots separately show Discord's native action and the viewer's
+  missing action.
+- **Failures or blockers:** Clipboard implementation and deterministic tests
+  are required before the two remaining `RT-26` clipboard rows can run.
+- **Commit:** Pending checklist-plan commit.
+- **Exact next action:** Commit and record this approved plan, implement the
+  shared clipboard reader plus the two scoped menu paths, run the full suite,
+  audit edge cases, then sync live for the two remaining runtime checks.
 
 ### Handoff entry template
 
