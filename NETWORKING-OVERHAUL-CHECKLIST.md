@@ -1553,7 +1553,7 @@ evidence for another session to understand what changed and why.
   Anti-Nuke intentionally pre-caches ignored guild media. Ignored local/self
   updates and filtered partial Ghost Ping updates have two additional strict
   cache-parity gaps. Removed attachments also bypass type/size gates.
-- **Commit:** `<pending-policy-audit-checkpoint>`.
+- **Commit:** 70c3c446246687d988744286253f785c17027b99.
 - **Exact next action:** Keep these findings out of the networking code; finish
   Stage 5C/5D and report any separately requested policy repair before editing.
 
