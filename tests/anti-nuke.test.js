@@ -917,7 +917,7 @@ test('Anti-Nuke pre-caches the final attachment-only reply after IgnoreSelf skip
   assert.equal(cacheCalls.length, 1);
   assert.deepEqual(cacheCalls[0], {
     messageId: 'ignore-self-message',
-    options: { queueWhileNoSave: false }
+    options: { queueWhileNoSave: false, cacheState: 'precache' }
   });
   assert.deepEqual(pluginState.plugin.messageRecord, {}, 'ordinary IgnoreSelf capture remains suppressed');
 });
@@ -958,7 +958,7 @@ test('Anti-Nuke pre-caches media on ignored MESSAGE_UPDATE events with new attac
   assert.equal(cacheCalls.length, 1);
   assert.deepEqual(cacheCalls[0], {
     messageId: 'ignored-update-message',
-    options: { queueWhileNoSave: false }
+    options: { queueWhileNoSave: false, cacheState: 'precache' }
   });
   assert.deepEqual(pluginState.plugin.messageRecord, {}, 'the ignored media update is not logged as edit history');
 });
@@ -1001,7 +1001,7 @@ test('Anti-Nuke pre-caches an author-less partial media update without swallowin
   assert.deepEqual(cacheCalls, [{
     messageId: 'partial-update-message',
     attachmentIds: ['later-partial'],
-    options: { queueWhileNoSave: false }
+    options: { queueWhileNoSave: false, cacheState: 'precache' }
   }]);
   assert.deepEqual(pluginState.plugin.messageRecord, {});
 });
@@ -1090,7 +1090,7 @@ test('Anti-Nuke still caches MESSAGE_CREATE media only once when message would o
   assert.equal(cacheCalls.length, 1);
   assert.deepEqual(cacheCalls[0], {
     messageId: 'regular-message',
-    options: { queueWhileNoSave: false }
+    options: { queueWhileNoSave: false, cacheState: 'precache' }
   });
 });
 
@@ -1164,7 +1164,7 @@ test('Anti-Nuke ignored media never writes or queues while no-save is active', (
 
   assert.deepEqual(cacheCalls, [{
     messageId: 'ignored-no-save-message',
-    options: { queueWhileNoSave: false }
+    options: { queueWhileNoSave: false, cacheState: 'precache' }
   }]);
   assert.deepEqual(queuedRequests, []);
   assert.deepEqual(pluginState.plugin.messageRecord, {});

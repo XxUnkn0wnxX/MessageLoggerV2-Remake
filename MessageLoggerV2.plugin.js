@@ -39,7 +39,11 @@ const MEDIA_CACHE_TRIM_ALL = MEDIA_CACHE_TRIM_LIVE_AGE
   | MEDIA_CACHE_TRIM_PRE_AGE
   | MEDIA_CACHE_TRIM_PRE_SIZE;
 const MEDIA_CACHE_TRIM_GB = 1024 ** 3;
-const MEDIA_CACHE_TRIM_WORK_BATCH = 32;
+const MEDIA_CACHE_TRIM_WORK_BATCH = 8;
+const MEDIA_CACHE_TRIM_YIELD_DELAY_MS = 4;
+const MEDIA_CACHE_TRIM_SNOWFLAKE_FUTURE_TOLERANCE_MS = 24 * 60 * 60 * 1000;
+const MEDIA_CACHE_TRIM_LIMIT_WARNING_MESSAGE = 'Cache limits changed. If the first catch-up trim has to process a large cache, Discord may briefly become unresponsive.';
+const MEDIA_CACHE_TRIM_LIMIT_WARNING_REPLACE_KEY = 'media-cache-trim:limit-warning';
 const MEDIA_CACHE_LEGACY_ROUTING_NOTICE = 'Networking: media routing is using the old Discord renderer fetch() method.';
 const DATA_SAVE_TRANSITION_TIMEOUT_MS = 30 * 1000;
 const DATA_SAVE_MAX_ATTEMPTS = 3;
@@ -4568,7 +4572,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Live cache maximum age (hours)',
-            note: 'Delete regular files older than this age from the live cache. Blank or 0 disables the age limit.',
+            note: 'Delete eligible live-cache files older than this age, using the source message date in each filename when valid and the file modified date as a fallback. Blank or 0 disables the age limit.',
             id: 'liveCacheMaxAgeHours',
             enableWith: 'cacheAllImages',
             type: 'textbox',
@@ -4581,7 +4585,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Live cache maximum size (GB)',
-            note: 'Delete oldest live-cache files until usage is at or below 95% of this cap. Blank or 0 disables the size limit.',
+            note: 'Delete oldest live-cache files until usage is at or below 95% of this cap, ordering by source message date from each filename when valid and file modified date otherwise. Blank or 0 disables the size limit. Setting or lowering this GB limit on a large cache can briefly make Discord unresponsive during the first catch-up trim; later passes are normally lighter.',
             id: 'liveCacheMaxSizeGb',
             enableWith: 'cacheAllImages',
             type: 'textbox',
@@ -4594,7 +4598,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Pre-cache maximum age (hours)',
-            note: 'Delete regular files older than this age from the pre-cache sibling. Blank or 0 disables the age limit.',
+            note: 'Delete provisional pre-cache files older than this age using their file modified date. Blank or 0 disables the age limit.',
             id: 'preCacheMaxAgeHours',
             enableWith: 'cacheAllImages',
             type: 'textbox',
@@ -4607,7 +4611,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Pre-cache maximum size (GB)',
-            note: 'Delete oldest pre-cache files until usage is at or below 80% of this cap. Blank or 0 disables the size limit.',
+            note: 'Delete oldest pre-cache files by file modified date until usage is at or below 80% of this cap. Blank or 0 disables the size limit. Setting or lowering this GB limit on a large cache can briefly make Discord unresponsive during the first catch-up trim; later passes are normally lighter.',
             id: 'preCacheMaxSizeGb',
             enableWith: 'cacheAllImages',
             type: 'textbox',
@@ -4633,7 +4637,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Show trimmer start/end toasts',
-            note: 'Show normal start/end toasts for age and GB-size trim phases. Console lifecycle messages remain visible when this is Off.',
+            note: 'Show normal start/end toasts for age and GB-size trim phases. Also shows a replaceable warning after an actual age or GB-size limit change if the first catch-up trim may briefly make Discord unresponsive. Console lifecycle messages remain visible when this is Off.',
             id: 'showMediaCacheTrimLifecycleToasts',
             enableWith: 'cacheAllImages',
             type: 'switch'
@@ -4937,7 +4941,7 @@ module.exports = class MessageLoggerV2 {
       handleBackup: (val) => this.handleAutoBackupSetting(val),
       reportLoggingScope: (val) => this.reportMajorSettingChange('onlyLogWhitelist', val),
       reportMediaCaching: (val) => this.handleMediaCachingSetting(val),
-      mediaCacheTrimLimitChanged: (val, settingId) => this.handleMediaCacheTrimLimitChange(settingId, val),
+      mediaCacheTrimLimitChanged: (val, settingId, _config, previousValue) => this.handleMediaCacheTrimLimitChange(settingId, val, previousValue),
       mediaCacheTrimIntervalChanged: (val) => this.handleMediaCacheTrimIntervalChange(val),
       reportForceLegacyMediaFetching: (val) => this.setMediaCacheFetchTransportPreference(val),
       reportLegacyRoutingDebugLoggingState: (enabled) => this.reportLegacyRoutingOutputStateChange(
@@ -5022,9 +5026,14 @@ module.exports = class MessageLoggerV2 {
       else if (config.validator === 'number') {
         setting.onChange = val => {
           this.handleNumericSettingInput(config, val, parsed => {
+            const previousValue = this.settings[config.id];
             this.settings[config.id] = parsed;
             if (config.action && actions[config.action]) {
-              actions[config.action](parsed, config.id, config);
+              if (config.action === 'mediaCacheTrimLimitChanged') {
+                actions[config.action](parsed, config.id, config, previousValue);
+              } else {
+                actions[config.action](parsed, config.id, config);
+              }
             }
             this.saveSettings();
           });
@@ -7905,9 +7914,17 @@ module.exports = class MessageLoggerV2 {
     );
     this._mediaCacheTrimDebug(`Media cache trim debounce ${wasScheduled ? 'reset' : 'scheduled'} for ${delay}ms.`);
   }
-  handleMediaCacheTrimLimitChange(settingId, value) {
+  handleMediaCacheTrimLimitChange(settingId, value, previousValue) {
     const bit = this._mediaCacheTrimLimitBit(settingId);
     if (!bit) return false;
+    const previousNumeric = Number(previousValue);
+    const valueNumeric = Number(value);
+    if (arguments.length >= 3
+      && Number.isFinite(previousNumeric)
+      && Number.isFinite(valueNumeric)
+      && previousNumeric === valueNumeric) {
+      return false;
+    }
     this._mediaCacheTrimClearPeriodicTimeout();
     const enabled = Number(value) > 0;
     if (enabled) this._mediaCacheTrimPendingMask |= bit;
@@ -7927,6 +7944,14 @@ module.exports = class MessageLoggerV2 {
       'TRIM'
     );
     this._mediaCacheTrimDebug(`Changed ${settingId} to ${Number(value) || 0}; pending mask is ${this._mediaCacheTrimPendingMask}.`);
+    if (this.settings?.showMediaCacheTrimLifecycleToasts === true) {
+      this.notifyUser(MEDIA_CACHE_TRIM_LIMIT_WARNING_MESSAGE, {
+        title: 'Message Logger Media Cache',
+        type: 'warning',
+        timeout: 8000,
+        replaceKey: MEDIA_CACHE_TRIM_LIMIT_WARNING_REPLACE_KEY
+      });
+    }
     if (this.settings?.cacheAllImages) this._scheduleMediaCacheTrimDebounce();
     return true;
   }
@@ -7950,7 +7975,7 @@ module.exports = class MessageLoggerV2 {
   }
   async _mediaCacheTrimYield(generation) {
     if (this._mediaCacheTrimIsCancelled(generation)) return false;
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, MEDIA_CACHE_TRIM_YIELD_DELAY_MS));
     return !this._mediaCacheTrimIsCancelled(generation);
   }
   async _mediaCacheTrimConsumeWork(generation, state) {
@@ -7992,6 +8017,22 @@ module.exports = class MessageLoggerV2 {
       return null;
     }
     return stat;
+  }
+  _mediaCacheTrimEffectiveTimestamp(name, fallbackTimestamp) {
+    const fallback = Number(fallbackTimestamp) || 0;
+    const match = / \((\d+)(?: by [^)]+)?\)(?:\.[^./]+)?$/i.exec(String(name || ''));
+    if (!match) return fallback;
+    if (!/^\d{17,20}$/.test(match[1])) return fallback;
+    try {
+      const timestamp = (BigInt(match[1]) >> 22n) + BigInt(DISCORD_EPOCH);
+      const discordEpoch = BigInt(DISCORD_EPOCH);
+      const latestPlausible = BigInt(Date.now() + MEDIA_CACHE_TRIM_SNOWFLAKE_FUTURE_TOLERANCE_MS);
+      if (timestamp <= discordEpoch || timestamp > latestPlausible) return fallback;
+      const decoded = Number(timestamp);
+      return Number.isFinite(decoded) ? decoded : fallback;
+    } catch {
+      return fallback;
+    }
   }
   async _walkMediaCacheTrimRoot(root, options, generation) {
     const fs = this.nodeModules?.fs;
@@ -8040,15 +8081,23 @@ module.exports = class MessageLoggerV2 {
         }
         if (typeof stat.isFile !== 'function' || !stat.isFile()
           || options.restrictMain && !/^.+ \(\d+(?: by [^)]+)?\)(?:\.[^./]+)?$/i.test(name)) continue;
+        const mtimeMs = Number(stat.mtimeMs) || 0;
         files.push({
           path: fullPath,
           name,
           size: Number(stat.size) || 0,
-          mtimeMs: Number(stat.mtimeMs) || 0
+          mtimeMs,
+          effectiveTimestamp: options?.useMessageTimestamp
+            ? this._mediaCacheTrimEffectiveTimestamp(name, mtimeMs)
+            : mtimeMs
         });
       }
     }
-    files.sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
+    files.sort((a, b) => {
+      const leftTimestamp = Number(a.effectiveTimestamp ?? a.mtimeMs) || 0;
+      const rightTimestamp = Number(b.effectiveTimestamp ?? b.mtimeMs) || 0;
+      return leftTimestamp - rightTimestamp || a.name.localeCompare(b.name);
+    });
     return { files, directories };
   }
   async _deleteMediaCacheTrimFile(entry, reason, generation, work = { count: 0 }) {
@@ -8081,7 +8130,11 @@ module.exports = class MessageLoggerV2 {
       try {
         this.nodeModules.fs.rmdirSync(directory);
       } catch (error) {
-        if (this.isMissingMediaCachePathError(error) || error?.code === 'ENOTEMPTY') continue;
+        const errorMessage = String(error?.message || '');
+        const isNonEmptyDirectoryError = error?.code === 'ENOTEMPTY'
+          || error?.code === 'EEXIST'
+          || /\b(?:ENOTEMPTY|EEXIST)\b/.test(errorMessage);
+        if (this.isMissingMediaCachePathError(error) || isNonEmptyDirectoryError) continue;
         throw error;
       }
     }
@@ -8094,6 +8147,7 @@ module.exports = class MessageLoggerV2 {
     const sizeGb = Number(this.settings?.[kind === 'pre' ? 'preCacheMaxSizeGb' : 'liveCacheMaxSizeGb']) || 0;
     const ageSelected = !!(selectedMask & ageBit);
     const sizeSelected = !!(selectedMask & sizeBit);
+    const useMessageTimestamp = options.useMessageTimestamp ?? kind === 'live';
     const ageLabel = this._mediaCacheTrimPhaseLabel(kind, 'age');
     const sizeLabel = this._mediaCacheTrimPhaseLabel(kind, 'size');
     const phaseStartedAt = new Map();
@@ -8131,7 +8185,11 @@ module.exports = class MessageLoggerV2 {
     let scan;
     const work = { count: 0 };
     try {
-      scan = await this._walkMediaCacheTrimRoot(root, { ...options, _yieldState: work }, generation);
+      scan = await this._walkMediaCacheTrimRoot(
+        root,
+        { ...options, useMessageTimestamp, _yieldState: work },
+        generation
+      );
     } catch (error) {
       endPhase(ageBit, ageLabel, 0);
       endPhase(sizeBit, sizeLabel, 0);
@@ -8153,7 +8211,7 @@ module.exports = class MessageLoggerV2 {
           const ageMs = ageHours * 60 * 60 * 1000;
           for (const file of files) {
             if (this._mediaCacheTrimIsCancelled(generation)) break;
-            const age = now - file.mtimeMs;
+            const age = now - (Number(file.effectiveTimestamp ?? file.mtimeMs) || 0);
             if (age < ageMs) continue;
             const ageValue = age / (60 * 60 * 1000);
             const outcome = await this._deleteMediaCacheTrimFile(file, `age ${ageValue.toFixed(2)}h >= ${ageHours}h`, generation, work);
@@ -8182,8 +8240,8 @@ module.exports = class MessageLoggerV2 {
             for (const file of files) {
               if (this._mediaCacheTrimIsCancelled(generation) || totalBytes <= targetBytes) break;
               if (removed.has(file)) continue;
-              const fileGb = file.size / MEDIA_CACHE_TRIM_GB;
-              const outcome = await this._deleteMediaCacheTrimFile(file, `size ${fileGb.toFixed(3)}GB over ${sizeGb}GB`, generation, work);
+              const fileMb = file.size / (1024 ** 2);
+              const outcome = await this._deleteMediaCacheTrimFile(file, `size ${fileMb.toFixed(1)}MB over ${sizeGb}GB`, generation, work);
               if (outcome.cancelled) break;
               if (outcome.deleted || outcome.missing) {
                 removed.add(file);
@@ -8202,7 +8260,7 @@ module.exports = class MessageLoggerV2 {
           // absorbs that drift and performs a final oldest-first correction without looping.
           const verification = await this._walkMediaCacheTrimRoot(
             root,
-            { ...options, _yieldState: work },
+            { ...options, useMessageTimestamp, _yieldState: work },
             generation
           );
           for (const directory of verification.directories) {
@@ -8214,10 +8272,9 @@ module.exports = class MessageLoggerV2 {
           if (totalBytes > sizeTargetBytes) {
             for (const file of verificationFiles) {
               if (this._mediaCacheTrimIsCancelled(generation) || totalBytes <= sizeTargetBytes) break;
-              const fileGb = file.size / MEDIA_CACHE_TRIM_GB;
               const outcome = await this._deleteMediaCacheTrimFile(
                 file,
-                `size ${fileGb.toFixed(3)}GB over ${sizeGb}GB`,
+                `size ${(file.size / (1024 ** 2)).toFixed(1)}MB over ${sizeGb}GB`,
                 generation,
                 work
               );
@@ -8265,7 +8322,8 @@ module.exports = class MessageLoggerV2 {
       if (!item.mask || this._mediaCacheTrimIsCancelled(generation)) continue;
       try {
         const result = await this._trimMediaCacheRoot(item.kind, item.root, item.mask, generation, {
-          restrictMain: item.restrictMain
+          restrictMain: item.restrictMain,
+          useMessageTimestamp: item.kind === 'live'
         });
         totals.files += result.files;
         totals.deleted += result.deleted;
@@ -14114,7 +14172,7 @@ module.exports = class MessageLoggerV2 {
           title: names.length === 1 ? 'Cached Attachment Deleted' : 'Cached Attachments Deleted',
           type: 'success',
           actions: [{ label: 'View files', onClick: () => this.showDeletedCachedFilesModal(names) }],
-          timeout: 3000
+          timeout: 10000
         }
       );
     }, 150);

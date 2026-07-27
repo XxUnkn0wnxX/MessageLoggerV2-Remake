@@ -150,6 +150,10 @@ function writeSizedFile(filePath, size, mtimeMs = Date.now()) {
   fs.utimesSync(filePath, new Date(mtimeMs), new Date(mtimeMs));
 }
 
+function discordSnowflakeForTimestamp(timestampMs) {
+  return String((BigInt(timestampMs) - 1420070400000n) << 22n);
+}
+
 async function withTempRoot(callback) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-trim-'));
   try {
@@ -239,6 +243,102 @@ test('age trimmer deletes old files and leaves newer files while reusing one sca
   });
 });
 
+test('live age uses an old source-message snowflake even when the file mtime is fresh', async () => {
+  await withTempRoot(async root => {
+    const now = Date.now();
+    const twoWeeks = 14 * 24 * 60 * 60 * 1000;
+    const sourceMessageId = discordSnowflakeForTimestamp(now - 15 * 24 * 60 * 60 * 1000);
+    const filePath = path.join(root, `attachment (${sourceMessageId}).png`);
+    writeSizedFile(filePath, 4, now);
+    const plugin = createTrimPlugin(root, {
+      settings: { liveCacheMaxAgeHours: twoWeeks / (60 * 60 * 1000) }
+    });
+
+    await plugin.runMediaCacheTrimNow();
+    plugin.stopMediaCacheTrimmer();
+
+    assert.equal(fs.existsSync(filePath), false);
+  });
+});
+
+test('live size ordering uses source-message snowflake time before file mtime', async () => {
+  await withTempRoot(async root => {
+    const now = Date.now();
+    const gb = 1024 ** 3;
+    const oldSourceMessageId = discordSnowflakeForTimestamp(now - 2 * 24 * 60 * 60 * 1000);
+    const newSourceMessageId = discordSnowflakeForTimestamp(now - 24 * 60 * 60 * 1000);
+    const oldPath = path.join(root, `old-file (${oldSourceMessageId}).bin`);
+    const newPath = path.join(root, `new-file (${newSourceMessageId}).bin`);
+    writeSizedFile(oldPath, Math.floor(gb * 0.6), now);
+    writeSizedFile(newPath, Math.floor(gb * 0.6), now - 60 * 60 * 1000);
+    const plugin = createTrimPlugin(root, {
+      settings: { liveCacheMaxSizeGb: 1 }
+    });
+
+    await plugin.runMediaCacheTrimNow();
+    plugin.stopMediaCacheTrimmer();
+
+    assert.equal(fs.existsSync(oldPath), false);
+    assert.equal(fs.existsSync(newPath), true);
+  });
+});
+
+test('invalid or missing live source IDs fall back to file mtime for age trimming', async () => {
+  await withTempRoot(async root => {
+    const now = Date.now();
+    const invalidPath = path.join(root, 'invalid (not-a-snowflake).png');
+    const missingPath = path.join(root, 'missing-source-id.png');
+    writeSizedFile(invalidPath, 4, now - 2 * 60 * 60 * 1000);
+    writeSizedFile(missingPath, 4, now);
+    const plugin = createTrimPlugin(root, {
+      settings: { liveCacheMaxAgeHours: 1 }
+    });
+
+    await plugin.runMediaCacheTrimNow();
+    plugin.stopMediaCacheTrimmer();
+
+    assert.equal(fs.existsSync(invalidPath), false);
+    assert.equal(fs.existsSync(missingPath), true);
+  });
+});
+
+test('short numeric filename tokens are not treated as Discord snowflakes', async () => {
+  await withTempRoot(async root => {
+    const filePath = path.join(root, 'unrelated (14694400).png');
+    writeSizedFile(filePath, 4, Date.now());
+    const plugin = createTrimPlugin(root, {
+      settings: { liveCacheMaxAgeHours: 1 }
+    });
+
+    await plugin.runMediaCacheTrimNow();
+    plugin.stopMediaCacheTrimmer();
+
+    assert.equal(fs.existsSync(filePath), true);
+  });
+});
+
+test('pre-cache age remains mtime-only when filenames include source-message snowflakes', async () => {
+  await withTempRoot(async root => {
+    const now = Date.now();
+    const preRoot = `${root}_PreCache`;
+    const oldSourceMessageId = discordSnowflakeForTimestamp(now - 15 * 24 * 60 * 60 * 1000);
+    const newSourceMessageId = discordSnowflakeForTimestamp(now - 60 * 60 * 1000);
+    const freshMtimePath = path.join(preRoot, `fresh-mtime (${oldSourceMessageId}).bin`);
+    const oldMtimePath = path.join(preRoot, `old-mtime (${newSourceMessageId}).bin`);
+    writeSizedFile(freshMtimePath, 4, now);
+    writeSizedFile(oldMtimePath, 4, now - 2 * 60 * 60 * 1000);
+    const plugin = createTrimPlugin(root, {
+      settings: { preCacheMaxAgeHours: 1 }
+    });
+
+    await plugin.runMediaCacheTrimNow();
+    plugin.stopMediaCacheTrimmer();
+
+    assert.equal(fs.existsSync(freshMtimePath), true);
+    assert.equal(fs.existsSync(oldMtimePath), false);
+  });
+});
+
 test('size thresholds use remaining files after age and the 95%/80% targets', async () => {
   await withTempRoot(async root => {
     const now = Date.now();
@@ -263,6 +363,29 @@ test('size thresholds use remaining files after age and the 95%/80% targets', as
   });
 });
 
+test('size deletion debug reasons report binary megabytes with the cap in GB', async () => {
+  await withTempRoot(async root => {
+    const now = Date.now();
+    const smallFile = path.join(root, 'small (14694400).bin');
+    const largeFile = path.join(root, 'large (14694401).bin');
+    writeSizedFile(smallFile, 7 * 1024 ** 2, now - 2 * 60 * 60 * 1000);
+    writeSizedFile(largeFile, 16 * 1024 ** 3, now);
+    const plugin = createTrimPlugin(root, {
+      settings: {
+        liveCacheMaxSizeGb: 15,
+        debugLogging: true
+      }
+    });
+
+    await plugin.runMediaCacheTrimNow();
+    plugin.stopMediaCacheTrimmer();
+
+    const debugMessages = styledConsoleMessages('DEBUG · TRIM');
+    assert.ok(debugMessages.some(message => message.includes('size 7.0MB over 15GB')));
+    assert.equal(debugMessages.some(message => message.includes('size 0.007GB over 15GB')), false);
+  });
+});
+
 test('interval changes reset the countdown without starting a trim and debounce coalesces limit edits', async () => {
   await withTempRoot(async root => {
     const plugin = createTrimPlugin(root, { settings: { mediaCacheTrimIntervalMinutes: 5 } });
@@ -281,6 +404,68 @@ test('interval changes reset the countdown without starting a trim and debounce 
     plugin.handleMediaCacheTrimLimitChange('preCacheMaxAgeHours', 1);
     await new Promise(resolve => setTimeout(resolve, 30));
     assert.equal(passes, 1);
+    plugin.stopMediaCacheTrimmer();
+  });
+});
+
+test('limit warning toast is gated, replaceable, and skipped for same-value or interval changes', async () => {
+  await withTempRoot(async root => {
+    const warningMessage = 'Cache limits changed. If the first catch-up trim has to process a large cache, Discord may briefly become unresponsive.';
+    const warningKey = 'media-cache-trim:limit-warning';
+    const plugin = createTrimPlugin(root, {
+      settings: {
+        preCacheMaxAgeHours: 24,
+        showMediaCacheTrimLifecycleToasts: true
+      }
+    });
+    plugin.settings.preCacheMaxAgeHours = 12;
+    assert.equal(plugin.handleMediaCacheTrimLimitChange('preCacheMaxAgeHours', 12, 24), true);
+    const warningNotifications = plugin.notifications.filter(item => item.options?.replaceKey === warningKey);
+    assert.equal(warningNotifications.length, 1);
+    assert.deepEqual(warningNotifications[0], {
+      message: warningMessage,
+      options: {
+        title: 'Message Logger Media Cache',
+        type: 'warning',
+        timeout: 8000,
+        replaceKey: warningKey
+      }
+    });
+
+    const notificationCount = plugin.notifications.length;
+    let clearCalls = 0;
+    let logCalls = 0;
+    let scheduleCalls = 0;
+    const originalClear = plugin._mediaCacheTrimClearPeriodicTimeout;
+    const originalNotify = plugin._mediaCacheTrimNotify;
+    const originalDebug = plugin._mediaCacheTrimDebug;
+    const originalSchedule = plugin._scheduleMediaCacheTrimDebounce;
+    plugin._mediaCacheTrimClearPeriodicTimeout = () => { clearCalls++; };
+    plugin._mediaCacheTrimNotify = () => { logCalls++; };
+    plugin._mediaCacheTrimDebug = () => { logCalls++; };
+    plugin._scheduleMediaCacheTrimDebounce = () => { scheduleCalls++; };
+    try {
+      assert.equal(plugin.handleMediaCacheTrimLimitChange('preCacheMaxAgeHours', 12, 12), false);
+    } finally {
+      plugin._mediaCacheTrimClearPeriodicTimeout = originalClear;
+      plugin._mediaCacheTrimNotify = originalNotify;
+      plugin._mediaCacheTrimDebug = originalDebug;
+      plugin._scheduleMediaCacheTrimDebounce = originalSchedule;
+    }
+    assert.equal(clearCalls, 0);
+    assert.equal(logCalls, 0);
+    assert.equal(scheduleCalls, 0);
+    assert.equal(plugin.notifications.length, notificationCount);
+
+    plugin.notifications.length = 0;
+    plugin.handleMediaCacheTrimIntervalChange(15);
+    assert.equal(plugin.notifications.some(item => item.options?.replaceKey === warningKey), false);
+
+    plugin.notifications.length = 0;
+    plugin.settings.showMediaCacheTrimLifecycleToasts = false;
+    plugin.settings.preCacheMaxAgeHours = 13;
+    assert.equal(plugin.handleMediaCacheTrimLimitChange('preCacheMaxAgeHours', 13, 12), true);
+    assert.equal(plugin.notifications.some(item => item.options?.replaceKey === warningKey), false);
     plugin.stopMediaCacheTrimmer();
   });
 });
@@ -475,6 +660,49 @@ test('sync BetterDiscord fs bridge trims cooperatively without fs.promises', asy
   });
 });
 
+test('message-only non-empty directory cleanup races are benign while real errors reject', async () => {
+  await withTempRoot(async root => {
+    const directory = path.join(root, 'nested');
+    fs.mkdirSync(directory, { recursive: true });
+    const messageOnlyBridgeFs = {
+      ...fs,
+      rmdirSync() {
+        throw new Error('rmdir failed: ENOTEMPTY');
+      }
+    };
+    const plugin = createTrimPlugin(root, {
+      nodeModules: { fs: messageOnlyBridgeFs, path }
+    });
+    await assert.doesNotReject(() => plugin._removeEmptyMediaCacheTrimDirectories(
+      root,
+      [root, directory],
+      plugin._mediaCacheTrimStopGeneration,
+      { count: 0 }
+    ));
+
+    const realErrorBridgeFs = {
+      ...fs,
+      rmdirSync() {
+        const error = new Error('rmdir failed: EACCES');
+        error.code = 'EACCES';
+        throw error;
+      }
+    };
+    const realErrorPlugin = createTrimPlugin(root, {
+      nodeModules: { fs: realErrorBridgeFs, path }
+    });
+    await assert.rejects(
+      () => realErrorPlugin._removeEmptyMediaCacheTrimDirectories(
+        root,
+        [root, directory],
+        realErrorPlugin._mediaCacheTrimStopGeneration,
+        { count: 0 }
+      ),
+      /EACCES/
+    );
+  });
+});
+
 test('size trimming yields across large snapshots and reaches the live target', async () => {
   await withTempRoot(async root => {
     const fileSize = 30 * 1024 * 1024;
@@ -505,6 +733,7 @@ test('size trimming yields across large snapshots and reaches the live target', 
       .filter(name => name.endsWith('.bin'))
       .reduce((sum, name) => sum + fs.statSync(path.join(root, name)).size, 0);
     assert.ok(rendererTicks.length >= 2, 'scan and size work must yield across multiple turns');
+    assert.ok(rendererTicks.some(delay => delay === 4), 'trimmer yields must use the 4ms responsiveness delay');
     assert.ok(remainingBytes <= 1024 ** 3 * 0.95);
   });
 });
