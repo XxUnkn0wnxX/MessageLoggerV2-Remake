@@ -172,6 +172,7 @@ const DiscordModules = (() => {
     UserStore: lazyGet('UserStore', () => Webpack.Stores.UserStore),
     MessageStore: lazyGet('MessageStore', () => Webpack.Stores.MessageStore),
     ChannelStore: lazyGet('ChannelStore', () => Webpack.Stores.ChannelStore ?? Webpack.getByKeys('getChannel', 'getDMFromUserId')),
+    GuildChannelStore: lazyGet('GuildChannelStore', () => Webpack.Stores?.GuildChannelStore ?? Webpack.getStore?.('GuildChannelStore') ?? Webpack.getByKeys('getChannels', 'getDefaultChannel')),
     SelectedChannelStore: lazyGet('SelectedChannelStore', () => Webpack.Stores.SelectedChannelStore),
     SelectedGuildStore: lazyGet('SelectedGuildStore', () => Webpack.Stores.SelectedGuildStore),
     LocaleStore: lazyGet('LocaleStore', () => Webpack.Stores?.LocaleStore ?? Webpack.getStore?.('LocaleStore')),
@@ -1607,6 +1608,7 @@ module.exports = class MessageLoggerV2 {
     this.style.filterHelpModal = this.obfuscatedClass('ml2-filter-help-modal');
     this.style.settingsHelpModal = this.obfuscatedClass('ml2-settings-help-modal');
     this.style.startupHelpModal = this.obfuscatedClass('ml2-startup-help-modal');
+    this.style.locationListsModal = this.obfuscatedClass('ml2-location-lists-modal');
     this.style.cachedFilesModal = this.obfuscatedClass('ml2-cached-files-modal');
     this.style.cssClassRestartWarning = this.obfuscatedClass('ml2-css-class-restart-warning');
     this.style.settingTransitionActive = this.obfuscatedClass('ml2-setting-transition-active');
@@ -1953,7 +1955,10 @@ module.exports = class MessageLoggerV2 {
                     .${this.style.settingsHelpModal} footer [data-mana-component="button"],
                     .${this.style.startupHelpModal} footer > div,
                     .${this.style.startupHelpModal} footer [data-direction="horizontal"],
-                    .${this.style.startupHelpModal} footer [data-mana-component="button"] {
+                    .${this.style.startupHelpModal} footer [data-mana-component="button"],
+                    .${this.style.locationListsModal} footer > div,
+                    .${this.style.locationListsModal} footer [data-direction="horizontal"],
+                    .${this.style.locationListsModal} footer [data-mana-component="button"] {
                       width: 100%;
                     }
                     .${this.style.cachedFilesModal} {
@@ -12879,59 +12884,12 @@ module.exports = class MessageLoggerV2 {
     }
     return changed;
   }
-  getLocationListGuildChannelCandidates(guild) {
-    const guildId = String(guild?.id ?? '');
-    if (!guildId) return [];
-    const selected = this.selectedChannel || null;
-    const selectedChannel = selected?.id
-      ? this.tools?.getChannel?.(String(selected.id)) || selected
-      : null;
-    const candidates = [];
-    const add = channel => {
-      if (!channel?.id || String(channel.guild_id || channel.guildId || '') !== guildId) return;
-      if ([4].includes(Number(channel.type))) return;
-      if (!candidates.some(existing => String(existing.id) === String(channel.id))) candidates.push(channel);
-    };
-    add(selectedChannel);
-    for (const channelId of [guild.system_channel_id, guild.systemChannelId, guild.rules_channel_id, guild.rulesChannelId]) {
-      if (channelId) add(this.tools?.getChannel?.(String(channelId)));
-    }
-    const channelStore = this.ChannelStore || this.tools?.ChannelStore;
-    const channels = channelStore?.getChannels?.();
-    const values = this.collectLocationListChannels(channels);
-    values.sort((a, b) => this.getLocationListChannelPriority(a) - this.getLocationListChannelPriority(b));
-    values.forEach(add);
-    return candidates;
-  }
-  collectLocationListChannels(value, output = [], seen = new Set()) {
-    if (!value || typeof value !== 'object' || seen.has(value)) return output;
-    seen.add(value);
-    if (Array.isArray(value)) {
-      for (const child of value) this.collectLocationListChannels(child, output, seen);
-      return output;
-    }
-    const looksLikeChannel = value.id !== undefined
-      && (value.type !== undefined
-        || value.guild_id !== undefined
-        || value.guildId !== undefined
-        || typeof value.isDM === 'function'
-        || typeof value.isThread === 'function');
-    if (looksLikeChannel) {
-      output.push(value);
-      return output;
-    }
-    for (const child of Object.values(value)) this.collectLocationListChannels(child, output, seen);
-    return output;
-  }
-  getLocationListChannelPriority(channel) {
-    return [0, 5, 15, 16].includes(Number(channel?.type)) ? 0 : 1;
-  }
   navigateToLocationListGuild(guild) {
     const guildId = String(guild?.id ?? '');
     const liveGuild = this.getLocationListGuild(guildId);
     if (!liveGuild) return false;
-    guild = liveGuild || guild;
-    const channel = this.getLocationListGuildChannelCandidates(guild)[0];
+    const guildChannelStore = this.GuildChannelStore || this.tools?.GuildChannelStore || DiscordModules.GuildChannelStore;
+    const channel = guildChannelStore?.getDefaultChannel?.(guildId);
     if (!channel?.id) return false;
     const historyModule = this.tools?.HistoryUtils || DiscordModules.HistoryUtils;
     const history = historyModule?.getHistory?.();
@@ -12957,6 +12915,52 @@ module.exports = class MessageLoggerV2 {
       };
       const removeAll = id => {
         if (plugin.removeLocationListIdsFromAll(id)) refresh();
+      };
+      const getGuildIconUrl = guild => {
+        if (!guild) return null;
+        let iconUrl = null;
+        try {
+          iconUrl = typeof guild.getIconURL === 'function' ? guild.getIconURL() : null;
+        } catch {}
+        if (!iconUrl) {
+          for (const key of ['iconURL', 'iconUrl', 'icon_url']) {
+            if (typeof guild[key] !== 'string' || !guild[key].trim()) continue;
+            iconUrl = guild[key];
+            break;
+          }
+        }
+        return typeof iconUrl === 'string' && iconUrl.trim() ? iconUrl : null;
+      };
+      const createGuildLabel = (guild, name) => {
+        const iconUrl = getGuildIconUrl(guild);
+        return React.createElement('span', {
+          style: { display: 'inline-flex', alignItems: 'center', gap: '6px', minWidth: 0 }
+        },
+        iconUrl
+          ? React.createElement('span', {
+            'aria-hidden': true,
+            style: {
+              boxSizing: 'border-box',
+              display: 'block',
+              flex: '0 0 auto',
+              width: '16px',
+              height: '16px',
+              overflow: 'hidden',
+              borderRadius: '50%',
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat'
+            }
+          }, React.createElement('img', {
+            src: iconUrl,
+            alt: '',
+            'aria-hidden': true,
+            width: 16,
+            height: 16,
+            style: { display: 'block', width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }
+          }))
+          : null,
+        name);
       };
       const openRowMenu = (event, entry) => {
         event.preventDefault?.();
@@ -13004,7 +13008,7 @@ module.exports = class MessageLoggerV2 {
             className: plugin.style.locationListLink,
             onClick: navigate,
             'aria-label': `Open server ${entry.name}`
-          }, entry.name)
+          }, createGuildLabel(server, entry.name))
           : React.createElement('span', null, entry.name);
         const serverControl = entry.kind !== 'guild' && server
           ? React.createElement('button', {
@@ -13012,7 +13016,7 @@ module.exports = class MessageLoggerV2 {
             className: plugin.style.locationListLink,
             onClick: navigate,
             'aria-label': `Open server ${server.name}`
-          }, server.name)
+          }, createGuildLabel(server, server.name))
           : null;
         return React.createElement('div', {
           key: `${entry.id}:${entry.kind}`,
@@ -13065,9 +13069,11 @@ module.exports = class MessageLoggerV2 {
     this.createModal({
       header: 'Manage location lists',
       size: this.tools.resolvedModalStuff.ModalSize.LARGE,
+      cancelText: 'Back',
+      onCancel: () => this.ModalStack?.closeModal?.(modalKey),
       children: [React.createElement(Manager)],
       ml2Data: true,
-      className: this.style.menuRoot
+      className: [this.style.menuRoot, this.style.locationListsModal].filter(Boolean).join(' ')
     }, false, modalKey);
     return true;
   }

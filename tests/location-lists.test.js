@@ -174,17 +174,16 @@ test('all-four removal de-duplicates each persisted list with one save and toast
   assert.equal(toasts, 1);
 });
 
-test('guild navigation uses an accessible current channel and does not navigate unavailable guilds', () => {
+test('guild navigation uses the default channel, leaves failures untouched, and skips unavailable guilds', () => {
   const history = [];
   let closed = 0;
   const plugin = createPlugin({
     settings: listSettings(),
     locationListsModalKey: 'location-lists',
-    selectedChannel: { id: 'selected', guild_id: 'guild-1', type: 0 },
-    ChannelStore: { getChannels: () => ({ selected: { id: 'selected', guild_id: 'guild-1', type: 0 } }) },
+    ChannelStore: { getChannels: () => ({}) },
+    GuildChannelStore: { getDefaultChannel: id => id === 'guild-1' ? { id: 'default' } : null },
     tools: {
       getServer: id => id === 'guild-1' ? { id, name: 'Alpha' } : null,
-      getChannel: id => id === 'selected' ? { id: 'selected', guild_id: 'guild-1', type: 0 } : null,
       HistoryUtils: { getHistory: () => ({ push: pathName => history.push(pathName) }) }
     },
     ModalStack: { closeModal: () => { closed++; } },
@@ -192,42 +191,23 @@ test('guild navigation uses an accessible current channel and does not navigate 
     style: { menu: 'logger' }
   });
   assert.equal(plugin.navigateToLocationListGuild({ id: 'guild-1' }), true);
-  assert.deepEqual(history, ['/channels/guild-1/selected']);
+  assert.deepEqual(history, ['/channels/guild-1/default']);
   assert.equal(closed, 2);
-  assert.equal(plugin.navigateToLocationListGuild({ id: 'missing-guild' }), false);
-  assert.deepEqual(history, ['/channels/guild-1/selected']);
-  assert.equal(closed, 2);
-});
 
-test('channel collection handles flat maps, arrays, and nested maps while preferring text/forum/media types', () => {
-  const channels = {
-    flatVoice: { id: 'voice', guild_id: 'guild-1', type: 2 },
-    nested: {
-      text: { id: 'text', guild_id: 'guild-1', type: 0 },
-      array: [
-        { id: 'forum', guild_id: 'guild-1', type: 15 },
-        { id: 'media', guild_id: 'guild-1', type: 16 }
-      ]
-    },
-    announcement: { id: 'announcement', guild_id: 'guild-1', type: 5 }
-  };
-  const plugin = createPlugin({
-    settings: listSettings(),
-    ChannelStore: { getChannels: () => channels },
-    tools: {
-      getServer: id => id === 'guild-1' ? { id, name: 'Alpha' } : null,
-      getChannel: id => plugin.ChannelStore.getChannels()[id] || null
-    }
-  });
-  assert.deepEqual(
-    plugin.getLocationListGuildChannelCandidates({ id: 'guild-1' }).map(channel => channel.id),
-    ['text', 'forum', 'media', 'announcement', 'voice']
-  );
+  plugin.GuildChannelStore = { getDefaultChannel: () => null };
+  assert.equal(plugin.navigateToLocationListGuild({ id: 'guild-1' }), false);
+  assert.deepEqual(history, ['/channels/guild-1/default']);
+  assert.equal(closed, 2);
+
+  assert.equal(plugin.navigateToLocationListGuild({ id: 'missing-guild' }), false);
+  assert.deepEqual(history, ['/channels/guild-1/default']);
+  assert.equal(closed, 2);
 });
 
 test('manager modal renders tabs and rows while right-click and Shift Trash keep their distinct removal scope', () => {
   let modal;
   let openedMenu;
+  const closedModalKeys = [];
   ContextMenu.open = (_event, menu) => { openedMenu = menu; };
   ContextMenu.close = () => {};
   const plugin = createPlugin({
@@ -246,7 +226,8 @@ test('manager modal renders tabs and rows while right-click and Shift Trash keep
       tabSelected: 'selected',
       locationListRow: 'location-row',
       locationListLink: 'location-link',
-      locationListDeleteButton: 'location-delete'
+      locationListDeleteButton: 'location-delete',
+      locationListsModal: 'location-lists-modal'
     },
     multiClasses: { defaultColor: 'default-color' },
     tools: {
@@ -254,7 +235,10 @@ test('manager modal renders tabs and rows while right-click and Shift Trash keep
       getChannel: () => null,
       resolvedModalStuff: { ModalSize: { LARGE: 'large' } }
     },
-    ModalStack: { hasModalOpen: () => false },
+    ModalStack: {
+      hasModalOpen: () => false,
+      closeModal: key => closedModalKeys.push(key)
+    },
     createModal(options, image, key) {
       modal = { options, image, key };
     },
@@ -267,6 +251,10 @@ test('manager modal renders tabs and rows while right-click and Shift Trash keep
   assert.equal(plugin.showLocationListManagerModal(), true);
   assert.equal(modal.key, plugin.locationListsModalKey);
   assert.equal(modal.options.size, 'large');
+  assert.equal(modal.options.cancelText, 'Back');
+  assert.equal(modal.options.className, 'menu-root location-lists-modal');
+  modal.options.onCancel();
+  assert.deepEqual(closedModalKeys, ['location-lists']);
   const rendered = modal.options.children[0].type();
   const elements = collectReactElements(rendered);
   assert.equal(elements.filter(element => element.props.role === 'tab').length, 4);
@@ -285,6 +273,77 @@ test('manager modal renders tabs and rows while right-click and Shift Trash keep
   trash.props.onClick({ shiftKey: true, preventDefault() {}, stopPropagation() {} });
   assert.deepEqual(plugin.settings.whitelist, []);
   assert.deepEqual(plugin.settings.blacklist, ['guild-1']);
+});
+
+test('manager renders guild icons before live server names and channel server links', () => {
+  let modal;
+  const guild = {
+    id: 'guild-1',
+    name: 'Alpha',
+    getIconURL: () => 'https://example.invalid/alpha.png'
+  };
+  const channel = { id: 'channel-1', name: 'general', guild_id: 'guild-1', type: 0 };
+  const plugin = createPlugin({
+    settings: listSettings({ whitelist: ['guild-1', 'channel-1'] }),
+    locationListsModalKey: 'location-lists',
+    style: {
+      menu: 'logger-modal',
+      menuRoot: 'menu-root',
+      tabBar: 'tab-bar',
+      tabBarItem: 'tab-item',
+      tab: 'tab',
+      tabSelected: 'selected',
+      locationListRow: 'location-row',
+      locationListLink: 'location-link',
+      locationListDeleteButton: 'location-delete',
+      locationListsModal: 'location-lists-modal'
+    },
+    multiClasses: { defaultColor: 'default-color' },
+    tools: {
+      getServer: id => id === guild.id ? guild : null,
+      getChannel: id => id === channel.id ? channel : null,
+      resolvedModalStuff: { ModalSize: { LARGE: 'large' } }
+    },
+    ModalStack: { hasModalOpen: () => false },
+    createModal(options, image, key) {
+      modal = { options, image, key };
+    },
+    getNativeDeleteIconComponent: () => function TrashIcon() {},
+    buildMenu: setup => setup
+  });
+
+  assert.equal(plugin.showLocationListManagerModal(), true);
+  const rendered = modal.options.children[0].type();
+  const links = collectReactElements(rendered).filter(element => element.props.className === 'location-link');
+  assert.equal(links.length, 2);
+  for (const link of links) {
+    const label = link.props.children[0];
+    assert.equal(label.type, 'span');
+    const frame = label.props.children[0];
+    assert.equal(frame.type, 'span');
+    assert.deepEqual(frame.props.style, {
+      boxSizing: 'border-box',
+      display: 'block',
+      flex: '0 0 auto',
+      width: '16px',
+      height: '16px',
+      overflow: 'hidden',
+      borderRadius: '50%',
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundRepeat: 'no-repeat'
+    });
+    const image = frame.props.children[0];
+    assert.equal(image.type, 'img');
+    assert.equal(image.props.src, 'https://example.invalid/alpha.png');
+    assert.deepEqual(image.props.style, {
+      display: 'block',
+      width: '100%',
+      height: '100%',
+      objectFit: 'cover',
+      borderRadius: '50%'
+    });
+  }
 });
 
 test('source contracts cover both manager launch buttons, four tabs, right-click actions, and Shift-only Trash', () => {
