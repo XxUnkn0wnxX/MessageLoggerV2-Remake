@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.11
+ * @version 2.8.2.12
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -1660,6 +1660,7 @@ module.exports = class MessageLoggerV2 {
     this.style.input = this.obfuscatedClass('MLv2-input-input');
     this.style.locationListRow = this.obfuscatedClass('MLv2-location-list-row');
     this.style.locationListGroupedRow = this.obfuscatedClass('MLv2-location-list-grouped-row');
+    this.style.locationListGroupHeader = this.obfuscatedClass('MLv2-location-list-group-header');
     this.style.locationListScroller = this.obfuscatedClass('MLv2-location-list-scroller');
     this.style.locationListDeleteButton = this.obfuscatedClass('MLv2-location-list-delete');
     this.style.locationListButton = this.obfuscatedClass('MLv2-location-list-button');
@@ -1780,6 +1781,19 @@ module.exports = class MessageLoggerV2 {
                        inheriting the SVG color. Override only paths inside logger-owned controls. */
                     html #app-mount .${this.style.restoredDeleteButton} path {
                       fill: var(--text-feedback-critical, var(--status-danger)) !important;
+                    }
+                    html #app-mount .${this.style.restoredDeleteButton}[data-ml2-fallback-delete-control="true"] button,
+                    html #app-mount .${this.style.restoredDeleteButton}[data-ml2-fallback-delete-control="true"] [role="button"] {
+                      box-sizing: border-box !important;
+                      width: 28px !important;
+                      height: 28px !important;
+                      padding: 0 !important;
+                      border: 0 !important;
+                      background: transparent !important;
+                    }
+                    html #app-mount .${this.style.restoredDeleteButton}[data-ml2-fallback-delete-control="true"] button:hover,
+                    html #app-mount .${this.style.restoredDeleteButton}[data-ml2-fallback-delete-control="true"] [role="button"]:hover {
+                      background: transparent !important;
                     }
                     html #app-mount .${this.style.restoredThreadEntry} > .${this.style.restoredDeleteButton} {
                       top: 50% !important;
@@ -2172,13 +2186,32 @@ module.exports = class MessageLoggerV2 {
                       position: relative;
                       display: flex;
                       align-items: center;
-                      gap: 12px;
+                      gap: 8px;
                       min-height: 44px;
                       padding: 8px 4px;
                       border-bottom: 1px solid var(--background-modifier-accent);
+                      border-radius: 4px;
+                      transition: background-color 120ms ease;
+                    }
+                    .${this.style.locationListsModal} .${this.style.locationListRow}:hover {
+                      background-color: var(--background-mod-subtle, rgba(128, 128, 128, 0.12)) !important;
                     }
                     .${this.style.locationListRow}:last-child {
                       border-bottom: 0;
+                    }
+                    .${this.style.locationListGroupHeader} {
+                      position: relative;
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                      min-width: 0;
+                      min-height: 32px;
+                      padding: 2px 4px 0;
+                      border-radius: 4px;
+                      transition: background-color 120ms ease;
+                    }
+                    .${this.style.locationListsModal} .${this.style.locationListGroupHeader}:hover {
+                      background-color: var(--background-mod-subtle, rgba(128, 128, 128, 0.12)) !important;
                     }
                     .${this.style.locationListGroupedRow} {
                       min-height: 32px;
@@ -2191,7 +2224,6 @@ module.exports = class MessageLoggerV2 {
                       width: 28px;
                       height: 28px;
                       flex: 0 0 28px;
-                      margin-left: auto;
                       padding: 0;
                       border: 0;
                       border-radius: 4px;
@@ -2211,8 +2243,8 @@ module.exports = class MessageLoggerV2 {
                     .${this.style.locationListDeleteButton}:focus-visible {
                       background: var(--background-modifier-selected);
                     }
-                    html.${this.style.shiftDeleteActive} .${this.style.locationListRow}:hover .${this.style.locationListDeleteButton},
-                    html.${this.style.shiftDeleteActive} .${this.style.locationListRow}:focus-within .${this.style.locationListDeleteButton} {
+                    html.${this.style.shiftDeleteActive} .${this.style.locationListRow}:hover > .${this.style.locationListDeleteButton},
+                    html.${this.style.shiftDeleteActive} .${this.style.locationListGroupHeader}:hover > .${this.style.locationListDeleteButton} {
                       opacity: 1;
                       visibility: visible;
                       pointer-events: auto;
@@ -10364,46 +10396,52 @@ module.exports = class MessageLoggerV2 {
     const filterFunc2 = x2 => x2?.toString?.().includes("isGroupDM") && x2?.toString?.().includes("targetIsUser");
     Object.values(targetModule).find(filterFunc2)(event, user, channel || this.menu.randomValidChannel);
   }
-  _addListToggleItems(newItems, id, listName, oppositeListName, displayName) {
+  _addListToggleItems(newItems, id, listName, oppositeListName, displayName, onChanged = null) {
     const list = this.settings[listName];
     const oppositeList = this.settings[oppositeListName];
     const idx = list.indexOf(id);
     const oppositeIdx = oppositeList.indexOf(id);
     const addElement = (label, action) => newItems.push({ label, action });
+    const listLabel = key => LOCATION_LIST_DESCRIPTORS.find(item => item.key === key)?.label || key;
+    const targetName = () => this.getLocationListDisplayName(id);
+    const notifyListChange = (verb, targetListName, preposition) => {
+      this.notifyUser(`${verb} ${targetName()} ${preposition} ${listLabel(targetListName)}.`, { type: 'success' });
+      onChanged?.();
+    };
     if (idx === -1 && oppositeIdx === -1) {
       addElement(`Add to ${displayName}`, () => {
         list.push(id);
         this.saveSettings();
-        this.notifyUser('Added!', { type: 'success' });
+        notifyListChange('Added', listName, 'to');
       });
       addElement(`Add to ${displayName.replace('Whitelist', 'Blacklist').replace('whitelist', 'blacklist')}`, () => {
         oppositeList.push(id);
         this.saveSettings();
-        this.notifyUser('Added!', { type: 'success' });
+        notifyListChange('Added', oppositeListName, 'to');
       });
     } else if (idx === -1) {
       addElement(`Remove From ${displayName.replace('Whitelist', 'Blacklist').replace('whitelist', 'blacklist')}`, () => {
         oppositeList.splice(oppositeIdx, 1);
         this.saveSettings();
-        this.notifyUser('Removed!', { type: 'success' });
+        notifyListChange('Removed', oppositeListName, 'from');
       });
       addElement(`Move to ${displayName}`, () => {
         oppositeList.splice(oppositeIdx, 1);
         list.push(id);
         this.saveSettings();
-        this.notifyUser('Moved!', { type: 'success' });
+        notifyListChange('Moved', listName, 'to');
       });
     } else {
       addElement(`Remove From ${displayName}`, () => {
         list.splice(idx, 1);
         this.saveSettings();
-        this.notifyUser('Removed!', { type: 'success' });
+        notifyListChange('Removed', listName, 'from');
       });
       addElement(`Move to ${displayName.replace('Whitelist', 'Blacklist').replace('whitelist', 'blacklist')}`, () => {
         list.splice(idx, 1);
         oppositeList.push(id);
         this.saveSettings();
-        this.notifyUser('Moved!', { type: 'success' });
+        notifyListChange('Moved', oppositeListName, 'to');
       });
     }
   }
@@ -12802,6 +12840,26 @@ module.exports = class MessageLoggerV2 {
     this.menu.open = false;
     setTimeout(() => this.openWindow(), 0);
   }
+  openLocationListLoggerFilter(filter) {
+    if (!this.menu || !filter) return false;
+    const loggerModalOpen = this.ModalStack?.hasModalOpen
+      ? this.ModalStack.hasModalOpen(this.style.menu)
+      : this.menu.open;
+    const hasAuxiliaryModal = this.hasAdditionalLoggerShortcutModal(loggerModalOpen);
+    const transitionId = this.cancelPendingLoggerShortcutTransition();
+    this.dismissLoggerShortcutSurfaces();
+    this.resetLoggerMenuRenderState(filter);
+    this.menu.scrollPosition = 0;
+    if (loggerModalOpen && !hasAuxiliaryModal) {
+      this.openWindow();
+      return true;
+    }
+    this._loggerShortcutReopenTimeout = setTimeout(
+      () => this.scheduleLoggerShortcutReopen(filter, transitionId),
+      0
+    );
+    return true;
+  }
   getLocationListDescriptors() {
     return LOCATION_LIST_DESCRIPTORS.map(descriptor => ({ ...descriptor }));
   }
@@ -12843,6 +12901,7 @@ module.exports = class MessageLoggerV2 {
       const deleteLocation = record?.delete_data?.location || {};
       const messageScore = toScore(message.timestamp);
       const messageGuildId = message.guild_id || message.guildId;
+      const messageChannelId = message.channel_id || message.channelId;
       remember(
         savedLocation.guildId || savedLocation.guild_id || messageGuildId,
         savedLocation.guildName || savedLocation.guild_name,
@@ -12851,6 +12910,16 @@ module.exports = class MessageLoggerV2 {
       remember(
         deleteLocation.guildId || deleteLocation.guild_id || messageGuildId,
         deleteLocation.guildName || deleteLocation.guild_name,
+        Math.max(toScore(deleteLocation.cachedAt), messageScore)
+      );
+      remember(
+        savedLocation.channelId || savedLocation.channel_id || messageChannelId,
+        savedLocation.channelName || savedLocation.channel_name,
+        Math.max(toScore(savedLocation.cachedAt), messageScore)
+      );
+      remember(
+        deleteLocation.channelId || deleteLocation.channel_id || messageChannelId,
+        deleteLocation.channelName || deleteLocation.channel_name,
         Math.max(toScore(deleteLocation.cachedAt), messageScore)
       );
       remember(messageGuildId, record?.guildName || message.guildName, messageScore);
@@ -12948,6 +13017,16 @@ module.exports = class MessageLoggerV2 {
       entries: entries.filter(entry => group.kinds.includes(entry.kind))
     }));
   }
+  getLocationListDisplayName(id, guildNameFallbacks = null) {
+    const rawId = String(id ?? '');
+    if (!rawId) return rawId;
+    const entry = this.resolveLocationListEntry(
+      rawId,
+      guildNameFallbacks || this.buildLocationListGuildNameFallbacks()
+    );
+    const name = typeof entry?.name === 'string' ? entry.name.trim() : '';
+    return name || rawId;
+  }
   removeLocationListIds(listKey, id) {
     if (!this.isLocationListKey(listKey)) return false;
     const list = this.settings?.[listKey];
@@ -12956,8 +13035,28 @@ module.exports = class MessageLoggerV2 {
     const next = list.filter(value => String(value ?? '') !== target);
     if (next.length === list.length) return false;
     this.settings[listKey] = next;
+    const targetName = this.getLocationListDisplayName(target);
+    const listLabel = LOCATION_LIST_DESCRIPTORS.find(item => item.key === listKey)?.label || 'this list';
     this.saveSettings();
-    this.notifyUser(`Removed ${target} from ${LOCATION_LIST_DESCRIPTORS.find(item => item.key === listKey)?.label || 'this list'}.`, { type: 'success' });
+    this.notifyUser(`Removed ${targetName} from ${listLabel}.`, { type: 'success' });
+    return true;
+  }
+  removeLocationListIdsBatch(listKey, ids) {
+    if (!this.isLocationListKey(listKey)) return false;
+    const list = this.settings?.[listKey];
+    if (!Array.isArray(list)) return false;
+    const targets = new Set((Array.isArray(ids) ? ids : [ids])
+      .map(id => String(id ?? ''))
+      .filter(Boolean));
+    if (!targets.size) return false;
+    const next = list.filter(value => !targets.has(String(value ?? '')));
+    if (next.length === list.length) return false;
+    this.settings[listKey] = next;
+    const descriptor = LOCATION_LIST_DESCRIPTORS.find(item => item.key === listKey);
+    const removedCount = list.length - next.length;
+    const targetName = this.getLocationListDisplayName([...targets][0]);
+    this.saveSettings();
+    this.notifyUser(`Removed ${removedCount} location${removedCount === 1 ? '' : 's'} from ${targetName} in ${descriptor?.label || 'this list'}.`, { type: 'success' });
     return true;
   }
   removeLocationListIdsFromAll(id) {
@@ -12972,8 +13071,9 @@ module.exports = class MessageLoggerV2 {
       changed = true;
     }
     if (changed) {
+      const targetName = this.getLocationListDisplayName(target);
       this.saveSettings();
-      this.notifyUser(`Removed ${target} from all MessageLogger location lists.`, { type: 'success' });
+      this.notifyUser(`Removed ${targetName} from all MessageLogger location lists.`, { type: 'success' });
     }
     return changed;
   }
@@ -13106,40 +13206,78 @@ module.exports = class MessageLoggerV2 {
           style: { display: 'inline-flex', alignItems: 'center', gap: '6px', minWidth: 0 }
         }, ...children);
       };
-      const openRowMenu = (event, entry) => {
-        event.preventDefault?.();
-        event.stopPropagation?.();
-        ContextMenu.open(event, plugin.buildMenu([{
-          type: 'group',
-          items: [
-            {
-              type: 'item',
-              label: 'Remove from this list',
-              danger: true,
-              action: () => {
-                ContextMenu.close();
-                removeCurrent(entry.id);
-              }
-            },
-            {
-              type: 'item',
-              label: 'Remove from all four lists',
-              danger: true,
-              action: () => {
-                ContextMenu.close();
-                removeAll(entry.id);
-              }
-            }
-          ]
-        }]));
-      };
-      const createEntry = (entry, compact = false) => {
+      const createTrashButton = ({ id, ariaLabel, title, onShiftClick }) => {
         const TrashIcon = plugin.getNativeDeleteIconComponent();
         const trash = TrashIcon
           ? React.createElement(TrashIcon, { 'aria-hidden': true, width: 16, height: 16 })
           : React.createElement('svg', { 'aria-hidden': true, width: 16, height: 16, viewBox: '0 0 24 24' },
             React.createElement('path', { fill: 'currentColor', d: 'M6 7h12l-1 14H7L6 7zm2-3h8l1 2H7l1-2z' })
           );
+        return React.createElement('button', {
+          type: 'button',
+          className: plugin.style.locationListDeleteButton,
+          'aria-label': ariaLabel || `Remove ${id} from ${descriptor.label}`,
+          title: title || `Shift-click to remove ${id} from ${descriptor.label}`,
+          onClick: event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!event.shiftKey) return;
+            onShiftClick();
+          }
+        }, trash);
+      };
+      const openRowMenu = (event, entry) => {
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        const menuItems = [];
+        const openFilter = entry.kind === 'guild'
+          ? { label: 'Open Log For Server', filter: `server:${entry.id}` }
+          : entry.kind === 'channel'
+            ? { label: 'Open Log For Channel', filter: `channel:${entry.id}` }
+            : entry.kind === 'thread'
+              ? { label: 'Open Log For Thread', filter: `channel:${entry.id}` }
+              : entry.kind === 'dm'
+                ? { label: 'Open Log For DM', filter: `channel:${entry.id}` }
+                : null;
+        if (openFilter) {
+          menuItems.push({
+            type: 'item',
+            label: openFilter.label,
+            action: () => {
+              ContextMenu.close();
+              plugin.openLocationListLoggerFilter(openFilter.filter);
+            }
+          });
+        }
+        const listActionStart = menuItems.length;
+        plugin._addListToggleItems(menuItems, entry.id, 'whitelist', 'blacklist', 'Whitelist', refresh);
+        plugin._addListToggleItems(menuItems, entry.id, 'notificationWhitelist', 'notificationBlacklist', 'Notification Whitelist', refresh);
+        for (let index = listActionStart; index < menuItems.length; index++) {
+          const action = menuItems[index].action;
+          menuItems[index] = {
+            ...menuItems[index],
+            type: 'item',
+            action: () => {
+              ContextMenu.close();
+              action?.();
+            }
+          };
+        }
+        menuItems.push({
+          type: 'item',
+          label: 'Remove from all four lists',
+          danger: true,
+          action: () => {
+            ContextMenu.close();
+            removeAll(entry.id);
+          }
+        });
+        ContextMenu.open(event, plugin.buildMenu([{
+          type: 'group',
+          items: menuItems
+        }]));
+      };
+      const createEntry = (entry, compact = false) => {
         const server = entry.kind === 'guild'
           ? entry.guild
           : entry.guildId
@@ -13174,24 +13312,16 @@ module.exports = class MessageLoggerV2 {
           tabIndex: 0,
           onContextMenu: event => openRowMenu(event, entry)
         },
-        React.createElement('div', { style: { minWidth: 0, flex: '1 1 auto' } },
+        React.createElement('div', { style: { minWidth: 0, flex: '0 1 auto' } },
           React.createElement('div', { style: { overflow: 'hidden', textOverflow: 'ellipsis' } }, display),
           showEntryId
             ? React.createElement('div', { style: { color: 'var(--text-muted)', fontSize: '12px' } }, entry.id)
             : null
         ),
-        React.createElement('button', {
-          type: 'button',
-          className: plugin.style.locationListDeleteButton,
-          'aria-label': `Remove ${entry.id} from ${descriptor.label}`,
-          title: `Shift-click to remove ${entry.id} from ${descriptor.label}`,
-          onClick: event => {
-            event.preventDefault();
-            event.stopPropagation();
-            if (!event.shiftKey) return;
-            removeCurrent(entry.id);
-          }
-        }, trash)
+        createTrashButton({
+          id: entry.id,
+          onShiftClick: () => removeCurrent(entry.id)
+        })
         );
       };
       const tabBar = React.createElement('div', {
@@ -13237,13 +13367,23 @@ module.exports = class MessageLoggerV2 {
           key: `location-list-guild-group:${guildGroup.guildId}`,
           style: { marginBottom: '4px' }
         },
-        React.createElement('div', { style: { padding: '2px 4px 0' } },
-          React.createElement('button', {
-            type: 'button',
-            className: plugin.style.locationListLink,
-            onClick: () => plugin.navigateToLocationListGuild(guildGroup.guild),
-            'aria-label': `Open server ${guildGroup.guild.name}`
-          }, createGuildLabel(guildGroup.guild, guildGroup.guild.name, guildGroup.guildId))),
+        React.createElement('div', { className: plugin.style.locationListGroupHeader },
+          React.createElement('div', { style: { minWidth: 0, flex: '0 1 auto', overflow: 'hidden', textOverflow: 'ellipsis' } },
+            React.createElement('button', {
+              type: 'button',
+              className: plugin.style.locationListLink,
+              onClick: () => plugin.navigateToLocationListGuild(guildGroup.guild),
+              'aria-label': `Open server ${guildGroup.guild.name}`
+            }, createGuildLabel(guildGroup.guild, guildGroup.guild.name, guildGroup.guildId))),
+          createTrashButton({
+            id: guildGroup.guildId,
+            ariaLabel: `Remove ${guildGroup.guild.name} and its channels and threads from ${descriptor.label}`,
+            title: `Shift-click to remove ${guildGroup.guild.name} and its channels and threads from ${descriptor.label}`,
+            onShiftClick: () => {
+              const ids = [guildGroup.guildId, ...guildGroup.entries.map(entry => entry.id)];
+              if (plugin.removeLocationListIdsBatch(descriptor.key, ids)) refresh();
+            }
+          })),
         React.createElement('div', {
           role: 'group',
           'aria-label': `${guildGroup.guild.name} channels and threads`,
@@ -15182,7 +15322,7 @@ module.exports = class MessageLoggerV2 {
     if (!this._nativeDeleteButtonPresentation && !this._nativeDeleteTemplateWarningShown) {
       this._nativeDeleteTemplateWarningShown = true;
       this.reportDebugEvent(
-        'Waiting for Discord to mount a native message toolbar before showing Delete controls on restored logger items. Hover a normal message to expose its toolbar.',
+        'Waiting for Discord to mount a native message toolbar before finalizing inline Delete controls. Logger clones use a generic Trash fallback until a normal message toolbar is exposed.',
         4000,
         'console'
       );
@@ -15254,14 +15394,42 @@ module.exports = class MessageLoggerV2 {
     host.addEventListener('mousedown', event => {
       if (event.shiftKey) event.preventDefault();
     });
+    const activate = event => this.handleCopiedNativeDeleteActivation(event, message.channel_id, message.id);
     if (!presentation) {
+      if (!options.inline) {
+        const TrashIcon = this.getNativeDeleteIconComponent();
+        if (TrashIcon && typeof ReactDOM.createRoot === 'function') {
+          const fallbackLabel = this.getNativeDeleteLabel();
+          host.setAttribute('data-ml2-fallback-delete-control', 'true');
+          let root = null;
+          try {
+            root = ReactDOM.createRoot(host);
+            root.render(React.createElement('button', {
+              type: 'button',
+              'aria-label': fallbackLabel,
+              title: fallbackLabel,
+              'data-ml2-remove-from-log': message.id,
+              onClick: activate
+            }, React.createElement(TrashIcon, {
+              'aria-hidden': true,
+              width: 20,
+              height: 20
+            })));
+            (this._copiedDeleteControlRoots ||= new Map()).set(host, root);
+            return host;
+          } catch (error) {
+            try { root?.unmount?.(); } catch {}
+            host.replaceChildren();
+            Logger.warn('Could not mount the generic Trash fallback on a restored logger item:', error);
+          }
+        }
+      }
       host.setAttribute('data-ml2-pending-delete-control', 'true');
       return host;
     }
     const innerHTML = presentation.useNativeTrashIcon
       ? ''
       : this.sanitizeNativeDeleteMarkup(presentation.innerHTML);
-    const activate = event => this.handleCopiedNativeDeleteActivation(event, message.channel_id, message.id);
     if (options.inline) {
       // Keep the permission-independent action as a direct native-toolbar child. A title supplies
       // the captured localized label without reintroducing the tooltip wrapper that broke layout.

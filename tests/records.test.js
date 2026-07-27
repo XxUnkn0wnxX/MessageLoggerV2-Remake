@@ -3073,6 +3073,80 @@ test('native Delete icon resolver accepts only unambiguous callable exports', ()
   assert.equal(plugin.resolveNativeDeleteIconExport({ u: 'not callable' }), null);
 });
 
+test('non-inline restored Delete controls mount the immediate generic Trash fallback', () => {
+  const attributes = new Map();
+  const host = {
+    className: '',
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    addEventListener() {},
+    replaceChildren() {}
+  };
+  const NativeTrashIcon = function NativeTrashIcon() {};
+  let rendered = null;
+  const root = {
+    render(child) { rendered = child; },
+    unmount() {}
+  };
+  ReactDOM.createRoot = target => {
+    assert.equal(target, host);
+    return root;
+  };
+  const plugin = createPlugin({
+    style: { restoredDeleteButton: 'logger-delete' },
+    getNativeDeleteIconComponent: () => NativeTrashIcon,
+    handleCopiedNativeDeleteActivation() {}
+  });
+  const previousDocument = global.document;
+  global.document = { createElement: () => host };
+  try {
+    assert.equal(plugin.createCopiedNativeDeleteControl({
+      message: { id: 'fallback-message', channel_id: 'fallback-channel' },
+      delete_data: {}
+    }), host);
+  } finally {
+    global.document = previousDocument;
+  }
+
+  assert.equal(attributes.get('data-ml2-fallback-delete-control'), 'true');
+  assert.equal(attributes.has('data-ml2-pending-delete-control'), false);
+  assert.equal(rendered.type, 'button');
+  assert.equal(rendered.props['aria-label'], 'Delete');
+  assert.equal(rendered.props.children[0].type, NativeTrashIcon);
+  assert.equal(rendered.props.children[0].props.width, 20);
+  assert.equal(plugin._copiedDeleteControlRoots.get(host), root);
+});
+
+test('inline restored Delete controls remain pending until native presentation capture', () => {
+  const attributes = new Map();
+  const host = {
+    className: '',
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    addEventListener() {},
+    replaceChildren() {}
+  };
+  const NativeTrashIcon = function NativeTrashIcon() {};
+  ReactDOM.createRoot = () => {
+    throw new Error('inline controls must wait for captured presentation');
+  };
+  const plugin = createPlugin({
+    style: { restoredDeleteButton: 'logger-delete', restoredInlineDeleteButton: 'inline-delete' },
+    getNativeDeleteIconComponent: () => NativeTrashIcon
+  });
+  const previousDocument = global.document;
+  global.document = { createElement: () => host };
+  try {
+    assert.equal(plugin.createCopiedNativeDeleteControl({
+      message: { id: 'inline-pending', channel_id: 'inline-channel' },
+      delete_data: {}
+    }, { inline: true }), host);
+  } finally {
+    global.document = previousDocument;
+  }
+
+  assert.equal(attributes.get('data-ml2-pending-delete-control'), 'true');
+  assert.equal(attributes.has('data-ml2-fallback-delete-control'), false);
+});
+
 test('permission-independent inline Delete is the direct native toolbar action', () => {
   const attributes = new Map();
   const listeners = new Map();

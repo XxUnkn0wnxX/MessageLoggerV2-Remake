@@ -21,7 +21,7 @@ function readDefaultSettings() {
 }
 
 test('plugin metadata and updater remain pointed at the maintained main branch', () => {
-  assert.match(source, /@version 2\.8\.2\.11/);
+  assert.match(source, /@version 2\.8\.2\.12/);
   assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   const changesBlock = source.match(/  getChanges\(\) \{([\s\S]*?)\n  \}\n  async checkNewUpdate/);
@@ -769,6 +769,10 @@ test('native and cloned Trash actions remain scoped to indexed logger deletions'
   assert.match(copiedControl, /handleCopiedNativeDeleteActivation\(event, message\.channel_id, message\.id\)/);
   assert.match(source, /handleCopiedNativeDeleteActivation\(event, channelId, messageId\)[\s\S]*stopPropagation[\s\S]*requestSavedDeletedRecordRemoval\(channelId, messageId, !!event\.shiftKey\)/);
   assert.match(source, /TrashIcon: lazyGet[\s\S]*getNativeDeleteIconComponent\(\)/);
+  assert.match(source, /data-ml2-fallback-delete-control/);
+  assert.match(copiedControl, /if \(!presentation\)[\s\S]*if \(!options\.inline\)[\s\S]*getNativeDeleteIconComponent\(\)/);
+  assert.match(source, /restoredDeleteButton}\[data-ml2-fallback-delete-control="true"\] button[\s\S]*width: 28px !important[\s\S]*background: transparent !important/);
+  assert.match(source, /fallback-delete-control="true"\] button:hover[\s\S]*background: transparent !important/);
   assert.match(source, /resolveNativeDeleteIconExport\(icon\)[\s\S]*Object\.values\(icon\)[\s\S]*callableExports\.length === 1/);
   assert.doesNotMatch(source, /Remove From Log/);
   assert.match(source, /shiftDeleteActive = this\.obfuscatedClass\('MLv2-shift-delete-active'\)/);
