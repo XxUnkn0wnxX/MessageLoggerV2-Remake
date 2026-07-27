@@ -34,7 +34,7 @@ This fork also restores logged forum posts and channel threads, preserves their 
 ### 🛡️ Scope, alerts, media, and reliability
 
 - Server, channel, DM, thread, mute, NSFW, bot/app/webhook, blocked-user, author, and local-action logging controls.
-- Separate guild/DM alert toggles, notification location lists, selected-location overrides, native BetterDiscord notifications, and custom actionable toasts.
+- Separate guild/DM alert toggles, notification location lists, selected-location overrides, native BetterDiscord notifications, and custom actionable toasts. A shared manager in Settings and the Logger reviews all four logging/notification lists with live server names/icons, grouped channel navigation, and scoped removal.
 - One console entry and routed alert per high-impact setting change.
 - Info-blue enabled states, theme-neutral disabled states, warning-colored backup diagnostics, and red errors.
 - Optional local media caching, cache-size/type controls, local-only rendering, CDN fallback, custom cache paths, cached-file cleanup, and a memory-only no-save media queue. Known limitation in 2.8.2.11: **Cache all attachment types** may leave arbitrary non-image files CDN-backed when On and may still log their references when Off.

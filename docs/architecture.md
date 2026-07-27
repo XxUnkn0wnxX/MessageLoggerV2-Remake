@@ -29,6 +29,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 - `reportMajorSettingChange` covers only broad logging, persistence, media, update, and destructive settings. Enabled states are info; disabled states use the theme-neutral presentation.
 - Per-setting replacement keys discard obsolete alerts after rapid changes.
 - Logging scope combines whitelist, blacklist, muted server/channel, NSFW, selected-channel, and DM rules.
+- `showLocationListManagerModal` exposes those persisted logging and notification lists without adding entries. Resolution prefers live guild/channel stores, preserves unresolved IDs, groups live channels and threads under their server, and routes clickable rows through the same guarded modal-close/history navigation path. Current-list removal and remove-from-all remain separate actions.
 - Author and local-action gates are intentionally separate: the bot gate recognizes bot authors plus webhook, application, and interaction markers; blocked-user, self-author, local-edit, and local-delete rules remain per message.
 - Components V2 is a supported payload format, not an author classifier. Any message carrying Discord's Ephemeral flag bit is excluded before caching or capture, even when Components V2 or other flags are also set.
 - Guild and DM notification lists affect alerts rather than record eligibility.

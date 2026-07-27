@@ -22,7 +22,7 @@ The deleted-message color, media-cache path, Media-group cached-file policies, a
 
 ## 🎯 Logging Scope
 
-The whitelist and blacklist are managed from the **Message Logger** submenu in server, channel, DM, and thread context menus. Use **Manage lists** beside **Help** in plugin settings (or the list button beside the Logger filter `?`) to review all four lists in one modal. Live Discord names take priority. For a departed server ID, the manager next uses the newest server name stored by any remaining saved record; if no such record remains, it shows the raw ID. Other unavailable location IDs also remain visible as raw IDs. Right-click a row for immediate removal from the current list or all four lists. Hold **Shift** while hovering a row to reveal its native Trash control; Shift-click removes that row from the current list.
+The whitelist and blacklist are managed from the **Message Logger** submenu in server, channel, DM, and thread context menus. Use **Manage lists** beside **Help** in plugin settings (or the list button beside the Logger filter `?`) to review all four lists in one modal. Live Discord names take priority. Live server rows show the server icon, name, and ID; live channels and threads group beneath a clickable server row and link to their exact destination. For a departed server ID, the manager next uses the newest server name stored by any remaining saved record; if no such record remains, it shows the raw ID. Other unavailable location IDs also remain visible as raw IDs. Right-click a row for immediate removal from the current list or all four lists. Hold **Shift** while hovering a row to reveal its native Trash control; Shift-click removes that row from the current list.
 
 ### Scope precedence
 
@@ -319,7 +319,7 @@ The same no-hover-pause and whole-card dismissal behavior applies to other syste
 - **Check for update now!**: runs an immediate update check.
 - **Support server**: opens the BetterDiscord invite prompt.
 - **Help**: opens the built-in logger help page.
-- **Manage lists**: opens the four-tab Logging Whitelist, Logging Blacklist, Notification Whitelist, and Notification Blacklist manager. It never adds or moves IDs; each row keeps its raw ID visible, and server names navigate to an accessible channel when Discord still exposes one.
+- **Manage lists**: opens the four-tab Logging Whitelist, Logging Blacklist, Notification Whitelist, and Notification Blacklist manager. It never adds or moves IDs. Live server rows retain their raw ID, live channel/thread rows group below their server and link to the exact destination, and unresolved entries remain visible by raw ID.
 
 ## 🧵 Forum Posts and Threads
 

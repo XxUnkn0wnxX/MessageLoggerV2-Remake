@@ -70,6 +70,8 @@ The question-mark button beside the filter opens the built-in filter help.
 
 ## 🖱️ Logger Window Controls
 
+The location-list button beside the filter help opens the same four-tab logging/notification list manager available from plugin Settings. Its live server and channel names are clickable; right-click removes an entry from the current list or all four lists, while Shift-clicking Trash removes it only from the current list. The adjacent cog opens MessageLoggerV2 Settings directly.
+
 ### Delete-key actions
 
 Hold `Delete` and left-click:
