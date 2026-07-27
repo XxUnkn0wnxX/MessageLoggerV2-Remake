@@ -1610,6 +1610,8 @@ module.exports = class MessageLoggerV2 {
     this.style.settingsHelpModal = this.obfuscatedClass('ml2-settings-help-modal');
     this.style.startupHelpModal = this.obfuscatedClass('ml2-startup-help-modal');
     this.style.locationListsModal = this.obfuscatedClass('ml2-location-lists-modal');
+    this.style.loggerSettingsModal = this.obfuscatedClass('ml2-logger-settings-modal');
+    this.style.loggerSettingsScroller = this.obfuscatedClass('ml2-logger-settings-scroller');
     this.style.cachedFilesModal = this.obfuscatedClass('ml2-cached-files-modal');
     this.style.cssClassRestartWarning = this.obfuscatedClass('ml2-css-class-restart-warning');
     this.style.settingTransitionActive = this.obfuscatedClass('ml2-setting-transition-active');
@@ -1618,6 +1620,7 @@ module.exports = class MessageLoggerV2 {
     this.loggerHelpModalKey = `${this.style.menu}-logger-help`;
     this.filterHelpModalKey = `${this.style.menu}-filter-help`;
     this.locationListsModalKey = `${this.style.menu}-location-lists`;
+    this.loggerSettingsModalKey = `${this.style.menu}-settings`;
     this.style.openLogs = this.obfuscatedClass('ML2-OL');
     this.style.filter = this.obfuscatedClass('ML2-FILTER');
     this.style.menuMessages = this.obfuscatedClass('ML2-MENU-MESSAGES');
@@ -1648,6 +1651,7 @@ module.exports = class MessageLoggerV2 {
     this.style.multiInputFirst = this.obfuscatedClass('MLv2-input-first');
     this.style.input = this.obfuscatedClass('MLv2-input-input');
     this.style.locationListRow = this.obfuscatedClass('MLv2-location-list-row');
+    this.style.locationListScroller = this.obfuscatedClass('MLv2-location-list-scroller');
     this.style.locationListDeleteButton = this.obfuscatedClass('MLv2-location-list-delete');
     this.style.locationListButton = this.obfuscatedClass('MLv2-location-list-button');
     this.style.locationListLink = this.obfuscatedClass('MLv2-location-list-link');
@@ -1966,10 +1970,54 @@ module.exports = class MessageLoggerV2 {
                     }
                     .${this.style.locationListsModal} {
                       box-sizing: border-box;
+                      width: min(880px, calc(100vw - 32px)) !important;
+                      max-width: 880px !important;
+                      min-width: 0 !important;
+                      margin-inline: auto;
+                    }
+                    .${this.style.locationListScroller} {
+                      scrollbar-gutter: stable;
+                      overflow-y: auto;
+                      overflow-x: hidden;
+                      scrollbar-color: var(--scrollbar-thin-thumb) var(--scrollbar-thin-track);
+                    }
+                    .${this.style.locationListScroller}::-webkit-scrollbar {
+                      width: 8px;
+                      height: 8px;
+                    }
+                    .${this.style.locationListScroller}::-webkit-scrollbar-track {
+                      background-color: var(--scrollbar-thin-track);
+                      border: 2px solid var(--scrollbar-thin-track);
+                    }
+                    .${this.style.locationListScroller}::-webkit-scrollbar-thumb {
+                      background-clip: padding-box;
+                      background-color: var(--scrollbar-thin-thumb);
+                      border: 2px solid transparent;
+                      border-radius: 4px;
+                      min-height: 40px;
+                    }
+                    .${this.style.locationListScroller}::-webkit-scrollbar-thumb:hover {
+                      background-color: var(--scrollbar-auto-thumb-hover, var(--scrollbar-thin-thumb));
+                    }
+                    .${this.style.loggerSettingsModal} {
+                      box-sizing: border-box;
                       width: min(760px, calc(100vw - 32px)) !important;
                       max-width: 760px !important;
                       min-width: 0 !important;
                       margin-inline: auto;
+                    }
+                    .${this.style.loggerSettingsModal} footer > div,
+                    .${this.style.loggerSettingsModal} footer [data-direction="horizontal"],
+                    .${this.style.loggerSettingsModal} footer [data-mana-component="button"] {
+                      width: 100% !important;
+                    }
+                    .${this.style.loggerSettingsScroller} {
+                      box-sizing: border-box;
+                      height: min(720px, calc(100vh - 220px));
+                      min-height: 0;
+                      overflow-y: auto;
+                      overflow-x: hidden;
+                      scrollbar-gutter: stable;
                     }
                     .${this.style.cachedFilesModal} {
                       width: min(560px, calc(100vw - 32px)) !important;
@@ -2945,6 +2993,7 @@ module.exports = class MessageLoggerV2 {
       this.loggerHelpModalKey,
       this.filterHelpModalKey,
       this.locationListsModalKey,
+      this.loggerSettingsModalKey,
       this.style?.menu && `${this.style.menu}-deleted-cached-files`
     ].filter(Boolean);
     const keys = new Set([...(this._loggerOwnedModalKeys || []), ...knownKeys]);
@@ -12905,8 +12954,35 @@ module.exports = class MessageLoggerV2 {
     const history = historyModule?.getHistory?.();
     if (!history?.push) return false;
     this.ModalStack?.closeModal?.(this.locationListsModalKey);
+    if (this.loggerSettingsModalKey && this.ModalStack?.hasModalOpen?.(this.loggerSettingsModalKey)) {
+      this.ModalStack?.closeModal?.(this.loggerSettingsModalKey);
+    }
     if (this.menu?.open && this.style?.menu) this.ModalStack?.closeModal?.(this.style.menu);
     history.push(`/channels/${guildId}/${channel.id}`);
+    return true;
+  }
+  showLoggerSettingsModal() {
+    const modalKey = this.loggerSettingsModalKey || `${this.style?.menu || 'ML2-MENU'}-settings`;
+    if (this.ModalStack?.hasModalOpen?.(modalKey)) return false;
+    const settingsPanel = this.getSettingsPanel();
+    this.createModal({
+      header: `${this.getName()} Settings`,
+      size: this.tools.resolvedModalStuff.ModalSize.LARGE,
+      cancelText: 'Back',
+      onCancel: () => this.ModalStack?.closeModal?.(modalKey),
+      children: [React.createElement('div', {
+        className: this.style.loggerSettingsScroller,
+        style: {
+          boxSizing: 'border-box',
+          height: 'min(720px, calc(100vh - 220px))',
+          minHeight: 0,
+          overflowY: 'auto',
+          overflowX: 'hidden'
+        }
+      }, settingsPanel)],
+      ml2Data: true,
+      className: this.style.loggerSettingsModal
+    }, false, modalKey);
     return true;
   }
   showLocationListManagerModal() {
@@ -12959,8 +13035,8 @@ module.exports = class MessageLoggerV2 {
               boxSizing: 'border-box',
               display: 'block',
               flex: '0 0 auto',
-              width: '16px',
-              height: '16px',
+              width: '20px',
+              height: '20px',
               overflow: 'hidden',
               borderRadius: '50%',
               backgroundSize: 'cover',
@@ -12971,8 +13047,8 @@ module.exports = class MessageLoggerV2 {
             src: iconUrl,
             alt: '',
             'aria-hidden': true,
-            width: 16,
-            height: 16,
+            width: 20,
+            height: 20,
             style: { display: 'block', width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }
           }))
           : null,
@@ -13081,7 +13157,7 @@ module.exports = class MessageLoggerV2 {
         ))
         : [React.createElement('div', { key: 'location-list-empty', style: { color: 'var(--text-muted)', padding: '24px 4px' } }, `No locations in ${descriptor.label}.`)];
       return React.createElement('div', {
-        className: plugin.multiClasses?.defaultColor,
+        className: [plugin.multiClasses?.defaultColor, plugin.style.locationListScroller].filter(Boolean).join(' '),
         style: {
           height: 'min(420px, calc(100vh - 260px))',
           minHeight: 0,
@@ -19418,6 +19494,20 @@ module.exports = class MessageLoggerV2 {
     const multiInput = textBox.getElementsByClassName(classes.inputMultiInput)[0]
       || textBox.firstElementChild;
     multiInput?.appendChild(locationListButton);
+    const settingsButton = document.createElement('span');
+    settingsButton.tabIndex = 0;
+    settingsButton.className = classes.questionMark;
+    settingsButton.setAttribute('role', 'button');
+    settingsButton.setAttribute('aria-label', 'Open MessageLogger settings');
+    settingsButton.title = 'Open MessageLogger settings';
+    settingsButton.innerHTML = '<svg name="LoggerSettings" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M19.43 12.98c.04-.32.07-.65.07-.98s-.02-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.37-.31-.6-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98L14.5 2.42C14.47 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.5.42L9.12 5.07c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.08-.48 0-.6.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.08.65-.08.98s.03.66.08.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.37.31.6.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1c.23.08.48 0 .6-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"></path></svg>';
+    settingsButton.addEventListener('click', () => this.showLoggerSettingsModal());
+    settingsButton.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      this.showLoggerSettingsModal();
+    });
+    multiInput?.appendChild(settingsButton);
     const inputEl = textBox.getElementsByTagName('input')[0];
     inputEl.addEventListener('focusout', e => {
       DOMTokenList.prototype.remove.apply(e.target.parentElement.parentElement.classList, classes.focused);

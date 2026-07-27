@@ -176,32 +176,95 @@ test('all-four removal de-duplicates each persisted list with one save and toast
 
 test('guild navigation uses the default channel, leaves failures untouched, and skips unavailable guilds', () => {
   const history = [];
-  let closed = 0;
+  const closed = [];
+  let settingsOpen = false;
   const plugin = createPlugin({
     settings: listSettings(),
     locationListsModalKey: 'location-lists',
     ChannelStore: { getChannels: () => ({}) },
     GuildChannelStore: { getDefaultChannel: id => id === 'guild-1' ? { id: 'default' } : null },
+    loggerSettingsModalKey: 'settings',
     tools: {
       getServer: id => id === 'guild-1' ? { id, name: 'Alpha' } : null,
       HistoryUtils: { getHistory: () => ({ push: pathName => history.push(pathName) }) }
     },
-    ModalStack: { closeModal: () => { closed++; } },
+    ModalStack: {
+      hasModalOpen: key => key === 'settings' && settingsOpen,
+      closeModal: key => {
+        closed.push(key);
+        if (key === 'settings') settingsOpen = false;
+      }
+    },
     menu: { open: true },
     style: { menu: 'logger' }
   });
   assert.equal(plugin.navigateToLocationListGuild({ id: 'guild-1' }), true);
   assert.deepEqual(history, ['/channels/guild-1/default']);
-  assert.equal(closed, 2);
+  assert.deepEqual(closed, ['location-lists', 'logger']);
+
+  settingsOpen = true;
+  plugin.GuildChannelStore = { getDefaultChannel: () => ({ id: 'nested-default' }) };
+  assert.equal(plugin.navigateToLocationListGuild({ id: 'guild-1' }), true);
+  assert.deepEqual(history, ['/channels/guild-1/default', '/channels/guild-1/nested-default']);
+  assert.deepEqual(closed, [
+    'location-lists',
+    'logger',
+    'location-lists',
+    'settings',
+    'logger'
+  ]);
 
   plugin.GuildChannelStore = { getDefaultChannel: () => null };
   assert.equal(plugin.navigateToLocationListGuild({ id: 'guild-1' }), false);
-  assert.deepEqual(history, ['/channels/guild-1/default']);
-  assert.equal(closed, 2);
+  assert.deepEqual(history, ['/channels/guild-1/default', '/channels/guild-1/nested-default']);
+  assert.equal(closed.length, 5);
 
   assert.equal(plugin.navigateToLocationListGuild({ id: 'missing-guild' }), false);
-  assert.deepEqual(history, ['/channels/guild-1/default']);
-  assert.equal(closed, 2);
+  assert.deepEqual(history, ['/channels/guild-1/default', '/channels/guild-1/nested-default']);
+  assert.equal(closed.length, 5);
+});
+
+test('logger settings shortcut opens the actual settings panel and closes only its modal', () => {
+  let modal;
+  let createCount = 0;
+  let open = false;
+  const closed = [];
+  const settingsPanel = { type: 'settings-panel' };
+  const plugin = createPlugin({
+    style: {
+      menu: 'logger-modal',
+      loggerSettingsModal: 'settings-modal',
+      loggerSettingsScroller: 'settings-scroller'
+    },
+    loggerSettingsModalKey: 'logger-settings',
+    tools: { resolvedModalStuff: { ModalSize: { LARGE: 'large' } } },
+    ModalStack: {
+      hasModalOpen: key => open && key === 'logger-settings',
+      closeModal: key => closed.push(key)
+    },
+    getSettingsPanel: () => settingsPanel,
+    createModal(options, image, key) {
+      createCount++;
+      modal = { options, image, key };
+    }
+  });
+
+  assert.equal(plugin.showLoggerSettingsModal(), true);
+  assert.equal(createCount, 1);
+  assert.equal(modal.key, 'logger-settings');
+  assert.equal(modal.options.header, 'MessageLoggerV2 Settings');
+  assert.equal(modal.options.cancelText, 'Back');
+  assert.equal(modal.options.className, 'settings-modal');
+  const scroller = modal.options.children[0];
+  assert.equal(scroller.props.className, 'settings-scroller');
+  assert.equal(scroller.props.children[0], settingsPanel);
+
+  open = true;
+  assert.deepEqual(plugin.getOpenLoggerOwnedModalKeys(), ['logger-settings']);
+  modal.options.onCancel();
+  assert.deepEqual(closed, ['logger-settings']);
+  assert.equal(plugin.showLoggerSettingsModal(), false);
+  assert.equal(createCount, 1);
 });
 
 test('manager modal renders tabs and rows while right-click and Shift Trash keep their distinct removal scope', () => {
@@ -227,6 +290,7 @@ test('manager modal renders tabs and rows while right-click and Shift Trash keep
       locationListRow: 'location-row',
       locationListLink: 'location-link',
       locationListDeleteButton: 'location-delete',
+      locationListScroller: 'location-list-scroller',
       locationListsModal: 'location-lists-modal'
     },
     multiClasses: { defaultColor: 'default-color' },
@@ -296,6 +360,7 @@ test('manager renders guild icons before live server names and channel server li
       locationListRow: 'location-row',
       locationListLink: 'location-link',
       locationListDeleteButton: 'location-delete',
+      locationListScroller: 'location-list-scroller',
       locationListsModal: 'location-lists-modal'
     },
     multiClasses: { defaultColor: 'default-color' },
@@ -319,6 +384,7 @@ test('manager renders guild icons before live server names and channel server li
 
   assert.equal(plugin.showLocationListManagerModal(), true);
   const rendered = modal.options.children[0].type();
+  assert.equal(rendered.props.className, 'default-color location-list-scroller');
   assert.deepEqual(rendered.props.style, {
     height: 'min(420px, calc(100vh - 260px))',
     minHeight: 0,
@@ -339,8 +405,8 @@ test('manager renders guild icons before live server names and channel server li
       boxSizing: 'border-box',
       display: 'block',
       flex: '0 0 auto',
-      width: '16px',
-      height: '16px',
+      width: '20px',
+      height: '20px',
       overflow: 'hidden',
       borderRadius: '50%',
       backgroundSize: 'cover',
@@ -378,7 +444,18 @@ test('source contracts cover both manager launch buttons, four tabs, right-click
   assert.match(source, /this\.style\.locationListLink/);
   assert.match(source, /ImageResolver: lazyGet\('ImageResolver', \(\) => Webpack\.getByKeys\('getUserAvatarURL', 'getGuildIconURL'\)\)/);
   assert.match(source, /className: this\.style\.locationListsModal/);
-  assert.match(source, /width: min\(760px, calc\(100vw - 32px\)\) !important/);
+  assert.match(source, /width: min\(880px, calc\(100vw - 32px\)\) !important/);
   assert.match(source, /height: 'min\(420px, calc\(100vh - 260px\)\)'/);
   assert.match(source, /classList\.add\(\.\.\.classNames\)/);
+  assert.match(source, /locationListScroller/);
+  assert.match(source, /scrollbar-gutter: stable/);
+  assert.match(source, /locationListScroller\}::-webkit-scrollbar/);
+  assert.match(source, /var\(--scrollbar-thin-thumb\)/);
+  assert.match(source, /var\(--scrollbar-thin-track\)/);
+  assert.match(source, /multiInput\?\.appendChild\(locationListButton\);\s+const settingsButton = document\.createElement\('span'\)/);
+  assert.match(source, /settingsButton\.addEventListener\('click', \(\) => this\.showLoggerSettingsModal\(\)\)/);
+  assert.match(source, /settingsButton\.addEventListener\('keydown'/);
+  assert.match(source, /Open MessageLogger settings/);
+  assert.match(source, /loggerSettingsModalKey/);
+  assert.match(source, /className: this\.style\.loggerSettingsModal/);
 });
