@@ -116,6 +116,7 @@ test('all fresh-install settings defaults remain stable', () => {
     preCacheMaxAgeHours: 24,
     preCacheMaxSizeGb: 5,
     mediaCacheTrimIntervalMinutes: 15,
+    showMediaCacheTrimLifecycleToasts: false,
     onlyRenderCachedAttachments: false,
     deleteCachedFilesWithRecords: false,
     flags: 0,
@@ -305,6 +306,7 @@ test('media-cache controls sit together below their master switch', () => {
       'preCacheMaxAgeHours',
       'preCacheMaxSizeGb',
       'mediaCacheTrimIntervalMinutes',
+      'showMediaCacheTrimLifecycleToasts',
       'newCacheAllImagesPath',
       'newCacheAllImages',
       'onlyRenderCachedAttachments',
@@ -312,6 +314,7 @@ test('media-cache controls sit together below their master switch', () => {
       'forceLegacyMediaFetching'
     ]
   );
+  assert.match(mediaSettings, /name: 'Show trimmer start\/end toasts'[\s\S]*normal start\/end toasts[\s\S]*id: 'showMediaCacheTrimLifecycleToasts'[\s\S]*enableWith: 'cacheAllImages'[\s\S]*type: 'switch'/);
   assert.equal(miscSettings.match(/id: '(?:cacheAllImages|addUserIdToSavedMediaFilename|newSaveAllFileTypes|maxCacheFileSize|newCacheAllImagesPath|newCacheAllImages|onlyRenderCachedAttachments|deleteCachedFilesWithRecords|forceLegacyMediaFetching)'/), null);
 });
 
@@ -509,6 +512,7 @@ test('settings dependencies match the approved master controls', () => {
     ['preCacheMaxAgeHours', 'cacheAllImages'],
     ['preCacheMaxSizeGb', 'cacheAllImages'],
     ['mediaCacheTrimIntervalMinutes', 'cacheAllImages'],
+    ['showMediaCacheTrimLifecycleToasts', 'cacheAllImages'],
     ['antiNukeToasts', 'antiNukeEnabled'],
     ['antiNukeThreadCap', 'antiNukeEnabled'],
     ['antiNukeMessageCap', 'antiNukeEnabled'],
@@ -757,6 +761,7 @@ test('native and cloned Trash actions remain scoped to indexed logger deletions'
   assert.match(source, /getNativeMessageToolbarNodes\(root = document\)[\s\S]*ancestor\.classList[\s\S]*getElementsByClassName/);
   assert.match(source, /getNativeMessageToolbarActionRow\(toolbar\)[\s\S]*lowest shared native-action ancestor[\s\S]*candidates\.every/);
   assert.match(source, /captureNativeDeleteButtonPresentation\(root = document\)[\s\S]*inspectNativeDeleteCandidate/);
+  assert.match(source, /_nativeDeleteTemplateWarningShown = true;[\s\S]*this\.reportDebugEvent\([\s\S]*Waiting for Discord to mount a native message toolbar[\s\S]*4000,[\s\S]*'console'/);
   const copiedControl = source.slice(
     source.indexOf('createCopiedNativeDeleteControl(record, options = {})'),
     source.indexOf('cleanupCopiedNativeDeleteControls(rootNode')
@@ -1160,7 +1165,7 @@ test('backup and edit-spam diagnostics remain opt-in under their warning-colored
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Debug'[\s\S]*id: 'ml2-settings-debug'[\s\S]*collapsible: true[\s\S]*shown: false/);
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Enable debug logging[\s\S]*id: 'debugLogging'[\s\S]*type: 'switch'/);
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Show debug messages as toasts[\s\S]*id: 'debugToasts'[\s\S]*enableWith: 'debugLogging'[\s\S]*type: 'switch'/);
-  assert.match(source, /reportDebugEvent\(message, timeout = 4000, outputSelection = null\)[\s\S]*const output = this\._normalizeDebugEventOutputSelection\(outputSelection\);[\s\S]*if \(output\.console && this\.settings\?\.debugLogging\)[\s\S]*Logger\.log\(`\[Debug\] \$\{message\}`\)[\s\S]*if \(output\.toast && this\.settings\?\.debugLogging && this\.settings\?\.debugToasts\)[\s\S]*this\.notifyUser\(message,[\s\S]*title: 'Message Logger Debug'[\s\S]*type: 'warning'/);
+  assert.match(source, /reportDebugEvent\(message, timeout = 4000, outputSelection = null\)[\s\S]*const output = this\._normalizeDebugEventOutputSelection\(outputSelection\);[\s\S]*if \(output\.console && this\.settings\?\.debugLogging\)[\s\S]*this\._logStyledConsoleEvent\('DEBUG', message\)[\s\S]*if \(output\.toast && this\.settings\?\.debugLogging && this\.settings\?\.debugToasts\)[\s\S]*this\.notifyUser\(message,[\s\S]*title: 'Message Logger Debug'[\s\S]*type: 'warning'/);
   assert.match(source, /Log automatic-backup, edit-spam, channel-entry, and networking diagnostics to the console\./);
   assert.match(source, /id: 'debugLogging',[\s\S]*action: 'reportLegacyRoutingDebugLoggingState'/);
   assert.match(source, /id: 'debugToasts',[\s\S]*action: 'reportLegacyRoutingDebugToastsState'/);

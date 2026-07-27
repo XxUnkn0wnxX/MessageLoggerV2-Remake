@@ -1,9 +1,38 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createPlugin, loggerEvents, resetHarness } = require('./helpers/plugin-harness');
+const { captureConsoleEvent, createPlugin, resetHarness } = require('./helpers/plugin-harness');
 
-test.beforeEach(resetHarness);
+let styledConsoleEvents = [];
+let originalConsoleLog;
+
+test.beforeEach(() => {
+  resetHarness();
+  styledConsoleEvents = [];
+  originalConsoleLog = console.log;
+  console.log = (...args) => {
+    styledConsoleEvents.push(args);
+    captureConsoleEvent('log', args);
+  };
+});
+
+test.afterEach(() => {
+  console.log = originalConsoleLog;
+});
+
+function styledConsoleMessages(category = null) {
+  return styledConsoleEvents.flatMap(args => {
+    const format = String(args[0] || '');
+    const compound = /^%cMessageLoggerV2%c%c DEBUG %c%c (.+) %c$/.exec(format);
+    if (compound) {
+      if (category != null && category !== `DEBUG · ${compound[1]}`) return [];
+      return [String(args.at(-1))];
+    }
+    const single = /^%cMessageLoggerV2%c%c (.+) %c$/.exec(format);
+    if (!single || (category != null && single[1] !== category)) return [];
+    return [String(args.at(-1))];
+  });
+}
 
 test('delete, thread, and purge alerts share one notification identity per saved ID', () => {
   const notifications = [];
@@ -280,11 +309,11 @@ test('edit-spam debug reports username counters and the full cooldown lifecycle'
   assert.equal(plugin._getEditNotificationSpamDecision('123456789', 0, 'Alice'), 'allow');
   assert.equal(plugin._getEditNotificationSpamDecision('123456789', 1_000, 'Alice'), 'started');
   assert.deepEqual(
-    loggerEvents.map(event => event[1]),
+    styledConsoleMessages('DEBUG'),
     [
-      '[Debug] Edit-spam counter for Alice: 1/2 edits within 60 seconds.',
-      '[Debug] Edit-spam counter for Alice: 2/2 edits within 60 seconds.',
-      '[Debug] Edit-spam cooldown for Alice started. Resetting in 60 seconds.'
+      'Edit-spam counter for Alice: 1/2 edits within 60 seconds.',
+      'Edit-spam counter for Alice: 2/2 edits within 60 seconds.',
+      'Edit-spam cooldown for Alice started. Resetting in 60 seconds.'
     ]
   );
   assert.deepEqual(scheduled.map(timer => timer.delay), [50_000, 60_000]);
@@ -292,15 +321,15 @@ test('edit-spam debug reports username counters and the full cooldown lifecycle'
   scheduled[0].callback();
   scheduled[1].callback();
   assert.deepEqual(
-    loggerEvents.slice(-2).map(event => event[1]),
+    styledConsoleMessages('DEBUG').slice(-2),
     [
-      '[Debug] Edit-spam cooldown for Alice will reset in 10 seconds.',
-      '[Debug] Edit-spam cooldown for Alice reset after 60 seconds.'
+      'Edit-spam cooldown for Alice will reset in 10 seconds.',
+      'Edit-spam cooldown for Alice reset after 60 seconds.'
     ]
   );
   assert.equal(plugin.editHistoryAntiSpam['123456789'], undefined);
   assert.equal(plugin._editSpamCooldownTimers.size, 0);
-  assert.ok(loggerEvents.every(event => !String(event[1]).includes('123456789')));
+  assert.ok(styledConsoleMessages('DEBUG').every(message => !message.includes('123456789')));
   assert.ok(notifications.every(args => !String(args[1]).includes('123456789')));
   assert.ok(notifications.every(args => args[5].pauseOnHover === false && args[5].instantDismiss === true));
 

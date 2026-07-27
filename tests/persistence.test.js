@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  captureConsoleEvent,
   Components,
   Data,
   Plugins,
@@ -15,6 +16,9 @@ const {
   notificationEvents,
   resetHarness
 } = require('./helpers/plugin-harness');
+
+let styledConsoleEvents = [];
+let originalConsoleLog;
 
 function temporaryDirectory(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-test-'));
@@ -28,7 +32,33 @@ function save(plugin, name, data, synchronous = false) {
   });
 }
 
-test.beforeEach(resetHarness);
+test.beforeEach(() => {
+  resetHarness();
+  styledConsoleEvents = [];
+  originalConsoleLog = console.log;
+  console.log = (...args) => {
+    styledConsoleEvents.push(args);
+    captureConsoleEvent('log', args);
+  };
+});
+
+test.afterEach(() => {
+  console.log = originalConsoleLog;
+});
+
+function styledConsoleMessages(category = null) {
+  return styledConsoleEvents.flatMap(args => {
+    const format = String(args[0] || '');
+    const compound = /^%cMessageLoggerV2%c%c DEBUG %c%c (.+) %c$/.exec(format);
+    if (compound) {
+      if (category != null && category !== `DEBUG · ${compound[1]}`) return [];
+      return [String(args.at(-1))];
+    }
+    const single = /^%cMessageLoggerV2%c%c (.+) %c$/.exec(format);
+    if (!single || (category != null && single[1] !== category)) return [];
+    return [String(args.at(-1))];
+  });
+}
 
 test('normal saves atomically replace the primary data file', async t => {
   const pluginDir = temporaryDirectory(t);
@@ -131,19 +161,19 @@ test('backup debug console remains master for routed toasts and both are disable
 
   plugin.settings.debugLogging = true;
   plugin.reportDebugEvent('console-only event');
-  assert.deepEqual(loggerEvents.at(-1), ['log', '[Debug] console-only event']);
+  assert.equal(styledConsoleMessages('DEBUG').at(-1), 'console-only event');
   assert.equal(notifications.length, 0);
 
   plugin.settings.debugLogging = false;
   plugin.settings.debugToasts = true;
   const masterOff = plugin.reportDebugEvent('master-off toast request', 2500);
   assert.deepEqual(masterOff, { console: false, toast: false });
-  assert.equal(loggerEvents.length, 1);
+  assert.equal(styledConsoleMessages('DEBUG').length, 1);
   assert.equal(notifications.length, 0);
 
   plugin.settings.debugLogging = true;
   plugin.reportDebugEvent('combined event');
-  assert.deepEqual(loggerEvents.at(-1), ['log', '[Debug] combined event']);
+  assert.equal(styledConsoleMessages('DEBUG').at(-1), 'combined event');
   assert.equal(notifications.at(-1)[1], 'combined event');
   assert.equal(notifications.at(-1)[2], 'warning');
 });
@@ -1172,9 +1202,9 @@ test('backup debug lifecycle reports the queue delay, write start, and completio
   plugin.saveBackupTimeout = 0;
   plugin.saveBackup();
 
-  assert.ok(loggerEvents.some(event => event[1] === '[Debug] Automatic backup queued. Starting in 300 seconds.'));
-  assert.ok(loggerEvents.some(event => event[1] === '[Debug] Automatic backup started.'));
-  assert.ok(loggerEvents.some(event => event[1] === '[Debug] Automatic backup completed successfully.'));
+  assert.ok(styledConsoleMessages('DEBUG').includes('Automatic backup queued. Starting in 300 seconds.'));
+  assert.ok(styledConsoleMessages('DEBUG').includes('Automatic backup started.'));
+  assert.ok(styledConsoleMessages('DEBUG').includes('Automatic backup completed successfully.'));
   assert.deepEqual(
     notifications.map(event => event[1]),
     [

@@ -39,6 +39,7 @@ const MEDIA_CACHE_TRIM_ALL = MEDIA_CACHE_TRIM_LIVE_AGE
   | MEDIA_CACHE_TRIM_PRE_AGE
   | MEDIA_CACHE_TRIM_PRE_SIZE;
 const MEDIA_CACHE_TRIM_GB = 1024 ** 3;
+const MEDIA_CACHE_TRIM_WORK_BATCH = 32;
 const MEDIA_CACHE_LEGACY_ROUTING_NOTICE = 'Networking: media routing is using the old Discord renderer fetch() method.';
 const DATA_SAVE_TRANSITION_TIMEOUT_MS = 30 * 1000;
 const DATA_SAVE_MAX_ATTEMPTS = 3;
@@ -66,9 +67,81 @@ const FORUM_UPLOAD_ROUTER_SOURCE_MARKERS = Object.freeze([
 ]);
 const FORUM_UPLOAD_AS_REPLY_BYPASS_TTL_MS = 4000;
 const FORUM_CHANNEL_TYPES = Object.freeze([10, 11, 12]);
-const { React, ReactDOM, Webpack, UI, Plugins, DOM, Patcher, Components, ContextMenu, Utils, Hooks, ReactUtils, Logger } = new BdApi('MessageLoggerV2');
+const BdApiInstance = new BdApi('MessageLoggerV2');
+const {
+  React,
+  ReactDOM,
+  Webpack,
+  UI,
+  Plugins,
+  DOM,
+  Patcher,
+  Components,
+  ContextMenu,
+  Utils,
+  Hooks,
+  ReactUtils,
+  Logger: BdApiLogger
+} = BdApiInstance;
 const { Data } = BdApi;
 const { Filters } = Webpack;
+const LOGGER_IDENTITY_STYLE = 'background:#f59e0b;color:#000;padding:1px 5px;border-radius:3px;font-weight:600;';
+const LOGGER_RESET_STYLE = '';
+const LOGGER_CATEGORY_BLUE_STYLE = 'background:#5865f2;color:#f0f0f0;padding:1px 5px;border-radius:3px;margin-left:4px;font-weight:700;';
+const LOGGER_CATEGORY_RED_STYLE = 'background:#ed4245;color:#000;padding:1px 5px;border-radius:3px;margin-left:4px;font-weight:700;';
+const NativeLogger = {
+  log: typeof BdApiLogger?.log === 'function' ? BdApiLogger.log.bind(BdApiLogger) : null,
+  warn: typeof BdApiLogger?.warn === 'function' ? BdApiLogger.warn.bind(BdApiLogger) : null,
+  error: typeof BdApiLogger?.error === 'function' ? BdApiLogger.error.bind(BdApiLogger) : null
+};
+function emitStyledConsoleEvent(severity, args, category = null, nativeArgs = args) {
+  const label = category == null ? null : String(category || 'MEDIA');
+  const compoundDebugSuffix = label?.startsWith('DEBUG · ')
+    ? label.slice('DEBUG · '.length)
+    : null;
+  const isDebug = label === 'DEBUG' || compoundDebugSuffix != null;
+  const format = label == null
+    ? '%cMessageLoggerV2%c'
+    : compoundDebugSuffix == null
+      ? `%cMessageLoggerV2%c%c ${label} %c`
+      : `%cMessageLoggerV2%c%c DEBUG %c%c ${compoundDebugSuffix} %c`;
+  const formatArgs = label == null
+    ? [format, LOGGER_IDENTITY_STYLE, LOGGER_RESET_STYLE, ...args]
+    : compoundDebugSuffix == null
+      ? [
+          format,
+          LOGGER_IDENTITY_STYLE,
+          LOGGER_RESET_STYLE,
+          isDebug ? LOGGER_CATEGORY_RED_STYLE : LOGGER_CATEGORY_BLUE_STYLE,
+          LOGGER_RESET_STYLE,
+          ...args
+        ]
+      : [
+          format,
+          LOGGER_IDENTITY_STYLE,
+          LOGGER_RESET_STYLE,
+          LOGGER_CATEGORY_RED_STYLE,
+          LOGGER_RESET_STYLE,
+          LOGGER_CATEGORY_BLUE_STYLE,
+          LOGGER_RESET_STYLE,
+          ...args
+        ];
+  try {
+    const consoleTarget = globalThis.console;
+    const consoleMethod = consoleTarget?.[severity];
+    if (typeof consoleMethod !== 'function') throw new TypeError(`console.${severity} is unavailable`);
+    consoleMethod.call(consoleTarget, ...formatArgs);
+    return true;
+  } catch {
+    try { NativeLogger[severity]?.(...nativeArgs); } catch {}
+    return false;
+  }
+}
+const Logger = {
+  log(...args) { return emitStyledConsoleEvent('log', args); },
+  warn(...args) { return emitStyledConsoleEvent('warn', args); },
+  error(...args) { return emitStyledConsoleEvent('error', args); }
+};
 const DiscordModules = (() => {
   const cache = {};
   const lazyGet = (key, getter) => ({
@@ -854,6 +927,7 @@ module.exports = class MessageLoggerV2 {
       preCacheMaxAgeHours: 24,
       preCacheMaxSizeGb: 5,
       mediaCacheTrimIntervalMinutes: DEFAULT_MEDIA_CACHE_TRIM_INTERVAL_MINUTES,
+      showMediaCacheTrimLifecycleToasts: false,
       onlyRenderCachedAttachments: false,
       deleteCachedFilesWithRecords: false,
       flags: 0,
@@ -3888,7 +3962,7 @@ module.exports = class MessageLoggerV2 {
     let reportedConsole = false;
     let reportedToast = false;
     if (output.console && this.settings?.debugLogging) {
-      Logger.log(`[Debug] ${message}`);
+      this._logStyledConsoleEvent('DEBUG', message);
       reportedConsole = true;
     }
     if (output.toast && this.settings?.debugLogging && this.settings?.debugToasts) {
@@ -4556,6 +4630,13 @@ module.exports = class MessageLoggerV2 {
             resetInvalidTo: DEFAULT_MEDIA_CACHE_TRIM_INTERVAL_MINUTES,
             inlineValidation: true,
             action: 'mediaCacheTrimIntervalChanged'
+          },
+          {
+            name: 'Show trimmer start/end toasts',
+            note: 'Show normal start/end toasts for age and GB-size trim phases. Console lifecycle messages remain visible when this is Off.',
+            id: 'showMediaCacheTrimLifecycleToasts',
+            enableWith: 'cacheAllImages',
+            type: 'switch'
           },
           {
             name: 'Media cache path (optional)',
@@ -7709,8 +7790,20 @@ module.exports = class MessageLoggerV2 {
     if (Number(settings.preCacheMaxSizeGb) > 0) mask |= MEDIA_CACHE_TRIM_PRE_SIZE;
     return mask;
   }
-  _mediaCacheTrimDebug(message) {
-    if (this.settings?.debugLogging) Logger.log(`[Debug] ${message}`);
+  _logStyledConsoleEvent(category, message) {
+    const label = String(category || 'MEDIA');
+    return emitStyledConsoleEvent(
+      'log',
+      [String(message)],
+      label,
+      [`[${label}] ${String(message)}`]
+    );
+  }
+  _mediaCacheTrimDebug(message, category = 'TIMER') {
+    if (this.settings?.debugLogging) {
+      const label = String(category).startsWith('DEBUG · ') ? category : `DEBUG · ${category}`;
+      this._logStyledConsoleEvent(label, message);
+    }
   }
   _mediaCacheTrimSafeError(error) {
     let message = String(error?.message || error || 'Unknown error');
@@ -7720,8 +7813,9 @@ module.exports = class MessageLoggerV2 {
     for (const value of paths) message = message.replaceAll(value, '<cache-root>');
     return message;
   }
-  _mediaCacheTrimNotify(message, replaceKey, type = 'info', timeout = 5000) {
-    Logger.log(message);
+  _mediaCacheTrimNotify(message, replaceKey, type = 'info', timeout = 5000, category = 'TIMER', dispatchToast = true) {
+    this._logStyledConsoleEvent(category, message);
+    if (!dispatchToast) return;
     this.notifyUser?.(message, {
       title: 'Message Logger Media Cache',
       type,
@@ -7827,7 +7921,10 @@ module.exports = class MessageLoggerV2 {
     const label = labels[settingId] || settingId;
     this._mediaCacheTrimNotify(
       `${label} limit changed to ${Number(value) || 0}${settingId.includes('Age') ? ' hours' : ' GB'}.`,
-      `media-cache-trim:limit:${settingId}`
+      `media-cache-trim:limit:${settingId}`,
+      'info',
+      5000,
+      'TRIM'
     );
     this._mediaCacheTrimDebug(`Changed ${settingId} to ${Number(value) || 0}; pending mask is ${this._mediaCacheTrimPendingMask}.`);
     if (this.settings?.cacheAllImages) this._scheduleMediaCacheTrimDebounce();
@@ -7851,77 +7948,138 @@ module.exports = class MessageLoggerV2 {
   _mediaCacheTrimIsCancelled(generation) {
     return generation !== this._mediaCacheTrimStopGeneration;
   }
+  async _mediaCacheTrimYield(generation) {
+    if (this._mediaCacheTrimIsCancelled(generation)) return false;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    return !this._mediaCacheTrimIsCancelled(generation);
+  }
+  async _mediaCacheTrimConsumeWork(generation, state) {
+    state.count += 1;
+    if (state.count < MEDIA_CACHE_TRIM_WORK_BATCH) return !this._mediaCacheTrimIsCancelled(generation);
+    state.count = 0;
+    return this._mediaCacheTrimYield(generation);
+  }
+  _mediaCacheTrimPathWithinRoot(root, target, path) {
+    const relative = path.relative(path.resolve(root), path.resolve(target));
+    return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+  }
+  _mediaCacheTrimSafeEntryStat(root, canonicalRoot, fullPath, fs, path, needsCanonicalGuard) {
+    if (!this._mediaCacheTrimPathWithinRoot(root, fullPath, path)) return null;
+    let stat;
+    try {
+      const lstat = typeof fs.lstatSync === 'function' ? fs.lstatSync : fs.statSync;
+      if (typeof lstat !== 'function') return null;
+      stat = lstat.call(fs, fullPath);
+    } catch (error) {
+      if (this.isMissingMediaCachePathError(error)) return null;
+      throw error;
+    }
+    if (typeof stat?.isSymbolicLink === 'function' && stat.isSymbolicLink()) return null;
+    if (needsCanonicalGuard && typeof fs.realpathSync === 'function') {
+      let canonicalPath;
+      try {
+        canonicalPath = path.resolve(fs.realpathSync(fullPath));
+      } catch (error) {
+        if (this.isMissingMediaCachePathError(error)) return null;
+        throw error;
+      }
+      const relative = path.relative(path.resolve(root), path.resolve(fullPath));
+      const expectedPath = path.resolve(canonicalRoot, relative);
+      if (!this._mediaCacheTrimPathWithinRoot(canonicalRoot, canonicalPath, path)
+        || canonicalPath !== expectedPath) return null;
+    } else if (needsCanonicalGuard) {
+      // Without truthful lstat or realpath support, do not follow or mutate an unknown entry.
+      return null;
+    }
+    return stat;
+  }
   async _walkMediaCacheTrimRoot(root, options, generation) {
-    const fsPromises = this.nodeModules?.fs?.promises;
+    const fs = this.nodeModules?.fs;
     const path = this.nodeModules?.path;
-    if (!fsPromises?.opendir || !path) throw new Error('Async native filesystem walking is unavailable');
+    if (!fs?.readdirSync || (!fs.lstatSync && !fs.statSync) || !path) {
+      throw new Error('Synchronous filesystem walking is unavailable');
+    }
     const files = [];
     const directories = [];
-    const visit = async directory => {
-      if (this._mediaCacheTrimIsCancelled(generation)) return;
-      let handle;
+    const stack = [root];
+    const work = options?._yieldState || { count: 0 };
+    const needsCanonicalGuard = !fs.lstatSync || fs.lstatSync === fs.statSync;
+    let canonicalRoot = path.resolve(root);
+    if (needsCanonicalGuard && typeof fs.realpathSync === 'function') {
       try {
-        handle = await fsPromises.opendir(directory);
+        canonicalRoot = path.resolve(fs.realpathSync(root));
       } catch (error) {
-        if (this.isMissingMediaCachePathError(error)) return;
+        if (this.isMissingMediaCachePathError(error)) return { files, directories };
+        throw error;
+      }
+    }
+    while (stack.length) {
+      if (this._mediaCacheTrimIsCancelled(generation)) return { files, directories };
+      const directory = stack.pop();
+      if (!(await this._mediaCacheTrimConsumeWork(generation, work))) return { files, directories };
+      if (this._mediaCacheTrimIsCancelled(generation)) return { files, directories };
+      let entries;
+      try {
+        entries = fs.readdirSync(directory);
+      } catch (error) {
+        if (this.isMissingMediaCachePathError(error)) continue;
         throw error;
       }
       directories.push(directory);
-      try {
-        for await (const entry of handle) {
-          if (this._mediaCacheTrimIsCancelled(generation)) return;
-          const fullPath = path.join(directory, entry.name);
-          let stat;
-          try {
-            stat = await fsPromises.lstat(fullPath);
-          } catch (error) {
-            if (this.isMissingMediaCachePathError(error)) continue;
-            throw error;
-          }
-          if (stat.isSymbolicLink()) continue;
-          if (stat.isDirectory()) {
-            await visit(fullPath);
-            continue;
-          }
-          if (!stat.isFile() || options.restrictMain && !/^.+ \(\d+(?: by [^)]+)?\)(?:\.[^./]+)?$/i.test(entry.name)) continue;
-          files.push({
-            path: fullPath,
-            name: entry.name,
-            size: Number(stat.size) || 0,
-            mtimeMs: Number(stat.mtimeMs) || 0
-          });
+      for (const rawEntry of entries) {
+        if (!(await this._mediaCacheTrimConsumeWork(generation, work))) return { files, directories };
+        if (this._mediaCacheTrimIsCancelled(generation)) return { files, directories };
+        const name = typeof rawEntry === 'string' ? rawEntry : rawEntry?.name;
+        if (typeof name !== 'string') continue;
+        const fullPath = path.join(directory, name);
+        const stat = this._mediaCacheTrimSafeEntryStat(root, canonicalRoot, fullPath, fs, path, needsCanonicalGuard);
+        if (!stat) continue;
+        if (typeof stat.isDirectory === 'function' && stat.isDirectory()) {
+          stack.push(fullPath);
+          continue;
         }
-      } finally {
-        try { await handle.close(); } catch {}
+        if (typeof stat.isFile !== 'function' || !stat.isFile()
+          || options.restrictMain && !/^.+ \(\d+(?: by [^)]+)?\)(?:\.[^./]+)?$/i.test(name)) continue;
+        files.push({
+          path: fullPath,
+          name,
+          size: Number(stat.size) || 0,
+          mtimeMs: Number(stat.mtimeMs) || 0
+        });
       }
-    };
-    await visit(root);
+    }
     files.sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
     return { files, directories };
   }
-  async _deleteMediaCacheTrimFile(entry, reason, generation) {
+  async _deleteMediaCacheTrimFile(entry, reason, generation, work = { count: 0 }) {
+    if (this._mediaCacheTrimIsCancelled(generation)) return { deleted: false, missing: false };
+    if (!(await this._mediaCacheTrimConsumeWork(generation, work))) {
+      return { deleted: false, missing: false, cancelled: true };
+    }
     if (this._mediaCacheTrimIsCancelled(generation)) return { deleted: false, missing: false };
     try {
-      await this.nodeModules.fs.promises.unlink(entry.path);
+      this.nodeModules.fs.unlinkSync(entry.path);
     } catch (error) {
       if (this.isMissingMediaCachePathError(error)) return { deleted: false, missing: true };
       throw error;
     }
-    this._mediaCacheTrimDebug(`Media cache trimmer deleted ${entry.name}; ${reason}.`);
+    this._mediaCacheTrimDebug(`Media cache trimmer deleted ${entry.name}; ${reason}.`, 'TRIM');
     return { deleted: true, missing: false };
   }
-  async _removeEmptyMediaCacheTrimDirectories(root, directories, generation) {
+  async _removeEmptyMediaCacheTrimDirectories(root, directories, generation, work = { count: 0 }) {
     const path = this.nodeModules.path;
     const ordered = directories
       .filter(directory => directory !== root)
       .sort((a, b) => {
         const depth = directory => path.relative(root, directory).split(path.sep).filter(Boolean).length;
         return depth(b) - depth(a) || b.localeCompare(a);
-      });
+    });
     for (const directory of ordered) {
       if (this._mediaCacheTrimIsCancelled(generation)) return;
+      if (!(await this._mediaCacheTrimConsumeWork(generation, work))) return;
+      if (this._mediaCacheTrimIsCancelled(generation)) return;
       try {
-        await this.nodeModules.fs.promises.rmdir(directory);
+        this.nodeModules.fs.rmdirSync(directory);
       } catch (error) {
         if (this.isMissingMediaCachePathError(error) || error?.code === 'ENOTEMPTY') continue;
         throw error;
@@ -7943,22 +8101,37 @@ module.exports = class MessageLoggerV2 {
     const startPhase = (bit, label) => {
       if (!(selectedMask & bit)) return;
       phaseStartedAt.set(bit, Date.now());
-      this._mediaCacheTrimNotify(`${label} started.`, `media-cache-trim:${kind}:${label}`);
+      this._mediaCacheTrimNotify(
+        `${label} started.`,
+        `media-cache-trim:${kind}:${label}`,
+        'info',
+        5000,
+        'TRIM',
+        this.settings?.showMediaCacheTrimLifecycleToasts === true
+      );
     };
     const endPhase = (bit, label, filesScanned) => {
       const startedAt = phaseStartedAt.get(bit);
       if (startedAt === undefined) return;
       phaseStartedAt.delete(bit);
-      this._mediaCacheTrimNotify(`${label} ended.`, `media-cache-trim:${kind}:${label}`);
-      this._mediaCacheTrimDebug(`${label} scanned ${filesScanned} file(s), deleted ${phaseDeleted.get(bit) || 0} file(s), duration ${Date.now() - startedAt}ms.`);
+      this._mediaCacheTrimNotify(
+        `${label} ended.`,
+        `media-cache-trim:${kind}:${label}`,
+        'info',
+        5000,
+        'TRIM',
+        this.settings?.showMediaCacheTrimLifecycleToasts === true
+      );
+      this._mediaCacheTrimDebug(`${label} scanned ${filesScanned} file(s), deleted ${phaseDeleted.get(bit) || 0} file(s), duration ${Date.now() - startedAt}ms.`, 'TRIM');
     };
     // Age owns the first phase when selected. If only size is selected it starts before the
     // shared root scan; when both are selected, size starts only after age ends.
     if (ageSelected) startPhase(ageBit, ageLabel);
     else if (sizeSelected) startPhase(sizeBit, sizeLabel);
     let scan;
+    const work = { count: 0 };
     try {
-      scan = await this._walkMediaCacheTrimRoot(root, options, generation);
+      scan = await this._walkMediaCacheTrimRoot(root, { ...options, _yieldState: work }, generation);
     } catch (error) {
       endPhase(ageBit, ageLabel, 0);
       endPhase(sizeBit, sizeLabel, 0);
@@ -7972,6 +8145,8 @@ module.exports = class MessageLoggerV2 {
     let deleted = 0;
     let phaseError = null;
     let cleanupError = null;
+    let sizeReductionRequired = false;
+    let sizeTargetBytes = 0;
     try {
       if (ageSelected) {
         if (ageHours > 0) {
@@ -7981,7 +8156,8 @@ module.exports = class MessageLoggerV2 {
             const age = now - file.mtimeMs;
             if (age < ageMs) continue;
             const ageValue = age / (60 * 60 * 1000);
-            const outcome = await this._deleteMediaCacheTrimFile(file, `age ${ageValue.toFixed(2)}h >= ${ageHours}h`, generation);
+            const outcome = await this._deleteMediaCacheTrimFile(file, `age ${ageValue.toFixed(2)}h >= ${ageHours}h`, generation, work);
+            if (outcome.cancelled) break;
             if (outcome.deleted || outcome.missing) {
               removed.add(file);
               totalBytes -= file.size;
@@ -8000,14 +8176,53 @@ module.exports = class MessageLoggerV2 {
         if (sizeGb > 0) {
           const capBytes = sizeGb * MEDIA_CACHE_TRIM_GB;
           const targetBytes = capBytes * (kind === 'pre' ? 0.8 : 0.95);
+          sizeTargetBytes = targetBytes;
           if (totalBytes > capBytes) {
+            sizeReductionRequired = true;
             for (const file of files) {
               if (this._mediaCacheTrimIsCancelled(generation) || totalBytes <= targetBytes) break;
               if (removed.has(file)) continue;
               const fileGb = file.size / MEDIA_CACHE_TRIM_GB;
-              const outcome = await this._deleteMediaCacheTrimFile(file, `size ${fileGb.toFixed(3)}GB over ${sizeGb}GB`, generation);
+              const outcome = await this._deleteMediaCacheTrimFile(file, `size ${fileGb.toFixed(3)}GB over ${sizeGb}GB`, generation, work);
+              if (outcome.cancelled) break;
               if (outcome.deleted || outcome.missing) {
                 removed.add(file);
+                totalBytes -= file.size;
+                if (outcome.missing) scannedCount--;
+                if (outcome.deleted) {
+                  deleted++;
+                  phaseDeleted.set(sizeBit, (phaseDeleted.get(sizeBit) || 0) + 1);
+                }
+              }
+            }
+          }
+        }
+        if (sizeReductionRequired && !this._mediaCacheTrimIsCancelled(generation)) {
+          // A concurrent write can invalidate the first snapshot. One fresh verification scan
+          // absorbs that drift and performs a final oldest-first correction without looping.
+          const verification = await this._walkMediaCacheTrimRoot(
+            root,
+            { ...options, _yieldState: work },
+            generation
+          );
+          for (const directory of verification.directories) {
+            if (!scan.directories.includes(directory)) scan.directories.push(directory);
+          }
+          const verificationFiles = verification.files;
+          scannedCount = verificationFiles.length;
+          totalBytes = verificationFiles.reduce((sum, file) => sum + file.size, 0);
+          if (totalBytes > sizeTargetBytes) {
+            for (const file of verificationFiles) {
+              if (this._mediaCacheTrimIsCancelled(generation) || totalBytes <= sizeTargetBytes) break;
+              const fileGb = file.size / MEDIA_CACHE_TRIM_GB;
+              const outcome = await this._deleteMediaCacheTrimFile(
+                file,
+                `size ${fileGb.toFixed(3)}GB over ${sizeGb}GB`,
+                generation,
+                work
+              );
+              if (outcome.cancelled) break;
+              if (outcome.deleted || outcome.missing) {
                 totalBytes -= file.size;
                 if (outcome.missing) scannedCount--;
                 if (outcome.deleted) {
@@ -8024,7 +8239,7 @@ module.exports = class MessageLoggerV2 {
     }
     try {
       // Empty descendants are cleaned before the final selected phase ends.
-      await this._removeEmptyMediaCacheTrimDirectories(root, scan.directories, generation);
+      await this._removeEmptyMediaCacheTrimDirectories(root, scan.directories, generation, work);
     } catch (error) {
       cleanupError = error;
     }
@@ -8059,7 +8274,7 @@ module.exports = class MessageLoggerV2 {
         errors.push({ root: item.kind, error });
       }
     }
-    this._mediaCacheTrimDebug(`Media cache trim pass scanned ${totals.files} file(s), deleted ${totals.deleted} file(s).`);
+    this._mediaCacheTrimDebug(`Media cache trim pass scanned ${totals.files} file(s), deleted ${totals.deleted} file(s).`, 'TRIM');
     return { ...totals, errors };
   }
   _startMediaCacheTrimPass() {
@@ -8268,7 +8483,7 @@ module.exports = class MessageLoggerV2 {
         this.removeEmptyMediaCachePreCacheDirectory(sourceDirectory);
       }
       if (this.canCacheMediaLocally(requestState.writeEpoch)) {
-        Logger.log(`Promoted pre-cached media to saved cache: ${fileName}`);
+        this._logStyledConsoleEvent('PROMOTE', `Promoted pre-cached media to saved cache: ${fileName}`);
       }
       return true;
     }
@@ -13606,9 +13821,9 @@ module.exports = class MessageLoggerV2 {
       fs.writeFileSync(path.join(filePath, fileName), finalData, { encoding: null });
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       if (requestState.cacheState === 'confirmed') {
-        Logger.log(`Cached media for saved record: ${fileName}`);
+        this._logStyledConsoleEvent('MEDIA CACHED', `Cached media for saved record: ${fileName}`);
       } else if (this.settings.debugLogging) {
-        Logger.log(`Pre-cached media: ${fileName}`);
+        this._logStyledConsoleEvent('DEBUG · PRE-CACHE', `Pre-cached media: ${fileName}`);
       }
     } catch (e) {
       if (!this.canCacheMediaLocally(writeEpoch)) return;
@@ -14029,7 +14244,7 @@ module.exports = class MessageLoggerV2 {
     }
     if (deleted) {
       const names = Array.from(deletedLabels).join(', ');
-      Logger.log(`Deleted ${deleted} cached file${deleted === 1 ? '' : 's'} for message ${messageId}: ${names}`);
+      this._logStyledConsoleEvent('CACHE DELETE', `Deleted ${deleted} cached file${deleted === 1 ? '' : 's'} for message ${messageId}: ${names}`);
       this.queueCachedFilesDeletedToast(deletedLabels);
     }
     return deleted;
@@ -14246,7 +14461,11 @@ module.exports = class MessageLoggerV2 {
     }
     if (!this._nativeDeleteButtonPresentation && !this._nativeDeleteTemplateWarningShown) {
       this._nativeDeleteTemplateWarningShown = true;
-      Logger.log('Waiting for Discord to mount a native message toolbar before showing Delete controls on restored logger items. Hover a normal message to expose its toolbar.');
+      this.reportDebugEvent(
+        'Waiting for Discord to mount a native message toolbar before showing Delete controls on restored logger items. Hover a normal message to expose its toolbar.',
+        4000,
+        'console'
+      );
     }
     return !!this._nativeDeleteButtonPresentation;
   }
@@ -19279,3 +19498,8 @@ module.exports = class MessageLoggerV2 {
       ));
   }
 };
+
+Object.defineProperty(module.exports, '__logger', {
+  value: Logger,
+  enumerable: false
+});

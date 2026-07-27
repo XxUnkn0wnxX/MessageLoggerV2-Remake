@@ -5,12 +5,28 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  captureConsoleEvent,
   createPlugin,
   loggerEvents,
   resetHarness
 } = require('./helpers/plugin-harness');
 
-test.beforeEach(resetHarness);
+let styledConsoleEvents = [];
+let originalConsoleLog;
+
+test.beforeEach(() => {
+  resetHarness();
+  styledConsoleEvents = [];
+  originalConsoleLog = console.log;
+  console.log = (...args) => {
+    styledConsoleEvents.push(args);
+    captureConsoleEvent('log', args);
+  };
+});
+
+test.afterEach(() => {
+  console.log = originalConsoleLog;
+});
 
 const MEDIA_CACHE_LEGACY_ROUTING_NOTICE =
   'Networking: media routing is using the old Discord renderer fetch() method.';
@@ -80,14 +96,25 @@ function delay(ms) {
 }
 
 function mediaNetworkDebugMessages(url = null) {
-  return loggerEvents
-    .filter(([level, message]) => (
-      level === 'log'
-      && typeof message === 'string'
-      && message.startsWith('[Debug] Media request #')
+  return styledConsoleMessages('DEBUG')
+    .filter(message => (
+      message.startsWith('Media request #')
       && (url == null || message.includes(url))
-    ))
-    .map(([, message]) => message);
+    ));
+}
+
+function styledConsoleMessages(category = null) {
+  return styledConsoleEvents.flatMap(args => {
+    const format = String(args[0] || '');
+    const compound = /^%cMessageLoggerV2%c%c DEBUG %c%c (.+) %c$/.exec(format);
+    if (compound) {
+      if (category != null && category !== `DEBUG · ${compound[1]}`) return [];
+      return [String(args.at(-1))];
+    }
+    const single = /^%cMessageLoggerV2%c%c (.+) %c$/.exec(format);
+    if (!single || (category != null && single[1] !== category)) return [];
+    return [String(args.at(-1))];
+  });
 }
 
 function createStreamChunkStep(value, delayMs = 0) {
@@ -296,16 +323,14 @@ test('media-cache fetch latches native incompatibility on synchronous throw and 
     assert.equal(rendererCalls, 1);
     assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
     assert.equal(notifications.length, 1);
-    assert.deepEqual(loggerEvents, [
-      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
-    ]);
+    assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
     assert.equal(notifications[0][0], MEDIA_CACHE_LEGACY_ROUTING_NOTICE);
     assert.equal(notifications[0][1].timeout, 4000);
     await plugin.fetchMediaCacheResponse('https://cdn.example/throw');
     assert.equal(nativeCalls, 0);
     assert.equal(rendererCalls, 2);
     assert.equal(notifications.length, 1);
-    assert.equal(loggerEvents.length, 1);
+    assert.equal(styledConsoleMessages('DEBUG').length, 1);
   } finally {
     global.BdApi.Net = originalNetApi;
     global.fetch = originalFetch;
@@ -553,9 +578,7 @@ test('media-cache transport notices follow active-delivered routing and dedupe u
     { console: true, toast: false }
   );
   assert.deepEqual(first, { console: true, toast: false });
-  assert.deepEqual(loggerEvents, [
-    ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
-  ]);
+  assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
   assert.equal(notifications.length, 0);
 
   plugin.settings.debugToasts = true;
@@ -579,9 +602,9 @@ test('media-cache transport notices follow active-delivered routing and dedupe u
   assert.deepEqual(fourth, { console: false, toast: false });
   assert.equal(notifications.length, 1);
   plugin._activateMediaCacheLegacyRoutingNotice();
-  assert.deepEqual(loggerEvents, [
-    ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`],
-    ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+  assert.deepEqual(styledConsoleMessages('DEBUG'), [
+    MEDIA_CACHE_LEGACY_ROUTING_NOTICE,
+    MEDIA_CACHE_LEGACY_ROUTING_NOTICE
   ]);
   assert.equal(notifications.length, 2);
   assert.equal(notifications[1][0], MEDIA_CACHE_LEGACY_ROUTING_NOTICE);
@@ -605,7 +628,7 @@ test('legacy-routing notice flushes both destinations when master is re-enabled 
     { console: true, toast: false }
   );
   assert.deepEqual(first, { console: true, toast: true });
-  assert.deepEqual(loggerEvents, [['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]]);
+  assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0][0], MEDIA_CACHE_LEGACY_ROUTING_NOTICE);
   assert.equal(plugin.settings.debugToasts, true, 're-enabling the master must not rewrite the saved child value');
@@ -615,12 +638,12 @@ test('legacy-routing notice flushes both destinations when master is re-enabled 
     { console: true, toast: false }
   );
   assert.deepEqual(second, { console: false, toast: false });
-  assert.deepEqual(loggerEvents, [['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]]);
+  assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
   assert.equal(notifications.length, 1);
 
   const third = plugin._flushMediaCacheLegacyRoutingNoticeForOutputSelection();
   assert.deepEqual(third, { console: false, toast: false });
-  assert.deepEqual(loggerEvents, [['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]]);
+  assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
   assert.equal(notifications.length, 1);
 });
 
@@ -648,17 +671,13 @@ test('legacy-routing notice stays console-only when master is re-enabled with to
     { console: true, toast: false }
   );
   assert.deepEqual(first, { console: true, toast: false });
-  assert.deepEqual(loggerEvents, [
-    ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
-  ]);
+  assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
   assert.equal(notifications.length, 0);
   assert.equal(plugin.settings.debugToasts, false);
 
   const second = plugin._flushMediaCacheLegacyRoutingNoticeForOutputSelection();
   assert.deepEqual(second, { console: false, toast: false });
-  assert.deepEqual(loggerEvents, [
-    ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
-  ]);
+  assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
   assert.equal(notifications.length, 0);
 });
 
@@ -672,11 +691,9 @@ test('media cache force toggle reports immediately and preserves a latched nativ
     plugin._mediaCacheNativeFetchCompatible = null;
     plugin.setMediaCacheFetchTransportPreference(true);
     assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
-    assert.deepEqual(loggerEvents, [
-      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
-    ]);
+    assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
     plugin.setMediaCacheFetchTransportPreference(true);
-    assert.equal(loggerEvents.length, 1);
+    assert.equal(styledConsoleMessages('DEBUG').length, 1);
 
     plugin.settings.forceLegacyMediaFetching = false;
     let nativeCalls = 0;
@@ -697,9 +714,9 @@ test('media cache force toggle reports immediately and preserves a latched nativ
     assert.equal(plugin.getMediaCacheTransportSelection(), 'legacy');
     assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
     assert.equal(nativeCalls, 0);
-    assert.deepEqual(loggerEvents, [
-      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`],
-      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+    assert.deepEqual(styledConsoleMessages('DEBUG'), [
+      MEDIA_CACHE_LEGACY_ROUTING_NOTICE,
+      MEDIA_CACHE_LEGACY_ROUTING_NOTICE
     ]);
   } finally {
     global.BdApi.Net = originalNetApi;
@@ -722,18 +739,16 @@ test('media routing legacy notice startup state initializer selects native-laten
     plugin._initializeMediaCacheLegacyRoutingNoticeState();
     assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
     assert.equal(plugin._mediaCacheNativeFetchCompatible, null);
-    assert.deepEqual(loggerEvents, [
-      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
-    ]);
+    assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
 
     plugin.settings.forceLegacyMediaFetching = false;
     global.BdApi.Net = undefined;
     plugin._initializeMediaCacheLegacyRoutingNoticeState();
     assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
     assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
-    assert.deepEqual(loggerEvents, [
-      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`],
-      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+    assert.deepEqual(styledConsoleMessages('DEBUG'), [
+      MEDIA_CACHE_LEGACY_ROUTING_NOTICE,
+      MEDIA_CACHE_LEGACY_ROUTING_NOTICE
     ]);
 
     const incompatibleNetApi = {};
@@ -746,10 +761,10 @@ test('media routing legacy notice startup state initializer selects native-laten
     plugin._initializeMediaCacheLegacyRoutingNoticeState();
     assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
     assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
-    assert.deepEqual(loggerEvents, [
-      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`],
-      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`],
-      ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
+    assert.deepEqual(styledConsoleMessages('DEBUG'), [
+      MEDIA_CACHE_LEGACY_ROUTING_NOTICE,
+      MEDIA_CACHE_LEGACY_ROUTING_NOTICE,
+      MEDIA_CACHE_LEGACY_ROUTING_NOTICE
     ]);
 
     global.BdApi.Net = {
@@ -760,7 +775,7 @@ test('media routing legacy notice startup state initializer selects native-laten
     assert.equal(plugin._mediaCacheNativeFetchCompatible, null);
     assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, false);
     assert.equal(notifications.length, 0);
-    assert.equal(loggerEvents.length, 3);
+    assert.equal(styledConsoleMessages('DEBUG').length, 3);
   } finally {
     global.BdApi.Net = originalNetApi;
   }
@@ -775,12 +790,12 @@ test('reportDebugEvent routes to requested output selection and returns dispatch
 
   const both = plugin.reportDebugEvent('combined debug event');
   assert.deepEqual(both, { console: true, toast: true });
-  assert.deepEqual(loggerEvents.at(-1), ['log', '[Debug] combined debug event']);
+  assert.equal(styledConsoleMessages('DEBUG').at(-1), 'combined debug event');
   assert.equal(notifications.at(-1)[1].timeout, 4000);
 
   const consoleOnly = plugin.reportDebugEvent('console-only', 1200, 'console');
   assert.deepEqual(consoleOnly, { console: true, toast: false });
-  assert.equal(loggerEvents.length, 2);
+  assert.equal(styledConsoleMessages('DEBUG').length, 2);
   assert.equal(notifications.length, 1);
 
   plugin.settings.debugLogging = false;
@@ -793,7 +808,7 @@ test('reportDebugEvent routes to requested output selection and returns dispatch
   plugin.settings.debugToasts = false;
   const none = plugin.reportDebugEvent('neither', 4000, 'none');
   assert.deepEqual(none, { console: false, toast: false });
-  assert.equal(loggerEvents.length, 2);
+  assert.equal(styledConsoleMessages('DEBUG').length, 2);
   assert.equal(notifications.length, 1);
 
   plugin.settings.debugLogging = true;
@@ -1561,7 +1576,10 @@ test('non-200 cacheImage responses release body before retrying', async () => {
       51,
       'non-200-retry-message',
       'channel',
-      'guild'
+      'guild',
+      0,
+      plugin._mediaCacheWriteEpoch || 0,
+      'confirmed'
     );
     assert.deepEqual(events, ['fetch-1', 'release-1', 'fetch-2']);
     assert.equal(attempts, 2);
@@ -2601,7 +2619,7 @@ test('provisional media uses exact pre-cache folders, debug logging, and self-he
 
   await plugin.cacheImage('https://cdn.example/precache-off.png', 0, 41, 'precache', 'channel', 'guild', 0, 0, 'precache');
   assert.equal(mkdirCalls, 1);
-  assert.equal(loggerEvents.some(([level, message]) => level === 'log' && String(message).startsWith('Pre-cached media:')), false);
+  assert.equal(styledConsoleMessages('DEBUG · PRE-CACHE').length, 0);
   assert.equal(fs.existsSync(path.join(`${cacheDir}_PreCache`, 'precache', '41 (precache).png')), true);
 
   plugin.settings.debugLogging = true;
@@ -2609,9 +2627,10 @@ test('provisional media uses exact pre-cache folders, debug logging, and self-he
   assert.equal(mkdirCalls, 1, 'an existing cache directory should not be recreated');
   plugin.settings.debugLogging = false;
   await plugin.cacheImage('https://cdn.example/confirmed.png', 0, 43, 'confirmed', 'channel', 'guild', 0, 0, 'confirmed');
-  const stateLogs = loggerEvents
-    .filter(([level, message]) => level === 'log' && /^(?:Pre-cached media:|Cached media for saved record:)/.test(String(message)))
-    .map(([, message]) => message);
+  const stateLogs = [
+    ...styledConsoleMessages('DEBUG · PRE-CACHE'),
+    ...styledConsoleMessages('MEDIA CACHED')
+  ];
   assert.deepEqual(stateLogs, [
     'Pre-cached media: 42 (precache).png',
     'Cached media for saved record: 43 (confirmed).png'
@@ -2644,7 +2663,7 @@ test('confirmed caching promotes an exact pre-cache file without fetching', asyn
   assert.equal(fs.existsSync(path.join(cacheDir, '41 (confirm).png')), true);
   assert.equal(fs.existsSync(path.join(sourceDirectory, '41 (confirm).png')), false);
   assert.deepEqual(
-    loggerEvents.filter(([level]) => level === 'log').map(([, message]) => message),
+    styledConsoleMessages('PROMOTE'),
     ['Promoted pre-cached media to saved cache: 41 (confirm).png']
   );
 });
@@ -2670,7 +2689,7 @@ test('confirmed cache miss fetches into the main cache without creating pre-cach
   assert.equal(fs.existsSync(path.join(cacheDir, '43 (confirmed).png')), true);
   assert.equal(fs.existsSync(`${cacheDir}_PreCache`), false);
   assert.deepEqual(
-    loggerEvents.filter(([level]) => level === 'log').map(([, message]) => message),
+    styledConsoleMessages('MEDIA CACHED'),
     ['Cached media for saved record: 43 (confirmed).png']
   );
 });
@@ -2703,7 +2722,7 @@ test('a confirmed request joins an in-flight provisional fetch and writes once t
   assert.equal(fs.existsSync(path.join(cacheDir, '44 (join).png')), true);
   assert.equal(fs.existsSync(path.join(`${cacheDir}_PreCache`, 'join')), false);
   assert.deepEqual(
-    loggerEvents.filter(([level]) => level === 'log').map(([, message]) => message),
+    styledConsoleMessages('MEDIA CACHED'),
     ['Cached media for saved record: 44 (join).png']
   );
 });
@@ -3072,11 +3091,7 @@ test('deferred media retries exactly three bounded attempts without latching the
   await waitForQueuedMediaTasks();
 
   assert.equal(fetches, 3);
-  assert.deepEqual(loggerEvents.filter(([level, message]) => (
-    level === 'log' && message === `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`
-  )), [
-    ['log', `[Debug] ${MEDIA_CACHE_LEGACY_ROUTING_NOTICE}`]
-  ]);
+  assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
   assert.equal(mediaErrors.length, 1, 'only terminal media exhaustion should route the media error');
   assert.equal(plugin._activeDeferredMediaCacheRequests.size, 0);
   assert.equal(plugin.isDataSaveModeTransitionBusy(), false);
@@ -3500,7 +3515,17 @@ test('a pre-disable media fetch cannot write after saving is re-enabled, while a
   assert.equal(fs.existsSync(path.join(cacheDir, '1 (message).png')), false);
 
   global.fetch = async () => successfulMediaResponse();
-  await plugin.cacheImage('https://cdn.example/fresh.png', 0, 2, 'message', 'channel', 'guild');
+  await plugin.cacheImage(
+    'https://cdn.example/fresh.png',
+    0,
+    2,
+    'message',
+    'channel',
+    'guild',
+    0,
+    plugin._mediaCacheWriteEpoch || 0,
+    'confirmed'
+  );
   assert.equal(fs.existsSync(path.join(cacheDir, '2 (message).png')), true);
   plugin.finishDataSavePrimaryFlush(plugin._dataSavePrimaryFlushGeneration, true);
 });

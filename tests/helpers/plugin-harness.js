@@ -46,6 +46,27 @@ const Logger = {
   error(...args) { loggerEvents.push(['error', ...args]); }
 };
 
+function captureStyledConsoleEvent(level, args) {
+  const format = String(args[0] || '');
+  if (format === '%cMessageLoggerV2%c') {
+    loggerEvents.push([level, ...args.slice(3)]);
+    return;
+  }
+  if (/^%cMessageLoggerV2%c%c DEBUG %c%c .+ %c$/.test(format)) {
+    loggerEvents.push([level, ...args.slice(7)]);
+    return;
+  }
+  if (/^%cMessageLoggerV2%c%c .+ %c$/.test(format)) {
+    loggerEvents.push([level, ...args.slice(5)]);
+    return;
+  }
+  loggerEvents.push([level, ...args]);
+}
+
+for (const level of ['log', 'warn', 'error']) {
+  console[level] = (...args) => captureStyledConsoleEvent(level, args);
+}
+
 const UI = {
   showToast(...args) { toastEvents.push(args); },
   showConfirmationModal(...args) { confirmationEvents.push(args); },
@@ -106,6 +127,7 @@ function resetHarness() {
 }
 
 module.exports = {
+  captureConsoleEvent: captureStyledConsoleEvent,
   Data,
   DOM,
   Logger,
@@ -122,6 +144,7 @@ module.exports = {
   dataStore,
   loggerEvents,
   notificationEvents,
+  Plugin,
   resetHarness,
   toastEvents
 };

@@ -112,6 +112,7 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Pre-cache maximum age (hours) | `24` | Deletes provisional pre-cache files older than this age. Blank or `0` is unlimited. |
 | Pre-cache maximum size (GB) | `5` | Deletes oldest pre-cache files until usage is at or below 80% of the cap. Blank or `0` is unlimited. |
 | Shared cache trim timer (minutes) | `15` | One shared periodic countdown for enabled limits. Minimum `5`; changing it resets the countdown and never runs a trim immediately. |
+| Show trimmer start/end toasts | Off | Shows a replaceable toast when an age or GB-size trimmer starts and ends. The same lifecycle events remain visible as normal `TRIM` console messages while this switch is Off. |
 | Media cache path (optional) | Empty | Uses a custom existing directory instead of `MLV2_IMAGE_CACHE`. |
 | Use new cached images system | On (locked) | Legacy setting retained for compatibility. The organized server/channel cache layout must remain enabled for reliable forum and thread media restoration. A saved `false` value is reset to `true` at startup. |
 | Only render locally cached attachments | Off | Prevents uncached attachments from rendering through Discord CDN. The saved record shows a filename placeholder instead. Toggling this reevaluates open logger and channel views immediately. |
@@ -128,9 +129,9 @@ BetterDiscord stores the plugin's data beside the installed plugin:
 - `MLV2_IMAGE_CACHE/`: default attachment cache.
 - `MLV2_IMAGE_CACHE_PreCache/`: provisional per-message media awaiting a saved logger record.
 
-The shared cache trimmer runs only while **Cache media locally** is On. It scans the active live root and its `${root}_PreCache` sibling asynchronously, applies age before size, skips symlinks, preserves both roots, and never deletes a file through the Logger record-deletion path. A limit edit waits for one coalesced 20-second debounce; the periodic timer waits for the full configured interval after startup, completion, or an interval reset.
+The shared cache trimmer runs only while **Cache media locally** is On. It walks the active live root and its `${root}_PreCache` sibling through BetterDiscord's synchronous filesystem bridge, yielding after small work batches so Discord can keep processing UI work. It applies age before size, skips symlinks, preserves both roots, and never deletes a file through the Logger record-deletion path. When a size reduction is required, one fresh verification scan catches files written during the first reduction and performs one final oldest-first correction toward the live 95% or pre-cache 80% target. A limit edit waits for one coalesced 20-second debounce; the periodic timer waits for the full configured interval after startup, completion, or an interval reset.
 
-The next eligible write recreates its exact missing main-cache or pre-cache directory. Provisional write messages are visible only with console Debug logging enabled; promotions and confirmed network writes remain normal info messages and show only the filename. The scheduled trimmer also scans and prunes orphaned pre-cache folders according to the active age and size limits.
+The next eligible write recreates its exact missing main-cache or pre-cache directory. Every MessageLogger console event uses the orange `MessageLoggerV2` identity pill. Normal categories add a blue pill. Debug output adds a red `DEBUG` pill and, when applicable, a separate blue subcategory pill such as `PRE-CACHE` or `TRIM`; uncategorized events add no second pill. Every pill uses black text. Provisional write messages are visible only with console Debug logging enabled; promotions and confirmed network writes remain normal info messages and show only the filename. The scheduled trimmer also scans and prunes orphaned pre-cache folders according to the active age and size limits.
 
 ### Config safety
 
