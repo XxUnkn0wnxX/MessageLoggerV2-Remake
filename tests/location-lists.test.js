@@ -252,7 +252,7 @@ test('manager modal renders tabs and rows while right-click and Shift Trash keep
   assert.equal(modal.key, plugin.locationListsModalKey);
   assert.equal(modal.options.size, 'large');
   assert.equal(modal.options.cancelText, 'Back');
-  assert.equal(modal.options.className, 'menu-root location-lists-modal');
+  assert.equal(modal.options.className, 'location-lists-modal');
   modal.options.onCancel();
   assert.deepEqual(closedModalKeys, ['location-lists']);
   const rendered = modal.options.children[0].type();
@@ -280,7 +280,7 @@ test('manager renders guild icons before live server names and channel server li
   const guild = {
     id: 'guild-1',
     name: 'Alpha',
-    getIconURL: () => 'https://example.invalid/alpha.png'
+    icon: 'alpha-hash'
   };
   const channel = { id: 'channel-1', name: 'general', guild_id: 'guild-1', type: 0 };
   const plugin = createPlugin({
@@ -304,6 +304,11 @@ test('manager renders guild icons before live server names and channel server li
       getChannel: id => id === channel.id ? channel : null,
       resolvedModalStuff: { ModalSize: { LARGE: 'large' } }
     },
+    ImageResolver: {
+      getGuildIconURL: target => target === guild && target.icon === 'alpha-hash'
+        ? 'https://example.invalid/alpha.png'
+        : null
+    },
     ModalStack: { hasModalOpen: () => false },
     createModal(options, image, key) {
       modal = { options, image, key };
@@ -314,11 +319,20 @@ test('manager renders guild icons before live server names and channel server li
 
   assert.equal(plugin.showLocationListManagerModal(), true);
   const rendered = modal.options.children[0].type();
+  assert.deepEqual(rendered.props.style, {
+    height: 'min(420px, calc(100vh - 260px))',
+    minHeight: 0,
+    boxSizing: 'border-box',
+    overflowY: 'auto',
+    overflowX: 'hidden'
+  });
   const links = collectReactElements(rendered).filter(element => element.props.className === 'location-link');
   assert.equal(links.length, 2);
   for (const link of links) {
+    assert.equal(link.props.children.length, 1);
     const label = link.props.children[0];
     assert.equal(label.type, 'span');
+    assert.equal(label.props.style.gap, '6px');
     const frame = label.props.children[0];
     assert.equal(frame.type, 'span');
     assert.deepEqual(frame.props.style, {
@@ -362,4 +376,9 @@ test('source contracts cover both manager launch buttons, four tabs, right-click
   assert.match(source, /const nonEmptyGroups = groups\.filter/);
   assert.match(source, /getElementsByClassName\(classes\.inputMultiInput\)/);
   assert.match(source, /this\.style\.locationListLink/);
+  assert.match(source, /ImageResolver: lazyGet\('ImageResolver', \(\) => Webpack\.getByKeys\('getUserAvatarURL', 'getGuildIconURL'\)\)/);
+  assert.match(source, /className: this\.style\.locationListsModal/);
+  assert.match(source, /width: min\(760px, calc\(100vw - 32px\)\) !important/);
+  assert.match(source, /height: 'min\(420px, calc\(100vh - 260px\)\)'/);
+  assert.match(source, /classList\.add\(\.\.\.classNames\)/);
 });

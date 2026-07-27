@@ -173,6 +173,7 @@ const DiscordModules = (() => {
     MessageStore: lazyGet('MessageStore', () => Webpack.Stores.MessageStore),
     ChannelStore: lazyGet('ChannelStore', () => Webpack.Stores.ChannelStore ?? Webpack.getByKeys('getChannel', 'getDMFromUserId')),
     GuildChannelStore: lazyGet('GuildChannelStore', () => Webpack.Stores?.GuildChannelStore ?? Webpack.getStore?.('GuildChannelStore') ?? Webpack.getByKeys('getChannels', 'getDefaultChannel')),
+    ImageResolver: lazyGet('ImageResolver', () => Webpack.getByKeys('getUserAvatarURL', 'getGuildIconURL')),
     SelectedChannelStore: lazyGet('SelectedChannelStore', () => Webpack.Stores.SelectedChannelStore),
     SelectedGuildStore: lazyGet('SelectedGuildStore', () => Webpack.Stores.SelectedGuildStore),
     LocaleStore: lazyGet('LocaleStore', () => Webpack.Stores?.LocaleStore ?? Webpack.getStore?.('LocaleStore')),
@@ -1955,11 +1956,20 @@ module.exports = class MessageLoggerV2 {
                     .${this.style.settingsHelpModal} footer [data-mana-component="button"],
                     .${this.style.startupHelpModal} footer > div,
                     .${this.style.startupHelpModal} footer [data-direction="horizontal"],
-                    .${this.style.startupHelpModal} footer [data-mana-component="button"],
+                    .${this.style.startupHelpModal} footer [data-mana-component="button"] {
+                      width: 100%;
+                    }
                     .${this.style.locationListsModal} footer > div,
                     .${this.style.locationListsModal} footer [data-direction="horizontal"],
                     .${this.style.locationListsModal} footer [data-mana-component="button"] {
-                      width: 100%;
+                      width: 100% !important;
+                    }
+                    .${this.style.locationListsModal} {
+                      box-sizing: border-box;
+                      width: min(760px, calc(100vw - 32px)) !important;
+                      max-width: 760px !important;
+                      min-width: 0 !important;
+                      margin-inline: auto;
                     }
                     .${this.style.cachedFilesModal} {
                       width: min(560px, calc(100vw - 32px)) !important;
@@ -12919,8 +12929,14 @@ module.exports = class MessageLoggerV2 {
       const getGuildIconUrl = guild => {
         if (!guild) return null;
         let iconUrl = null;
+        for (const imageResolver of [plugin.ImageResolver, plugin.tools?.ImageResolver, DiscordModules.ImageResolver]) {
+          try {
+            iconUrl = imageResolver?.getGuildIconURL?.(guild) || null;
+          } catch {}
+          if (iconUrl) break;
+        }
         try {
-          iconUrl = typeof guild.getIconURL === 'function' ? guild.getIconURL() : null;
+          if (!iconUrl) iconUrl = typeof guild.getIconURL === 'function' ? guild.getIconURL() : null;
         } catch {}
         if (!iconUrl) {
           for (const key of ['iconURL', 'iconUrl', 'icon_url']) {
@@ -13064,7 +13080,16 @@ module.exports = class MessageLoggerV2 {
           group.entries.map(createEntry)
         ))
         : [React.createElement('div', { key: 'location-list-empty', style: { color: 'var(--text-muted)', padding: '24px 4px' } }, `No locations in ${descriptor.label}.`)];
-      return React.createElement('div', { className: plugin.multiClasses?.defaultColor, style: { maxHeight: '65vh', overflowY: 'auto' } }, tabBar, ...body);
+      return React.createElement('div', {
+        className: plugin.multiClasses?.defaultColor,
+        style: {
+          height: 'min(420px, calc(100vh - 260px))',
+          minHeight: 0,
+          boxSizing: 'border-box',
+          overflowY: 'auto',
+          overflowX: 'hidden'
+        }
+      }, tabBar, ...body);
     };
     this.createModal({
       header: 'Manage location lists',
@@ -13073,7 +13098,7 @@ module.exports = class MessageLoggerV2 {
       onCancel: () => this.ModalStack?.closeModal?.(modalKey),
       children: [React.createElement(Manager)],
       ml2Data: true,
-      className: [this.style.menuRoot, this.style.locationListsModal].filter(Boolean).join(' ')
+      className: this.style.locationListsModal
     }, false, modalKey);
     return true;
   }
@@ -13736,7 +13761,10 @@ module.exports = class MessageLoggerV2 {
         requestAnimationFrame(() => {
           const containers = document.querySelectorAll('[data-mana-component="modal"]');
           const container = containers[containers.length - 1];
-          if (container) container.classList.add(options.className);
+          if (container?.classList) {
+            const classNames = String(options.className).split(/\s+/).filter(Boolean);
+            if (classNames.length) container.classList.add(...classNames);
+          }
         });
       }
     } else {
