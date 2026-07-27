@@ -361,6 +361,7 @@ test('manager groups live channels under one server header and keeps guild IDs i
       tab: 'tab',
       tabSelected: 'selected',
       locationListRow: 'location-row',
+      locationListGroupedRow: 'location-row-grouped',
       locationListLink: 'location-link',
       locationListDeleteButton: 'location-delete',
       locationListScroller: 'location-list-scroller',
@@ -439,7 +440,7 @@ test('manager groups live channels under one server header and keeps guild IDs i
   }
   assert.equal(links.filter(link => link.props['aria-label'] === 'Open channel general').length, 1);
   assert.equal(links.filter(link => link.props['aria-label'] === 'Open thread topic').length, 1);
-  const rows = elements.filter(element => element.props.className === 'location-row');
+  const rows = elements.filter(element => String(element.props.className || '').split(' ').includes('location-row'));
   assert.equal(rows.length, 3);
   const channelTree = elements.find(element => element.props.role === 'group'
     && element.props['aria-label'] === 'Alpha channels and threads');
@@ -449,9 +450,10 @@ test('manager groups live channels under one server header and keeps guild IDs i
     paddingLeft: '12px',
     borderLeft: '1px solid var(--background-modifier-accent)'
   });
-  const childRows = channelTree.props.children.filter(element => element.props.className === 'location-row');
+  const childRows = channelTree.props.children.filter(element => element.props.className === 'location-row location-row-grouped');
   assert.equal(childRows.length, 2);
   for (const row of childRows) {
+    assert.equal(row.props.className, 'location-row location-row-grouped');
     assert.equal(row.props.children[0].props.children.filter(Boolean).length, 1);
     assert.equal(typeof row.props.onContextMenu, 'function');
     assert.equal(row.props.children[1].props.className, 'location-delete');
@@ -480,6 +482,7 @@ test('grouped server and channel links navigate with their distinct targets and 
     loggerSettingsModalKey: 'settings',
     style: {
       menu: 'logger-modal',
+      locationListGroupedRow: 'location-row-grouped',
       tabBar: 'tab-bar',
       tabBarItem: 'tab-item',
       tab: 'tab',
@@ -551,6 +554,10 @@ test('source contracts cover both manager launch buttons, four tabs, right-click
   assert.match(source, /html\.\$\{this\.style\.shiftDeleteActive\} \.\$\{this\.style\.locationListRow\}:hover/);
   assert.match(source, /visibility: hidden/);
   assert.match(source, /const nonEmptyGroups = groups\.filter/);
+  assert.match(source, /locationListGroupedRow/);
+  assert.match(source, /min-height: 32px;\s+padding: 4px 4px;/);
+  assert.match(source, /style: \{ marginBottom: '4px' \}/);
+  assert.match(source, /style: \{ padding: '2px 4px 0' \}/);
   assert.match(source, /getElementsByClassName\(classes\.inputMultiInput\)/);
   assert.match(source, /this\.style\.locationListLink/);
   assert.match(source, /ImageResolver: lazyGet\('ImageResolver', \(\) => Webpack\.getByKeys\('getUserAvatarURL', 'getGuildIconURL'\)\)/);

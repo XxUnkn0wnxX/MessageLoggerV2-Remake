@@ -495,6 +495,71 @@ test('interval changes reset the countdown without starting a trim and debounce 
   });
 });
 
+test('startup trimmer delay reuses the periodic timeout slot and stop cancels it', t => {
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+  const scheduled = [];
+  t.after(() => {
+    global.setTimeout = originalSetTimeout;
+    global.clearTimeout = originalClearTimeout;
+  });
+  global.setTimeout = (callback, delay) => {
+    const timer = { callback, delay, cleared: false };
+    scheduled.push(timer);
+    return timer;
+  };
+  global.clearTimeout = timer => {
+    if (timer) timer.cleared = true;
+  };
+
+  let periodicSchedules = 0;
+  const plugin = createPlugin({
+    __started: true,
+    settings: { cacheAllImages: true },
+    _scheduleMediaCacheTrimPeriodic() {
+      periodicSchedules++;
+      return true;
+    }
+  });
+
+  assert.equal(plugin.startMediaCacheTrimmer(800), true);
+  assert.equal(scheduled.length, 1);
+  const startupTimer = scheduled[0];
+  assert.equal(startupTimer.delay, 800);
+  assert.strictEqual(plugin._mediaCacheTrimPeriodicTimeout, startupTimer);
+  assert.equal(periodicSchedules, 0);
+
+  plugin.stopMediaCacheTrimmer();
+  assert.equal(startupTimer.cleared, true);
+  assert.equal(plugin._mediaCacheTrimPeriodicTimeout, 0);
+  startupTimer.callback();
+  assert.equal(periodicSchedules, 0);
+});
+
+test('trimmer schedule notifications use real native notifyUser defaults', () => {
+  const nativeNotifications = [];
+  const plugin = createPlugin({
+    __started: true,
+    _notificationRouterReady: true,
+    settings: {
+      cacheAllImages: true,
+      useNotificationsInstead: true,
+      mediaCacheTrimIntervalMinutes: 5
+    },
+    _enqueueNativeNotification(notification) {
+      nativeNotifications.push(notification);
+    }
+  });
+
+  assert.equal(plugin._scheduleMediaCacheTrimPeriodic(), true);
+  assert.equal(nativeNotifications.length, 1);
+  assert.equal(nativeNotifications[0].content, 'Shared cache trim timer scheduled for 5 minutes.');
+  assert.equal(nativeNotifications[0].replaceKey, 'media-cache-trim:timer');
+  assert.equal(nativeNotifications[0].pauseOnHover, false);
+  assert.equal(nativeNotifications[0].instantDismiss, true);
+  plugin.stopMediaCacheTrimmer();
+});
+
 test('limit warning toast is gated, replaceable, and skipped for same-value or interval changes', async () => {
   await withTempRoot(async root => {
     const warningMessage = 'Cache limits changed. If the first catch-up trim has to process a large cache, Discord may briefly become unresponsive.';

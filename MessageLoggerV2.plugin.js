@@ -30,6 +30,7 @@ const DEFAULT_MEDIA_CACHE_TRIM_INTERVAL_MINUTES = 15;
 const MIN_MEDIA_CACHE_TRIM_INTERVAL_MINUTES = 5;
 const MAX_MEDIA_CACHE_TRIM_INTERVAL_MINUTES = Math.floor(0x7fffffff / 60000);
 const MEDIA_CACHE_TRIM_DEBOUNCE_MS = 20 * 1000;
+const MEDIA_CACHE_TRIM_STARTUP_DELAY_MS = 800;
 const MEDIA_CACHE_TRIM_LIVE_AGE = 1 << 0;
 const MEDIA_CACHE_TRIM_LIVE_SIZE = 1 << 1;
 const MEDIA_CACHE_TRIM_PRE_AGE = 1 << 2;
@@ -1651,6 +1652,7 @@ module.exports = class MessageLoggerV2 {
     this.style.multiInputFirst = this.obfuscatedClass('MLv2-input-first');
     this.style.input = this.obfuscatedClass('MLv2-input-input');
     this.style.locationListRow = this.obfuscatedClass('MLv2-location-list-row');
+    this.style.locationListGroupedRow = this.obfuscatedClass('MLv2-location-list-grouped-row');
     this.style.locationListScroller = this.obfuscatedClass('MLv2-location-list-scroller');
     this.style.locationListDeleteButton = this.obfuscatedClass('MLv2-location-list-delete');
     this.style.locationListButton = this.obfuscatedClass('MLv2-location-list-button');
@@ -2171,6 +2173,10 @@ module.exports = class MessageLoggerV2 {
                     .${this.style.locationListRow}:last-child {
                       border-bottom: 0;
                     }
+                    .${this.style.locationListGroupedRow} {
+                      min-height: 32px;
+                      padding: 4px 4px;
+                    }
                     .${this.style.locationListDeleteButton} {
                       display: inline-flex;
                       align-items: center;
@@ -2340,7 +2346,7 @@ module.exports = class MessageLoggerV2 {
       })
     );
     this.patchContextMenus();
-    this.startMediaCacheTrimmer();
+    this.startMediaCacheTrimmer(MEDIA_CACHE_TRIM_STARTUP_DELAY_MS);
     Logger.log('All patches applied, forcing UI update...');
     setTimeout(() => {
       this.forceUpdateUI();
@@ -8017,9 +8023,25 @@ module.exports = class MessageLoggerV2 {
     this._mediaCacheTrimDebug(`Shared cache trim timer scheduled for ${delay}ms.`);
     return true;
   }
-  startMediaCacheTrimmer() {
+  startMediaCacheTrimmer(startupDelayMs = 0) {
     this._mediaCacheTrimClearDebounceTimeout();
     this._mediaCacheTrimPendingMask = 0;
+    const delay = Number.isFinite(Number(startupDelayMs))
+      ? Math.min(1000, Math.max(0, Number(startupDelayMs)))
+      : 0;
+    if (delay > 0) {
+      this._mediaCacheTrimClearPeriodicTimeout();
+      if (this.__started === false || !this.settings?.cacheAllImages) return false;
+      let startupTimer;
+      startupTimer = setTimeout(() => {
+        if (this._mediaCacheTrimPeriodicTimeout !== startupTimer) return;
+        this._mediaCacheTrimPeriodicTimeout = 0;
+        if (this.__started === false || !this.settings?.cacheAllImages) return;
+        this._scheduleMediaCacheTrimPeriodic();
+      }, delay);
+      this._mediaCacheTrimPeriodicTimeout = startupTimer;
+      return true;
+    }
     return this._scheduleMediaCacheTrimPeriodic();
   }
   stopMediaCacheTrimmer(options = {}) {
@@ -13104,7 +13126,7 @@ module.exports = class MessageLoggerV2 {
           ]
         }]));
       };
-      const createEntry = entry => {
+      const createEntry = (entry, compact = false) => {
         const TrashIcon = plugin.getNativeDeleteIconComponent();
         const trash = TrashIcon
           ? React.createElement(TrashIcon, { 'aria-hidden': true, width: 16, height: 16 })
@@ -13139,7 +13161,9 @@ module.exports = class MessageLoggerV2 {
         const showEntryId = !isGuild && !hasLiveGuild;
         return React.createElement('div', {
           key: `${entry.id}:${entry.kind}`,
-          className: plugin.style.locationListRow,
+          className: compact && plugin.style.locationListGroupedRow
+            ? `${plugin.style.locationListRow} ${plugin.style.locationListGroupedRow}`
+            : plugin.style.locationListRow,
           tabIndex: 0,
           onContextMenu: event => openRowMenu(event, entry)
         },
@@ -13204,9 +13228,9 @@ module.exports = class MessageLoggerV2 {
         });
         const rendered = sortedGuildGroups.map(guildGroup => React.createElement('div', {
           key: `location-list-guild-group:${guildGroup.guildId}`,
-          style: { marginBottom: '8px' }
+          style: { marginBottom: '4px' }
         },
-        React.createElement('div', { style: { padding: '4px 4px 2px' } },
+        React.createElement('div', { style: { padding: '2px 4px 0' } },
           React.createElement('button', {
             type: 'button',
             className: plugin.style.locationListLink,
@@ -13221,7 +13245,7 @@ module.exports = class MessageLoggerV2 {
             paddingLeft: '12px',
             borderLeft: '1px solid var(--background-modifier-accent)'
           }
-        }, ...guildGroup.entries.sort(compareEntries).map(entry => createEntry(entry)))
+        }, ...guildGroup.entries.sort(compareEntries).map(entry => createEntry(entry, true)))
         ));
         return rendered.concat(ungroupedEntries);
       };
