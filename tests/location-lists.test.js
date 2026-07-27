@@ -339,16 +339,19 @@ test('manager modal renders tabs and rows while right-click and Shift Trash keep
   assert.deepEqual(plugin.settings.blacklist, ['guild-1']);
 });
 
-test('manager renders guild icons before live server names and channel server links', () => {
+test('manager groups live channels under one server header and keeps guild IDs inside clickable labels', () => {
   let modal;
   const guild = {
     id: 'guild-1',
     name: 'Alpha',
     icon: 'alpha-hash'
   };
-  const channel = { id: 'channel-1', name: 'general', guild_id: 'guild-1', type: 0 };
+  const channels = {
+    'channel-1': { id: 'channel-1', name: 'general', guild_id: 'guild-1', type: 0 },
+    'thread-1': { id: 'thread-1', name: 'topic', guild_id: 'guild-1', type: 11 }
+  };
   const plugin = createPlugin({
-    settings: listSettings({ whitelist: ['guild-1', 'channel-1'] }),
+    settings: listSettings({ whitelist: ['guild-1', 'channel-1', 'thread-1'] }),
     locationListsModalKey: 'location-lists',
     style: {
       menu: 'logger-modal',
@@ -366,7 +369,7 @@ test('manager renders guild icons before live server names and channel server li
     multiClasses: { defaultColor: 'default-color' },
     tools: {
       getServer: id => id === guild.id ? guild : null,
-      getChannel: id => id === channel.id ? channel : null,
+      getChannel: id => channels[id] || null,
       resolvedModalStuff: { ModalSize: { LARGE: 'large' } }
     },
     ImageResolver: {
@@ -392,13 +395,23 @@ test('manager renders guild icons before live server names and channel server li
     overflowY: 'auto',
     overflowX: 'hidden'
   });
-  const links = collectReactElements(rendered).filter(element => element.props.className === 'location-link');
-  assert.equal(links.length, 2);
-  for (const link of links) {
+  const elements = collectReactElements(rendered);
+  const links = elements.filter(element => element.props.className === 'location-link');
+  assert.equal(links.length, 4);
+  const serverLinks = links.filter(link => link.props['aria-label'] === 'Open server Alpha');
+  assert.equal(serverLinks.length, 2);
+  for (const link of serverLinks) {
     assert.equal(link.props.children.length, 1);
     const label = link.props.children[0];
     assert.equal(label.type, 'span');
     assert.equal(label.props.style.gap, '6px');
+    const labelId = label.props.children[label.props.children.length - 1];
+    assert.equal(labelId.props.children[0], '[guild-1]');
+    assert.deepEqual(labelId.props.style, {
+      color: 'var(--text-muted)',
+      fontSize: '12px',
+      fontWeight: 400
+    });
     const frame = label.props.children[0];
     assert.equal(frame.type, 'span');
     assert.deepEqual(frame.props.style, {
@@ -424,6 +437,104 @@ test('manager renders guild icons before live server names and channel server li
       borderRadius: '50%'
     });
   }
+  assert.equal(links.filter(link => link.props['aria-label'] === 'Open channel general').length, 1);
+  assert.equal(links.filter(link => link.props['aria-label'] === 'Open thread topic').length, 1);
+  const rows = elements.filter(element => element.props.className === 'location-row');
+  assert.equal(rows.length, 3);
+  const channelTree = elements.find(element => element.props.role === 'group'
+    && element.props['aria-label'] === 'Alpha channels and threads');
+  assert.ok(channelTree);
+  assert.deepEqual(channelTree.props.style, {
+    marginLeft: '10px',
+    paddingLeft: '12px',
+    borderLeft: '1px solid var(--background-modifier-accent)'
+  });
+  const childRows = channelTree.props.children.filter(element => element.props.className === 'location-row');
+  assert.equal(childRows.length, 2);
+  for (const row of childRows) {
+    assert.equal(row.props.children[0].props.children.filter(Boolean).length, 1);
+    assert.equal(typeof row.props.onContextMenu, 'function');
+    assert.equal(row.props.children[1].props.className, 'location-delete');
+  }
+  const standaloneGuildRow = rows.find(row => row.props.children[0]?.props?.children?.[0]?.props?.children?.[0]?.props?.['aria-label'] === 'Open server Alpha');
+  assert.ok(standaloneGuildRow);
+  assert.equal(standaloneGuildRow.props.children[0].props.children.filter(Boolean).length, 1);
+  const parentHeader = serverLinks.find(link => !elements.some(element => element.props.className === 'location-row' && element.props.children?.[0]?.props?.children?.[0] === link));
+  assert.ok(parentHeader);
+  assert.equal(parentHeader.props.onContextMenu, undefined);
+
+  childRows[0].props.children[1].props.onClick({ shiftKey: true, preventDefault() {}, stopPropagation() {} });
+  assert.deepEqual(plugin.settings.whitelist, ['guild-1', 'thread-1']);
+});
+
+test('grouped server and channel links navigate with their distinct targets and modal closure order', () => {
+  let modal;
+  const history = [];
+  const closed = [];
+  let settingsOpen = true;
+  const guild = { id: 'guild-1', name: 'Alpha' };
+  const channel = { id: 'channel-1', name: 'general', guild_id: 'guild-1', type: 0 };
+  const plugin = createPlugin({
+    settings: listSettings({ whitelist: ['channel-1'] }),
+    locationListsModalKey: 'location-lists',
+    loggerSettingsModalKey: 'settings',
+    style: {
+      menu: 'logger-modal',
+      tabBar: 'tab-bar',
+      tabBarItem: 'tab-item',
+      tab: 'tab',
+      tabSelected: 'selected',
+      locationListRow: 'location-row',
+      locationListLink: 'location-link',
+      locationListDeleteButton: 'location-delete',
+      locationListScroller: 'location-list-scroller',
+      locationListsModal: 'location-lists-modal'
+    },
+    multiClasses: { defaultColor: 'default-color' },
+    GuildChannelStore: { getDefaultChannel: id => id === guild.id ? { id: 'default-channel' } : null },
+    menu: { open: true },
+    tools: {
+      getServer: id => id === guild.id ? guild : null,
+      getChannel: id => id === channel.id ? channel : null,
+      HistoryUtils: { getHistory: () => ({ push: target => history.push(target) }) },
+      resolvedModalStuff: { ModalSize: { LARGE: 'large' } }
+    },
+    ModalStack: {
+      hasModalOpen: key => key === 'settings' && settingsOpen,
+      closeModal: key => {
+        closed.push(key);
+        if (key === 'settings') settingsOpen = false;
+      }
+    },
+    createModal(options, image, key) {
+      modal = { options, image, key };
+    },
+    getNativeDeleteIconComponent: () => function TrashIcon() {},
+    buildMenu: setup => setup
+  });
+
+  assert.equal(plugin.showLocationListManagerModal(), true);
+  const rendered = modal.options.children[0].type();
+  const links = collectReactElements(rendered).filter(element => element.props.className === 'location-link');
+  const parent = links.find(link => link.props['aria-label'] === 'Open server Alpha');
+  const child = links.find(link => link.props['aria-label'] === 'Open channel general');
+  assert.ok(parent);
+  assert.ok(child);
+  parent.props.onClick();
+  assert.deepEqual(history, ['/channels/guild-1/default-channel']);
+  assert.deepEqual(closed, ['location-lists', 'settings', 'logger-modal']);
+
+  settingsOpen = true;
+  child.props.onClick();
+  assert.deepEqual(history, ['/channels/guild-1/default-channel', '/channels/guild-1/channel-1']);
+  assert.deepEqual(closed, [
+    'location-lists',
+    'settings',
+    'logger-modal',
+    'location-lists',
+    'settings',
+    'logger-modal'
+  ]);
 });
 
 test('source contracts cover both manager launch buttons, four tabs, right-click actions, and Shift-only Trash', () => {

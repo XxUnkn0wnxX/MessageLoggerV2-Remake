@@ -12948,13 +12948,10 @@ module.exports = class MessageLoggerV2 {
     }
     return changed;
   }
-  navigateToLocationListGuild(guild) {
-    const guildId = String(guild?.id ?? '');
-    const liveGuild = this.getLocationListGuild(guildId);
-    if (!liveGuild) return false;
-    const guildChannelStore = this.GuildChannelStore || this.tools?.GuildChannelStore || DiscordModules.GuildChannelStore;
-    const channel = guildChannelStore?.getDefaultChannel?.(guildId);
-    if (!channel?.id) return false;
+  navigateToLocationListPath(guildId, channelId) {
+    const targetGuildId = String(guildId ?? '');
+    const targetChannelId = String(channelId ?? '');
+    if (!targetGuildId || !targetChannelId || !this.getLocationListGuild(targetGuildId)) return false;
     const historyModule = this.tools?.HistoryUtils || DiscordModules.HistoryUtils;
     const history = historyModule?.getHistory?.();
     if (!history?.push) return false;
@@ -12963,8 +12960,21 @@ module.exports = class MessageLoggerV2 {
       this.ModalStack?.closeModal?.(this.loggerSettingsModalKey);
     }
     if (this.menu?.open && this.style?.menu) this.ModalStack?.closeModal?.(this.style.menu);
-    history.push(`/channels/${guildId}/${channel.id}`);
+    history.push(`/channels/${targetGuildId}/${targetChannelId}`);
     return true;
+  }
+  navigateToLocationListGuild(guild) {
+    const guildId = String(guild?.id ?? '');
+    if (!this.getLocationListGuild(guildId)) return false;
+    const guildChannelStore = this.GuildChannelStore || this.tools?.GuildChannelStore || DiscordModules.GuildChannelStore;
+    const channel = guildChannelStore?.getDefaultChannel?.(guildId);
+    if (!channel?.id) return false;
+    return this.navigateToLocationListPath(guildId, channel.id);
+  }
+  navigateToLocationListChannel(entry) {
+    const guildId = String(entry?.guildId || entry?.guild?.id || entry?.channel?.guild_id || entry?.channel?.guildId || '');
+    const channelId = String(entry?.id || entry?.channel?.id || '');
+    return this.navigateToLocationListPath(guildId, channelId);
   }
   showLoggerSettingsModal() {
     const modalKey = this.loggerSettingsModalKey || `${this.style?.menu || 'ML2-MENU'}-settings`;
@@ -13028,36 +13038,44 @@ module.exports = class MessageLoggerV2 {
         }
         return typeof iconUrl === 'string' && iconUrl.trim() ? iconUrl : null;
       };
-      const createGuildLabel = (guild, name) => {
+      const createGuildLabel = (guild, name, id = guild?.id) => {
         const iconUrl = getGuildIconUrl(guild);
+        const guildId = String(id ?? '').trim();
+        const children = [
+          iconUrl
+            ? React.createElement('span', {
+              'aria-hidden': true,
+              style: {
+                boxSizing: 'border-box',
+                display: 'block',
+                flex: '0 0 auto',
+                width: '20px',
+                height: '20px',
+                overflow: 'hidden',
+                borderRadius: '50%',
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat'
+              }
+            }, React.createElement('img', {
+              src: iconUrl,
+              alt: '',
+              'aria-hidden': true,
+              width: 20,
+              height: 20,
+              style: { display: 'block', width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }
+            }))
+            : null,
+          name
+        ];
+        if (guildId) {
+          children.push(React.createElement('span', {
+            style: { color: 'var(--text-muted)', fontSize: '12px', fontWeight: 400 }
+          }, `[${guildId}]`));
+        }
         return React.createElement('span', {
           style: { display: 'inline-flex', alignItems: 'center', gap: '6px', minWidth: 0 }
-        },
-        iconUrl
-          ? React.createElement('span', {
-            'aria-hidden': true,
-            style: {
-              boxSizing: 'border-box',
-              display: 'block',
-              flex: '0 0 auto',
-              width: '20px',
-              height: '20px',
-              overflow: 'hidden',
-              borderRadius: '50%',
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              backgroundRepeat: 'no-repeat'
-            }
-          }, React.createElement('img', {
-            src: iconUrl,
-            alt: '',
-            'aria-hidden': true,
-            width: 20,
-            height: 20,
-            style: { display: 'block', width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }
-          }))
-          : null,
-        name);
+        }, ...children);
       };
       const openRowMenu = (event, entry) => {
         event.preventDefault?.();
@@ -13098,23 +13116,27 @@ module.exports = class MessageLoggerV2 {
           : entry.guildId
             ? plugin.getLocationListGuild(entry.guildId)
             : null;
-        const navigate = () => plugin.navigateToLocationListGuild(server);
+        const isGuild = entry.kind === 'guild';
+        const hasLiveGuild = !isGuild && Boolean(server);
+        const navigate = () => isGuild
+          ? plugin.navigateToLocationListGuild(server)
+          : plugin.navigateToLocationListChannel(entry);
         const display = entry.kind === 'guild' && server
           ? React.createElement('button', {
             type: 'button',
             className: plugin.style.locationListLink,
             onClick: navigate,
             'aria-label': `Open server ${entry.name}`
-          }, createGuildLabel(server, entry.name))
+          }, createGuildLabel(server, entry.name, entry.id))
+          : hasLiveGuild
+            ? React.createElement('button', {
+              type: 'button',
+              className: plugin.style.locationListLink,
+              onClick: navigate,
+              'aria-label': `Open ${entry.kind} ${entry.name}`
+            }, entry.name)
           : React.createElement('span', null, entry.name);
-        const serverControl = entry.kind !== 'guild' && server
-          ? React.createElement('button', {
-            type: 'button',
-            className: plugin.style.locationListLink,
-            onClick: navigate,
-            'aria-label': `Open server ${server.name}`
-          }, createGuildLabel(server, server.name))
-          : null;
+        const showEntryId = !isGuild && !hasLiveGuild;
         return React.createElement('div', {
           key: `${entry.id}:${entry.kind}`,
           className: plugin.style.locationListRow,
@@ -13123,10 +13145,9 @@ module.exports = class MessageLoggerV2 {
         },
         React.createElement('div', { style: { minWidth: 0, flex: '1 1 auto' } },
           React.createElement('div', { style: { overflow: 'hidden', textOverflow: 'ellipsis' } }, display),
-          serverControl
-            ? React.createElement('div', { style: { color: 'var(--text-muted)', fontSize: '12px' } }, serverControl)
-            : null,
-          React.createElement('div', { style: { color: 'var(--text-muted)', fontSize: '12px' } }, entry.id)
+          showEntryId
+            ? React.createElement('div', { style: { color: 'var(--text-muted)', fontSize: '12px' } }, entry.id)
+            : null
         ),
         React.createElement('button', {
           type: 'button',
@@ -13155,10 +13176,59 @@ module.exports = class MessageLoggerV2 {
         onClick: () => setActiveKey(item.key)
       }, item.label)));
       const nonEmptyGroups = groups.filter(group => group.entries.length);
+      const renderGroupEntries = group => {
+        if (group.label !== 'Channels & Threads') return group.entries.map(entry => createEntry(entry));
+        const guildGroups = new Map();
+        const ungroupedEntries = [];
+        for (const entry of group.entries) {
+          const guild = entry.guild && (entry.guildId || entry.guild.id) ? entry.guild : null;
+          if (!guild) {
+            ungroupedEntries.push(createEntry(entry));
+            continue;
+          }
+          const guildId = String(entry.guildId || guild.id);
+          let guildGroup = guildGroups.get(guildId);
+          if (!guildGroup) {
+            guildGroup = { guild, guildId, entries: [] };
+            guildGroups.set(guildId, guildGroup);
+          }
+          guildGroup.entries.push(entry);
+        }
+        const compareEntries = (a, b) => {
+          const nameOrder = String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' });
+          return nameOrder || String(a.id).localeCompare(String(b.id));
+        };
+        const sortedGuildGroups = [...guildGroups.values()].sort((a, b) => {
+          const nameOrder = String(a.guild.name || a.guildId).localeCompare(String(b.guild.name || b.guildId), undefined, { sensitivity: 'base' });
+          return nameOrder || a.guildId.localeCompare(b.guildId);
+        });
+        const rendered = sortedGuildGroups.map(guildGroup => React.createElement('div', {
+          key: `location-list-guild-group:${guildGroup.guildId}`,
+          style: { marginBottom: '8px' }
+        },
+        React.createElement('div', { style: { padding: '4px 4px 2px' } },
+          React.createElement('button', {
+            type: 'button',
+            className: plugin.style.locationListLink,
+            onClick: () => plugin.navigateToLocationListGuild(guildGroup.guild),
+            'aria-label': `Open server ${guildGroup.guild.name}`
+          }, createGuildLabel(guildGroup.guild, guildGroup.guild.name, guildGroup.guildId))),
+        React.createElement('div', {
+          role: 'group',
+          'aria-label': `${guildGroup.guild.name} channels and threads`,
+          style: {
+            marginLeft: '10px',
+            paddingLeft: '12px',
+            borderLeft: '1px solid var(--background-modifier-accent)'
+          }
+        }, ...guildGroup.entries.sort(compareEntries).map(entry => createEntry(entry)))
+        ));
+        return rendered.concat(ungroupedEntries);
+      };
       const body = nonEmptyGroups.length
         ? nonEmptyGroups.map(group => React.createElement('section', { key: group.label, style: { margin: '18px 0' } },
           React.createElement('h3', { style: { margin: '0 0 6px' } }, group.label),
-          group.entries.map(createEntry)
+          ...renderGroupEntries(group)
         ))
         : [React.createElement('div', { key: 'location-list-empty', style: { color: 'var(--text-muted)', padding: '24px 4px' } }, `No locations in ${descriptor.label}.`)];
       return React.createElement('div', {
