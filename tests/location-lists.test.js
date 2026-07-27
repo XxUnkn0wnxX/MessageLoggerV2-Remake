@@ -444,7 +444,7 @@ test('source contracts cover both manager launch buttons, four tabs, right-click
   assert.match(source, /this\.style\.locationListLink/);
   assert.match(source, /ImageResolver: lazyGet\('ImageResolver', \(\) => Webpack\.getByKeys\('getUserAvatarURL', 'getGuildIconURL'\)\)/);
   assert.match(source, /className: this\.style\.locationListsModal/);
-  assert.match(source, /width: min\(880px, calc\(100vw - 32px\)\) !important/);
+  assert.match(source, /width: min\(1100px, calc\(100vw - 32px\)\) !important/);
   assert.match(source, /height: 'min\(420px, calc\(100vh - 260px\)\)'/);
   assert.match(source, /classList\.add\(\.\.\.classNames\)/);
   assert.match(source, /locationListScroller/);

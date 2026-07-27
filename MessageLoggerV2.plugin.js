@@ -1970,8 +1970,8 @@ module.exports = class MessageLoggerV2 {
                     }
                     .${this.style.locationListsModal} {
                       box-sizing: border-box;
-                      width: min(880px, calc(100vw - 32px)) !important;
-                      max-width: 880px !important;
+                      width: min(1100px, calc(100vw - 32px)) !important;
+                      max-width: 1100px !important;
                       min-width: 0 !important;
                       margin-inline: auto;
                     }
