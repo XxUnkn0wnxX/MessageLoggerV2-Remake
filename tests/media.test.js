@@ -1596,6 +1596,53 @@ test('non-200 cacheImage responses release body before retrying', async () => {
   }
 });
 
+test('cacheImage retries an ENOENT write after recreating a removed destination directory', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const originalFetch = global.fetch;
+  const OriginalAbortController = global.AbortController;
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-cache-image-enoent-write-'));
+  const messageId = 'enoent-write-message';
+  const url = 'https://cdn.example/enoent-write.png';
+  let fetches = 0;
+  let ensureCalls = 0;
+  try {
+    global.BdApi.Net = undefined;
+    global.AbortController = class {
+      constructor() { return mockAbortControllerWithSignalCapture().controller; }
+    };
+    global.fetch = async () => {
+      fetches += 1;
+      return successfulMediaResponse();
+    };
+    const plugin = createMediaCachePlugin(cacheDir, {
+      _mediaCacheMaxAttempts: 2,
+      _mediaCacheRetryDelayMs: 0,
+      messageRecord: {
+        [messageId]: { message: { id: messageId } }
+      }
+    });
+    plugin.settings.forceLegacyMediaFetching = true;
+    const ensureDirectory = plugin.ensureMediaCacheDirectory.bind(plugin);
+    plugin.ensureMediaCacheDirectory = directory => {
+      ensureCalls += 1;
+      ensureDirectory(directory);
+      if (ensureCalls === 1) fs.rmSync(directory, { recursive: true, force: true });
+    };
+
+    await plugin.cacheImage(url, 0, 52, messageId, 'channel', 'guild');
+
+    assert.equal(ensureCalls, 2);
+    assert.equal(fetches, 2, 'the write failure must refetch on its retry');
+    assert.equal(fs.existsSync(path.join(cacheDir, `52 (${messageId}).png`)), true);
+    assert.deepEqual(loggerEvents.filter(entry => entry[0] === 'error'), []);
+  } finally {
+    fs.rmSync(cacheDir, { force: true, recursive: true });
+    global.BdApi.Net = originalNetApi;
+    global.fetch = originalFetch;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
 test('non-aborting environment still supports logical request timeout cancellation', async () => {
   const originalFetch = global.fetch;
   const originalNetApi = global.BdApi.Net;

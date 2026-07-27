@@ -651,6 +651,48 @@ test('immediate media trim requests share one pending in-flight pass', async () 
   });
 });
 
+test('manual trim requests queue uncovered limiter bits behind an active narrow pass', async () => {
+  await withTempRoot(async root => {
+    const plugin = createTrimPlugin(root, {
+      settings: {
+        liveCacheMaxAgeHours: 1,
+        preCacheMaxAgeHours: 1
+      }
+    });
+    const liveBit = plugin._mediaCacheTrimLimitBit('liveCacheMaxAgeHours');
+    const preBit = plugin._mediaCacheTrimLimitBit('preCacheMaxAgeHours');
+    const passMasks = [];
+    let resolveFirst;
+    let resolveFollowUp;
+    plugin._runMediaCacheTrimPass = async mask => {
+      passMasks.push(mask);
+      if (passMasks.length === 1) {
+        await new Promise(resolve => { resolveFirst = resolve; });
+      } else if (passMasks.length === 2) {
+        await new Promise(resolve => { resolveFollowUp = resolve; });
+      }
+      return { files: 0, deleted: 0, errors: [] };
+    };
+
+    try {
+      const first = plugin.runMediaCacheTrimNow(liveBit);
+      const followUpRequest = plugin.runMediaCacheTrimNow(preBit);
+      assert.strictEqual(followUpRequest, first);
+      assert.deepEqual(passMasks, [liveBit]);
+
+      resolveFirst();
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(passMasks, [liveBit, preBit]);
+
+      resolveFollowUp();
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(passMasks, [liveBit, preBit]);
+    } finally {
+      plugin.stopMediaCacheTrimmer();
+    }
+  });
+});
+
 test('concurrent ENOENT removes the vanished scan entry without counting a deletion', async () => {
   await withTempRoot(async root => {
     const gb = 1024 ** 3;

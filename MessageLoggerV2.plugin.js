@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.10
+ * @version 2.8.2.11
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -406,6 +406,7 @@ module.exports = class MessageLoggerV2 {
     this._mediaCacheTrimPeriodicTimeout = 0;
     this._mediaCacheTrimDebounceTimeout = 0;
     this._mediaCacheTrimPendingMask = 0;
+    this._mediaCacheTrimActiveMask = 0;
     this._mediaCacheTrimRunningPromise = null;
     this._mediaCacheTrimStopGeneration = 0;
     this._flushMediaCacheAfterNextDataSave = false;
@@ -664,8 +665,8 @@ module.exports = class MessageLoggerV2 {
         title: 'Pre-cache and trimmer hardening',
         type: 'improved',
         items: [
-          'Media without a saved record stages in a per-message `_PreCache` folder; confirmation promotes matching files and write-time checks self-heal missing cache folders without a second download.',
-          'Live retention uses snowflake-aware message time with file mtime fallback; cooperative sliced trimming, a verification scan, and safe cleanup/logging keep large caches responsive and bounded.'
+          'Media without a saved record uses per-message `_PreCache` staging and promotion; missing cache directories self-heal, and a bounded retry recreates a directory removed during a write.',
+          'Live retention uses snowflake-aware message time with mtime fallback; cooperative sliced trimming, one verification scan, and deterministic follow-up passes keep limits responsive without dropping distinct manual requests.'
         ]
       }
     ];
@@ -7955,8 +7956,12 @@ module.exports = class MessageLoggerV2 {
     return true;
   }
   runMediaCacheTrimNow(mask = MEDIA_CACHE_TRIM_ALL) {
-    if (this._mediaCacheTrimRunningPromise) return this._mediaCacheTrimRunningPromise;
-    this._mediaCacheTrimPendingMask |= mask & MEDIA_CACHE_TRIM_ALL;
+    const requestedMask = (mask & MEDIA_CACHE_TRIM_ALL) & this.getMediaCacheTrimLimiterMask();
+    if (this._mediaCacheTrimRunningPromise) {
+      this._mediaCacheTrimPendingMask |= requestedMask & ~this._mediaCacheTrimActiveMask;
+      return this._mediaCacheTrimRunningPromise;
+    }
+    this._mediaCacheTrimPendingMask |= requestedMask;
     return this._startMediaCacheTrimPass();
   }
   _mediaCacheTrimIsCancelled(generation) {
@@ -8334,6 +8339,7 @@ module.exports = class MessageLoggerV2 {
       return null;
     }
     const generation = this._mediaCacheTrimStopGeneration;
+    this._mediaCacheTrimActiveMask = mask;
     this._mediaCacheTrimClearPeriodicTimeout();
     const operation = this._runMediaCacheTrimPass(mask, generation);
     this._mediaCacheTrimRunningPromise = operation;
@@ -8362,6 +8368,7 @@ module.exports = class MessageLoggerV2 {
     }).finally(() => {
       if (this._mediaCacheTrimRunningPromise !== operation) return;
       this._mediaCacheTrimRunningPromise = null;
+      this._mediaCacheTrimActiveMask = 0;
       if (this._mediaCacheTrimIsCancelled(generation) || !this.settings?.cacheAllImages || this.__started === false) return;
       if (this._mediaCacheTrimPendingMask) {
         // A limit edit owns its debounce window. If that timer is still pending, let it fire
