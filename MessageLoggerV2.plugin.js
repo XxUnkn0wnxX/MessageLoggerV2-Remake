@@ -63,6 +63,12 @@ const LOGGER_KEYBIND_SETTING_IDS = Object.freeze([
   'openServerLogsKeybind'
 ]);
 const LOGGER_KEYBIND_MODIFIERS = Object.freeze(['Control', 'Shift', 'Alt', 'Meta']);
+const LOCATION_LIST_DESCRIPTORS = Object.freeze([
+  Object.freeze({ key: 'whitelist', label: 'Logging Whitelist' }),
+  Object.freeze({ key: 'blacklist', label: 'Logging Blacklist' }),
+  Object.freeze({ key: 'notificationWhitelist', label: 'Notification Whitelist' }),
+  Object.freeze({ key: 'notificationBlacklist', label: 'Notification Blacklist' })
+]);
 const FORUM_UPLOAD_ROUTER_SOURCE_MARKERS = Object.freeze([
   'castChannelIdAsMessageId',
   '.isForumPost()',
@@ -1608,6 +1614,7 @@ module.exports = class MessageLoggerV2 {
     this.style.menu = this.obfuscatedClass('ML2-MENU');
     this.loggerHelpModalKey = `${this.style.menu}-logger-help`;
     this.filterHelpModalKey = `${this.style.menu}-filter-help`;
+    this.locationListsModalKey = `${this.style.menu}-location-lists`;
     this.style.openLogs = this.obfuscatedClass('ML2-OL');
     this.style.filter = this.obfuscatedClass('ML2-FILTER');
     this.style.menuMessages = this.obfuscatedClass('ML2-MENU-MESSAGES');
@@ -1637,6 +1644,10 @@ module.exports = class MessageLoggerV2 {
     this.style.multiInput = this.obfuscatedClass('MLv2-input');
     this.style.multiInputFirst = this.obfuscatedClass('MLv2-input-first');
     this.style.input = this.obfuscatedClass('MLv2-input-input');
+    this.style.locationListRow = this.obfuscatedClass('MLv2-location-list-row');
+    this.style.locationListDeleteButton = this.obfuscatedClass('MLv2-location-list-delete');
+    this.style.locationListButton = this.obfuscatedClass('MLv2-location-list-button');
+    this.style.locationListLink = this.obfuscatedClass('MLv2-location-list-link');
     this.style.questionMark = this.obfuscatedClass('MLv2-question-mark');
     this.style.tabBarContainer = this.obfuscatedClass('MLv2-tab-bar-container');
     this.style.tabBar = this.obfuscatedClass('MLv2-tab-bar');
@@ -2046,6 +2057,7 @@ module.exports = class MessageLoggerV2 {
                       -webkit-box-flex: 1;
                       -ms-flex-positive: 1;
                       flex-grow: 1;
+                      min-width: 0;
                     }
                     .${this.style.input} {
                       font-size: 16px;
@@ -2071,12 +2083,80 @@ module.exports = class MessageLoggerV2 {
                       justify-content: center;
                       width: 32px;
                       height: 32px;
+                      flex: 0 0 32px;
                       border-radius: 2px;
                       margin-right: 4px;
                       padding: 0;
                       min-width: 0;
                       min-height: 0;
                       background-color: var(--brand-500);
+                    }
+                    .${this.style.locationListRow} {
+                      position: relative;
+                      display: flex;
+                      align-items: center;
+                      gap: 12px;
+                      min-height: 44px;
+                      padding: 8px 4px;
+                      border-bottom: 1px solid var(--background-modifier-accent);
+                    }
+                    .${this.style.locationListRow}:last-child {
+                      border-bottom: 0;
+                    }
+                    .${this.style.locationListDeleteButton} {
+                      display: inline-flex;
+                      align-items: center;
+                      justify-content: center;
+                      width: 28px;
+                      height: 28px;
+                      flex: 0 0 28px;
+                      margin-left: auto;
+                      padding: 0;
+                      border: 0;
+                      border-radius: 4px;
+                      color: var(--text-feedback-critical, var(--status-danger));
+                      background: transparent;
+                      opacity: 0;
+                      visibility: hidden;
+                      pointer-events: none;
+                    }
+                    .${this.style.locationListDeleteButton},
+                    .${this.style.locationListDeleteButton} svg,
+                    .${this.style.locationListDeleteButton} path {
+                      color: var(--text-feedback-critical, var(--status-danger));
+                      fill: currentColor;
+                    }
+                    .${this.style.locationListDeleteButton}:hover,
+                    .${this.style.locationListDeleteButton}:focus-visible {
+                      background: var(--background-modifier-selected);
+                    }
+                    html.${this.style.shiftDeleteActive} .${this.style.locationListRow}:hover .${this.style.locationListDeleteButton},
+                    html.${this.style.shiftDeleteActive} .${this.style.locationListRow}:focus-within .${this.style.locationListDeleteButton} {
+                      opacity: 1;
+                      visibility: visible;
+                      pointer-events: auto;
+                    }
+                    .${this.style.locationListLink} {
+                      border: 0;
+                      padding: 0;
+                      color: var(--text-link);
+                      background: transparent;
+                      cursor: pointer;
+                      font: inherit;
+                      text-align: left;
+                    }
+                    .${this.style.locationListLink}:focus-visible {
+                      outline: 2px solid var(--text-link);
+                      outline-offset: 2px;
+                      border-radius: 2px;
+                    }
+                    .${this.style.tabBar} button.${this.style.tab} {
+                      -webkit-appearance: none;
+                      appearance: none;
+                      border-width: 0 0 2px;
+                      border-style: solid;
+                      background: transparent;
+                      font: inherit;
                     }
                     .${this.style.tabBarContainer} {
                       border-bottom: 1px solid var(--background-accent);
@@ -2849,6 +2929,7 @@ module.exports = class MessageLoggerV2 {
       this.style?.menu,
       this.loggerHelpModalKey,
       this.filterHelpModalKey,
+      this.locationListsModalKey,
       this.style?.menu && `${this.style.menu}-deleted-cached-files`
     ].filter(Boolean);
     const keys = new Set([...(this._loggerOwnedModalKeys || []), ...knownKeys]);
@@ -5105,6 +5186,7 @@ module.exports = class MessageLoggerV2 {
     const div = document.createElement('div');
     div.id = this.obfuscatedClass('ml2-settings-buttonbox');
     div.style.display = 'inline-flex';
+    div.style.flexWrap = 'wrap';
     div.appendChild(this.createButton('Stats', () => this.showStatsModal()));
     div.appendChild(
       this.createButton('Check for update now!', () => {
@@ -5115,6 +5197,7 @@ module.exports = class MessageLoggerV2 {
       this.createButton('Support server', () => UI.showInviteModal('e66JbKte2P'))
     );
     div.appendChild(this.createButton('Help', () => this.showLoggerHelpModal(false, 'settings')));
+    div.appendChild(this.createButton('Manage lists', () => this.showLocationListManagerModal()));
     let button = div.firstElementChild;
     while (button) {
       button.style.marginRight = button.style.marginLeft = `5px`;
@@ -12621,6 +12704,373 @@ module.exports = class MessageLoggerV2 {
     this.menu.open = false;
     setTimeout(() => this.openWindow(), 0);
   }
+  getLocationListDescriptors() {
+    return LOCATION_LIST_DESCRIPTORS.map(descriptor => ({ ...descriptor }));
+  }
+  isLocationListKey(listKey) {
+    return LOCATION_LIST_DESCRIPTORS.some(descriptor => descriptor.key === listKey);
+  }
+  getLocationListGuild(guildId) {
+    const id = String(guildId ?? '');
+    if (!id) return null;
+    const fromTools = this.tools?.getServer?.(id);
+    if (fromTools) return fromTools;
+    return DiscordModules.GuildStore?.getGuild?.(id) || null;
+  }
+  buildLocationListGuildNameFallbacks() {
+    const fallbacks = new Map();
+    const records = this.messageRecord && typeof this.messageRecord === 'object'
+      ? Object.values(this.messageRecord)
+      : [];
+    const toScore = value => {
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+      if (typeof value === 'string') {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) return numeric;
+        const parsed = Date.parse(value);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+      return 0;
+    };
+    const remember = (guildId, name, score) => {
+      const key = String(guildId ?? '');
+      const label = typeof name === 'string' ? name.trim() : '';
+      if (!key || !label) return;
+      const existing = fallbacks.get(key);
+      if (!existing || score >= existing.score) fallbacks.set(key, { name: label, score });
+    };
+    for (const record of records) {
+      const message = record?.message || {};
+      const savedLocation = record?.saved_location || {};
+      const deleteLocation = record?.delete_data?.location || {};
+      const messageScore = toScore(message.timestamp);
+      const messageGuildId = message.guild_id || message.guildId;
+      remember(
+        savedLocation.guildId || savedLocation.guild_id || messageGuildId,
+        savedLocation.guildName || savedLocation.guild_name,
+        Math.max(toScore(savedLocation.cachedAt), messageScore)
+      );
+      remember(
+        deleteLocation.guildId || deleteLocation.guild_id || messageGuildId,
+        deleteLocation.guildName || deleteLocation.guild_name,
+        Math.max(toScore(deleteLocation.cachedAt), messageScore)
+      );
+      remember(messageGuildId, record?.guildName || message.guildName, messageScore);
+    }
+    return fallbacks;
+  }
+  getLocationListDmName(channel) {
+    if (!channel) return '';
+    const explicit = typeof channel.name === 'string' ? channel.name.trim() : '';
+    if (explicit) return explicit;
+    const recipients = Array.isArray(channel.recipients) ? channel.recipients : [];
+    const names = recipients.map(recipient => {
+      const user = typeof recipient === 'object'
+        ? recipient
+        : this.tools?.getUser?.(recipient);
+      return user?.globalName || user?.global_name || user?.username || user?.tag || '';
+    }).map(name => String(name).trim()).filter(Boolean);
+    return names.join(', ');
+  }
+  resolveLocationListEntry(id, guildNameFallbacks = null) {
+    const rawId = String(id ?? '');
+    const guild = this.getLocationListGuild(rawId);
+    if (guild) {
+      return {
+        id: rawId,
+        kind: 'guild',
+        group: 'Servers',
+        name: String(guild.name || rawId),
+        guild,
+        channel: null,
+        resolved: true
+      };
+    }
+    const channel = this.tools?.getChannel?.(rawId);
+    if (channel) {
+      const guildId = channel.guild_id || channel.guildId;
+      const isThread = typeof channel.isThread === 'function'
+        ? channel.isThread()
+        : [10, 11, 12].includes(Number(channel.type));
+      const isDm = typeof channel.isDM === 'function'
+        ? channel.isDM()
+        : [1, 3].includes(Number(channel.type)) || !guildId;
+      if (isDm) {
+        return {
+          id: rawId,
+          kind: 'dm',
+          group: 'Direct Messages',
+          name: this.getLocationListDmName(channel) || rawId,
+          guild: null,
+          channel,
+          resolved: true
+        };
+      }
+      return {
+        id: rawId,
+        kind: isThread ? 'thread' : 'channel',
+        group: 'Channels & Threads',
+        name: String(channel.name || rawId),
+        guild: guildId ? this.getLocationListGuild(String(guildId)) : null,
+        guildId: guildId ? String(guildId) : null,
+        channel,
+        resolved: true
+      };
+    }
+    const fallbackName = guildNameFallbacks?.get?.(rawId)?.name || rawId;
+    return {
+      id: rawId,
+      kind: 'unknown',
+      group: 'Unavailable IDs',
+      name: fallbackName,
+      guild: null,
+      channel: null,
+      resolved: false
+    };
+  }
+  getLocationListEntries(listKey, guildNameFallbacks = null) {
+    if (!this.isLocationListKey(listKey)) return [];
+    const ids = Array.isArray(this.settings?.[listKey])
+      ? [...new Set(this.settings[listKey].map(id => String(id ?? '')).filter(Boolean))]
+      : [];
+    return ids.map(id => this.resolveLocationListEntry(id, guildNameFallbacks)).sort((a, b) => {
+      const nameOrder = String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' });
+      return nameOrder || String(a.id).localeCompare(String(b.id));
+    });
+  }
+  getLocationListGroupedEntries(listKey, guildNameFallbacks = null) {
+    const entries = this.getLocationListEntries(listKey, guildNameFallbacks);
+    return [
+      { label: 'Servers', kinds: ['guild'] },
+      { label: 'Channels & Threads', kinds: ['channel', 'thread'] },
+      { label: 'Direct Messages', kinds: ['dm'] },
+      { label: 'Unavailable IDs', kinds: ['unknown'] }
+    ].map(group => ({
+      label: group.label,
+      entries: entries.filter(entry => group.kinds.includes(entry.kind))
+    }));
+  }
+  removeLocationListIds(listKey, id) {
+    if (!this.isLocationListKey(listKey)) return false;
+    const list = this.settings?.[listKey];
+    if (!Array.isArray(list)) return false;
+    const target = String(id ?? '');
+    const next = list.filter(value => String(value ?? '') !== target);
+    if (next.length === list.length) return false;
+    this.settings[listKey] = next;
+    this.saveSettings();
+    this.notifyUser(`Removed ${target} from ${LOCATION_LIST_DESCRIPTORS.find(item => item.key === listKey)?.label || 'this list'}.`, { type: 'success' });
+    return true;
+  }
+  removeLocationListIdsFromAll(id) {
+    const target = String(id ?? '');
+    let changed = false;
+    for (const descriptor of LOCATION_LIST_DESCRIPTORS) {
+      const list = this.settings?.[descriptor.key];
+      if (!Array.isArray(list)) continue;
+      const next = list.filter(value => String(value ?? '') !== target);
+      if (next.length === list.length) continue;
+      this.settings[descriptor.key] = next;
+      changed = true;
+    }
+    if (changed) {
+      this.saveSettings();
+      this.notifyUser(`Removed ${target} from all MessageLogger location lists.`, { type: 'success' });
+    }
+    return changed;
+  }
+  getLocationListGuildChannelCandidates(guild) {
+    const guildId = String(guild?.id ?? '');
+    if (!guildId) return [];
+    const selected = this.selectedChannel || null;
+    const selectedChannel = selected?.id
+      ? this.tools?.getChannel?.(String(selected.id)) || selected
+      : null;
+    const candidates = [];
+    const add = channel => {
+      if (!channel?.id || String(channel.guild_id || channel.guildId || '') !== guildId) return;
+      if ([4].includes(Number(channel.type))) return;
+      if (!candidates.some(existing => String(existing.id) === String(channel.id))) candidates.push(channel);
+    };
+    add(selectedChannel);
+    for (const channelId of [guild.system_channel_id, guild.systemChannelId, guild.rules_channel_id, guild.rulesChannelId]) {
+      if (channelId) add(this.tools?.getChannel?.(String(channelId)));
+    }
+    const channelStore = this.ChannelStore || this.tools?.ChannelStore;
+    const channels = channelStore?.getChannels?.();
+    const values = this.collectLocationListChannels(channels);
+    values.sort((a, b) => this.getLocationListChannelPriority(a) - this.getLocationListChannelPriority(b));
+    values.forEach(add);
+    return candidates;
+  }
+  collectLocationListChannels(value, output = [], seen = new Set()) {
+    if (!value || typeof value !== 'object' || seen.has(value)) return output;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (const child of value) this.collectLocationListChannels(child, output, seen);
+      return output;
+    }
+    const looksLikeChannel = value.id !== undefined
+      && (value.type !== undefined
+        || value.guild_id !== undefined
+        || value.guildId !== undefined
+        || typeof value.isDM === 'function'
+        || typeof value.isThread === 'function');
+    if (looksLikeChannel) {
+      output.push(value);
+      return output;
+    }
+    for (const child of Object.values(value)) this.collectLocationListChannels(child, output, seen);
+    return output;
+  }
+  getLocationListChannelPriority(channel) {
+    return [0, 5, 15, 16].includes(Number(channel?.type)) ? 0 : 1;
+  }
+  navigateToLocationListGuild(guild) {
+    const guildId = String(guild?.id ?? '');
+    const liveGuild = this.getLocationListGuild(guildId);
+    if (!liveGuild) return false;
+    guild = liveGuild || guild;
+    const channel = this.getLocationListGuildChannelCandidates(guild)[0];
+    if (!channel?.id) return false;
+    const historyModule = this.tools?.HistoryUtils || DiscordModules.HistoryUtils;
+    const history = historyModule?.getHistory?.();
+    if (!history?.push) return false;
+    this.ModalStack?.closeModal?.(this.locationListsModalKey);
+    if (this.menu?.open && this.style?.menu) this.ModalStack?.closeModal?.(this.style.menu);
+    history.push(`/channels/${guildId}/${channel.id}`);
+    return true;
+  }
+  showLocationListManagerModal() {
+    const modalKey = this.locationListsModalKey || `${this.style?.menu || 'ML2-MENU'}-location-lists`;
+    if (this.ModalStack?.hasModalOpen?.(modalKey)) return false;
+    const guildNameFallbacks = this.buildLocationListGuildNameFallbacks();
+    const plugin = this;
+    const Manager = () => {
+      const [activeKey, setActiveKey] = React.useState(LOCATION_LIST_DESCRIPTORS[0].key);
+      const [, setRevision] = React.useState(0);
+      const descriptor = LOCATION_LIST_DESCRIPTORS.find(item => item.key === activeKey) || LOCATION_LIST_DESCRIPTORS[0];
+      const groups = plugin.getLocationListGroupedEntries(descriptor.key, guildNameFallbacks);
+      const refresh = () => setRevision(value => value + 1);
+      const removeCurrent = id => {
+        if (plugin.removeLocationListIds(descriptor.key, id)) refresh();
+      };
+      const removeAll = id => {
+        if (plugin.removeLocationListIdsFromAll(id)) refresh();
+      };
+      const openRowMenu = (event, entry) => {
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        ContextMenu.open(event, plugin.buildMenu([{
+          type: 'group',
+          items: [
+            {
+              type: 'item',
+              label: 'Remove from this list',
+              danger: true,
+              action: () => {
+                ContextMenu.close();
+                removeCurrent(entry.id);
+              }
+            },
+            {
+              type: 'item',
+              label: 'Remove from all four lists',
+              danger: true,
+              action: () => {
+                ContextMenu.close();
+                removeAll(entry.id);
+              }
+            }
+          ]
+        }]));
+      };
+      const createEntry = entry => {
+        const TrashIcon = plugin.getNativeDeleteIconComponent();
+        const trash = TrashIcon
+          ? React.createElement(TrashIcon, { 'aria-hidden': true, width: 16, height: 16 })
+          : React.createElement('svg', { 'aria-hidden': true, width: 16, height: 16, viewBox: '0 0 24 24' },
+            React.createElement('path', { fill: 'currentColor', d: 'M6 7h12l-1 14H7L6 7zm2-3h8l1 2H7l1-2z' })
+          );
+        const server = entry.kind === 'guild'
+          ? entry.guild
+          : entry.guildId
+            ? plugin.getLocationListGuild(entry.guildId)
+            : null;
+        const navigate = () => plugin.navigateToLocationListGuild(server);
+        const display = entry.kind === 'guild' && server
+          ? React.createElement('button', {
+            type: 'button',
+            className: plugin.style.locationListLink,
+            onClick: navigate,
+            'aria-label': `Open server ${entry.name}`
+          }, entry.name)
+          : React.createElement('span', null, entry.name);
+        const serverControl = entry.kind !== 'guild' && server
+          ? React.createElement('button', {
+            type: 'button',
+            className: plugin.style.locationListLink,
+            onClick: navigate,
+            'aria-label': `Open server ${server.name}`
+          }, server.name)
+          : null;
+        return React.createElement('div', {
+          key: `${entry.id}:${entry.kind}`,
+          className: plugin.style.locationListRow,
+          tabIndex: 0,
+          onContextMenu: event => openRowMenu(event, entry)
+        },
+        React.createElement('div', { style: { minWidth: 0, flex: '1 1 auto' } },
+          React.createElement('div', { style: { overflow: 'hidden', textOverflow: 'ellipsis' } }, display),
+          serverControl
+            ? React.createElement('div', { style: { color: 'var(--text-muted)', fontSize: '12px' } }, serverControl)
+            : null,
+          React.createElement('div', { style: { color: 'var(--text-muted)', fontSize: '12px' } }, entry.id)
+        ),
+        React.createElement('button', {
+          type: 'button',
+          className: plugin.style.locationListDeleteButton,
+          'aria-label': `Remove ${entry.id} from ${descriptor.label}`,
+          title: `Shift-click to remove ${entry.id} from ${descriptor.label}`,
+          onClick: event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!event.shiftKey) return;
+            removeCurrent(entry.id);
+          }
+        }, trash)
+        );
+      };
+      const tabBar = React.createElement('div', {
+        className: plugin.style.tabBar,
+        role: 'tablist',
+        style: { flexWrap: 'wrap', height: 'auto', minHeight: '55px' }
+      }, ...LOCATION_LIST_DESCRIPTORS.map(item => React.createElement('button', {
+        key: item.key,
+        type: 'button',
+        className: `${plugin.style.tabBarItem} ${plugin.style.tab} ${item.key === descriptor.key ? plugin.style.tabSelected : ''}`,
+        role: 'tab',
+        'aria-selected': item.key === descriptor.key,
+        onClick: () => setActiveKey(item.key)
+      }, item.label)));
+      const nonEmptyGroups = groups.filter(group => group.entries.length);
+      const body = nonEmptyGroups.length
+        ? nonEmptyGroups.map(group => React.createElement('section', { key: group.label, style: { margin: '18px 0' } },
+          React.createElement('h3', { style: { margin: '0 0 6px' } }, group.label),
+          group.entries.map(createEntry)
+        ))
+        : [React.createElement('div', { key: 'location-list-empty', style: { color: 'var(--text-muted)', padding: '24px 4px' } }, `No locations in ${descriptor.label}.`)];
+      return React.createElement('div', { className: plugin.multiClasses?.defaultColor, style: { maxHeight: '65vh', overflowY: 'auto' } }, tabBar, ...body);
+    };
+    this.createModal({
+      header: 'Manage location lists',
+      size: this.tools.resolvedModalStuff.ModalSize.LARGE,
+      children: [React.createElement(Manager)],
+      ml2Data: true,
+      className: this.style.menuRoot
+    }, false, modalKey);
+    return true;
+  }
   showLoggerHelpModal(initial = false, returnTarget = 'logger') {
     const fromSettings = returnTarget === 'settings';
     // Keep first-install onboarding aligned with docs/help.md#first-setup while reusing the
@@ -18918,6 +19368,22 @@ module.exports = class MessageLoggerV2 {
     let textBox = this.parseHTML(
       `<div class="${classes.inputWrapper}"><div class="${classes.inputMultiInput}"><div class="${classes.inputWrapper} ${classes.multiInputFirst}"><input class="${classes.inputDefaultMultiInputField}" name="username" type="text" placeholder="Message filter" maxlength="999" value="${this.menu.filter}" id="${this.style.filter}"></div><span tabindex="0" class="${classes.questionMark}" role="button"><svg name="QuestionMark" class="${classes.icon}" aria-hidden="false" width="16" height="16" viewBox="0 0 24 24"><g fill="currentColor" fill-rule="evenodd" transform="translate(7 4)"><path d="M0 4.3258427C0 5.06741573.616438356 5.68539326 1.35616438 5.68539326 2.09589041 5.68539326 2.71232877 5.06741573 2.71232877 4.3258427 2.71232877 2.84269663 4.31506849 2.78089888 4.5 2.78089888 4.68493151 2.78089888 6.28767123 2.84269663 6.28767123 4.3258427L6.28767123 4.63483146C6.28767123 5.25280899 5.97945205 5.74719101 5.42465753 6.05617978L4.19178082 6.73595506C3.51369863 7.10674157 3.14383562 7.78651685 3.14383562 8.52808989L3.14383562 9.64044944C3.14383562 10.3820225 3.76027397 11 4.5 11 5.23972603 11 5.85616438 10.3820225 5.85616438 9.64044944L5.85616438 8.96067416 6.71917808 8.52808989C8.1369863 7.78651685 9 6.30337079 9 4.69662921L9 4.3258427C9 1.48314607 6.71917808 0 4.5 0 2.21917808 0 0 1.48314607 0 4.3258427zM4.5 12C2.5 12 2.5 15 4.5 15 6.5 15 6.5 12 4.5 12L4.5 12z"></path></g></svg></span></div></div>`
     );
+    const locationListButton = document.createElement('span');
+    locationListButton.tabIndex = 0;
+    locationListButton.className = `${classes.questionMark} ${this.style.locationListButton}`;
+    locationListButton.setAttribute('role', 'button');
+    locationListButton.setAttribute('aria-label', 'Manage location lists');
+    locationListButton.title = 'Manage location lists';
+    locationListButton.innerHTML = '<svg name="LocationLists" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M4 4h16v3H4zM4 10h10v3H4zM4 16h16v3H4zM17 9l5 5-5 5-1.4-1.4 2.6-2.6-2.6-2.6z"></path></svg>';
+    locationListButton.addEventListener('click', () => this.showLocationListManagerModal());
+    locationListButton.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      this.showLocationListManagerModal();
+    });
+    const multiInput = textBox.getElementsByClassName(classes.inputMultiInput)[0]
+      || textBox.firstElementChild;
+    multiInput?.appendChild(locationListButton);
     const inputEl = textBox.getElementsByTagName('input')[0];
     inputEl.addEventListener('focusout', e => {
       DOMTokenList.prototype.remove.apply(e.target.parentElement.parentElement.classList, classes.focused);
