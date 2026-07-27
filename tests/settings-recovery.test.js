@@ -32,6 +32,12 @@ const defaults = {
   },
   aggresiveMessageCaching: true,
   forceLegacyMediaFetching: false,
+  liveCacheMaxAgeHours: 0,
+  liveCacheMaxSizeGb: 0,
+  preCacheMaxAgeHours: 24,
+  preCacheMaxSizeGb: 5,
+  mediaCacheTrimIntervalMinutes: 15,
+  showMediaCacheTrimLifecycleToasts: false,
   newCacheAllImages: true
 };
 
@@ -44,6 +50,7 @@ function temporaryDirectory(t) {
 function normalizeRecovered(plugin, settings) {
   plugin.ensureLoggerKeybindSettings(settings, defaults);
   plugin.migrateDisableToastsForLocalSetting(settings);
+  plugin.normalizeMediaCacheTrimSettings(settings);
   plugin.normalizeSettingsAgainstDefaults(settings, defaults);
   plugin.ensureRequiredLegacySettings(settings);
   return settings;
@@ -179,6 +186,41 @@ test('a valid legacy DM local-toast setting migrates without corruption classifi
   assert.equal(settings.toastTogglesDMs.sent, true);
   assert.equal(settings.toastTogglesDMs.edited, false);
   assert.equal(settings.toastTogglesDMs.forkSpecificAlert, 'keep');
+});
+
+test('a valid mixed settings envelope normalizes retention fields without a corruption backup', t => {
+  const pluginDir = temporaryDirectory(t);
+  const plugin = createPlugin({ pluginDir });
+  const configPath = path.join(pluginDir, 'MessageLoggerV2.config.json');
+  const original = JSON.stringify({
+    settings: {
+      liveCacheMaxAgeHours: '',
+      liveCacheMaxSizeGb: 'malformed',
+      preCacheMaxAgeHours: '',
+      preCacheMaxSizeGb: 2,
+      mediaCacheTrimIntervalMinutes: 4,
+      showMediaCacheTrimLifecycleToasts: true,
+      forkSpecificRetentionSetting: { keep: true },
+      flags: 2
+    }
+  });
+  fs.writeFileSync(configPath, original, 'utf8');
+
+  const result = plugin.loadSettingsConfigForStartup(defaults, { fs, path });
+  assert.equal(result.existed, true);
+  assert.equal(result.repaired, false);
+  assert.equal(result.backupPath, null);
+  assert.equal(fs.existsSync(path.join(pluginDir, 'MessageLoggerV2.config.corrupt-backup.json')), false);
+
+  const settings = normalizeRecovered(plugin, result.settings);
+  assert.equal(settings.liveCacheMaxAgeHours, 0);
+  assert.equal(settings.liveCacheMaxSizeGb, 0);
+  assert.equal(settings.preCacheMaxAgeHours, 0);
+  assert.equal(settings.preCacheMaxSizeGb, 2);
+  assert.equal(settings.mediaCacheTrimIntervalMinutes, 15);
+  assert.equal(settings.showMediaCacheTrimLifecycleToasts, true);
+  assert.deepEqual(settings.forkSpecificRetentionSetting, { keep: true });
+  assert.equal(fs.readFileSync(configPath, 'utf8'), original);
 });
 
 test('a trailing comma preserves existing settings and restores only missing defaults', () => {

@@ -199,6 +199,71 @@ test('normalization keeps explicit blank limits unlimited and repairs interval v
   });
 });
 
+test('media trim interval normalization keeps only whole values from 5 through the timer maximum', () => {
+  const plugin = createPlugin();
+  const maxInterval = Math.floor(0x7fffffff / 60000);
+  const cases = [
+    [0, 15],
+    [4, 15],
+    [4.5, 15],
+    ['', 15],
+    [maxInterval + 1, 15],
+    [5, 5]
+  ];
+
+  for (const [raw, expected] of cases) {
+    const settings = {
+      liveCacheMaxAgeHours: 0,
+      liveCacheMaxSizeGb: 0,
+      preCacheMaxAgeHours: 0,
+      preCacheMaxSizeGb: 0,
+      mediaCacheTrimIntervalMinutes: raw
+    };
+    const changed = plugin.normalizeMediaCacheTrimSettings(settings);
+    assert.equal(settings.mediaCacheTrimIntervalMinutes, expected, `interval ${String(raw)}`);
+    assert.equal(changed, raw !== expected, `changed state for interval ${String(raw)}`);
+  }
+});
+
+test('media trim limiter mask keeps each age and size dimension independent', () => {
+  const cases = [
+    {
+      name: 'live age unlimited leaves live size active',
+      settings: { liveCacheMaxAgeHours: 0, liveCacheMaxSizeGb: 1, preCacheMaxAgeHours: 0, preCacheMaxSizeGb: 0 },
+      active: ['liveCacheMaxSizeGb']
+    },
+    {
+      name: 'live size unlimited leaves live age active',
+      settings: { liveCacheMaxAgeHours: 1, liveCacheMaxSizeGb: 0, preCacheMaxAgeHours: 0, preCacheMaxSizeGb: 0 },
+      active: ['liveCacheMaxAgeHours']
+    },
+    {
+      name: 'pre age unlimited leaves pre size active',
+      settings: { liveCacheMaxAgeHours: 0, liveCacheMaxSizeGb: 0, preCacheMaxAgeHours: 0, preCacheMaxSizeGb: 1 },
+      active: ['preCacheMaxSizeGb']
+    },
+    {
+      name: 'pre size unlimited leaves pre age active',
+      settings: { liveCacheMaxAgeHours: 0, liveCacheMaxSizeGb: 0, preCacheMaxAgeHours: 1, preCacheMaxSizeGb: 0 },
+      active: ['preCacheMaxAgeHours']
+    },
+    {
+      name: 'both age limits unlimited leaves both size limits active',
+      settings: { liveCacheMaxAgeHours: 0, liveCacheMaxSizeGb: 1, preCacheMaxAgeHours: 0, preCacheMaxSizeGb: 1 },
+      active: ['liveCacheMaxSizeGb', 'preCacheMaxSizeGb']
+    }
+  ];
+
+  for (const { name, settings, active } of cases) {
+    const plugin = createPlugin({ settings });
+    const expected = active.reduce(
+      (mask, settingId) => mask | plugin._mediaCacheTrimLimitBit(settingId),
+      0
+    );
+    assert.equal(plugin.getMediaCacheTrimLimiterMask(), expected, name);
+  }
+});
+
 test('lifecycle toast setting uses the boolean default-repair path', () => {
   const plugin = createPlugin();
   const settings = { showMediaCacheTrimLifecycleToasts: 'yes' };
@@ -280,6 +345,28 @@ test('live size ordering uses source-message snowflake time before file mtime', 
 
     assert.equal(fs.existsSync(oldPath), false);
     assert.equal(fs.existsSync(newPath), true);
+  });
+});
+
+test('live size ordering falls back to mtime for invalid and missing source IDs', async () => {
+  await withTempRoot(async root => {
+    const now = Date.now();
+    const gb = 1024 ** 3;
+    const mtimeOld = now - 2 * 60 * 60 * 1000;
+    const mtimeNew = now - 60 * 60 * 1000;
+    const oldByMtimePath = path.join(root, 'newest-by-name (not-a-snowflake).bin');
+    const newByMtimePath = path.join(root, 'oldest-by-name.bin');
+    writeSizedFile(oldByMtimePath, Math.floor(gb * 0.6), mtimeOld);
+    writeSizedFile(newByMtimePath, Math.floor(gb * 0.6), mtimeNew);
+    const plugin = createTrimPlugin(root, {
+      settings: { liveCacheMaxSizeGb: 1 }
+    });
+
+    await plugin.runMediaCacheTrimNow();
+    plugin.stopMediaCacheTrimmer();
+
+    assert.equal(fs.existsSync(oldByMtimePath), false);
+    assert.equal(fs.existsSync(newByMtimePath), true);
   });
 });
 
@@ -524,6 +611,43 @@ test('a running pass waits for a still-pending limit debounce before its merged 
     await new Promise(resolve => setTimeout(resolve, 35));
     assert.equal(passes, 2);
     plugin.stopMediaCacheTrimmer();
+  });
+});
+
+test('immediate media trim requests share one pending in-flight pass', async () => {
+  await withTempRoot(async root => {
+    const plugin = createTrimPlugin(root, {
+      settings: { liveCacheMaxAgeHours: 1 }
+    });
+    let passCalls = 0;
+    let resolvePass;
+    const pendingPass = new Promise(resolve => {
+      resolvePass = resolve;
+    });
+    plugin._runMediaCacheTrimPass = async () => {
+      passCalls++;
+      return pendingPass;
+    };
+
+    try {
+      const first = plugin.runMediaCacheTrimNow();
+      const second = plugin.runMediaCacheTrimNow();
+      assert.equal(passCalls, 1);
+      assert.strictEqual(second, first);
+
+      let completed = false;
+      const completion = first.finally(() => {
+        completed = true;
+      });
+      await Promise.resolve();
+      assert.equal(completed, false);
+
+      resolvePass({ files: 0, deleted: 0, errors: [] });
+      await completion;
+      assert.equal(passCalls, 1);
+    } finally {
+      plugin.stopMediaCacheTrimmer();
+    }
   });
 });
 

@@ -21,11 +21,15 @@ function readDefaultSettings() {
 }
 
 test('plugin metadata and updater remain pointed at the maintained main branch', () => {
-  assert.match(source, /@version 2\.8\.2\.9/);
+  assert.match(source, /@version 2\.8\.2\.10/);
   assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
-  assert.match(source, /title: 'Native media networking'[\s\S]*title: 'Download watchdogs and cancellation'[\s\S]*title: 'Media network diagnostics'/);
-  assert.doesNotMatch(source, /title: 'Live display controls'|title: 'Settings reliability and layout'/);
+  const changesBlock = source.match(/  getChanges\(\) \{([\s\S]*?)\n  \}\n  async checkNewUpdate/);
+  assert.ok(changesBlock, 'getChanges block was not found');
+  assert.deepEqual(
+    [...changesBlock[1].matchAll(/title: '([^']+)'/g)].map(([, title]) => title),
+    ['Networking fixes', 'Cached media clipboard', 'Pre-cache and trimmer hardening']
+  );
 });
 
 test('all fresh-install settings defaults remain stable', () => {
@@ -346,20 +350,14 @@ test('the BdApi notification setting omits the outdated basic qualifier', () => 
   assert.doesNotMatch(source, /BdApi basic notifications/i);
 });
 
-test('the current changelog covers the networking and cached-media clipboard release', () => {
-  assert.match(source, /Persistent media caching now uses BetterDiscord native networking by default/);
-  assert.match(source, /Forced legacy mode and automatic fallback remain available/);
-  assert.match(source, /Update checks and local or remote image-copy networking remain unchanged/);
-  assert.match(source, /rolling 30-second body-idle watchdog/);
-  assert.match(source, /inherited five-second host socket timeout is disabled/);
-  assert.match(source, /stopping the plugin cancels active downloads immediately without retries or late file writes/);
-  assert.match(source, /request ID, method, full URL, transport, status, bytes, timing, and terminal outcome/);
-  assert.match(source, /Detailed media-request diagnostics never emit toasts or change request behavior/);
-  assert.match(source, /Known limitation: Cache all attachment types remains incomplete for arbitrary non-image files/);
-  assert.match(source, /Restored cached PNG, JPG, and JPEG media can now be copied from both live messages and the Logger viewer through Discord\\'s native image clipboard/);
-  assert.match(source, /Copy actions require the exact physical cached image and stay hidden for ambiguous, missing, placeholder, unsupported, or cache-disabled media/);
-  assert.match(source, /Logger keeps ownership of its restored-media copy action after Discord reloads and alongside other context-menu plugins without changing ordinary live messages/);
-  assert.match(source, /Known limitation: intended to cache videos, audio, and other files, but arbitrary non-image types may stay CDN-backed when On or remain Logger references when Off/);
+test('the current changelog covers networking, cached-media clipboard, and pre-cache/trimmer hardening', () => {
+  assert.match(source, /BetterDiscord native networking with guarded legacy routing and automatic fallback/);
+  assert.match(source, /rolling no-data watchdog, disable the inherited socket timeout, and cancel promptly when caching is turned off or the plugin stops/);
+  assert.match(source, /media request diagnostics report IDs, transport, status, bytes, timing, and outcomes to the console only/);
+  assert.match(source, /Copy exact cached PNG\/JPEG files from both live messages and Logger surfaces through Discord\\'s native image clipboard/);
+  assert.match(source, /actions stay hidden when the physical cached file is missing, ambiguous, unsupported, a placeholder, or caching is disabled/);
+  assert.match(source, /per-message `_PreCache` folder; confirmation promotes matching files and write-time checks self-heal missing cache folders/);
+  assert.match(source, /snowflake-aware message time with file mtime fallback; cooperative sliced trimming, a verification scan, and safe cleanup\/logging/);
 });
 
 test('settings documentation retains audited group order and current UI labels', () => {
@@ -1708,6 +1706,21 @@ test('media routing converges through cacheImage and cacheMessageImages across e
   assert.match(updatePayloadSlice, /this\.cacheMessageImages\(current, \{[\s\S]*cacheState:[\s\S]*?\}\);/);
   assert.match(dispatchSlice, /this\.cacheMessageImages\(dispatch\.message, \{[\s\S]*cacheState: 'precache'[\s\S]*\}\);/);
   assert.match(antiNukeSlice, /this\.cacheMessageImages\(cacheMessage, \{[\s\S]*cacheState: 'precache'[\s\S]*\}\);/);
+});
+
+test('media trimmer debounce and cached-file deletion aggregation keep their distinct delays', () => {
+  assert.match(source, /const MEDIA_CACHE_TRIM_DEBOUNCE_MS = 20 \* 1000;/);
+  const toastMethodStart = source.indexOf('  queueCachedFilesDeletedToast(labels) {');
+  const toastMethodEnd = source.indexOf('  showDeletedCachedFilesModal(names) {', toastMethodStart);
+  assert.ok(toastMethodStart >= 0, 'cached-file deletion toast method was not found');
+  assert.ok(toastMethodEnd > toastMethodStart, 'cached-file deletion toast method boundary was not found');
+  const toastMethod = source.slice(toastMethodStart, toastMethodEnd);
+  const aggregationTimeout = toastMethod.match(
+    /this\.cachedFileDeletionToastTimeout\s*=\s*setTimeout\(\(\) => \{([\s\S]*?)\},\s*(\d+)\);/
+  );
+  assert.ok(aggregationTimeout, 'cached-file deletion aggregation timeout was not found');
+  assert.equal(Number(aggregationTimeout[2]), 150);
+  assert.match(aggregationTimeout[1], /this\.notifyUser\([\s\S]*?timeout:\s*10000/);
 });
 
 test('renderer fetch remains confined to fetchMediaNetworkResponse and clipboard stays filesystem-only', () => {

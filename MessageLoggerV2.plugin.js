@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.9
+ * @version 2.8.2.10
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -645,39 +645,27 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Native media networking',
+        title: 'Networking fixes',
         type: 'fixed',
         items: [
-          'Persistent media caching now uses BetterDiscord native networking by default, allowing cross-origin and mixed-content downloads that Discord renderer fetch can block.',
-          'Forced legacy mode and automatic fallback remain available for missing or synchronously incompatible native networking.',
-          'Update checks and local or remote image-copy networking remain unchanged.'
-        ]
-      },
-      {
-        title: 'Download watchdogs and cancellation',
-        type: 'fixed',
-        items: [
-          'Downloads keep the 15-second initial-response deadline and now use a rolling 30-second body-idle watchdog, so slow transfers continue while bytes arrive.',
-          'The inherited five-second host socket timeout is disabled for media-cache requests.',
-          'Turning Cache media locally off or stopping the plugin cancels active downloads immediately without retries or late file writes.'
-        ]
-      },
-      {
-        title: 'Media network diagnostics',
-        type: 'improved',
-        items: [
-          'An opt-in child of Enable debug logging reports each media request ID, method, full URL, transport, status, bytes, timing, and terminal outcome to the console only.',
-          'Detailed media-request diagnostics never emit toasts or change request behavior.',
-          'Known limitation: Cache all attachment types remains incomplete for arbitrary non-image files.'
+          'Persistent media downloads use BetterDiscord native networking with guarded legacy routing and automatic fallback when native transport is unavailable or incompatible.',
+          'Media requests keep the initial-response deadline with a rolling no-data watchdog, disable the inherited socket timeout, and cancel promptly when caching is turned off or the plugin stops.',
+          'Opt-in media request diagnostics report IDs, transport, status, bytes, timing, and outcomes to the console only.'
         ]
       },
       {
         title: 'Cached media clipboard',
         type: 'fixed',
         items: [
-          'Restored cached PNG, JPG, and JPEG media can now be copied from both live messages and the Logger viewer through Discord\'s native image clipboard.',
-          'Copy actions require the exact physical cached image and stay hidden for ambiguous, missing, placeholder, unsupported, or cache-disabled media.',
-          'Logger keeps ownership of its restored-media copy action after Discord reloads and alongside other context-menu plugins without changing ordinary live messages.'
+          'Copy exact cached PNG/JPEG files from both live messages and Logger surfaces through Discord\'s native image clipboard; actions stay hidden when the physical cached file is missing, ambiguous, unsupported, a placeholder, or caching is disabled.'
+        ]
+      },
+      {
+        title: 'Pre-cache and trimmer hardening',
+        type: 'improved',
+        items: [
+          'Media without a saved record stages in a per-message `_PreCache` folder; confirmation promotes matching files and write-time checks self-heal missing cache folders without a second download.',
+          'Live retention uses snowflake-aware message time with file mtime fallback; cooperative sliced trimming, a verification scan, and safe cleanup/logging keep large caches responsive and bounded.'
         ]
       }
     ];
@@ -7967,6 +7955,7 @@ module.exports = class MessageLoggerV2 {
     return true;
   }
   runMediaCacheTrimNow(mask = MEDIA_CACHE_TRIM_ALL) {
+    if (this._mediaCacheTrimRunningPromise) return this._mediaCacheTrimRunningPromise;
     this._mediaCacheTrimPendingMask |= mask & MEDIA_CACHE_TRIM_ALL;
     return this._startMediaCacheTrimPass();
   }
