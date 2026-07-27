@@ -75,6 +75,23 @@ test('zero Anti-Nuke caps mean unlimited and disabled capture stays disabled', (
   assert.equal(plugin.claimDeletedChannelThread(context, 'thread'), false);
 });
 
+test('Anti-Nuke preserves the saved attachment cap while disabling its active gate with media caching off', () => {
+  const plugin = createPlugin({
+    settings: {
+      antiNukeEnabled: true,
+      cacheAllImages: false,
+      antiNukeThreadCap: 2,
+      antiNukeMessageCap: 3,
+      antiNukeAttachmentCap: 7
+    },
+    getCachedMessagesForDeletedChannel: () => []
+  });
+  const context = plugin.createDeletedChannelCaptureContext({ id: 'channel', type: 0 }, null);
+  assert.equal(context.attachmentCap, 7);
+  assert.equal(context.attachmentCapActive, false);
+  assert.equal(context.remainingAttachments, Infinity);
+});
+
 test('Anti-Nuke excludes thread-created system and unsupported messages', () => {
   const plugin = createPlugin();
 

@@ -16,7 +16,7 @@ Default shortcuts, configurable under Misc settings:
 - `Ctrl+N`: selected channel.
 - `Ctrl+S`: selected server; unavailable in DMs.
 
-> Logged content and enabled media caches remain local to this device. Review **Cache media locally** and **Disable saving data** before using the plugin.
+> Logged content and enabled media caches remain local to this device. Review **Cache media locally** under **Media settings** and **Disable saving data** under **Misc settings** before using the plugin.
 
 ## 📂 Opening Logs
 

@@ -264,25 +264,50 @@ test('live restored-message settings present the master switch before category c
 });
 
 test('media-cache controls sit together below their master switch', () => {
+  const groupIds = Array.from(
+    source.slice(
+      source.indexOf('const settingsConfig = ['),
+      source.indexOf('const actions = {', source.indexOf('const settingsConfig = ['))
+    ).matchAll(/^\s{8}id: '(ml2-settings-[^']+)'/gm),
+    match => match[1]
+  );
   const miscSettings = source.slice(
     source.indexOf("name: 'Misc settings'"),
+    source.indexOf("name: 'Media settings'")
+  );
+  const mediaSettings = source.slice(
+    source.indexOf("name: 'Media settings'"),
     source.indexOf("name: 'Toast notifications for guilds'")
   );
-  const cacheMasterIndex = miscSettings.indexOf("name: 'Cache media locally'");
-  const nextIndependentIndex = miscSettings.indexOf("name: 'Aggresive message caching");
-
-  assert.ok(cacheMasterIndex >= 0);
-  assert.ok(cacheMasterIndex < nextIndependentIndex);
+  assert.deepEqual(groupIds.slice(0, 5), [
+    'ml2-settings-ignores-overrides',
+    'ml2-settings-display',
+    'ml2-settings-misc',
+    'ml2-settings-media',
+    'ml2-settings-toast-guilds'
+  ]);
   assert.deepEqual(
-    Array.from(miscSettings.slice(cacheMasterIndex, nextIndependentIndex).matchAll(/id: '([^']+)'/g), match => match[1]),
-    ['cacheAllImages', 'addUserIdToSavedMediaFilename', 'newSaveAllFileTypes', 'maxCacheFileSize', 'newCacheAllImagesPath']
+    Array.from(mediaSettings.matchAll(/id: '([^']+)'/g), match => match[1])
+      .filter(id => id !== 'ml2-settings-media'),
+    [
+      'cacheAllImages',
+      'addUserIdToSavedMediaFilename',
+      'newSaveAllFileTypes',
+      'maxCacheFileSize',
+      'newCacheAllImagesPath',
+      'newCacheAllImages',
+      'onlyRenderCachedAttachments',
+      'deleteCachedFilesWithRecords',
+      'forceLegacyMediaFetching'
+    ]
   );
+  assert.equal(miscSettings.match(/id: '(?:cacheAllImages|addUserIdToSavedMediaFilename|newSaveAllFileTypes|maxCacheFileSize|newCacheAllImagesPath|newCacheAllImages|onlyRenderCachedAttachments|deleteCachedFilesWithRecords|forceLegacyMediaFetching)'/), null);
 });
 
 test('global notification controls form one block before logger access controls', () => {
   const miscSettings = source.slice(
     source.indexOf("name: 'Misc settings'"),
-    source.indexOf("name: 'Toast notifications for guilds'")
+    source.indexOf("name: 'Media settings'")
   );
   const notificationModeIndex = miscSettings.indexOf("id: 'useNotificationsInstead'");
   const loggerAccessIndex = miscSettings.indexOf("id: 'showOpenLogsButton'");
@@ -329,6 +354,7 @@ test('settings documentation retains audited group order and current UI labels',
     '## 🚫 Ignores and Overrides',
     '## 🎨 Display Settings',
     '## 🧰 Misc Settings',
+    '## 🎬 Media settings',
     '## 🔔 Toast Notifications',
     '## 🛡️ Anti Nuke',
     '## 📏 Message Caps',
@@ -430,17 +456,13 @@ test('update-note visibility sits directly below automatic updates', () => {
     source.indexOf("id: 'ml2-settings-debug'")
   );
   const automaticUpdatesIndex = advancedSettings.indexOf("id: 'autoUpdate'");
-  const forceLegacyMediaFetchingIndex = advancedSettings.indexOf("id: 'forceLegacyMediaFetching'");
   const contextMenuIndex = advancedSettings.indexOf("id: 'contextmenuSubmenuName'");
 
   assert.ok(automaticUpdatesIndex >= 0);
-  assert.ok(forceLegacyMediaFetchingIndex >= 0);
   assert.ok(automaticUpdatesIndex < contextMenuIndex);
-  assert.ok(forceLegacyMediaFetchingIndex > automaticUpdatesIndex);
-  assert.ok(forceLegacyMediaFetchingIndex < contextMenuIndex);
   assert.deepEqual(
     Array.from(advancedSettings.slice(automaticUpdatesIndex, contextMenuIndex).matchAll(/id: '([^']+)'/g), match => match[1]),
-    ['autoUpdate', 'displayUpdateNotes', 'forceLegacyMediaFetching']
+    ['autoUpdate', 'displayUpdateNotes']
   );
 });
 
@@ -476,6 +498,29 @@ test('settings dependencies match the approved master controls', () => {
   assert.doesNotMatch(settingsConfig, /id: 'ignoreLocalEdits',[\s\S]{0,80}(?:enableWith|disableWith):/);
   assert.doesNotMatch(settingsConfig, /id: 'newCacheAllImagesPath',[\s\S]{0,80}(?:enableWith|disableWith):/);
   assert.doesNotMatch(settingsConfig, /id: 'deletedMessageColor',[\s\S]{0,80}(?:enableWith|disableWith):/);
+});
+
+test('multi-master dependencies disable until every master is enabled and stay local to the plugin', () => {
+  const settingsConfig = source.slice(
+    source.indexOf('const settingsConfig = ['),
+    source.indexOf('const actions = {', source.indexOf('const settingsConfig = ['))
+  );
+  assert.match(
+    settingsConfig,
+    /name: 'Total attachment cap',[\s\S]*createSettingStateLabel\(false\)[\s\S]*createSettingStateLabel\(true\)[\s\S]*id: 'antiNukeAttachmentCap',[\s\S]*enableWithAll: \['antiNukeEnabled', 'cacheAllImages'\],[\s\S]*inlineValidation: true/
+  );
+  const plugin = createPlugin({ settings: { antiNukeEnabled: true, cacheAllImages: false } });
+  const config = {
+    id: 'antiNukeAttachmentCap',
+    enableWith: 'antiNukeEnabled',
+    enableWithAll: ['antiNukeEnabled', 'cacheAllImages']
+  };
+  assert.deepEqual(plugin.getSettingEnableDependencies(config), ['antiNukeEnabled', 'cacheAllImages']);
+  assert.equal(plugin.isSettingDependencyDisabled(config), true);
+  plugin.settings.cacheAllImages = true;
+  assert.equal(plugin.isSettingDependencyDisabled(config), false);
+  const setting = plugin.createSetting({ ...config, type: 'textbox' });
+  assert.equal(Object.prototype.hasOwnProperty.call(setting, 'enableWithAll'), false);
 });
 
 test('linked master notes use bold semantic On and Off labels', () => {
@@ -968,7 +1013,7 @@ test('first-install help matches the current logging-scope onboarding', () => {
   assert.match(source, /Open the <strong>Message Logger<\/strong> submenu/);
   assert.match(source, /Only log whitelist<\/strong> under <strong>Ignores and overrides/);
   assert.match(source, /Always log selected channel<\/strong> and <strong>Always log DMs/);
-  assert.match(source, /Cache media locally<\/strong> and <strong>Disable saving data/);
+  assert.match(source, /Cache media locally<\/strong> under <strong>Media settings<\/strong> and <strong>Disable saving data<\/strong> under <strong>Misc settings/);
   assert.match(source, /<div class="\$\{this\.style\.textIndent\}">\s*<strong>1\.<\/strong>/);
   assert.doesNotMatch(source, /<strong class="\$\{this\.style\.startupHelpTitle\}">First setup:<\/strong>/);
   assert.doesNotMatch(source, /startupHelpIntro|ml2-startup-help-intro/);
@@ -1211,7 +1256,9 @@ test('edit-spam blocking is opt-in and uses a per-author sixty-second cooldown',
 test('settings callbacks have one BetterDiscord owner', () => {
   const createSetting = source.slice(source.indexOf('createSetting(data)'), source.indexOf('normalizeLoggerShortcutKey(key)'));
   assert.match(createSetting, /current\.onChange = value => \{[\s\S]*this\.settings\[current\.id\] = value;[\s\S]*this\.saveSettings\(\)/);
-  assert.match(createSetting, /const \{ id, enableWith, disableWith, \.\.\.settingData \} = current/);
+  assert.match(createSetting, /const \{ id, enableWith, enableWithAll, disableWith, \.\.\.settingData \} = current/);
+  assert.match(createSetting, /enableWithAll/);
+  assert.doesNotMatch(createSetting, /setting\.enableWithAll/);
   assert.match(createSetting, /id: this\.obfuscatedClass\(id\),[\s\S]*\.\.\.settingData/);
   assert.match(createSetting, /setting\.enableWith = this\.obfuscatedClass\(enableWith\)/);
   assert.match(createSetting, /setting\.disableWith = this\.obfuscatedClass\(disableWith\)/);
@@ -1601,7 +1648,7 @@ test('media routing converges through cacheImage and cacheMessageImages across e
     source.indexOf('  getMediaCacheTransportSelection()')
   );
   const imageCacheSlice = source.slice(
-    source.indexOf('  async cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts = 0, writeEpoch = this._mediaCacheWriteEpoch || 0) {'),
+    source.indexOf('  async cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts = 0, writeEpoch = this._mediaCacheWriteEpoch || 0, cacheState = null) {'),
     source.indexOf('  contentTypeToExtension(contentType) {')
   );
   const antiNukeSlice = source.slice(
@@ -1609,7 +1656,7 @@ test('media routing converges through cacheImage and cacheMessageImages across e
     source.indexOf('      if (dispatch.type === \'MESSAGE_CREATE\') cacheSupportedMessageMediaForAntiNuke(dispatch.message);')
   );
   const deferredSlice = source.slice(
-    source.indexOf('  queuePendingMediaCacheRequest(url, attachmentIdx, attachmentId, messageId, channelId, serverId) {'),
+    source.indexOf('  queuePendingMediaCacheRequest(url, attachmentIdx, attachmentId, messageId, channelId, serverId, cacheState = null) {'),
     source.indexOf('  cleanUpStaleDataTempFiles() {')
   );
   const removedSlice = source.slice(
@@ -1631,10 +1678,10 @@ test('media routing converges through cacheImage and cacheMessageImages across e
   assert.match(networkSlice, /nativeFetch\.call\(netApi,\s*url,\s*\{[\s\S]*timeout:\s*0/);
   assert.match(imageCacheSlice, /let response;[\s\S]*response = await this\.fetchMediaCacheResponse\(url\);/);
   assert.match(deferredSlice, /Promise\.resolve\(this\.cacheImage\(/);
-  assert.match(removedSlice, /this\.cacheImage\(url, i, attachmentId, messageId, channelId, guildId\);/);
-  assert.match(updatePayloadSlice, /this\.cacheMessageImages\(current, \{\s*queueWhileNoSave: records\.some\(Boolean\)\s*\|\|\s*!!this\.messageRecord\?\.?\[current\.id\]\s*\}\);/);
-  assert.match(dispatchSlice, /this\.cacheMessageImages\(dispatch\.message, \{\s*queueWhileNoSave: false\s*\}\);/);
-  assert.match(antiNukeSlice, /this\.cacheMessageImages\(cacheMessage, { queueWhileNoSave: false }\);/);
+  assert.match(removedSlice, /this\.cacheImage\([\s\S]*?'confirmed'\s*\);/);
+  assert.match(updatePayloadSlice, /this\.cacheMessageImages\(current, \{[\s\S]*cacheState:[\s\S]*?\}\);/);
+  assert.match(dispatchSlice, /this\.cacheMessageImages\(dispatch\.message, \{[\s\S]*cacheState: 'precache'[\s\S]*\}\);/);
+  assert.match(antiNukeSlice, /this\.cacheMessageImages\(cacheMessage, \{[\s\S]*cacheState: 'precache'[\s\S]*\}\);/);
 });
 
 test('renderer fetch remains confined to fetchMediaNetworkResponse and clipboard stays filesystem-only', () => {

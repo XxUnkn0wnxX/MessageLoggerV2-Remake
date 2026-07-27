@@ -4,7 +4,7 @@ This page documents the controls shown in **BetterDiscord Settings > Plugins > M
 
 ## 🔗 Linked Controls
 
-On current BetterDiscord builds, dependent controls are greyed out while their master is off. Their saved values are retained and become active again when the master is re-enabled; the master does not flip or reset them. Older BetterDiscord builds that do not understand dependency metadata may leave standard child controls usable, but the plugin and saved values continue to work; the plugin-provided **Auto backup interval** and **Edit spam threshold** fields still follow their master.
+On current BetterDiscord builds, dependent controls are greyed out while their master is off. Their saved values are retained and become active again when the master is re-enabled; the master does not flip or reset them. Older BetterDiscord builds that do not understand dependency metadata may leave standard child controls usable, but the plugin and saved values continue to work; the plugin-provided **Auto backup interval**, **Edit spam threshold**, and **Total attachment cap** fields still follow their masters.
 
 | Master switch | Controls unavailable while Off |
 | --- | --- |
@@ -12,11 +12,13 @@ On current BetterDiscord builds, dependent controls are greyed out while their m
 | Display edited messages in chat | Max number of shown edits; Show oldest edit instead of newest if over the shown edits limit |
 | Disable saving data | Disable loading archived data |
 | Auto backup data (won't fully prevent losing data, just prevent total data loss) | Auto backup interval (seconds) |
-| Cache media locally | Add user id to saved media filename; Cache all attachment types; Max cache file size (MB, 0 = no limit) |
+| Cache media locally | Add user id to saved media filename; Cache all attachment types; Max cache file size (MB, 0 = no limit); Total attachment cap when Anti Nuke is On |
 | Block spam edit notifications (if enabled) | Edit spam threshold |
 | Enable Anti Nuke | Show nuke detection toasts; Thread and forum post cap; Total message cap; Total attachment cap |
 
-The deleted-message color, media-cache path, advanced cached-file policies, and self-message/edit ignores remain independent by design.
+The deleted-message color, media-cache path, Media-group cached-file policies, and self-message/edit ignores remain independent by design.
+
+**Total attachment cap** has two masters. It is available only while both **Enable Anti Nuke** and **Cache media locally** are On; turning either master Off preserves the saved cap.
 
 ## 🎯 Logging Scope
 
@@ -84,13 +86,7 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Disable loading archived data | Off | When both this setting and **Disable saving data** are enabled, the saved archive is skipped or hot-unloaded and only temporary session records remain in memory. Every archive-owned row, live mount, tint, modal, and action is removed while session-owned equivalents remain usable. The archive stays unchanged on disk, archival removals and cached-file deletion are unavailable, and reload/disable discards the temporary session. Disabling this child hot-loads the latest archive and combines it with the session in memory without writing. Its saved preference remains visible on the greyed control but has no effect while its parent is disabled. |
 | Auto backup data (won't fully prevent losing data, just prevent total data loss) | Off | Maintains a fallback copy of the logger data. It reduces, but cannot eliminate, data-loss risk. |
 | Auto backup interval (seconds) | 20 | Waits this many seconds after saved data changes before refreshing the backup. Accepts whole numbers from 10 through 86,400; for example, `300` is five minutes. Blank is valid and saves the 20-second default. Other invalid drafts remain unsaved and are marked with a red field border and inline error instead of a toast. Invalid settings or manual config edits reset to 20 at startup. |
-| Cache media locally | On | Master switch for caching attachments, embed images, Components V2 thumbnails/media galleries, and stickers. While **Disable saving data** is on, eligible logger media requests remain in a memory-only queue and no media files are created. The queue drains only after the primary archive save succeeds; disabling media caching or reloading first discards it. A download allows 15 seconds for the initial response, then uses a rolling 30-second no-data watchdog: it may continue longer while non-empty bytes keep arriving. Turning this switch Off or stopping the plugin immediately cancels active media work without a retry or late file write. |
-| Add user id to saved media filename | Off | Includes the author ID in hierarchical cache filenames. |
-| Cache all attachment types | Off | Known limitation in 2.8.2.9: arbitrary non-image files may remain CDN-backed or uncached when On and may still appear as attachment references when Off. Established image, embed, sticker, and visual Components V2 caching remains supported by **Cache media locally**. |
-| Max cache file size (MB, 0 = no limit) | `0` MB | Skips larger attachment files; blank or `0` disables the limit. Embed images and stickers are unaffected. |
-| Media cache path (optional) | Empty | Uses a custom existing directory instead of `MLV2_IMAGE_CACHE`. |
 | Aggresive message caching | On (locked) | Legacy setting retained for compatibility. It must remain enabled on this fork so message history is available for reliable forum and thread restoration. A saved `false` value is reset to `true` at startup. |
-| Use new cached images system | On (locked) | Legacy setting retained for compatibility. The organized server/channel cache layout must remain enabled for reliable forum and thread media restoration. A saved `false` value is reset to `true` at startup. |
 | Use BdApi notifications instead of custom toasts | On | Selects BetterDiscord notifications or plugin custom toasts for every logger alert and system/UI message. Switching it off immediately dismisses the active native notification and clears its memory-only queue. |
 | Always show notifications for selected channel | Off | Allows enabled alerts while viewing the active channel, thread, or parent forum and overrides notification location lists there. |
 | Always show notifications for selected guild | Off | Treats the currently open server as an override for notification location lists. |
@@ -102,6 +98,20 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Toggle selected channel logs keybind | `Ctrl+N` | Resolves the selected channel when pressed. It closes an open logger already filtered to that exact channel; any other logger state or stacked plugin-owned panel closes and reopens with that channel filter. Native media viewers close first; all other Discord panels remain open. Clear the recorder to disable it. |
 | Toggle selected server logs keybind | `Ctrl+S` | Resolves the selected server when pressed and uses its server ID filter. It closes an open logger already filtered to that exact server; any other logger state or stacked plugin-owned panel closes and reopens with that server filter. It does nothing except show a warning in DMs and group DMs; the all-log and selected-channel shortcuts continue working there. Native media viewers close first; all other Discord panels remain open. Clear the recorder to disable it. |
 | Automatically refresh new forum posts | On | Uses Discord's native **New Post(s)** control so cards appear without leaving and reopening the forum. |
+
+## 🎬 Media settings
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| Cache media locally | On | Master switch for caching attachments, embed images, Components V2 thumbnails/media galleries, and stickers. While **Disable saving data** is on, eligible logger media requests remain in a memory-only queue and no media files are created. The queue drains only after the primary archive save succeeds; disabling media caching or reloading first discards it. A download allows 15 seconds for the initial response, then uses a rolling 30-second no-data watchdog: it may continue longer while non-empty bytes keep arriving. Turning this switch Off or stopping the plugin immediately cancels active media work without a retry or late file write. |
+| Add user id to saved media filename | Off | Includes the author ID in hierarchical cache filenames. |
+| Cache all attachment types | Off | Known limitation in 2.8.2.9: arbitrary non-image files may remain CDN-backed or uncached when On and may still appear as attachment references when Off. Established image, embed, sticker, and visual Components V2 caching remains supported by **Cache media locally**. |
+| Max cache file size (MB, 0 = no limit) | `0` MB | Skips larger attachment files; blank or `0` disables the limit. Embed images and stickers are unaffected. |
+| Media cache path (optional) | Empty | Uses a custom existing directory instead of `MLV2_IMAGE_CACHE`. |
+| Use new cached images system | On (locked) | Legacy setting retained for compatibility. The organized server/channel cache layout must remain enabled for reliable forum and thread media restoration. A saved `false` value is reset to `true` at startup. |
+| Only render locally cached attachments | Off | Prevents uncached attachments from rendering through Discord CDN. The saved record shows a filename placeholder instead. Toggling this reevaluates open logger and channel views immediately. |
+| Delete cached files with log records | Off | Permanently deletes related cached attachments, embeds, Components V2 media, and stickers whenever their final log record is removed, including purges and thread/forum cascades. It still runs in ordinary no-save mode, but pauses while **Disable loading archived data** is active because unseen archive records cannot participate in shared-media reference checks. |
+| Force legacy media fetching | Off | Persistent media-cache downloads use BetterDiscord native networking by default. Turn this on to use Discord renderer `fetch()` instead; the renderer route is also selected automatically for the current plugin session when the native fetch API is missing or synchronously incompatible. This media-only selector does not affect update checks or local/remote image-copy requests. |
 
 ### Local files
 
@@ -197,13 +207,14 @@ Older configs that stored this Guild-only value under DM toast settings are migr
 | Show nuke detection toasts | On | Reports only deleted channels that captured Anti-Nuke records, avoiding empty/uncached false positives. Uses the destructive deleted/purged event color and selected native/custom mode; ordinary logging and alert scope do not suppress it. |
 | Thread and forum post cap | `15` | Limits structural thread/forum-post roots captured per deleted parent channel. Blank or `0` is unlimited. |
 | Total message cap | `45` | One shared allowance for replies across captured threads/forum posts plus ordinary parent-channel messages. Root payloads, including a distinct starter folded into a channel-thread root, do not consume this cap. Blank or `0` is unlimited. |
-| Total attachment cap | `15` | One total shared allowance for Discord file attachments across the deleted channel. A single message can consume the entire cap. Blank or `0` is unlimited. |
+| Total attachment cap | `15` | One total shared allowance for Discord file attachments across the deleted channel while **Cache media locally** is On. A single message can consume the entire cap. While local media caching is Off, no Anti-Nuke attachment bytes are cached, the saved cap is inactive, and attachment metadata remains in the saved record. When active, blank or `0` is unlimited. |
 
 All three caps apply to one parent-channel deletion event:
 
 - Thread/forum roots, then their replies, then ordinary parent-channel messages are captured newest-first.
 - Anti-Nuke channel-thread roots use the same metadata and starter-body schema as ordinary deleted threads; their dedicated Nuked category and marker keep them separate from ordinary bulk deletes.
 - Attachments count only after their message is admitted. Excluded messages never store attachments; roots remain even if their attachments exceed the budget.
+- The attachment cap is inactive while **Cache media locally** is Off; the thread and message caps remain active.
 - Anti Nuke bypasses normal logging scope and unrelated author ignores. Ordinarily ignored bot/app/webhook messages and hidden records are still eligible for Anti-Nuke capture when present in deleted-channel history. Ephemeral messages are always excluded.
 - Hidden Nuked records remain in **Hidden** while Anti Nuke is off. Unhiding one keeps it stored and makes it visible again when Anti Nuke is re-enabled.
 - Blank or `0` is unlimited and can freeze Discord or use substantial disk space on large channels.
@@ -232,10 +243,7 @@ Message-history caching and hierarchical media storage are core behavior with no
 | Obfuscate CSS classes | On | Uses plugin-specific class names to reduce conflicts with themes and plugins. Changing either direction restarts MessageLogger by temporarily disabling and re-enabling it so the class map can be rebuilt. With **Disable saving data** **Off**, the accepted value saves immediately and the existing shutdown path flushes pending archive data before restart. With it **On**, a compact danger confirmation warns that memory-only session activity will be discarded; **Restart Logger** saves and proceeds, while **No** or dismissing the modal leaves the setting unchanged. |
 | Automatic updates | On | Periodically checks the repository for a newer plugin version and offers **Update Now**. Choosing it installs the update and reloads the renderer. |
 | Display update notes | On | Shows the plugin changelog after a version change. |
-| Force legacy media fetching | Off | Persistent media-cache downloads use BetterDiscord native networking by default. Turn this on to use Discord renderer `fetch()` instead; the renderer route is also selected automatically for the current plugin session when the native fetch API is missing or synchronously incompatible. This media-only selector does not affect update checks or local/remote image-copy requests. |
 | Contextmenu submenu name | Empty | Replaces the **Message Logger** label. Empty values use the built-in label. |
-| Only render locally cached attachments | Off | Prevents uncached attachments from rendering through Discord CDN. The saved record shows a filename placeholder instead. Toggling this reevaluates open logger and channel views immediately. |
-| Delete cached files with log records | Off | Permanently deletes related cached attachments, embeds, Components V2 media, and stickers whenever their final log record is removed, including purges and thread/forum cascades. It still runs in ordinary no-save mode, but pauses while **Disable loading archived data** is active because unseen archive records cannot participate in shared-media reference checks. |
 
 ## 🐞 Debug
 

@@ -2175,10 +2175,21 @@ module.exports = class MessageLoggerV2 {
       }
     }
   }
+  getSettingEnableDependencies(config = {}) {
+    const dependencies = [
+      config.enableWith,
+      ...(Array.isArray(config.enableWithAll) ? config.enableWithAll : [])
+    ].filter(settingId => typeof settingId === 'string' && settingId);
+    return [...new Set(dependencies)];
+  }
   isSettingDependencyDisabled(config = {}) {
     let disabled = typeof config.disabled === 'boolean' ? config.disabled : false;
-    if (config.enableWith) disabled = !this.settings?.[config.enableWith];
-    if (config.disableWith) disabled = !!this.settings?.[config.disableWith];
+    if (this.getSettingEnableDependencies(config).some(
+      settingId => !this.settings?.[settingId]
+    )) {
+      disabled = true;
+    }
+    if (config.disableWith && this.settings?.[config.disableWith]) disabled = true;
     return disabled;
   }
   createSettingStateLabel(enabled) {
@@ -2520,7 +2531,7 @@ module.exports = class MessageLoggerV2 {
     // so accepted values save immediately on upstream, this fork, and older builders that
     // ignore dependency metadata. A panel-level callback would either duplicate item changes
     // or miss root non-switch controls depending on the BetterDiscord version.
-    const { id, enableWith, disableWith, ...settingData } = current;
+    const { id, enableWith, enableWithAll, disableWith, ...settingData } = current;
     const setting = {
       id: this.obfuscatedClass(id),
       ...settingData
@@ -3499,7 +3510,10 @@ module.exports = class MessageLoggerV2 {
       const [draft, setDraft] = React.useState(String(plugin.settings[config.id] ?? ''));
       const [, setDependencyRevision] = React.useState(0);
       React.useEffect(() => {
-        const dependencyIds = [...new Set([config.enableWith, config.disableWith].filter(Boolean))];
+        const dependencyIds = [...new Set([
+          ...plugin.getSettingEnableDependencies(config),
+          config.disableWith
+        ].filter(Boolean))];
         const refresh = () => setDependencyRevision(revision => revision + 1);
         const unsubscribers = dependencyIds.map(id => plugin.subscribeSettingDependency(id, refresh));
         return () => unsubscribers.forEach(unsubscribe => unsubscribe());
@@ -4243,56 +4257,6 @@ module.exports = class MessageLoggerV2 {
             action: 'rescheduleBackup'
           },
           {
-            name: 'Cache media locally',
-            note: this.createLinkedSettingNote(
-              'Caches media and enables its three linked controls.',
-              'Disables them; child values stay saved.',
-              ' New downloads pause while ',
-              React.createElement(
-                'span',
-                { style: { color: 'var(--text-warning, var(--status-warning))' } },
-                'Disable saving data'
-              ),
-              ' is ',
-              this.createSettingStateLabel(true),
-              '; eligible logger media stays queued in memory until saving succeeds.'
-            ),
-            id: 'cacheAllImages',
-            type: 'switch',
-            action: 'reportMediaCaching'
-          },
-          {
-            name: "Add user id to saved media filename",
-            id: 'addUserIdToSavedMediaFilename',
-            enableWith: 'cacheAllImages',
-            type: 'switch'
-          },
-          {
-            name: "Cache all attachment types",
-            note: 'Known limitation: intended to cache videos, audio, and other files, but arbitrary non-image types may stay CDN-backed when On or remain Logger references when Off.',
-            id: 'newSaveAllFileTypes',
-            enableWith: 'cacheAllImages',
-            type: 'switch',
-            customValue: true
-          },
-          {
-            name: 'Max cache file size (MB, 0 = no limit)',
-            note: 'Skip larger attachments. Blank or 0 disables the limit.',
-            id: 'maxCacheFileSize',
-            enableWith: 'cacheAllImages',
-            type: 'textbox',
-            validator: 'number',
-            emptyValue: 0,
-            min: 0
-          },
-          {
-            name: 'Media cache path (optional)',
-            note: 'Use an existing folder instead of MLV2_IMAGE_CACHE.',
-            id: 'newCacheAllImagesPath',
-            type: 'textbox',
-            validator: 'cachePath'
-          },
-          {
             name: 'Aggresive message caching (makes sure we have the data of any deleted or edited messages)',
             note: React.createElement(
               'span',
@@ -4306,23 +4270,6 @@ module.exports = class MessageLoggerV2 {
             disabled: true,
             onChange: () => {
               this.settings.aggresiveMessageCaching = true;
-              this.saveSettings();
-            }
-          },
-          {
-            name: 'Use new cached images system',
-            note: React.createElement(
-              'span',
-              null,
-              'Legacy control locked ',
-              this.createSettingStateLabel(true),
-              ' for organized forum and thread media storage.'
-            ),
-            id: 'newCacheAllImages',
-            type: 'switch',
-            disabled: true,
-            onChange: () => {
-              this.settings.newCacheAllImages = true;
               this.saveSettings();
             }
           },
@@ -4416,6 +4363,102 @@ module.exports = class MessageLoggerV2 {
         ]
       },
       {
+        name: 'Media settings',
+        id: 'ml2-settings-media',
+        collapsible: true,
+        shown: false,
+        settings: [
+          {
+            name: 'Cache media locally',
+            note: this.createLinkedSettingNote(
+              'Caches media and enables linked child controls.',
+              'Disables them; child values stay saved.',
+              ' New downloads pause while ',
+              React.createElement(
+                'span',
+                { style: { color: 'var(--text-warning, var(--status-warning))' } },
+                'Disable saving data'
+              ),
+              ' is ',
+              this.createSettingStateLabel(true),
+              '; eligible logger media stays queued in memory until saving succeeds.'
+            ),
+            id: 'cacheAllImages',
+            type: 'switch',
+            action: 'reportMediaCaching'
+          },
+          {
+            name: "Add user id to saved media filename",
+            id: 'addUserIdToSavedMediaFilename',
+            enableWith: 'cacheAllImages',
+            type: 'switch'
+          },
+          {
+            name: "Cache all attachment types",
+            note: 'Known limitation: intended to cache videos, audio, and other files, but arbitrary non-image types may stay CDN-backed when On or remain Logger references when Off.',
+            id: 'newSaveAllFileTypes',
+            enableWith: 'cacheAllImages',
+            type: 'switch',
+            customValue: true
+          },
+          {
+            name: 'Max cache file size (MB, 0 = no limit)',
+            note: 'Skip larger attachments. Blank or 0 disables the limit.',
+            id: 'maxCacheFileSize',
+            enableWith: 'cacheAllImages',
+            type: 'textbox',
+            validator: 'number',
+            emptyValue: 0,
+            min: 0
+          },
+          {
+            name: 'Media cache path (optional)',
+            note: 'Use an existing folder instead of MLV2_IMAGE_CACHE.',
+            id: 'newCacheAllImagesPath',
+            type: 'textbox',
+            validator: 'cachePath'
+          },
+          {
+            name: 'Use new cached images system',
+            note: React.createElement(
+              'span',
+              null,
+              'Legacy control locked ',
+              this.createSettingStateLabel(true),
+              ' for organized forum and thread media storage.'
+            ),
+            id: 'newCacheAllImages',
+            type: 'switch',
+            disabled: true,
+            onChange: () => {
+              this.settings.newCacheAllImages = true;
+              this.saveSettings();
+            }
+          },
+          {
+            name: 'Only render locally cached attachments',
+            note: 'Hide uncached attachments instead of loading them from Discord.',
+            id: 'onlyRenderCachedAttachments',
+            type: 'switch',
+            action: 'refreshAttachmentRendering'
+          },
+          {
+            name: 'Delete cached files with log records',
+            note: 'Also delete cached media with log records. This cannot be undone.',
+            id: 'deleteCachedFilesWithRecords',
+            type: 'switch',
+            action: 'reportCachedFileDeletion'
+          },
+          {
+            name: 'Force legacy media fetching',
+            note: 'Use Discord renderer networking for persistent media-cache downloads instead of BetterDiscord native networking.',
+            id: 'forceLegacyMediaFetching',
+            type: 'switch',
+            action: 'reportForceLegacyMediaFetching'
+          }
+        ]
+      },
+      {
         name: 'Toast notifications for guilds',
         id: 'ml2-settings-toast-guilds',
         collapsible: true,
@@ -4502,14 +4545,20 @@ module.exports = class MessageLoggerV2 {
             note: React.createElement(
               'span',
               { style: { color: 'var(--status-warning)' } },
-              'Shared newest-first attachment cap. Blank or 0 is unlimited and may use substantial disk space.'
+              'Shared newest-first attachment cap. Cache media locally governs this cap and all Anti-Nuke attachment caching: while local media caching is ',
+              this.createSettingStateLabel(false),
+              ', no attachment bytes are cached and the saved cap has no effect. When both masters are ',
+              this.createSettingStateLabel(true),
+              ', blank or 0 is unlimited and may use substantial disk space.'
             ),
             id: 'antiNukeAttachmentCap',
             enableWith: 'antiNukeEnabled',
+            enableWithAll: ['antiNukeEnabled', 'cacheAllImages'],
             type: 'textbox',
             validator: 'number',
             min: 0,
-            emptyValue: 0
+            emptyValue: 0,
+            inlineValidation: true
           }
         ]
       },
@@ -4578,32 +4627,11 @@ module.exports = class MessageLoggerV2 {
           },
           { name: 'Display update notes', id: 'displayUpdateNotes', type: 'switch' },
           {
-            name: 'Force legacy media fetching',
-            note: 'Use Discord renderer networking for persistent media-cache downloads instead of BetterDiscord native networking.',
-            id: 'forceLegacyMediaFetching',
-            type: 'switch',
-            action: 'reportForceLegacyMediaFetching'
-          },
-          {
             name: 'Contextmenu submenu name',
             note: 'Custom label for the Message Logger submenu.',
             id: 'contextmenuSubmenuName',
             type: 'textbox'
           },
-          {
-            name: 'Only render locally cached attachments',
-            note: 'Hide uncached attachments instead of loading them from Discord.',
-            id: 'onlyRenderCachedAttachments',
-            type: 'switch',
-            action: 'refreshAttachmentRendering'
-          },
-          {
-            name: 'Delete cached files with log records',
-            note: 'Also delete cached media with log records. This cannot be undone.',
-            id: 'deleteCachedFilesWithRecords',
-            type: 'switch',
-            action: 'reportCachedFileDeletion'
-          }
         ]
       },
       {
@@ -7564,7 +7592,7 @@ module.exports = class MessageLoggerV2 {
       }
     );
   }
-  queuePendingMediaCacheRequest(url, attachmentIdx, attachmentId, messageId, channelId, serverId) {
+  queuePendingMediaCacheRequest(url, attachmentIdx, attachmentId, messageId, channelId, serverId, cacheState = null) {
     if (!this.settings?.cacheAllImages || !url || !messageId) return false;
     const request = {
       url: String(url),
@@ -7572,7 +7600,10 @@ module.exports = class MessageLoggerV2 {
       attachmentId,
       messageId: String(messageId),
       channelId,
-      serverId
+      serverId,
+      cacheState: cacheState === 'confirmed' || cacheState === 'precache'
+        ? cacheState
+        : (this.messageRecord?.[messageId] ? 'confirmed' : 'precache')
     };
     const key = this.getMediaCacheRequestKey(request);
     (this._pendingMediaCacheRequests ||= new Map()).set(key, request);
@@ -7599,7 +7630,8 @@ module.exports = class MessageLoggerV2 {
         request.channelId,
         request.serverId,
         0,
-        writeEpoch
+        writeEpoch,
+        request.cacheState
       )).catch(error => {
         Logger.error(`Deferred media cache request failed for ${request.attachmentId}:`, error);
       }).finally(() => {
@@ -8202,7 +8234,10 @@ module.exports = class MessageLoggerV2 {
     const hasNewMedia = Array.from(this.getMessageMediaCacheKeys(current)).some(key => !previousMediaKeys.has(key));
     if (hasNewMedia && this.settings.cacheAllImages && !options.skipMediaCache) {
       this.cacheMessageImages(current, {
-        queueWhileNoSave: records.some(Boolean) || !!this.messageRecord?.[current.id]
+        queueWhileNoSave: records.some(Boolean) || !!this.messageRecord?.[current.id],
+        cacheState: records.some(Boolean) || !!this.messageRecord?.[current.id]
+          ? 'confirmed'
+          : 'precache'
       });
     }
     return current;
@@ -8990,7 +9025,17 @@ module.exports = class MessageLoggerV2 {
       if (!attachmentId || !url || logged.includes(attachmentId)) continue;
       content += "`Attachment Deleted: `" + url + "\n";
       if (this.settings.cacheAllImages) {
-        this.cacheImage(url, i, attachmentId, messageId, channelId, guildId);
+        this.cacheImage(
+          url,
+          i,
+          attachmentId,
+          messageId,
+          channelId,
+          guildId,
+          0,
+          this._mediaCacheWriteEpoch || 0,
+          'confirmed'
+        );
       }
       logged.push(attachmentId);
     }
@@ -10690,6 +10735,7 @@ module.exports = class MessageLoggerV2 {
     const threadCap = Number.isInteger(configuredThreadCap) && configuredThreadCap >= 0 ? configuredThreadCap : 15;
     const messageCap = Number.isInteger(configuredMessageCap) && configuredMessageCap >= 0 ? configuredMessageCap : 45;
     const attachmentCap = Number.isInteger(configuredAttachmentCap) && configuredAttachmentCap >= 0 ? configuredAttachmentCap : 15;
+    const attachmentCapActive = this.settings.cacheAllImages !== false;
     const parentMessages = this.getCachedMessagesForDeletedChannel(channel.id);
     const parentLocation = {
       guildId: channel.guild_id || guild?.id || null,
@@ -10719,9 +10765,10 @@ module.exports = class MessageLoggerV2 {
       threadCap,
       messageCap,
       attachmentCap,
+      attachmentCapActive,
       remainingThreads: threadCap === 0 ? Infinity : threadCap,
       remainingMessages: messageCap === 0 ? Infinity : messageCap,
-      remainingAttachments: attachmentCap === 0 ? Infinity : attachmentCap,
+      remainingAttachments: !attachmentCapActive || attachmentCap === 0 ? Infinity : attachmentCap,
       captured: 0,
       capturedThreads: 0,
       capturedMessages: 0,
@@ -11614,7 +11661,7 @@ module.exports = class MessageLoggerV2 {
            </div></br>
            To log all eligible unmuted servers and channels, disable <strong>Only log whitelist</strong> under <strong>Ignores and overrides</strong>.</br>
            <strong>Always log selected channel</strong> and <strong>Always log DMs</strong> are enabled by default and can override the normal whitelist, blacklist, mute, and NSFW scope rules for their targets.</br>
-           Logged message content and any enabled media cache remain local to this device. Review <strong>Cache media locally</strong> and <strong>Disable saving data</strong> under Misc settings if needed.
+           Logged message content and any enabled media cache remain local to this device. Review <strong>Cache media locally</strong> under <strong>Media settings</strong> and <strong>Disable saving data</strong> under <strong>Misc settings</strong> if needed.
          </div>`
       : '';
     // The generic help greeting is useful when the modal is opened manually, but it adds
@@ -12112,7 +12159,9 @@ module.exports = class MessageLoggerV2 {
       }
       this.fixEmbeds(this.messageRecord[id].message);
     }
-    if (this.settings.cacheAllImages) this.cacheMessageImages(this.messageRecord[id].message);
+    if (this.settings.cacheAllImages) {
+      this.cacheMessageImages(this.messageRecord[id].message, { cacheState: 'confirmed' });
+    }
     this.moveSavedRecordToCategoryIndex(id, targetMessageRecord);
     return true;
   }
@@ -12696,10 +12745,21 @@ module.exports = class MessageLoggerV2 {
     if (typeof this._mediaCacheNativeFetchCompatible === 'boolean') return;
     this._mediaCacheNativeFetchCompatible = this._hasMediaCacheNativeFetch() ? null : false;
   }
-  async cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts = 0, writeEpoch = this._mediaCacheWriteEpoch || 0) {
+  async cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts = 0, writeEpoch = this._mediaCacheWriteEpoch || 0, cacheState = null) {
+    const resolvedCacheState = cacheState === 'confirmed' || cacheState === 'precache'
+      ? cacheState
+      : (this.messageRecord?.[messageId] ? 'confirmed' : 'precache');
     if (this.settings?.dontSaveData) {
       if (writeEpoch === (this._mediaCacheWriteEpoch || 0)) {
-        this.queuePendingMediaCacheRequest(url, attachmentIdx, attachmentId, messageId, channelId, serverId);
+        this.queuePendingMediaCacheRequest(
+          url,
+          attachmentIdx,
+          attachmentId,
+          messageId,
+          channelId,
+          serverId,
+          resolvedCacheState
+        );
       }
       return;
     }
@@ -12741,7 +12801,7 @@ module.exports = class MessageLoggerV2 {
           return;
         }
         if (retryDelay) await new Promise(resolve => setTimeout(resolve, retryDelay));
-        return this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts, writeEpoch);
+        return this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts, writeEpoch, resolvedCacheState);
       }
       const arrayBuffer = await response.arrayBuffer();
       if (!this.canCacheMediaLocally(writeEpoch)) return;
@@ -12765,11 +12825,25 @@ module.exports = class MessageLoggerV2 {
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       const fileId = this.getMediaCacheFileId(attachmentId, attachmentIdx, messageId);
       const filePath = this.imageCacheServerSimulator.resolveNewCachePath({ channelId: channelId, serverId: serverId });
-      this.nodeModules.fs.mkdirSync(filePath, { recursive: true });
+      const fs = this.nodeModules.fs;
+      let cacheDirectoryMissing = false;
+      try {
+        if (!fs.statSync(filePath).isDirectory()) {
+          throw new Error(`Media cache path is not a directory: ${filePath}`);
+        }
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+        cacheDirectoryMissing = true;
+      }
+      if (cacheDirectoryMissing) fs.mkdirSync(filePath, { recursive: true });
       const authorId = this.messageRecord[messageId]?.message?.author?.id || this.cachedMessagesMap.get(messageId)?.author?.id;
-      this.nodeModules.fs.writeFileSync(filePath + `/${fileId} (${messageId}${(this.settings.addUserIdToSavedMediaFilename && authorId) ? (" by " + authorId) : ""
-      })${fileExtension}`, finalData, { encoding: null });
-      Logger.log(`Cached image: ${fileId}${fileExtension}`);
+      const fileName = `${fileId} (${messageId}${(this.settings.addUserIdToSavedMediaFilename && authorId) ? (" by " + authorId) : ""})${fileExtension}`;
+      fs.writeFileSync(this.nodeModules.path.join(filePath, fileName), finalData, { encoding: null });
+      if (resolvedCacheState === 'confirmed') {
+        Logger.log(`Cached media for saved record: ${fileName}`);
+      } else if (this.settings.debugLogging) {
+        Logger.log(`Pre-cached media: ${fileName}`);
+      }
     } catch (e) {
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       attempts++;
@@ -12781,7 +12855,7 @@ module.exports = class MessageLoggerV2 {
         return;
       }
       if (retryDelay) await new Promise(resolve => setTimeout(resolve, retryDelay));
-      return this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts, writeEpoch);
+      return this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts, writeEpoch, resolvedCacheState);
     } finally {
       try {
         await (response?.release?.() ?? response?.releaseBody?.() ?? Promise.resolve());
@@ -12846,14 +12920,16 @@ module.exports = class MessageLoggerV2 {
     if (this.settings?.dontSaveData) {
       if (options.queueWhileNoSave === false || !this.settings.cacheAllImages) return;
       processMedia((url, attachmentIdx, attachmentId) => {
-        this.queuePendingMediaCacheRequest(
+        const requestArgs = [
           url,
           attachmentIdx,
           attachmentId,
           message.id,
           message.channel_id,
           message.guild_id
-        );
+        ];
+        if (options.cacheState) requestArgs.push(options.cacheState);
+        this.queuePendingMediaCacheRequest(...requestArgs);
       });
       return;
     }
@@ -12861,7 +12937,7 @@ module.exports = class MessageLoggerV2 {
     setTimeout(() => {
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       processMedia((url, attachmentIdx, attachmentId) => {
-        this.cacheImage(
+        const cacheArgs = [
           url,
           attachmentIdx,
           attachmentId,
@@ -12870,7 +12946,9 @@ module.exports = class MessageLoggerV2 {
           message.guild_id,
           0,
           writeEpoch
-        );
+        ];
+        if (options.cacheState) cacheArgs.push(options.cacheState);
+        this.cacheImage(...cacheArgs);
       });
     }, 0);
   }
@@ -13993,7 +14071,10 @@ module.exports = class MessageLoggerV2 {
           || dispatch.optimistic
           || (cacheMessage.type !== 0 && cacheMessage.type !== 19 && cacheMessage.type !== 20)
         ) return false;
-        this.cacheMessageImages(cacheMessage, { queueWhileNoSave: false });
+        this.cacheMessageImages(cacheMessage, {
+          queueWhileNoSave: false,
+          cacheState: 'precache'
+        });
         preCachedMessageImages = true;
         return true;
       };
@@ -14397,7 +14478,12 @@ module.exports = class MessageLoggerV2 {
         return callDefault(...args);
       } else if (dispatch.type == 'MESSAGE_CREATE' && this.hasSupportedMessagePayload(dispatch.message) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20)) {
         if (this._cacheIncomingMessage(dispatch.message)) return callDefault(...args);
-        if (this.settings.cacheAllImages && !preCachedMessageImages) this.cacheMessageImages(dispatch.message, { queueWhileNoSave: false });
+        if (this.settings.cacheAllImages && !preCachedMessageImages) {
+          this.cacheMessageImages(dispatch.message, {
+            queueWhileNoSave: false,
+            cacheState: 'precache'
+          });
+        }
         this._ensureChannelCached(channel.id);
         if (this._shouldShowToast(channel, guild, 'sent', isLocalUser)) {
           this._notifyEventOnce('sent', 'sent', [dispatch.message.id], channel, guild, dispatch.message.id);

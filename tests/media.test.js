@@ -2562,6 +2562,53 @@ test('external gallery media uses distinct fallback filenames at the final cache
   ]);
 });
 
+test('media cache state logs are scoped and missing cache directories self-heal once', async t => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  global.fetch = async () => successfulMediaResponse();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-state-'));
+  const cacheDir = path.join(root, 'missing-cache');
+  t.after(() => fs.rmSync(root, { force: true, recursive: true }));
+  let mkdirCalls = 0;
+  const fsSpy = {
+    ...fs,
+    mkdirSync(...args) {
+      mkdirCalls++;
+      return fs.mkdirSync(...args);
+    }
+  };
+  const plugin = createMediaCachePlugin(cacheDir, {
+    nodeModules: { fs: fsSpy, path },
+    settings: {
+      cacheAllImages: true,
+      dontSaveData: false,
+      newSaveAllFileTypes: true,
+      maxCacheFileSize: 0,
+      addUserIdToSavedMediaFilename: false,
+      debugLogging: false,
+      imageCacheDir: cacheDir
+    }
+  });
+
+  await plugin.cacheImage('https://cdn.example/precache-off.png', 0, 41, 'precache-off', 'channel', 'guild', 0, 0, 'precache');
+  assert.equal(mkdirCalls, 1);
+  assert.equal(loggerEvents.some(([level, message]) => level === 'log' && String(message).startsWith('Pre-cached media:')), false);
+
+  plugin.settings.debugLogging = true;
+  await plugin.cacheImage('https://cdn.example/precache-on.png', 0, 42, 'precache-on', 'channel', 'guild', 0, 0, 'precache');
+  assert.equal(mkdirCalls, 1, 'an existing cache directory should not be recreated');
+  plugin.settings.debugLogging = false;
+  await plugin.cacheImage('https://cdn.example/confirmed.png', 0, 43, 'confirmed', 'channel', 'guild', 0, 0, 'confirmed');
+  const stateLogs = loggerEvents
+    .filter(([level, message]) => level === 'log' && /^(?:Pre-cached media:|Cached media for saved record:)/.test(String(message)))
+    .map(([, message]) => message);
+  assert.deepEqual(stateLogs, [
+    'Pre-cached media: 42 (precache-on).png',
+    'Cached media for saved record: 43 (confirmed).png'
+  ]);
+  assert.equal(stateLogs.some(message => message.includes(cacheDir)), false);
+});
+
 test('record media IDs cover messages, attachments, stickers, embeds, and later updates', () => {
   const plugin = createPlugin();
   const record = {
