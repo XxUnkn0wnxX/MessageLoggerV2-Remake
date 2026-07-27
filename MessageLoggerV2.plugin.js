@@ -2017,7 +2017,12 @@ module.exports = class MessageLoggerV2 {
                       min-height: 0;
                       overflow-y: auto;
                       overflow-x: hidden;
-                      scrollbar-gutter: stable;
+                      scrollbar-width: none;
+                    }
+                    .${this.style.loggerSettingsScroller}::-webkit-scrollbar {
+                      display: none;
+                      width: 0;
+                      height: 0;
                     }
                     .${this.style.cachedFilesModal} {
                       width: min(560px, calc(100vw - 32px)) !important;

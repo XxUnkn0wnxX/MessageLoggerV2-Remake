@@ -458,4 +458,5 @@ test('source contracts cover both manager launch buttons, four tabs, right-click
   assert.match(source, /Open MessageLogger settings/);
   assert.match(source, /loggerSettingsModalKey/);
   assert.match(source, /className: this\.style\.loggerSettingsModal/);
+  assert.match(source, /loggerSettingsScroller\}::-webkit-scrollbar[\s\S]*?display: none/);
 });
