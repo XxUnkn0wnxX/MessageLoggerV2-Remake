@@ -12,7 +12,7 @@ On current BetterDiscord builds, dependent controls are greyed out while their m
 | Display edited messages in chat | Max number of shown edits; Show oldest edit instead of newest if over the shown edits limit |
 | Disable saving data | Disable loading archived data |
 | Auto backup data (won't fully prevent losing data, just prevent total data loss) | Auto backup interval (seconds) |
-| Cache media locally | Add user id to saved media filename; Cache all attachment types; Max cache file size (MB, 0 = no limit); Total attachment cap when Anti Nuke is On |
+| Cache media locally | Add user id to saved media filename; Cache all attachment types; Max cache file size (MB, 0 = no limit); Live/pre-cache age and GB limits; Shared cache trim timer; Total attachment cap when Anti Nuke is On |
 | Block spam edit notifications (if enabled) | Edit spam threshold |
 | Enable Anti Nuke | Show nuke detection toasts; Thread and forum post cap; Total message cap; Total attachment cap |
 
@@ -107,6 +107,11 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 | Add user id to saved media filename | Off | Includes the author ID in hierarchical cache filenames. |
 | Cache all attachment types | Off | Known limitation in 2.8.2.9: arbitrary non-image files may remain CDN-backed or uncached when On and may still appear as attachment references when Off. Established image, embed, sticker, and visual Components V2 caching remains supported by **Cache media locally**. |
 | Max cache file size (MB, 0 = no limit) | `0` MB | Skips larger attachment files; blank or `0` disables the limit. Embed images and stickers are unaffected. |
+| Live cache maximum age (hours) | `0` | Deletes eligible live-cache files older than this age. Blank or `0` is unlimited. |
+| Live cache maximum size (GB) | `0` | Deletes oldest eligible live-cache files until usage is at or below 95% of the cap. Blank or `0` is unlimited. |
+| Pre-cache maximum age (hours) | `24` | Deletes provisional pre-cache files older than this age. Blank or `0` is unlimited. |
+| Pre-cache maximum size (GB) | `5` | Deletes oldest pre-cache files until usage is at or below 80% of the cap. Blank or `0` is unlimited. |
+| Shared cache trim timer (minutes) | `15` | One shared periodic countdown for enabled limits. Minimum `5`; changing it resets the countdown and never runs a trim immediately. |
 | Media cache path (optional) | Empty | Uses a custom existing directory instead of `MLV2_IMAGE_CACHE`. |
 | Use new cached images system | On (locked) | Legacy setting retained for compatibility. The organized server/channel cache layout must remain enabled for reliable forum and thread media restoration. A saved `false` value is reset to `true` at startup. |
 | Only render locally cached attachments | Off | Prevents uncached attachments from rendering through Discord CDN. The saved record shows a filename placeholder instead. Toggling this reevaluates open logger and channel views immediately. |
@@ -123,7 +128,9 @@ BetterDiscord stores the plugin's data beside the installed plugin:
 - `MLV2_IMAGE_CACHE/`: default attachment cache.
 - `MLV2_IMAGE_CACHE_PreCache/`: provisional per-message media awaiting a saved logger record.
 
-The next eligible write recreates its exact missing main-cache or pre-cache directory. Provisional write messages are visible only with console Debug logging enabled; promotions and confirmed network writes remain normal info messages and show only the filename. This stage deliberately does not scan or prune orphaned pre-cache folders; that cleanup is deferred to the later scheduled-trimmer stage.
+The shared cache trimmer runs only while **Cache media locally** is On. It scans the active live root and its `${root}_PreCache` sibling asynchronously, applies age before size, skips symlinks, preserves both roots, and never deletes a file through the Logger record-deletion path. A limit edit waits for one coalesced 20-second debounce; the periodic timer waits for the full configured interval after startup, completion, or an interval reset.
+
+The next eligible write recreates its exact missing main-cache or pre-cache directory. Provisional write messages are visible only with console Debug logging enabled; promotions and confirmed network writes remain normal info messages and show only the filename. The scheduled trimmer also scans and prunes orphaned pre-cache folders according to the active age and size limits.
 
 ### Config safety
 

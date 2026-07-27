@@ -26,6 +26,19 @@ const MEDIA_CACHE_FETCH_TIMEOUT_MS = 15 * 1000;
 const MEDIA_CACHE_BODY_IDLE_TIMEOUT_MS = 30 * 1000;
 const MEDIA_CACHE_RETRY_DELAY_MS = 1000;
 const MEDIA_CACHE_MAX_ATTEMPTS = 3;
+const DEFAULT_MEDIA_CACHE_TRIM_INTERVAL_MINUTES = 15;
+const MIN_MEDIA_CACHE_TRIM_INTERVAL_MINUTES = 5;
+const MAX_MEDIA_CACHE_TRIM_INTERVAL_MINUTES = Math.floor(0x7fffffff / 60000);
+const MEDIA_CACHE_TRIM_DEBOUNCE_MS = 20 * 1000;
+const MEDIA_CACHE_TRIM_LIVE_AGE = 1 << 0;
+const MEDIA_CACHE_TRIM_LIVE_SIZE = 1 << 1;
+const MEDIA_CACHE_TRIM_PRE_AGE = 1 << 2;
+const MEDIA_CACHE_TRIM_PRE_SIZE = 1 << 3;
+const MEDIA_CACHE_TRIM_ALL = MEDIA_CACHE_TRIM_LIVE_AGE
+  | MEDIA_CACHE_TRIM_LIVE_SIZE
+  | MEDIA_CACHE_TRIM_PRE_AGE
+  | MEDIA_CACHE_TRIM_PRE_SIZE;
+const MEDIA_CACHE_TRIM_GB = 1024 ** 3;
 const MEDIA_CACHE_LEGACY_ROUTING_NOTICE = 'Networking: media routing is using the old Discord renderer fetch() method.';
 const DATA_SAVE_TRANSITION_TIMEOUT_MS = 30 * 1000;
 const DATA_SAVE_MAX_ATTEMPTS = 3;
@@ -313,6 +326,11 @@ module.exports = class MessageLoggerV2 {
     this._mediaCacheAbortControllers = new Set();
     this._mediaCacheNativeFetchCompatible = null;
     this._mediaCacheLegacyRoutingNoticeState = null;
+    this._mediaCacheTrimPeriodicTimeout = 0;
+    this._mediaCacheTrimDebounceTimeout = 0;
+    this._mediaCacheTrimPendingMask = 0;
+    this._mediaCacheTrimRunningPromise = null;
+    this._mediaCacheTrimStopGeneration = 0;
     this._flushMediaCacheAfterNextDataSave = false;
     this._dataSavePrimaryFlushInProgress = false;
     this._dataSavePrimaryFlushGeneration = 0;
@@ -368,6 +386,7 @@ module.exports = class MessageLoggerV2 {
   stop() {
     this._startupGeneration = (this._startupGeneration || 0) + 1;
     this._startupPending = false;
+    this.stopMediaCacheTrimmer?.();
     this.cancelPendingMediaCacheWrites?.();
     this._pendingMediaCacheRequests?.clear?.();
     this._activeDeferredMediaCacheRequests?.clear?.();
@@ -830,6 +849,11 @@ module.exports = class MessageLoggerV2 {
       contextmenuSubmenuName: '',
       imageCacheDir: this.pluginDir + '/MLV2_IMAGE_CACHE',
       maxCacheFileSize: 0,
+      liveCacheMaxAgeHours: 0,
+      liveCacheMaxSizeGb: 0,
+      preCacheMaxAgeHours: 24,
+      preCacheMaxSizeGb: 5,
+      mediaCacheTrimIntervalMinutes: DEFAULT_MEDIA_CACHE_TRIM_INTERVAL_MINUTES,
       onlyRenderCachedAttachments: false,
       deleteCachedFilesWithRecords: false,
       flags: 0,
@@ -915,6 +939,10 @@ module.exports = class MessageLoggerV2 {
     const hadAntiNukeMessageCap = Object.prototype.hasOwnProperty.call(this.settings, 'antiNukeMessageCap');
     const legacyChannelDeleteCaptureCap = this.settings.channelDeleteCaptureCap;
     if (this.migrateDisableToastsForLocalSetting()) settingsChanged = true;
+    // Normalize media-retention fields before the generic number normalizer. An explicitly
+    // blank limit is a valid unlimited value (0), including for pre-cache fields whose
+    // nonzero defaults apply only when the key is missing.
+    if (this.normalizeMediaCacheTrimSettings(this.settings)) settingsChanged = true;
     if (this.normalizeSettingsAgainstDefaults(this.settings, defaultSettings)) settingsChanged = true;
     if (legacyChannelDeleteCaptureCap !== undefined) {
       const parsedLegacyCap = legacyChannelDeleteCaptureCap === null || String(legacyChannelDeleteCaptureCap).trim() === ''
@@ -2097,6 +2125,7 @@ module.exports = class MessageLoggerV2 {
       })
     );
     this.patchContextMenus();
+    this.startMediaCacheTrimmer();
     Logger.log('All patches applied, forcing UI update...');
     setTimeout(() => {
       this.forceUpdateUI();
@@ -3321,6 +3350,56 @@ module.exports = class MessageLoggerV2 {
       strictParseError: result.strictParseError
     };
   }
+  normalizeMediaCacheTrimSettings(settings = this.settings) {
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return false;
+    const limits = [
+      ['liveCacheMaxAgeHours', 0],
+      ['liveCacheMaxSizeGb', 0],
+      ['preCacheMaxAgeHours', 24],
+      ['preCacheMaxSizeGb', 5]
+    ];
+    let changed = false;
+    for (const [id, fallback] of limits) {
+      const hasValue = Object.prototype.hasOwnProperty.call(settings, id);
+      const raw = settings[id];
+      let normalized;
+      if (!hasValue) {
+        normalized = fallback;
+      } else if (raw === undefined) {
+        normalized = fallback;
+      } else if (typeof raw === 'string' && raw.trim() === '') {
+        normalized = 0;
+      } else if (typeof raw === 'number' || typeof raw === 'string') {
+        const parsed = Number(raw);
+        normalized = Number.isFinite(parsed) && Number.isInteger(parsed) && parsed >= 0
+          ? parsed
+          : fallback;
+      } else {
+        normalized = fallback;
+      }
+      if (raw !== normalized) {
+        settings[id] = normalized;
+        changed = true;
+      }
+    }
+    const intervalId = 'mediaCacheTrimIntervalMinutes';
+    const intervalRaw = settings[intervalId];
+    const intervalParsed = intervalRaw === null || intervalRaw === undefined
+      || String(intervalRaw).trim() === ''
+      ? NaN
+      : Number(intervalRaw);
+    const normalizedInterval = Number.isFinite(intervalParsed)
+      && Number.isInteger(intervalParsed)
+      && intervalParsed >= MIN_MEDIA_CACHE_TRIM_INTERVAL_MINUTES
+      && intervalParsed <= MAX_MEDIA_CACHE_TRIM_INTERVAL_MINUTES
+      ? intervalParsed
+      : DEFAULT_MEDIA_CACHE_TRIM_INTERVAL_MINUTES;
+    if (intervalRaw !== normalizedInterval) {
+      settings[intervalId] = normalizedInterval;
+      changed = true;
+    }
+    return changed;
+  }
   normalizeSettingsAgainstDefaults(settings, defaults) {
     // This is the common compatibility boundary for fresh installs, older forks, and
     // hand-edited configs. Unknown top-level settings survive, while every setting owned by
@@ -4414,6 +4493,71 @@ module.exports = class MessageLoggerV2 {
             min: 0
           },
           {
+            name: 'Live cache maximum age (hours)',
+            note: 'Delete regular files older than this age from the live cache. Blank or 0 disables the age limit.',
+            id: 'liveCacheMaxAgeHours',
+            enableWith: 'cacheAllImages',
+            type: 'textbox',
+            validator: 'number',
+            emptyValue: 0,
+            min: 0,
+            resetInvalidTo: 0,
+            inlineValidation: true,
+            action: 'mediaCacheTrimLimitChanged'
+          },
+          {
+            name: 'Live cache maximum size (GB)',
+            note: 'Delete oldest live-cache files until usage is at or below 95% of this cap. Blank or 0 disables the size limit.',
+            id: 'liveCacheMaxSizeGb',
+            enableWith: 'cacheAllImages',
+            type: 'textbox',
+            validator: 'number',
+            emptyValue: 0,
+            min: 0,
+            resetInvalidTo: 0,
+            inlineValidation: true,
+            action: 'mediaCacheTrimLimitChanged'
+          },
+          {
+            name: 'Pre-cache maximum age (hours)',
+            note: 'Delete regular files older than this age from the pre-cache sibling. Blank or 0 disables the age limit.',
+            id: 'preCacheMaxAgeHours',
+            enableWith: 'cacheAllImages',
+            type: 'textbox',
+            validator: 'number',
+            emptyValue: 0,
+            min: 0,
+            resetInvalidTo: 24,
+            inlineValidation: true,
+            action: 'mediaCacheTrimLimitChanged'
+          },
+          {
+            name: 'Pre-cache maximum size (GB)',
+            note: 'Delete oldest pre-cache files until usage is at or below 80% of this cap. Blank or 0 disables the size limit.',
+            id: 'preCacheMaxSizeGb',
+            enableWith: 'cacheAllImages',
+            type: 'textbox',
+            validator: 'number',
+            emptyValue: 0,
+            min: 0,
+            resetInvalidTo: 5,
+            inlineValidation: true,
+            action: 'mediaCacheTrimLimitChanged'
+          },
+          {
+            name: 'Shared cache trim timer (minutes)',
+            note: 'Periodic trim countdown. Changing this value resets the countdown and never runs a trim immediately.',
+            id: 'mediaCacheTrimIntervalMinutes',
+            enableWith: 'cacheAllImages',
+            type: 'textbox',
+            validator: 'number',
+            min: MIN_MEDIA_CACHE_TRIM_INTERVAL_MINUTES,
+            max: MAX_MEDIA_CACHE_TRIM_INTERVAL_MINUTES,
+            resetInvalidTo: DEFAULT_MEDIA_CACHE_TRIM_INTERVAL_MINUTES,
+            inlineValidation: true,
+            action: 'mediaCacheTrimIntervalChanged'
+          },
+          {
             name: 'Media cache path (optional)',
             note: 'Use an existing folder instead of MLV2_IMAGE_CACHE.',
             id: 'newCacheAllImagesPath',
@@ -4712,6 +4856,8 @@ module.exports = class MessageLoggerV2 {
       handleBackup: (val) => this.handleAutoBackupSetting(val),
       reportLoggingScope: (val) => this.reportMajorSettingChange('onlyLogWhitelist', val),
       reportMediaCaching: (val) => this.handleMediaCachingSetting(val),
+      mediaCacheTrimLimitChanged: (val, settingId) => this.handleMediaCacheTrimLimitChange(settingId, val),
+      mediaCacheTrimIntervalChanged: (val) => this.handleMediaCacheTrimIntervalChange(val),
       reportForceLegacyMediaFetching: (val) => this.setMediaCacheFetchTransportPreference(val),
       reportLegacyRoutingDebugLoggingState: (enabled) => this.reportLegacyRoutingOutputStateChange(
         enabled,
@@ -4797,7 +4943,7 @@ module.exports = class MessageLoggerV2 {
           this.handleNumericSettingInput(config, val, parsed => {
             this.settings[config.id] = parsed;
             if (config.action && actions[config.action]) {
-              actions[config.action](parsed);
+              actions[config.action](parsed, config.id, config);
             }
             this.saveSettings();
           });
@@ -7543,6 +7689,429 @@ module.exports = class MessageLoggerV2 {
     }
     return true;
   }
+  getMediaCacheTrimIntervalMinutes() {
+    const parsed = Number(this.settings?.mediaCacheTrimIntervalMinutes);
+    return Number.isInteger(parsed)
+      && parsed >= MIN_MEDIA_CACHE_TRIM_INTERVAL_MINUTES
+      && parsed <= MAX_MEDIA_CACHE_TRIM_INTERVAL_MINUTES
+      ? parsed
+      : DEFAULT_MEDIA_CACHE_TRIM_INTERVAL_MINUTES;
+  }
+  getMediaCacheTrimIntervalMilliseconds() {
+    return this.getMediaCacheTrimIntervalMinutes() * 60 * 1000;
+  }
+  getMediaCacheTrimLimiterMask() {
+    const settings = this.settings || {};
+    let mask = 0;
+    if (Number(settings.liveCacheMaxAgeHours) > 0) mask |= MEDIA_CACHE_TRIM_LIVE_AGE;
+    if (Number(settings.liveCacheMaxSizeGb) > 0) mask |= MEDIA_CACHE_TRIM_LIVE_SIZE;
+    if (Number(settings.preCacheMaxAgeHours) > 0) mask |= MEDIA_CACHE_TRIM_PRE_AGE;
+    if (Number(settings.preCacheMaxSizeGb) > 0) mask |= MEDIA_CACHE_TRIM_PRE_SIZE;
+    return mask;
+  }
+  _mediaCacheTrimDebug(message) {
+    if (this.settings?.debugLogging) Logger.log(`[Debug] ${message}`);
+  }
+  _mediaCacheTrimSafeError(error) {
+    let message = String(error?.message || error || 'Unknown error');
+    let root = null;
+    try { root = this.imageCacheServerSimulator?._getBaseCachePath?.(); } catch {}
+    const paths = [root, root && `${root}_PreCache`, this.settings?.imageCacheDir].filter(Boolean);
+    for (const value of paths) message = message.replaceAll(value, '<cache-root>');
+    return message;
+  }
+  _mediaCacheTrimNotify(message, replaceKey, type = 'info', timeout = 5000) {
+    Logger.log(message);
+    this.notifyUser?.(message, {
+      title: 'Message Logger Media Cache',
+      type,
+      timeout,
+      replaceKey
+    });
+  }
+  _mediaCacheTrimRootLabel(kind) {
+    return kind === 'pre' ? 'Pre-cache' : 'Live cache';
+  }
+  _mediaCacheTrimPhaseLabel(kind, phase) {
+    return `${this._mediaCacheTrimRootLabel(kind)} ${phase === 'age' ? 'age' : 'GB size'} trimmer`;
+  }
+  _mediaCacheTrimLimitBit(settingId) {
+    return {
+      liveCacheMaxAgeHours: MEDIA_CACHE_TRIM_LIVE_AGE,
+      liveCacheMaxSizeGb: MEDIA_CACHE_TRIM_LIVE_SIZE,
+      preCacheMaxAgeHours: MEDIA_CACHE_TRIM_PRE_AGE,
+      preCacheMaxSizeGb: MEDIA_CACHE_TRIM_PRE_SIZE
+    }[settingId] || 0;
+  }
+  _mediaCacheTrimClearPeriodicTimeout() {
+    if (this._mediaCacheTrimPeriodicTimeout) clearTimeout(this._mediaCacheTrimPeriodicTimeout);
+    this._mediaCacheTrimPeriodicTimeout = 0;
+  }
+  _mediaCacheTrimClearDebounceTimeout() {
+    if (this._mediaCacheTrimDebounceTimeout) clearTimeout(this._mediaCacheTrimDebounceTimeout);
+    this._mediaCacheTrimDebounceTimeout = 0;
+  }
+  _scheduleMediaCacheTrimPeriodic() {
+    this._mediaCacheTrimClearPeriodicTimeout();
+    if (this.__started === false || !this.settings?.cacheAllImages) return false;
+    const delay = this.getMediaCacheTrimIntervalMilliseconds();
+    this._mediaCacheTrimPeriodicTimeout = setTimeout(() => {
+      this._mediaCacheTrimPeriodicTimeout = 0;
+      if (this.__started === false || !this.settings?.cacheAllImages) return;
+      this._mediaCacheTrimNotify(
+        'Shared cache trim timer fired.',
+        'media-cache-trim:timer'
+      );
+      this._mediaCacheTrimDebug(`Shared cache trim timer fired after ${delay}ms.`);
+      this._mediaCacheTrimPendingMask |= this.getMediaCacheTrimLimiterMask();
+      this._startMediaCacheTrimPass();
+    }, delay);
+    this._mediaCacheTrimNotify(
+      `Shared cache trim timer scheduled for ${this.getMediaCacheTrimIntervalMinutes()} minutes.`,
+      'media-cache-trim:timer'
+    );
+    this._mediaCacheTrimDebug(`Shared cache trim timer scheduled for ${delay}ms.`);
+    return true;
+  }
+  startMediaCacheTrimmer() {
+    this._mediaCacheTrimClearDebounceTimeout();
+    this._mediaCacheTrimPendingMask = 0;
+    return this._scheduleMediaCacheTrimPeriodic();
+  }
+  stopMediaCacheTrimmer(options = {}) {
+    this._mediaCacheTrimClearPeriodicTimeout();
+    this._mediaCacheTrimClearDebounceTimeout();
+    this._mediaCacheTrimPendingMask = 0;
+    if (!options.preserveRunning) this._mediaCacheTrimStopGeneration++;
+    return true;
+  }
+  _scheduleMediaCacheTrimDebounce() {
+    const wasScheduled = !!this._mediaCacheTrimDebounceTimeout;
+    this._mediaCacheTrimClearDebounceTimeout();
+    const delay = Number.isFinite(Number(this._mediaCacheTrimDebounceMs))
+      ? Math.max(1, Number(this._mediaCacheTrimDebounceMs))
+      : MEDIA_CACHE_TRIM_DEBOUNCE_MS;
+    this._mediaCacheTrimDebounceTimeout = setTimeout(() => {
+      this._mediaCacheTrimDebounceTimeout = 0;
+      this._mediaCacheTrimNotify(
+        'Media cache trim debounce fired.',
+        'media-cache-trim:debounce'
+      );
+      this._mediaCacheTrimDebug(`Media cache trim debounce fired after ${delay}ms.`);
+      if (!this.settings?.cacheAllImages) return;
+      if (this._mediaCacheTrimRunningPromise) {
+        this._mediaCacheTrimDebug('Media cache trim debounce fired while a pass was running; keeping one merged follow-up.');
+        return;
+      }
+      this._startMediaCacheTrimPass();
+    }, delay);
+    this._mediaCacheTrimNotify(
+      `Media cache trim debounce ${wasScheduled ? 'reset' : 'scheduled'} for 20 seconds.`,
+      'media-cache-trim:debounce'
+    );
+    this._mediaCacheTrimDebug(`Media cache trim debounce ${wasScheduled ? 'reset' : 'scheduled'} for ${delay}ms.`);
+  }
+  handleMediaCacheTrimLimitChange(settingId, value) {
+    const bit = this._mediaCacheTrimLimitBit(settingId);
+    if (!bit) return false;
+    this._mediaCacheTrimClearPeriodicTimeout();
+    const enabled = Number(value) > 0;
+    if (enabled) this._mediaCacheTrimPendingMask |= bit;
+    else this._mediaCacheTrimPendingMask &= ~bit;
+    const labels = {
+      liveCacheMaxAgeHours: 'Live cache age',
+      liveCacheMaxSizeGb: 'Live cache GB size',
+      preCacheMaxAgeHours: 'Pre-cache age',
+      preCacheMaxSizeGb: 'Pre-cache GB size'
+    };
+    const label = labels[settingId] || settingId;
+    this._mediaCacheTrimNotify(
+      `${label} limit changed to ${Number(value) || 0}${settingId.includes('Age') ? ' hours' : ' GB'}.`,
+      `media-cache-trim:limit:${settingId}`
+    );
+    this._mediaCacheTrimDebug(`Changed ${settingId} to ${Number(value) || 0}; pending mask is ${this._mediaCacheTrimPendingMask}.`);
+    if (this.settings?.cacheAllImages) this._scheduleMediaCacheTrimDebounce();
+    return true;
+  }
+  handleMediaCacheTrimIntervalChange(value) {
+    this._mediaCacheTrimClearPeriodicTimeout();
+    const minutes = this.getMediaCacheTrimIntervalMinutes();
+    this._mediaCacheTrimNotify(
+      `Shared cache trim timer reset to ${minutes} minutes. This interval change resets the countdown and does not run a trim.`,
+      'media-cache-trim:timer'
+    );
+    this._mediaCacheTrimDebug(`Shared cache trim timer reset to ${minutes} minutes; no trim was started.`);
+    if (this.settings?.cacheAllImages) this._scheduleMediaCacheTrimPeriodic();
+    return true;
+  }
+  runMediaCacheTrimNow(mask = MEDIA_CACHE_TRIM_ALL) {
+    this._mediaCacheTrimPendingMask |= mask & MEDIA_CACHE_TRIM_ALL;
+    return this._startMediaCacheTrimPass();
+  }
+  _mediaCacheTrimIsCancelled(generation) {
+    return generation !== this._mediaCacheTrimStopGeneration;
+  }
+  async _walkMediaCacheTrimRoot(root, options, generation) {
+    const fsPromises = this.nodeModules?.fs?.promises;
+    const path = this.nodeModules?.path;
+    if (!fsPromises?.opendir || !path) throw new Error('Async native filesystem walking is unavailable');
+    const files = [];
+    const directories = [];
+    const visit = async directory => {
+      if (this._mediaCacheTrimIsCancelled(generation)) return;
+      let handle;
+      try {
+        handle = await fsPromises.opendir(directory);
+      } catch (error) {
+        if (this.isMissingMediaCachePathError(error)) return;
+        throw error;
+      }
+      directories.push(directory);
+      try {
+        for await (const entry of handle) {
+          if (this._mediaCacheTrimIsCancelled(generation)) return;
+          const fullPath = path.join(directory, entry.name);
+          let stat;
+          try {
+            stat = await fsPromises.lstat(fullPath);
+          } catch (error) {
+            if (this.isMissingMediaCachePathError(error)) continue;
+            throw error;
+          }
+          if (stat.isSymbolicLink()) continue;
+          if (stat.isDirectory()) {
+            await visit(fullPath);
+            continue;
+          }
+          if (!stat.isFile() || options.restrictMain && !/^.+ \(\d+(?: by [^)]+)?\)(?:\.[^./]+)?$/i.test(entry.name)) continue;
+          files.push({
+            path: fullPath,
+            name: entry.name,
+            size: Number(stat.size) || 0,
+            mtimeMs: Number(stat.mtimeMs) || 0
+          });
+        }
+      } finally {
+        try { await handle.close(); } catch {}
+      }
+    };
+    await visit(root);
+    files.sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
+    return { files, directories };
+  }
+  async _deleteMediaCacheTrimFile(entry, reason, generation) {
+    if (this._mediaCacheTrimIsCancelled(generation)) return { deleted: false, missing: false };
+    try {
+      await this.nodeModules.fs.promises.unlink(entry.path);
+    } catch (error) {
+      if (this.isMissingMediaCachePathError(error)) return { deleted: false, missing: true };
+      throw error;
+    }
+    this._mediaCacheTrimDebug(`Media cache trimmer deleted ${entry.name}; ${reason}.`);
+    return { deleted: true, missing: false };
+  }
+  async _removeEmptyMediaCacheTrimDirectories(root, directories, generation) {
+    const path = this.nodeModules.path;
+    const ordered = directories
+      .filter(directory => directory !== root)
+      .sort((a, b) => {
+        const depth = directory => path.relative(root, directory).split(path.sep).filter(Boolean).length;
+        return depth(b) - depth(a) || b.localeCompare(a);
+      });
+    for (const directory of ordered) {
+      if (this._mediaCacheTrimIsCancelled(generation)) return;
+      try {
+        await this.nodeModules.fs.promises.rmdir(directory);
+      } catch (error) {
+        if (this.isMissingMediaCachePathError(error) || error?.code === 'ENOTEMPTY') continue;
+        throw error;
+      }
+    }
+    // Keep the root itself intact even if it became empty.
+  }
+  async _trimMediaCacheRoot(kind, root, selectedMask, generation, options = {}) {
+    const ageBit = kind === 'pre' ? MEDIA_CACHE_TRIM_PRE_AGE : MEDIA_CACHE_TRIM_LIVE_AGE;
+    const sizeBit = kind === 'pre' ? MEDIA_CACHE_TRIM_PRE_SIZE : MEDIA_CACHE_TRIM_LIVE_SIZE;
+    const ageHours = Number(this.settings?.[kind === 'pre' ? 'preCacheMaxAgeHours' : 'liveCacheMaxAgeHours']) || 0;
+    const sizeGb = Number(this.settings?.[kind === 'pre' ? 'preCacheMaxSizeGb' : 'liveCacheMaxSizeGb']) || 0;
+    const ageSelected = !!(selectedMask & ageBit);
+    const sizeSelected = !!(selectedMask & sizeBit);
+    const ageLabel = this._mediaCacheTrimPhaseLabel(kind, 'age');
+    const sizeLabel = this._mediaCacheTrimPhaseLabel(kind, 'size');
+    const phaseStartedAt = new Map();
+    const phaseDeleted = new Map();
+    const startPhase = (bit, label) => {
+      if (!(selectedMask & bit)) return;
+      phaseStartedAt.set(bit, Date.now());
+      this._mediaCacheTrimNotify(`${label} started.`, `media-cache-trim:${kind}:${label}`);
+    };
+    const endPhase = (bit, label, filesScanned) => {
+      const startedAt = phaseStartedAt.get(bit);
+      if (startedAt === undefined) return;
+      phaseStartedAt.delete(bit);
+      this._mediaCacheTrimNotify(`${label} ended.`, `media-cache-trim:${kind}:${label}`);
+      this._mediaCacheTrimDebug(`${label} scanned ${filesScanned} file(s), deleted ${phaseDeleted.get(bit) || 0} file(s), duration ${Date.now() - startedAt}ms.`);
+    };
+    // Age owns the first phase when selected. If only size is selected it starts before the
+    // shared root scan; when both are selected, size starts only after age ends.
+    if (ageSelected) startPhase(ageBit, ageLabel);
+    else if (sizeSelected) startPhase(sizeBit, sizeLabel);
+    let scan;
+    try {
+      scan = await this._walkMediaCacheTrimRoot(root, options, generation);
+    } catch (error) {
+      endPhase(ageBit, ageLabel, 0);
+      endPhase(sizeBit, sizeLabel, 0);
+      throw error;
+    }
+    const files = scan.files;
+    const now = Date.now();
+    const removed = new Set();
+    let scannedCount = files.length;
+    let totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+    let deleted = 0;
+    let phaseError = null;
+    let cleanupError = null;
+    try {
+      if (ageSelected) {
+        if (ageHours > 0) {
+          const ageMs = ageHours * 60 * 60 * 1000;
+          for (const file of files) {
+            if (this._mediaCacheTrimIsCancelled(generation)) break;
+            const age = now - file.mtimeMs;
+            if (age < ageMs) continue;
+            const ageValue = age / (60 * 60 * 1000);
+            const outcome = await this._deleteMediaCacheTrimFile(file, `age ${ageValue.toFixed(2)}h >= ${ageHours}h`, generation);
+            if (outcome.deleted || outcome.missing) {
+              removed.add(file);
+              totalBytes -= file.size;
+              if (outcome.missing) scannedCount--;
+              if (outcome.deleted) {
+                deleted++;
+                phaseDeleted.set(ageBit, (phaseDeleted.get(ageBit) || 0) + 1);
+              }
+            }
+          }
+        }
+        if (sizeSelected) endPhase(ageBit, ageLabel, scannedCount);
+      }
+      if (sizeSelected && !this._mediaCacheTrimIsCancelled(generation)) {
+        if (!phaseStartedAt.has(sizeBit)) startPhase(sizeBit, sizeLabel);
+        if (sizeGb > 0) {
+          const capBytes = sizeGb * MEDIA_CACHE_TRIM_GB;
+          const targetBytes = capBytes * (kind === 'pre' ? 0.8 : 0.95);
+          if (totalBytes > capBytes) {
+            for (const file of files) {
+              if (this._mediaCacheTrimIsCancelled(generation) || totalBytes <= targetBytes) break;
+              if (removed.has(file)) continue;
+              const fileGb = file.size / MEDIA_CACHE_TRIM_GB;
+              const outcome = await this._deleteMediaCacheTrimFile(file, `size ${fileGb.toFixed(3)}GB over ${sizeGb}GB`, generation);
+              if (outcome.deleted || outcome.missing) {
+                removed.add(file);
+                totalBytes -= file.size;
+                if (outcome.missing) scannedCount--;
+                if (outcome.deleted) {
+                  deleted++;
+                  phaseDeleted.set(sizeBit, (phaseDeleted.get(sizeBit) || 0) + 1);
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      phaseError = error;
+    }
+    try {
+      // Empty descendants are cleaned before the final selected phase ends.
+      await this._removeEmptyMediaCacheTrimDirectories(root, scan.directories, generation);
+    } catch (error) {
+      cleanupError = error;
+    }
+    endPhase(ageBit, ageLabel, scannedCount);
+    endPhase(sizeBit, sizeLabel, scannedCount);
+    if (phaseError) throw phaseError;
+    if (cleanupError) throw cleanupError;
+    return { files: scannedCount, deleted, bytes: totalBytes };
+  }
+  async _runMediaCacheTrimPass(mask, generation) {
+    const root = this.imageCacheServerSimulator?._getBaseCachePath?.();
+    if (!root) return { files: 0, deleted: 0, errors: [] };
+    const preRoot = `${root}_PreCache`;
+    const defaultRoot = this.settings?.imageCacheDir;
+    const selected = mask & this.getMediaCacheTrimLimiterMask();
+    const errors = [];
+    const totals = { files: 0, deleted: 0 };
+    const roots = [
+      { kind: 'pre', root: preRoot, mask: selected & (MEDIA_CACHE_TRIM_PRE_AGE | MEDIA_CACHE_TRIM_PRE_SIZE), restrictMain: false },
+      { kind: 'live', root, mask: selected & (MEDIA_CACHE_TRIM_LIVE_AGE | MEDIA_CACHE_TRIM_LIVE_SIZE), restrictMain: !!defaultRoot && root !== defaultRoot }
+    ];
+    for (const item of roots) {
+      if (!item.mask || this._mediaCacheTrimIsCancelled(generation)) continue;
+      try {
+        const result = await this._trimMediaCacheRoot(item.kind, item.root, item.mask, generation, {
+          restrictMain: item.restrictMain
+        });
+        totals.files += result.files;
+        totals.deleted += result.deleted;
+      } catch (error) {
+        if (this.isMissingMediaCachePathError(error)) continue;
+        errors.push({ root: item.kind, error });
+      }
+    }
+    this._mediaCacheTrimDebug(`Media cache trim pass scanned ${totals.files} file(s), deleted ${totals.deleted} file(s).`);
+    return { ...totals, errors };
+  }
+  _startMediaCacheTrimPass() {
+    if (this._mediaCacheTrimRunningPromise) return this._mediaCacheTrimRunningPromise;
+    if (!this.settings?.cacheAllImages || this.__started === false) return null;
+    const mask = this._mediaCacheTrimPendingMask & this.getMediaCacheTrimLimiterMask();
+    this._mediaCacheTrimPendingMask &= ~mask;
+    if (!mask) {
+      this._scheduleMediaCacheTrimPeriodic();
+      return null;
+    }
+    const generation = this._mediaCacheTrimStopGeneration;
+    this._mediaCacheTrimClearPeriodicTimeout();
+    const operation = this._runMediaCacheTrimPass(mask, generation);
+    this._mediaCacheTrimRunningPromise = operation;
+    operation.then(result => {
+      if (result?.errors?.length) {
+        Logger.error(
+          'Media cache trim pass encountered unexpected errors.',
+          result.errors.map(item => ({ root: item.root, message: this._mediaCacheTrimSafeError(item.error) }))
+        );
+        this.notifyUser?.('Media cache trimming encountered one or more errors. View the console for details.', {
+          title: 'Message Logger Media Cache Error',
+          type: 'error',
+          timeout: 8000,
+          replaceKey: 'media-cache-trim:error'
+        });
+      }
+    }).catch(error => {
+      if (this.isMissingMediaCachePathError(error)) return;
+      Logger.error('Media cache trim pass failed unexpectedly.', this._mediaCacheTrimSafeError(error));
+      this.notifyUser?.('Media cache trimming failed. View the console for details.', {
+        title: 'Message Logger Media Cache Error',
+        type: 'error',
+        timeout: 8000,
+        replaceKey: 'media-cache-trim:error'
+      });
+    }).finally(() => {
+      if (this._mediaCacheTrimRunningPromise !== operation) return;
+      this._mediaCacheTrimRunningPromise = null;
+      if (this._mediaCacheTrimIsCancelled(generation) || !this.settings?.cacheAllImages || this.__started === false) return;
+      if (this._mediaCacheTrimPendingMask) {
+        // A limit edit owns its debounce window. If that timer is still pending, let it fire
+        // instead of starting an early follow-up; a timer that already fired while this pass
+        // was active leaves one merged pending mask for the immediate follow-up below.
+        if (!this._mediaCacheTrimDebounceTimeout) this._startMediaCacheTrimPass();
+      } else if (!this._mediaCacheTrimDebounceTimeout) {
+        this._scheduleMediaCacheTrimPeriodic();
+      }
+    });
+    return operation;
+  }
   cancelPendingMediaCacheWrites() {
     this._mediaCacheWriteEpoch = (this._mediaCacheWriteEpoch || 0) + 1;
     for (const controller of this._mediaCacheAbortControllers || []) {
@@ -7558,11 +8127,15 @@ module.exports = class MessageLoggerV2 {
   }
   handleMediaCachingSetting(enabled) {
     if (!enabled) {
+      this.stopMediaCacheTrimmer?.({ preserveRunning: true });
       this.cancelPendingMediaCacheWrites();
       this._pendingMediaCacheRequests?.clear?.();
       this._activeDeferredMediaCacheRequests?.clear?.();
       this._flushMediaCacheAfterNextDataSave = false;
       this.notifyDataSaveModeTransitionChange();
+    } else {
+      // Enabling the cache starts a full periodic countdown; it never performs a startup trim.
+      this.startMediaCacheTrimmer?.();
     }
     this.reportMajorSettingChange('cacheAllImages', enabled);
   }
@@ -7593,7 +8166,7 @@ module.exports = class MessageLoggerV2 {
   }
   isMissingMediaCachePathError(error) {
     return error?.code === 'ENOENT'
-      || /^ENOENT: no such file or directory(?:,|$)/.test(String(error?.message || ''));
+      || /\bENOENT\b/.test(String(error?.message || ''));
   }
   getMediaCacheInFlightRequest(request, writeEpoch = this._mediaCacheWriteEpoch || 0) {
     for (const key of this.getMediaCacheRequestKeys(request)) {
