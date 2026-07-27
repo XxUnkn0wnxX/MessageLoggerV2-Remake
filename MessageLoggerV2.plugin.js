@@ -677,6 +677,13 @@ module.exports = class MessageLoggerV2 {
           'Media without a saved record uses per-message `_PreCache` staging and promotion; missing cache directories self-heal, and a bounded retry recreates a directory removed during a write.',
           'Live retention uses snowflake-aware message time with mtime fallback; cooperative sliced trimming, one verification scan, and deterministic follow-up passes keep limits responsive without dropping distinct manual requests.'
         ]
+      },
+      {
+        title: 'Location list manager',
+        type: 'improved',
+        items: [
+          'Manage logging and notification whitelist/blacklist locations from Settings or Logger with live server names/icons, grouped clickable channels/threads, and scoped removal.'
+        ]
       }
     ];
   }

@@ -28,7 +28,7 @@ test('plugin metadata and updater remain pointed at the maintained main branch',
   assert.ok(changesBlock, 'getChanges block was not found');
   assert.deepEqual(
     [...changesBlock[1].matchAll(/title: '([^']+)'/g)].map(([, title]) => title),
-    ['Networking fixes', 'Cached media clipboard', 'Pre-cache and trimmer hardening']
+    ['Networking fixes', 'Cached media clipboard', 'Pre-cache and trimmer hardening', 'Location list manager']
   );
 });
 
