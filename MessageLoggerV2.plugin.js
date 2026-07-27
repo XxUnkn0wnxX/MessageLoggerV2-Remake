@@ -307,6 +307,7 @@ module.exports = class MessageLoggerV2 {
     // to write merely because media caching was enabled again before the fetch settled.
     this._mediaCacheWriteEpoch = 0;
     this._mediaCacheRequestSerial = 0;
+    this._mediaCacheInFlightRequests = new Map();
     this._pendingMediaCacheRequests = new Map();
     this._activeDeferredMediaCacheRequests = new Map();
     this._mediaCacheAbortControllers = new Set();
@@ -370,6 +371,7 @@ module.exports = class MessageLoggerV2 {
     this.cancelPendingMediaCacheWrites?.();
     this._pendingMediaCacheRequests?.clear?.();
     this._activeDeferredMediaCacheRequests?.clear?.();
+    this._mediaCacheInFlightRequests?.clear?.();
     this._mediaCacheAbortControllers?.clear?.();
     this._mediaCacheNativeFetchCompatible = null;
     this._mediaCacheLegacyRoutingNoticeState = null;
@@ -7572,6 +7574,133 @@ module.exports = class MessageLoggerV2 {
       String(request.url)
     ]);
   }
+  getMediaCacheSourceMessageIds(messageId) {
+    const ids = new Set();
+    if (messageId !== null && messageId !== undefined && String(messageId)) {
+      ids.add(String(messageId));
+    }
+    const record = this.messageRecord?.[messageId];
+    if (record) {
+      this.getRecordCacheSourceMessageIds(record).forEach(id => ids.add(String(id)));
+    }
+    return ids;
+  }
+  getMediaCacheRequestKeys(request) {
+    return new Set(Array.from(
+      this.getMediaCacheSourceMessageIds(request.messageId),
+      messageId => this.getMediaCacheRequestKey({ ...request, messageId })
+    ));
+  }
+  isMissingMediaCachePathError(error) {
+    return error?.code === 'ENOENT'
+      || /^ENOENT: no such file or directory(?:,|$)/.test(String(error?.message || ''));
+  }
+  getMediaCacheInFlightRequest(request, writeEpoch = this._mediaCacheWriteEpoch || 0) {
+    for (const key of this.getMediaCacheRequestKeys(request)) {
+      const state = this._mediaCacheInFlightRequests?.get?.(key);
+      if (state && state.writeEpoch === writeEpoch) return state;
+    }
+    return null;
+  }
+  getMediaCacheSafeMessageId(messageId) {
+    const safe = String(messageId || 'message').replace(/[^0-9a-z_-]+/gi, '-');
+    return safe || 'message';
+  }
+  ensureMediaCacheDirectory(directory) {
+    const fs = this.nodeModules.fs;
+    try {
+      if (!fs.statSync(directory).isDirectory()) {
+        throw new Error(`Media cache path is not a directory: ${directory}`);
+      }
+    } catch (error) {
+      if (!this.isMissingMediaCachePathError(error)) throw error;
+      fs.mkdirSync(directory, { recursive: true });
+    }
+  }
+  getMediaCachePreCacheDirectory(sourceMessageId) {
+    const activeRoot = this.imageCacheServerSimulator?._getBaseCachePath?.();
+    if (!activeRoot) return null;
+    return this.nodeModules.path.join(
+      `${activeRoot}_PreCache`,
+      this.getMediaCacheSafeMessageId(sourceMessageId)
+    );
+  }
+  removeEmptyMediaCachePreCacheDirectory(directory) {
+    try {
+      if (this.nodeModules.fs.readdirSync(directory).length === 0) {
+        this.nodeModules.fs.rmdirSync(directory);
+      }
+    } catch {}
+  }
+  promotePreCachedMedia(requestState, fileIds, channelId, serverId) {
+    if (!this.canCacheMediaLocally(requestState.writeEpoch)) return false;
+    const fs = this.nodeModules.fs;
+    const path = this.nodeModules.path;
+    const sourceMessageIds = this.getMediaCacheSourceMessageIds(requestState.messageId);
+    const activeRoot = this.imageCacheServerSimulator?._getBaseCachePath?.();
+    if (!activeRoot || !sourceMessageIds.size) return false;
+    const preCacheRoot = `${activeRoot}_PreCache`;
+    for (const sourceMessageId of sourceMessageIds) {
+      if (!this.canCacheMediaLocally(requestState.writeEpoch)) return false;
+      const sourceDirectory = path.join(
+        preCacheRoot,
+        this.getMediaCacheSafeMessageId(sourceMessageId)
+      );
+      let entries;
+      try {
+        entries = fs.readdirSync(sourceDirectory);
+      } catch (error) {
+        if (this.isMissingMediaCachePathError(error)) continue;
+        continue;
+      }
+      const fileName = entries.find(name => {
+        if (typeof name !== 'string') return false;
+        const matchingPrefix = fileIds.some(fileId => name.startsWith(`${fileId} (`));
+        if (!matchingPrefix) return false;
+        try { return fs.statSync(path.join(sourceDirectory, name)).isFile(); } catch { return false; }
+      });
+      if (!fileName) continue;
+      const sourcePath = path.join(sourceDirectory, fileName);
+      let destinationDirectory;
+      try {
+        destinationDirectory = this.imageCacheServerSimulator.resolveNewCachePath({ channelId, serverId });
+      } catch {
+        continue;
+      }
+      const destinationPath = path.join(destinationDirectory, fileName);
+      let destinationExists = false;
+      try {
+        destinationExists = fs.statSync(destinationPath).isFile();
+      } catch (error) {
+        if (!this.isMissingMediaCachePathError(error)) continue;
+      }
+      if (!this.canCacheMediaLocally(requestState.writeEpoch)) return false;
+      if (destinationExists) {
+        try {
+          if (this.canCacheMediaLocally(requestState.writeEpoch)) fs.unlinkSync(sourcePath);
+        } catch {}
+        if (this.canCacheMediaLocally(requestState.writeEpoch)) {
+          this.removeEmptyMediaCachePreCacheDirectory(sourceDirectory);
+        }
+        return true;
+      }
+      try {
+        this.ensureMediaCacheDirectory(destinationDirectory);
+        if (!this.canCacheMediaLocally(requestState.writeEpoch)) return false;
+        fs.renameSync(sourcePath, destinationPath);
+      } catch {
+        continue;
+      }
+      if (this.canCacheMediaLocally(requestState.writeEpoch)) {
+        this.removeEmptyMediaCachePreCacheDirectory(sourceDirectory);
+      }
+      if (this.canCacheMediaLocally(requestState.writeEpoch)) {
+        Logger.log(`Promoted pre-cached media to saved cache: ${fileName}`);
+      }
+      return true;
+    }
+    return false;
+  }
   isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId) {
     return !!this._activeDeferredMediaCacheRequests?.has?.(this.getMediaCacheRequestKey({
       url,
@@ -7622,6 +7751,9 @@ module.exports = class MessageLoggerV2 {
       started++;
       const activeRequest = { request, writeEpoch };
       (this._activeDeferredMediaCacheRequests ||= new Map()).set(key, activeRequest);
+      const cacheState = this.messageRecord?.[request.messageId]
+        ? 'confirmed'
+        : request.cacheState;
       Promise.resolve(this.cacheImage(
         request.url,
         request.attachmentIdx,
@@ -7631,7 +7763,7 @@ module.exports = class MessageLoggerV2 {
         request.serverId,
         0,
         writeEpoch,
-        request.cacheState
+        cacheState
       )).catch(error => {
         Logger.error(`Deferred media cache request failed for ${request.attachmentId}:`, error);
       }).finally(() => {
@@ -12746,9 +12878,61 @@ module.exports = class MessageLoggerV2 {
     this._mediaCacheNativeFetchCompatible = this._hasMediaCacheNativeFetch() ? null : false;
   }
   async cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts = 0, writeEpoch = this._mediaCacheWriteEpoch || 0, cacheState = null) {
-    const resolvedCacheState = cacheState === 'confirmed' || cacheState === 'precache'
-      ? cacheState
-      : (this.messageRecord?.[messageId] ? 'confirmed' : 'precache');
+    let requestState = arguments[9] || null;
+    if (!requestState) {
+      const initialCacheState = cacheState === 'confirmed' || cacheState === 'precache'
+        ? cacheState
+        : (this.messageRecord?.[messageId] ? 'confirmed' : 'precache');
+      const request = {
+        url,
+        attachmentIdx,
+        attachmentId,
+        messageId: String(messageId),
+        channelId,
+        serverId
+      };
+      const existing = this.getMediaCacheInFlightRequest(request, writeEpoch);
+      if (existing) {
+        if (initialCacheState === 'confirmed' || this.messageRecord?.[messageId]) existing.cacheState = 'confirmed';
+        for (const key of this.getMediaCacheRequestKeys(request)) {
+          existing.keys.add(key);
+          this._mediaCacheInFlightRequests.set(key, existing);
+        }
+        return existing.promise;
+      }
+      requestState = {
+        ...request,
+        writeEpoch,
+        cacheState: initialCacheState,
+        keys: this.getMediaCacheRequestKeys(request),
+        promise: null
+      };
+      const operation = this.cacheImage(
+        url,
+        attachmentIdx,
+        attachmentId,
+        messageId,
+        channelId,
+        serverId,
+        attempts,
+        writeEpoch,
+        initialCacheState,
+        requestState
+      );
+      requestState.promise = operation;
+      for (const key of requestState.keys) this._mediaCacheInFlightRequests.set(key, requestState);
+      const cleanup = () => {
+        for (const key of requestState.keys) {
+          if (this._mediaCacheInFlightRequests.get(key) === requestState) {
+            this._mediaCacheInFlightRequests.delete(key);
+          }
+        }
+      };
+      operation.finally(cleanup).catch(() => {});
+      return operation;
+    }
+    if (this.messageRecord?.[messageId]) requestState.cacheState = 'confirmed';
+    const resolvedCacheState = requestState.cacheState === 'confirmed' ? 'confirmed' : 'precache';
     if (this.settings?.dontSaveData) {
       if (writeEpoch === (this._mediaCacheWriteEpoch || 0)) {
         this.queuePendingMediaCacheRequest(
@@ -12764,7 +12948,7 @@ module.exports = class MessageLoggerV2 {
       return;
     }
     if (!this.canCacheMediaLocally(writeEpoch)) return;
-    if (this.cacheDeletionMessageIds.has(messageId)) return;
+    if (this.cacheDeletionMessageIds?.has?.(messageId)) return;
     const configuredAttempts = Number(this._mediaCacheMaxAttempts);
     const maxAttempts = Number.isInteger(configuredAttempts) && configuredAttempts > 0
       ? configuredAttempts
@@ -12773,8 +12957,16 @@ module.exports = class MessageLoggerV2 {
     const retryDelay = Number.isFinite(configuredRetryDelay)
       ? Math.max(0, configuredRetryDelay)
       : MEDIA_CACHE_RETRY_DELAY_MS;
+    if (resolvedCacheState === 'precache' && !this.getMediaCachePreCacheDirectory(messageId)) return;
     let response;
     try {
+      if (resolvedCacheState === 'confirmed') {
+        const sourceMessageIds = this.getMediaCacheSourceMessageIds(messageId);
+        const fileIds = Array.from(sourceMessageIds, sourceId =>
+          this.getMediaCacheFileId(attachmentId, attachmentIdx, sourceId)
+        );
+        if (this.promotePreCachedMedia(requestState, fileIds, channelId, serverId)) return;
+      }
       response = await this.fetchMediaCacheResponse(url);
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       if (!response.ok) {
@@ -12801,10 +12993,13 @@ module.exports = class MessageLoggerV2 {
           return;
         }
         if (retryDelay) await new Promise(resolve => setTimeout(resolve, retryDelay));
-        return this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts, writeEpoch, resolvedCacheState);
+        return this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts, writeEpoch, requestState.cacheState, requestState);
       }
       const arrayBuffer = await response.arrayBuffer();
       if (!this.canCacheMediaLocally(writeEpoch)) return;
+      requestState.cacheState = requestState.cacheState === 'confirmed' || this.messageRecord?.[messageId]
+        ? 'confirmed'
+        : 'precache';
       const finalData = new Uint8Array(arrayBuffer);
       let match = /\.[0-9a-z]+$/i.exec(new URL(url).pathname);
       if (match == null) {
@@ -12821,25 +13016,23 @@ module.exports = class MessageLoggerV2 {
         }
         return;
       }
-      if (this.cacheDeletionMessageIds.has(messageId)) return;
+      if (this.cacheDeletionMessageIds?.has?.(messageId)) return;
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       const fileId = this.getMediaCacheFileId(attachmentId, attachmentIdx, messageId);
-      const filePath = this.imageCacheServerSimulator.resolveNewCachePath({ channelId: channelId, serverId: serverId });
       const fs = this.nodeModules.fs;
-      let cacheDirectoryMissing = false;
-      try {
-        if (!fs.statSync(filePath).isDirectory()) {
-          throw new Error(`Media cache path is not a directory: ${filePath}`);
-        }
-      } catch (error) {
-        if (error?.code !== 'ENOENT') throw error;
-        cacheDirectoryMissing = true;
-      }
-      if (cacheDirectoryMissing) fs.mkdirSync(filePath, { recursive: true });
-      const authorId = this.messageRecord[messageId]?.message?.author?.id || this.cachedMessagesMap.get(messageId)?.author?.id;
+      const path = this.nodeModules.path;
+      const filePath = requestState.cacheState === 'confirmed'
+        ? this.imageCacheServerSimulator.resolveNewCachePath({ channelId, serverId })
+        : this.getMediaCachePreCacheDirectory(messageId);
+      if (!filePath) return;
+      const authorId = this.messageRecord?.[messageId]?.message?.author?.id || this.cachedMessagesMap?.get?.(messageId)?.author?.id;
       const fileName = `${fileId} (${messageId}${(this.settings.addUserIdToSavedMediaFilename && authorId) ? (" by " + authorId) : ""})${fileExtension}`;
-      fs.writeFileSync(this.nodeModules.path.join(filePath, fileName), finalData, { encoding: null });
-      if (resolvedCacheState === 'confirmed') {
+      if (!this.canCacheMediaLocally(writeEpoch)) return;
+      this.ensureMediaCacheDirectory(filePath);
+      if (!this.canCacheMediaLocally(writeEpoch)) return;
+      fs.writeFileSync(path.join(filePath, fileName), finalData, { encoding: null });
+      if (!this.canCacheMediaLocally(writeEpoch)) return;
+      if (requestState.cacheState === 'confirmed') {
         Logger.log(`Cached media for saved record: ${fileName}`);
       } else if (this.settings.debugLogging) {
         Logger.log(`Pre-cached media: ${fileName}`);
@@ -12855,7 +13048,7 @@ module.exports = class MessageLoggerV2 {
         return;
       }
       if (retryDelay) await new Promise(resolve => setTimeout(resolve, retryDelay));
-      return this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts, writeEpoch, resolvedCacheState);
+      return this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts, writeEpoch, requestState.cacheState, requestState);
     } finally {
       try {
         await (response?.release?.() ?? response?.releaseBody?.() ?? Promise.resolve());

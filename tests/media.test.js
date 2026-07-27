@@ -39,6 +39,7 @@ function createMediaCachePlugin(cacheDir, overrides = {}) {
     nodeModules: { fs, path },
     imageCacheServerSimulator: {
       resolveNewCachePath: () => cacheDir,
+      _getBaseCachePath: () => cacheDir,
       cleanUp() {}
     },
     cacheDeletionMessageIds: new Set(),
@@ -2562,7 +2563,7 @@ test('external gallery media uses distinct fallback filenames at the final cache
   ]);
 });
 
-test('media cache state logs are scoped and missing cache directories self-heal once', async t => {
+test('provisional media uses exact pre-cache folders, debug logging, and self-healing', async t => {
   const originalFetch = global.fetch;
   t.after(() => { global.fetch = originalFetch; });
   global.fetch = async () => successfulMediaResponse();
@@ -2572,6 +2573,14 @@ test('media cache state logs are scoped and missing cache directories self-heal 
   let mkdirCalls = 0;
   const fsSpy = {
     ...fs,
+    statSync(target, ...args) {
+      try {
+        return fs.statSync(target, ...args);
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+        throw new Error(`ENOENT: no such file or directory, stat '${target}'`);
+      }
+    },
     mkdirSync(...args) {
       mkdirCalls++;
       return fs.mkdirSync(...args);
@@ -2590,12 +2599,13 @@ test('media cache state logs are scoped and missing cache directories self-heal 
     }
   });
 
-  await plugin.cacheImage('https://cdn.example/precache-off.png', 0, 41, 'precache-off', 'channel', 'guild', 0, 0, 'precache');
+  await plugin.cacheImage('https://cdn.example/precache-off.png', 0, 41, 'precache', 'channel', 'guild', 0, 0, 'precache');
   assert.equal(mkdirCalls, 1);
   assert.equal(loggerEvents.some(([level, message]) => level === 'log' && String(message).startsWith('Pre-cached media:')), false);
+  assert.equal(fs.existsSync(path.join(`${cacheDir}_PreCache`, 'precache', '41 (precache).png')), true);
 
   plugin.settings.debugLogging = true;
-  await plugin.cacheImage('https://cdn.example/precache-on.png', 0, 42, 'precache-on', 'channel', 'guild', 0, 0, 'precache');
+  await plugin.cacheImage('https://cdn.example/precache-on.png', 0, 42, 'precache', 'channel', 'guild', 0, 0, 'precache');
   assert.equal(mkdirCalls, 1, 'an existing cache directory should not be recreated');
   plugin.settings.debugLogging = false;
   await plugin.cacheImage('https://cdn.example/confirmed.png', 0, 43, 'confirmed', 'channel', 'guild', 0, 0, 'confirmed');
@@ -2603,10 +2613,99 @@ test('media cache state logs are scoped and missing cache directories self-heal 
     .filter(([level, message]) => level === 'log' && /^(?:Pre-cached media:|Cached media for saved record:)/.test(String(message)))
     .map(([, message]) => message);
   assert.deepEqual(stateLogs, [
-    'Pre-cached media: 42 (precache-on).png',
+    'Pre-cached media: 42 (precache).png',
     'Cached media for saved record: 43 (confirmed).png'
   ]);
   assert.equal(stateLogs.some(message => message.includes(cacheDir)), false);
+  assert.equal(fs.existsSync(path.join(cacheDir, '43 (confirmed).png')), true);
+});
+
+test('confirmed caching promotes an exact pre-cache file without fetching', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-promote-'));
+  const cacheDir = path.join(root, 'missing-cache');
+  t.after(() => fs.rmSync(root, { force: true, recursive: true }));
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  let fetches = 0;
+  global.fetch = async () => {
+    fetches++;
+    throw new Error('confirmed promotion must not fetch');
+  };
+  const plugin = createMediaCachePlugin(cacheDir, {
+    messageRecord: { confirm: { message: { id: 'confirm', author: { id: 'author' } } } }
+  });
+  const sourceDirectory = path.join(`${cacheDir}_PreCache`, 'confirm');
+  fs.mkdirSync(sourceDirectory, { recursive: true });
+  fs.writeFileSync(path.join(sourceDirectory, '41 (confirm).png'), 'pre-cached');
+
+  await plugin.cacheImage('https://cdn.example/confirm.png', 0, 41, 'confirm', 'channel', 'guild', 0, 0, 'confirmed');
+
+  assert.equal(fetches, 0);
+  assert.equal(fs.existsSync(path.join(cacheDir, '41 (confirm).png')), true);
+  assert.equal(fs.existsSync(path.join(sourceDirectory, '41 (confirm).png')), false);
+  assert.deepEqual(
+    loggerEvents.filter(([level]) => level === 'log').map(([, message]) => message),
+    ['Promoted pre-cached media to saved cache: 41 (confirm).png']
+  );
+});
+
+test('confirmed cache miss fetches into the main cache without creating pre-cache', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-confirmed-miss-'));
+  const cacheDir = path.join(root, 'missing-cache');
+  t.after(() => fs.rmSync(root, { force: true, recursive: true }));
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  let fetches = 0;
+  global.fetch = async () => {
+    fetches++;
+    return successfulMediaResponse();
+  };
+  const plugin = createMediaCachePlugin(cacheDir, {
+    messageRecord: { confirmed: { message: { id: 'confirmed', author: { id: 'author' } } } }
+  });
+
+  await plugin.cacheImage('https://cdn.example/confirmed.png', 0, 43, 'confirmed', 'channel', 'guild', 0, 0, 'confirmed');
+
+  assert.equal(fetches, 1);
+  assert.equal(fs.existsSync(path.join(cacheDir, '43 (confirmed).png')), true);
+  assert.equal(fs.existsSync(`${cacheDir}_PreCache`), false);
+  assert.deepEqual(
+    loggerEvents.filter(([level]) => level === 'log').map(([, message]) => message),
+    ['Cached media for saved record: 43 (confirmed).png']
+  );
+});
+
+test('a confirmed request joins an in-flight provisional fetch and writes once to main cache', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-join-'));
+  const cacheDir = path.join(root, 'missing-cache');
+  t.after(() => fs.rmSync(root, { force: true, recursive: true }));
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  const pendingResponse = defer();
+  let fetches = 0;
+  global.fetch = async () => {
+    fetches++;
+    return pendingResponse.promise;
+  };
+  const plugin = createMediaCachePlugin(cacheDir);
+  const provisional = plugin.cacheImage(
+    'https://cdn.example/join.png', 0, 44, 'join', 'channel', 'guild', 0, 0, 'precache'
+  );
+  await setImmediatePromise();
+  plugin.messageRecord = { join: { message: { id: 'join', author: { id: 'author' } } } };
+  const confirmed = plugin.cacheImage(
+    'https://cdn.example/join.png', 0, 44, 'join', 'channel', 'guild', 0, 0, 'confirmed'
+  );
+  pendingResponse.resolve(successfulMediaResponse());
+  await Promise.all([provisional, confirmed]);
+
+  assert.equal(fetches, 1);
+  assert.equal(fs.existsSync(path.join(cacheDir, '44 (join).png')), true);
+  assert.equal(fs.existsSync(path.join(`${cacheDir}_PreCache`, 'join')), false);
+  assert.deepEqual(
+    loggerEvents.filter(([level]) => level === 'log').map(([, message]) => message),
+    ['Cached media for saved record: 44 (join).png']
+  );
 });
 
 test('record media IDs cover messages, attachments, stickers, embeds, and later updates', () => {

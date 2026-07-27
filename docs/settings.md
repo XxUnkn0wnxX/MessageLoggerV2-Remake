@@ -103,7 +103,7 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Cache media locally | On | Master switch for caching attachments, embed images, Components V2 thumbnails/media galleries, and stickers. While **Disable saving data** is on, eligible logger media requests remain in a memory-only queue and no media files are created. The queue drains only after the primary archive save succeeds; disabling media caching or reloading first discards it. A download allows 15 seconds for the initial response, then uses a rolling 30-second no-data watchdog: it may continue longer while non-empty bytes keep arriving. Turning this switch Off or stopping the plugin immediately cancels active media work without a retry or late file write. |
+| Cache media locally | On | Master switch for caching attachments, embed images, Components V2 thumbnails/media galleries, and stickers. Media without a saved logger record is staged in an exact per-message `_PreCache` folder; confirmation promotes the matching file into the normal cache without downloading it again. While **Disable saving data** is on, eligible logger media requests remain in a memory-only queue and no media files are created. The queue drains only after the primary archive save succeeds; disabling media caching or reloading first discards it. A download allows 15 seconds for the initial response, then uses a rolling 30-second no-data watchdog: it may continue longer while non-empty bytes keep arriving. Turning this switch Off or stopping the plugin immediately cancels active media work without a retry or late file write. |
 | Add user id to saved media filename | Off | Includes the author ID in hierarchical cache filenames. |
 | Cache all attachment types | Off | Known limitation in 2.8.2.9: arbitrary non-image files may remain CDN-backed or uncached when On and may still appear as attachment references when Off. Established image, embed, sticker, and visual Components V2 caching remains supported by **Cache media locally**. |
 | Max cache file size (MB, 0 = no limit) | `0` MB | Skips larger attachment files; blank or `0` disables the limit. Embed images and stickers are unaffected. |
@@ -121,6 +121,9 @@ BetterDiscord stores the plugin's data beside the installed plugin:
 - `MessageLoggerV2Data.config.json`: active logs.
 - `MessageLoggerV2DataBackup.config.json`: optional backup.
 - `MLV2_IMAGE_CACHE/`: default attachment cache.
+- `MLV2_IMAGE_CACHE_PreCache/`: provisional per-message media awaiting a saved logger record.
+
+The next eligible write recreates its exact missing main-cache or pre-cache directory. Provisional write messages are visible only with console Debug logging enabled; promotions and confirmed network writes remain normal info messages and show only the filename. This stage deliberately does not scan or prune orphaned pre-cache folders; that cleanup is deferred to the later scheduled-trimmer stage.
 
 ### Config safety
 
