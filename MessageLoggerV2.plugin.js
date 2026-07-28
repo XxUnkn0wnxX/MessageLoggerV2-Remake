@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.12
+ * @version 2.8.2.13
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -655,34 +655,10 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Networking fixes',
-        type: 'fixed',
-        items: [
-          'Persistent media downloads use BetterDiscord native networking with guarded legacy routing and automatic fallback when native transport is unavailable or incompatible.',
-          'Media requests keep the initial-response deadline with a rolling no-data watchdog, disable the inherited socket timeout, and cancel promptly when caching is turned off or the plugin stops.',
-          'Opt-in media request diagnostics report IDs, transport, status, bytes, timing, and outcomes to the console only.'
-        ]
-      },
-      {
-        title: 'Cached media clipboard',
-        type: 'fixed',
-        items: [
-          'Copy exact cached PNG/JPEG files from both live messages and Logger surfaces through Discord\'s native image clipboard; actions stay hidden when the physical cached file is missing, ambiguous, unsupported, a placeholder, or caching is disabled.'
-        ]
-      },
-      {
-        title: 'Pre-cache and trimmer hardening',
+        title: 'Trimmer lifecycle toasts',
         type: 'improved',
         items: [
-          'Media without a saved record uses per-message `_PreCache` staging and promotion; missing cache directories self-heal, and a bounded retry recreates a directory removed during a write.',
-          'Live retention uses snowflake-aware message time with mtime fallback; cooperative sliced trimming, one verification scan, and deterministic follow-up passes keep limits responsive without dropping distinct manual requests.'
-        ]
-      },
-      {
-        title: 'Location list manager',
-        type: 'improved',
-        items: [
-          'Manage logging and notification whitelist/blacklist locations from Settings or Logger with live server names/icons, grouped clickable channels/threads, and scoped removal.'
+          'When both age and GB limits are enabled for one cache root, the age + GB size phases use one combined start toast and one combined end toast; a single enabled limit keeps its individual phase start/end toasts, blank or 0 remains unlimited and silent, and individual age/GB phase lines remain visible in the console.'
         ]
       }
     ];
@@ -4821,7 +4797,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Show trimmer start/end toasts',
-            note: 'Show normal start/end toasts for age and GB-size trim phases. Also shows a replaceable warning after an actual age or GB-size limit change if the first catch-up trim may briefly make Discord unresponsive. Console lifecycle messages remain visible when this is Off.',
+            note: 'Show normal start/end toasts for age and GB-size phases. When both age and GB limits are enabled for one root, show one combined phase start/end pair; individual age/GB console phase lines remain visible. Also shows a replaceable warning after an actual age or GB-size limit change if the first catch-up trim may briefly make Discord unresponsive. Console lifecycle phase lines remain visible when this is Off.',
             id: 'showMediaCacheTrimLifecycleToasts',
             enableWith: 'cacheAllImages',
             type: 'switch'
@@ -8022,7 +7998,7 @@ module.exports = class MessageLoggerV2 {
     return kind === 'pre' ? 'Pre-cache' : 'Live cache';
   }
   _mediaCacheTrimPhaseLabel(kind, phase) {
-    return `${this._mediaCacheTrimRootLabel(kind)} ${phase === 'age' ? 'age' : 'GB size'} trimmer`;
+    return `${this._mediaCacheTrimRootLabel(kind)} ${phase === 'age' ? 'age' : 'GB size'} phase`;
   }
   _mediaCacheTrimLimitBit(settingId) {
     return {
@@ -8099,7 +8075,7 @@ module.exports = class MessageLoggerV2 {
     this._mediaCacheTrimDebounceTimeout = setTimeout(() => {
       this._mediaCacheTrimDebounceTimeout = 0;
       this._mediaCacheTrimNotify(
-        'Media cache trim debounce fired.',
+        'Cache limit delay ended. Starting trim.',
         'media-cache-trim:debounce'
       );
       this._mediaCacheTrimDebug(`Media cache trim debounce fired after ${delay}ms.`);
@@ -8111,7 +8087,9 @@ module.exports = class MessageLoggerV2 {
       this._startMediaCacheTrimPass();
     }, delay);
     this._mediaCacheTrimNotify(
-      `Media cache trim debounce ${wasScheduled ? 'reset' : 'scheduled'} for 20 seconds.`,
+      wasScheduled
+        ? 'Cache limit trim rescheduled in 20 seconds.'
+        : 'Cache limit trim scheduled in 20 seconds.',
       'media-cache-trim:debounce'
     );
     this._mediaCacheTrimDebug(`Media cache trim debounce ${wasScheduled ? 'reset' : 'scheduled'} for ${delay}ms.`);
@@ -8357,8 +8335,21 @@ module.exports = class MessageLoggerV2 {
     const useMessageTimestamp = options.useMessageTimestamp ?? kind === 'live';
     const ageLabel = this._mediaCacheTrimPhaseLabel(kind, 'age');
     const sizeLabel = this._mediaCacheTrimPhaseLabel(kind, 'size');
+    const lifecycleToastsEnabled = this.settings?.showMediaCacheTrimLifecycleToasts === true;
+    const combinedLifecycleLabel = ageSelected && sizeSelected
+      ? `${this._mediaCacheTrimRootLabel(kind)} age + GB size phases`
+      : '';
     const phaseStartedAt = new Map();
     const phaseDeleted = new Map();
+    const dispatchCombinedLifecycleToast = phase => {
+      if (!combinedLifecycleLabel || !lifecycleToastsEnabled) return;
+      this.notifyUser?.(`${combinedLifecycleLabel} ${phase}.`, {
+        title: 'Message Logger Media Cache',
+        type: 'info',
+        timeout: 5000,
+        replaceKey: `media-cache-trim:${kind}:combined`
+      });
+    };
     const startPhase = (bit, label) => {
       if (!(selectedMask & bit)) return;
       phaseStartedAt.set(bit, Date.now());
@@ -8368,7 +8359,7 @@ module.exports = class MessageLoggerV2 {
         'info',
         5000,
         'TRIM',
-        this.settings?.showMediaCacheTrimLifecycleToasts === true
+        lifecycleToastsEnabled && !combinedLifecycleLabel
       );
     };
     const endPhase = (bit, label, filesScanned) => {
@@ -8381,12 +8372,13 @@ module.exports = class MessageLoggerV2 {
         'info',
         5000,
         'TRIM',
-        this.settings?.showMediaCacheTrimLifecycleToasts === true
+        lifecycleToastsEnabled && !combinedLifecycleLabel
       );
       this._mediaCacheTrimDebug(`${label} scanned ${filesScanned} file(s), deleted ${phaseDeleted.get(bit) || 0} file(s), duration ${Date.now() - startedAt}ms.`, 'TRIM');
     };
     // Age owns the first phase when selected. If only size is selected it starts before the
     // shared root scan; when both are selected, size starts only after age ends.
+    dispatchCombinedLifecycleToast('started');
     if (ageSelected) startPhase(ageBit, ageLabel);
     else if (sizeSelected) startPhase(sizeBit, sizeLabel);
     let scan;
@@ -8400,6 +8392,7 @@ module.exports = class MessageLoggerV2 {
     } catch (error) {
       endPhase(ageBit, ageLabel, 0);
       endPhase(sizeBit, sizeLabel, 0);
+      dispatchCombinedLifecycleToast('ended');
       throw error;
     }
     const files = scan.files;
@@ -8509,6 +8502,7 @@ module.exports = class MessageLoggerV2 {
     }
     endPhase(ageBit, ageLabel, scannedCount);
     endPhase(sizeBit, sizeLabel, scannedCount);
+    dispatchCombinedLifecycleToast('ended');
     if (phaseError) throw phaseError;
     if (cleanupError) throw cleanupError;
     return { files: scannedCount, deleted, bytes: totalBytes };

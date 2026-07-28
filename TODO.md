@@ -9,7 +9,7 @@ Status markers:
 
 ## 📎 Cache All Attachment Types Gate
 
-Status: Known limitation in 2.8.2.12; follow-up after the networking release
+Status: Known limitation in 2.8.2.13; follow-up after the networking release
 
 - [ ] With **Cache media locally** Off, block every attachment type from ordinary Logger attachment capture and local caching, regardless of the saved child value.
 - [ ] With the master On and **Cache all attachment types** Off, preserve established image, embed, sticker, and visual Components V2 handling while blocking every other file type from ordinary attachment history and local caching.

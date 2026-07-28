@@ -488,8 +488,11 @@ test('interval changes reset the countdown without starting a trim and debounce 
     assert.equal(passes, 0);
     plugin.settings.preCacheMaxAgeHours = 1;
     plugin.handleMediaCacheTrimLimitChange('preCacheMaxAgeHours', 1);
+    assert.ok(plugin.notifications.some(item => item.message === 'Cache limit trim scheduled in 20 seconds.'));
     plugin.handleMediaCacheTrimLimitChange('preCacheMaxAgeHours', 1);
+    assert.ok(plugin.notifications.some(item => item.message === 'Cache limit trim rescheduled in 20 seconds.'));
     await new Promise(resolve => setTimeout(resolve, 30));
+    assert.ok(plugin.notifications.some(item => item.message === 'Cache limit delay ended. Starting trim.'));
     assert.equal(passes, 1);
     plugin.stopMediaCacheTrimmer();
   });
@@ -663,17 +666,31 @@ test('a running pass waits for a still-pending limit debounce before its merged 
     const plugin = createTrimPlugin(root, { settings: { preCacheMaxAgeHours: 1 } });
     plugin._mediaCacheTrimDebounceMs = 40;
     let passes = 0;
+    let resolveFirstPass;
+    let resolveFirstPassStarted;
+    let resolveSecondPassStarted;
+    const firstPassStarted = new Promise(resolve => { resolveFirstPassStarted = resolve; });
+    const secondPassStarted = new Promise(resolve => { resolveSecondPassStarted = resolve; });
+    const firstPassGate = new Promise(resolve => { resolveFirstPass = resolve; });
     plugin._runMediaCacheTrimPass = async () => {
       passes++;
-      await new Promise(resolve => setTimeout(resolve, 10));
+      if (passes === 1) {
+        resolveFirstPassStarted();
+        await firstPassGate;
+      } else {
+        resolveSecondPassStarted();
+      }
       return { files: 0, deleted: 0, errors: [] };
     };
     const first = plugin.runMediaCacheTrimNow();
+    await firstPassStarted;
     plugin.handleMediaCacheTrimLimitChange('preCacheMaxAgeHours', 1);
+    resolveFirstPass();
     await first;
-    await new Promise(resolve => setTimeout(resolve, 20));
     assert.equal(passes, 1);
-    await new Promise(resolve => setTimeout(resolve, 35));
+    assert.ok(plugin._mediaCacheTrimDebounceTimeout, 'the limit debounce must still be pending when the first pass ends');
+    await secondPassStarted;
+    await new Promise(resolve => setImmediate(resolve));
     assert.equal(passes, 2);
     plugin.stopMediaCacheTrimmer();
   });
@@ -882,10 +899,10 @@ test('sync BetterDiscord fs bridge trims cooperatively without fs.promises', asy
     assert.equal(fs.existsSync(path.join(empty, 'old (999).png')), false);
     assert.equal(fs.existsSync(empty), false);
     assert.equal(fs.existsSync(path.join(nested, 'keep.txt')), true);
-    assert.ok(styledConsoleMessages('TRIM').some(message => message === 'Live cache age trimmer started.'));
-    assert.ok(styledConsoleMessages('TRIM').some(message => message === 'Live cache age trimmer ended.'));
+    assert.ok(styledConsoleMessages('TRIM').some(message => message === 'Live cache age phase started.'));
+    assert.ok(styledConsoleMessages('TRIM').some(message => message === 'Live cache age phase ended.'));
     assert.equal(
-      plugin.notifications.some(item => /trimmer (?:started|ended)\.$/i.test(item.message)),
+      plugin.notifications.some(item => /phase(?:s)? (?:started|ended)\.$/i.test(item.message)),
       false
     );
   });
@@ -1012,7 +1029,7 @@ test('size verification pass removes a file created during the first reduction',
   });
 });
 
-test('lifecycle toasts replace timer/debounce entries and debug deletion has no deletion toast', async () => {
+test('lifecycle toasts combine age and size while preserving individual console phases', async () => {
   await withTempRoot(async root => {
     const oldFile = path.join(root, 'old (500).png');
     writeSizedFile(oldFile, 4, Date.now() - 2 * 60 * 60 * 1000);
@@ -1026,13 +1043,82 @@ test('lifecycle toasts replace timer/debounce entries and debug deletion has no 
     });
     await plugin.runMediaCacheTrimNow();
     plugin.stopMediaCacheTrimmer();
-    assert.ok(plugin.notifications.some(item => item.message === 'Live cache age trimmer started.'));
-    assert.ok(plugin.notifications.some(item => item.message === 'Live cache age trimmer ended.'));
-    const lifecycle = plugin.notifications.map(item => item.message);
-    assert.ok(lifecycle.indexOf('Live cache age trimmer started.') < lifecycle.indexOf('Live cache age trimmer ended.'));
-    assert.ok(lifecycle.indexOf('Live cache age trimmer ended.') < lifecycle.indexOf('Live cache GB size trimmer started.'));
-    assert.ok(lifecycle.indexOf('Live cache GB size trimmer started.') < lifecycle.indexOf('Live cache GB size trimmer ended.'));
+    assert.deepEqual(
+      plugin.notifications.map(item => item.message),
+      ['Live cache age + GB size phases started.', 'Live cache age + GB size phases ended.']
+    );
+    assert.ok(styledConsoleMessages('TRIM').includes('Live cache age phase started.'));
+    assert.ok(styledConsoleMessages('TRIM').includes('Live cache age phase ended.'));
+    assert.ok(styledConsoleMessages('TRIM').includes('Live cache GB size phase started.'));
+    assert.ok(styledConsoleMessages('TRIM').includes('Live cache GB size phase ended.'));
     assert.equal(plugin.notifications.some(item => /deleted .*old \(500\)/i.test(item.message)), false);
     assert.ok(styledConsoleMessages('DEBUG · TRIM').some(message => message.includes('old (500).png')));
+  });
+});
+
+test('pre-cache lifecycle toasts use the combined root label', async () => {
+  await withTempRoot(async root => {
+    const preRoot = `${root}_PreCache`;
+    writeSizedFile(path.join(preRoot, 'old (501).png'), 4, Date.now() - 2 * 60 * 60 * 1000);
+    const plugin = createTrimPlugin(root, {
+      settings: {
+        preCacheMaxAgeHours: 1,
+        preCacheMaxSizeGb: 1,
+        showMediaCacheTrimLifecycleToasts: true
+      }
+    });
+    await plugin.runMediaCacheTrimNow();
+    plugin.stopMediaCacheTrimmer();
+    assert.deepEqual(
+      plugin.notifications.map(item => item.message),
+      ['Pre-cache age + GB size phases started.', 'Pre-cache age + GB size phases ended.']
+    );
+    assert.ok(styledConsoleMessages('TRIM').includes('Pre-cache age phase started.'));
+    assert.ok(styledConsoleMessages('TRIM').includes('Pre-cache age phase ended.'));
+    assert.ok(styledConsoleMessages('TRIM').includes('Pre-cache GB size phase started.'));
+    assert.ok(styledConsoleMessages('TRIM').includes('Pre-cache GB size phase ended.'));
+  });
+});
+
+test('lifecycle toasts stay individual for age-only and size-only roots and are absent when disabled', async () => {
+  await withTempRoot(async root => {
+    const cases = [
+      {
+        name: 'age-only',
+        settings: { liveCacheMaxAgeHours: 1 },
+        notifications: ['Live cache age phase started.', 'Live cache age phase ended.'],
+        consolePhases: ['Live cache age phase started.', 'Live cache age phase ended.']
+      },
+      {
+        name: 'size-only',
+        settings: { liveCacheMaxSizeGb: 1 },
+        notifications: ['Live cache GB size phase started.', 'Live cache GB size phase ended.'],
+        consolePhases: ['Live cache GB size phase started.', 'Live cache GB size phase ended.']
+      },
+      {
+        name: 'disabled',
+        settings: {},
+        notifications: [],
+        consolePhases: []
+      }
+    ];
+    for (const scenario of cases) {
+      styledConsoleEvents.length = 0;
+      const plugin = createTrimPlugin(root, {
+        settings: {
+          ...scenario.settings,
+          showMediaCacheTrimLifecycleToasts: true
+        }
+      });
+      await plugin.runMediaCacheTrimNow();
+      plugin.stopMediaCacheTrimmer();
+      const lifecycleNotifications = plugin.notifications
+        .map(item => item.message)
+        .filter(message => /phase(?:s)? (?:started|ended)\.$/i.test(message));
+      assert.deepEqual(lifecycleNotifications, scenario.notifications, scenario.name);
+      for (const message of scenario.consolePhases) {
+        assert.ok(styledConsoleMessages('TRIM').includes(message), `${scenario.name}: missing console phase ${message}`);
+      }
+    }
   });
 });

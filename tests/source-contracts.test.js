@@ -21,14 +21,14 @@ function readDefaultSettings() {
 }
 
 test('plugin metadata and updater remain pointed at the maintained main branch', () => {
-  assert.match(source, /@version 2\.8\.2\.12/);
+  assert.match(source, /@version 2\.8\.2\.13/);
   assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   const changesBlock = source.match(/  getChanges\(\) \{([\s\S]*?)\n  \}\n  async checkNewUpdate/);
   assert.ok(changesBlock, 'getChanges block was not found');
   assert.deepEqual(
     [...changesBlock[1].matchAll(/title: '([^']+)'/g)].map(([, title]) => title),
-    ['Networking fixes', 'Cached media clipboard', 'Pre-cache and trimmer hardening', 'Location list manager']
+    ['Trimmer lifecycle toasts']
   );
 });
 
@@ -350,14 +350,14 @@ test('the BdApi notification setting omits the outdated basic qualifier', () => 
   assert.doesNotMatch(source, /BdApi basic notifications/i);
 });
 
-test('the current changelog covers networking, cached-media clipboard, and pre-cache/trimmer hardening', () => {
-  assert.match(source, /BetterDiscord native networking with guarded legacy routing and automatic fallback/);
-  assert.match(source, /rolling no-data watchdog, disable the inherited socket timeout, and cancel promptly when caching is turned off or the plugin stops/);
-  assert.match(source, /media request diagnostics report IDs, transport, status, bytes, timing, and outcomes to the console only/);
-  assert.match(source, /Copy exact cached PNG\/JPEG files from both live messages and Logger surfaces through Discord\\'s native image clipboard/);
-  assert.match(source, /actions stay hidden when the physical cached file is missing, ambiguous, unsupported, a placeholder, or caching is disabled/);
-  assert.match(source, /per-message `_PreCache` staging and promotion; missing cache directories self-heal, and a bounded retry recreates a directory removed during a write/);
-  assert.match(source, /snowflake-aware message time with mtime fallback; cooperative sliced trimming, one verification scan, and deterministic follow-up passes keep limits responsive without dropping distinct manual requests/);
+test('the current changelog covers trimmer lifecycle toast behavior', () => {
+  const changesBlock = source.match(/  getChanges\(\) \{([\s\S]*?)\n  \}\n  async checkNewUpdate/);
+  assert.ok(changesBlock, 'getChanges block was not found');
+  assert.match(changesBlock[1], /type: 'improved'/);
+  assert.match(changesBlock[1], /both age and GB limits are enabled for one cache root, the age \+ GB size phases use one combined start toast and one combined end toast/);
+  assert.match(changesBlock[1], /a single enabled limit keeps its individual phase start\/end toasts/);
+  assert.match(changesBlock[1], /blank or 0 remains unlimited and silent/);
+  assert.match(changesBlock[1], /individual age\/GB phase lines remain visible in the console/);
 });
 
 test('settings documentation retains audited group order and current UI labels', () => {
