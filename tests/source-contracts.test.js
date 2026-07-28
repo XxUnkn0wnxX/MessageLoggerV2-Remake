@@ -1752,7 +1752,7 @@ test('media trimmer debounce and cached-file deletion aggregation keep their dis
   );
   assert.ok(aggregationTimeout, 'cached-file deletion aggregation timeout was not found');
   assert.equal(Number(aggregationTimeout[2]), 150);
-  assert.match(aggregationTimeout[1], /this\.notifyUser\([\s\S]*?timeout:\s*10000/);
+  assert.match(aggregationTimeout[1], /this\.notifyUser\([\s\S]*?timeout:\s*5000/);
 });
 
 test('renderer fetch remains confined to fetchMediaNetworkResponse and clipboard stays filesystem-only', () => {

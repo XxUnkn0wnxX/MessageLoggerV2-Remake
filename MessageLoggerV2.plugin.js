@@ -15027,7 +15027,7 @@ module.exports = class MessageLoggerV2 {
           title: names.length === 1 ? 'Cached Attachment Deleted' : 'Cached Attachments Deleted',
           type: 'success',
           actions: [{ label: 'View files', onClick: () => this.showDeletedCachedFilesModal(names) }],
-          timeout: 10000
+          timeout: 5000
         }
       );
     }, 150);
