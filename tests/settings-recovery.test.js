@@ -10,6 +10,7 @@ const defaults = {
   autoBackup: false,
   autoBackupIntervalSeconds: 20,
   editSpamThreshold: 10,
+  maxCacheFileSize: 0,
   debugLogging: false,
   detailedMediaNetworkDebug: false,
   debugToasts: false,
@@ -221,6 +222,37 @@ test('a valid mixed settings envelope normalizes retention fields without a corr
   assert.equal(settings.showMediaCacheTrimLifecycleToasts, true);
   assert.deepEqual(settings.forkSpecificRetentionSetting, { keep: true });
   assert.equal(fs.readFileSync(configPath, 'utf8'), original);
+});
+
+test('decimal media sizes are salvaged while invalid precision and integer-only limits use fallbacks', () => {
+  const plugin = createPlugin();
+  const settings = {
+    maxCacheFileSize: '1.25',
+    liveCacheMaxSizeGb: '2.5',
+    preCacheMaxSizeGb: '1.234',
+    liveCacheMaxAgeHours: '1.5',
+    preCacheMaxAgeHours: '2.25',
+    forkSpecificSetting: { keep: true }
+  };
+  normalizeRecovered(plugin, settings);
+  assert.equal(settings.maxCacheFileSize, 1.25);
+  assert.equal(settings.liveCacheMaxSizeGb, 2.5);
+  assert.equal(settings.preCacheMaxSizeGb, 5);
+  assert.equal(settings.liveCacheMaxAgeHours, 0);
+  assert.equal(settings.preCacheMaxAgeHours, 24);
+  assert.deepEqual(settings.forkSpecificSetting, { keep: true });
+
+  for (const raw of [-1, '1.234', 'not-a-number', true]) {
+    const invalid = {
+      maxCacheFileSize: raw,
+      liveCacheMaxSizeGb: raw,
+      preCacheMaxSizeGb: raw
+    };
+    normalizeRecovered(plugin, invalid);
+    assert.equal(invalid.maxCacheFileSize, 0, String(raw));
+    assert.equal(invalid.liveCacheMaxSizeGb, 0, String(raw));
+    assert.equal(invalid.preCacheMaxSizeGb, 5, String(raw));
+  }
 });
 
 test('a trailing comma preserves existing settings and restores only missing defaults', () => {

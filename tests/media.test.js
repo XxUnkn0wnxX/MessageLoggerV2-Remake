@@ -2433,6 +2433,46 @@ test('cache-only rendering sanitizes malformed embed media in an isolated render
   assert.deepEqual(saved, canonicalBeforeRender);
 });
 
+test('decimal per-file MB limits use SI bytes', async () => {
+  const cached = [];
+  const plugin = createPlugin({
+    __started: true,
+    settings: {
+      cacheAllImages: true,
+      newSaveAllFileTypes: true,
+      maxCacheFileSize: 1.25
+    },
+    cacheImage(...args) {
+      cached.push(args);
+    }
+  });
+  plugin.cacheMessageImages({
+    id: 'decimal-limit-message',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    attachments: [
+      {
+        id: 'over-limit',
+        filename: 'over.bin',
+        size: 1_250_001,
+        url: 'https://cdn.example/over.bin'
+      },
+      {
+        id: 'at-limit',
+        filename: 'at.bin',
+        size: 1_250_000,
+        url: 'https://cdn.example/at.bin'
+      }
+    ],
+    embeds: [],
+    components: [],
+    sticker_items: []
+  });
+  await delay(5);
+  assert.equal(cached.length, 1);
+  assert.equal(cached[0][0], 'https://cdn.example/at.bin');
+});
+
 test('media caching skips malformed embed images and uses valid URL or proxy media', async () => {
   const cached = [];
   const plugin = createPlugin({

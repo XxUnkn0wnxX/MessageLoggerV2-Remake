@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.13
+ * @version 2.8.2.14
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -39,7 +39,13 @@ const MEDIA_CACHE_TRIM_ALL = MEDIA_CACHE_TRIM_LIVE_AGE
   | MEDIA_CACHE_TRIM_LIVE_SIZE
   | MEDIA_CACHE_TRIM_PRE_AGE
   | MEDIA_CACHE_TRIM_PRE_SIZE;
-const MEDIA_CACHE_TRIM_GB = 1024 ** 3;
+const MEDIA_CACHE_TRIM_GB = 1_000_000_000;
+const MEDIA_CACHE_FILE_MB = 1_000_000;
+const MEDIA_CACHE_DECIMAL_SETTING_IDS = Object.freeze([
+  'maxCacheFileSize',
+  'liveCacheMaxSizeGb',
+  'preCacheMaxSizeGb'
+]);
 const MEDIA_CACHE_TRIM_WORK_BATCH = 8;
 const MEDIA_CACHE_TRIM_YIELD_DELAY_MS = 4;
 const MEDIA_CACHE_TRIM_SNOWFLAKE_FUTURE_TOLERANCE_MS = 24 * 60 * 60 * 1000;
@@ -660,6 +666,13 @@ module.exports = class MessageLoggerV2 {
         items: [
           'When both age and GB limits are enabled for one cache root, the age + GB size phases use one combined start toast and one combined end toast; a single enabled limit keeps its individual phase start/end toasts, blank or 0 remains unlimited and silent, and individual age/GB phase lines remain visible in the console.'
         ]
+      },
+      {
+        title: 'Precise media size limits',
+        type: 'improved',
+        items: [
+          'Live/pre-cache GB caps and per-file MB limits now accept whole numbers or up to two decimal places and use decimal SI units to align with Finder; blank or 0 remains unlimited.'
+        ]
       }
     ];
   }
@@ -1021,7 +1034,7 @@ module.exports = class MessageLoggerV2 {
     const numericSettings = {
       editSpamThreshold: { fallback: DEFAULT_EDIT_SPAM_THRESHOLD, min: 1 },
       maxShownEdits: { fallback: 0, min: 0 },
-      maxCacheFileSize: { fallback: 0, min: 0 },
+      maxCacheFileSize: { fallback: 0, min: 0, maxDecimalPlaces: 2 },
       messageCacheCap: { fallback: defaultSettings.messageCacheCap, min: 1 },
       savedMessagesCap: { fallback: defaultSettings.savedMessagesCap, min: 0 },
       antiNukeThreadCap: { fallback: defaultSettings.antiNukeThreadCap, min: 0, emptyValue: 0 },
@@ -1032,14 +1045,17 @@ module.exports = class MessageLoggerV2 {
     };
     for (const [id, limits] of Object.entries(numericSettings)) {
       const raw = this.settings[id];
-      const parsed = raw === undefined
+      const normalized = raw === undefined
         ? limits.fallback
-        : raw === null || String(raw).trim() === ''
-          ? limits.emptyValue ?? limits.fallback
-          : Number(raw);
-      const normalized = Number.isFinite(parsed) && Number.isInteger(parsed) && parsed >= limits.min
-        ? parsed
-        : limits.fallback;
+        : (() => {
+          const validation = this.validateNumericSettingValue(raw, {
+            min: limits.min,
+            max: limits.max,
+            emptyValue: limits.emptyValue,
+            maxDecimalPlaces: limits.maxDecimalPlaces
+          });
+          return validation.valid ? validation.value : limits.fallback;
+        })();
       if (raw === normalized) continue;
       this.settings[id] = normalized;
       settingsChanged = true;
@@ -3591,13 +3607,13 @@ module.exports = class MessageLoggerV2 {
   normalizeMediaCacheTrimSettings(settings = this.settings) {
     if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return false;
     const limits = [
-      ['liveCacheMaxAgeHours', 0],
-      ['liveCacheMaxSizeGb', 0],
-      ['preCacheMaxAgeHours', 24],
-      ['preCacheMaxSizeGb', 5]
+      ['liveCacheMaxAgeHours', 0, undefined],
+      ['liveCacheMaxSizeGb', 0, 2],
+      ['preCacheMaxAgeHours', 24, undefined],
+      ['preCacheMaxSizeGb', 5, 2]
     ];
     let changed = false;
-    for (const [id, fallback] of limits) {
+    for (const [id, fallback, maxDecimalPlaces] of limits) {
       const hasValue = Object.prototype.hasOwnProperty.call(settings, id);
       const raw = settings[id];
       let normalized;
@@ -3605,13 +3621,16 @@ module.exports = class MessageLoggerV2 {
         normalized = fallback;
       } else if (raw === undefined) {
         normalized = fallback;
+      } else if (raw === null) {
+        normalized = fallback;
       } else if (typeof raw === 'string' && raw.trim() === '') {
         normalized = 0;
       } else if (typeof raw === 'number' || typeof raw === 'string') {
-        const parsed = Number(raw);
-        normalized = Number.isFinite(parsed) && Number.isInteger(parsed) && parsed >= 0
-          ? parsed
-          : fallback;
+        const validation = this.validateNumericSettingValue(raw, {
+          min: 0,
+          maxDecimalPlaces
+        });
+        normalized = validation.valid ? validation.value : fallback;
       } else {
         normalized = fallback;
       }
@@ -3661,10 +3680,19 @@ module.exports = class MessageLoggerV2 {
             : nestedDefault;
         }
       } else if (typeof defaultValue === 'number') {
-        const parsed = current === null || current === undefined || String(current).trim() === ''
-          ? defaultValue
-          : Number(current);
-        normalized = Number.isFinite(parsed) && Number.isInteger(parsed) ? parsed : defaultValue;
+        if (MEDIA_CACHE_DECIMAL_SETTING_IDS.includes(key)) {
+          const validation = this.validateNumericSettingValue(current, {
+            emptyValue: defaultValue,
+            min: 0,
+            maxDecimalPlaces: 2
+          });
+          normalized = validation.valid ? validation.value : defaultValue;
+        } else {
+          const parsed = current === null || current === undefined || String(current).trim() === ''
+            ? defaultValue
+            : Number(current);
+          normalized = Number.isFinite(parsed) && Number.isInteger(parsed) ? parsed : defaultValue;
+        }
       } else {
         normalized = typeof current === typeof defaultValue ? current : defaultValue;
       }
@@ -3777,13 +3805,35 @@ module.exports = class MessageLoggerV2 {
   validateNumericSettingValue(value, config = {}) {
     const trimmed = String(value ?? '').trim();
     if (trimmed === '' && config.emptyValue === undefined) {
-      return { valid: false, message: 'Value must be a whole number!' };
+      return {
+        valid: false,
+        message: config.maxDecimalPlaces === undefined
+          ? 'Value must be a whole number!'
+          : `Value must be a whole number or have no more than ${config.maxDecimalPlaces} decimal places!`
+      };
+    }
+    if (trimmed !== '' && config.maxDecimalPlaces !== undefined) {
+      const maxDecimalPlaces = Number(config.maxDecimalPlaces);
+      const decimalPattern = Number.isInteger(maxDecimalPlaces) && maxDecimalPlaces > 0
+        ? new RegExp(`^[+-]?(?:\\d+(?:\\.\\d{0,${maxDecimalPlaces}})?|\\.\\d{1,${maxDecimalPlaces}})$`)
+        : /^[+-]?\d+$/;
+      if (!decimalPattern.test(trimmed)) {
+        return {
+          valid: false,
+          message: `Value must be a whole number or have no more than ${config.maxDecimalPlaces} decimal places!`
+        };
+      }
     }
     const parsed = trimmed === '' && config.emptyValue !== undefined
       ? config.emptyValue
       : Number(trimmed);
-    if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
-      return { valid: false, message: 'Value must be a whole number!' };
+    if (!Number.isFinite(parsed) || (config.maxDecimalPlaces === undefined && !Number.isInteger(parsed))) {
+      return {
+        valid: false,
+        message: config.maxDecimalPlaces === undefined
+          ? 'Value must be a whole number!'
+          : `Value must be a whole number or have no more than ${config.maxDecimalPlaces} decimal places!`
+      };
     }
     if (config.min !== undefined && parsed < config.min) {
       return { valid: false, message: `Value must be at least ${config.min}!` };
@@ -3863,7 +3913,7 @@ module.exports = class MessageLoggerV2 {
         React.createElement('input', {
           className: 'bd-text-input',
           type: 'text',
-          inputMode: 'numeric',
+          inputMode: config.maxDecimalPlaces === undefined ? 'numeric' : 'decimal',
           value: draft,
           disabled,
           onChange,
@@ -4728,7 +4778,9 @@ module.exports = class MessageLoggerV2 {
             type: 'textbox',
             validator: 'number',
             emptyValue: 0,
-            min: 0
+            min: 0,
+            maxDecimalPlaces: 2,
+            inlineValidation: true
           },
           {
             name: 'Live cache maximum age (hours)',
@@ -4752,6 +4804,7 @@ module.exports = class MessageLoggerV2 {
             validator: 'number',
             emptyValue: 0,
             min: 0,
+            maxDecimalPlaces: 2,
             resetInvalidTo: 0,
             inlineValidation: true,
             action: 'mediaCacheTrimLimitChanged'
@@ -4778,6 +4831,7 @@ module.exports = class MessageLoggerV2 {
             validator: 'number',
             emptyValue: 0,
             min: 0,
+            maxDecimalPlaces: 2,
             resetInvalidTo: 5,
             inlineValidation: true,
             action: 'mediaCacheTrimLimitChanged'
@@ -8432,15 +8486,15 @@ module.exports = class MessageLoggerV2 {
       if (sizeSelected && !this._mediaCacheTrimIsCancelled(generation)) {
         if (!phaseStartedAt.has(sizeBit)) startPhase(sizeBit, sizeLabel);
         if (sizeGb > 0) {
-          const capBytes = sizeGb * MEDIA_CACHE_TRIM_GB;
-          const targetBytes = capBytes * (kind === 'pre' ? 0.8 : 0.95);
+          const capBytes = Math.round(sizeGb * MEDIA_CACHE_TRIM_GB);
+          const targetBytes = Math.round(capBytes * (kind === 'pre' ? 0.8 : 0.95));
           sizeTargetBytes = targetBytes;
           if (totalBytes > capBytes) {
             sizeReductionRequired = true;
             for (const file of files) {
               if (this._mediaCacheTrimIsCancelled(generation) || totalBytes <= targetBytes) break;
               if (removed.has(file)) continue;
-              const fileMb = file.size / (1024 ** 2);
+              const fileMb = file.size / MEDIA_CACHE_FILE_MB;
               const outcome = await this._deleteMediaCacheTrimFile(file, `size ${fileMb.toFixed(1)}MB over ${sizeGb}GB`, generation, work);
               if (outcome.cancelled) break;
               if (outcome.deleted || outcome.missing) {
@@ -8474,7 +8528,7 @@ module.exports = class MessageLoggerV2 {
               if (this._mediaCacheTrimIsCancelled(generation) || totalBytes <= sizeTargetBytes) break;
               const outcome = await this._deleteMediaCacheTrimFile(
                 file,
-                `size ${(file.size / (1024 ** 2)).toFixed(1)}MB over ${sizeGb}GB`,
+                `size ${(file.size / MEDIA_CACHE_FILE_MB).toFixed(1)}MB over ${sizeGb}GB`,
                 generation,
                 work
               );
@@ -14724,9 +14778,9 @@ module.exports = class MessageLoggerV2 {
       const stickers = this.getMessageStickerItems(message);
       for (let i = 0; i < attachments.length; i++) {
         const attachment = attachments[i];
-        const maxSize = this.settings.maxCacheFileSize * 1024 * 1024;
+        const maxSize = Math.round(Number(this.settings.maxCacheFileSize) * MEDIA_CACHE_FILE_MB);
         if (maxSize > 0 && attachment.size && attachment.size > maxSize) {
-          Logger.log(`Skipping cache for ${attachment.filename}: ${(attachment.size / 1024 / 1024).toFixed(2)}MB exceeds limit`);
+          Logger.log(`Skipping cache for ${attachment.filename}: ${(attachment.size / MEDIA_CACHE_FILE_MB).toFixed(2)}MB exceeds limit`);
           continue;
         }
         if (this.isImage(attachment.url) || this.settings.newSaveAllFileTypes) {

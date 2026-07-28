@@ -21,15 +21,16 @@ function readDefaultSettings() {
 }
 
 test('plugin metadata and updater remain pointed at the maintained main branch', () => {
-  assert.match(source, /@version 2\.8\.2\.13/);
+  assert.match(source, /@version 2\.8\.2\.14/);
   assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   const changesBlock = source.match(/  getChanges\(\) \{([\s\S]*?)\n  \}\n  async checkNewUpdate/);
   assert.ok(changesBlock, 'getChanges block was not found');
   assert.deepEqual(
     [...changesBlock[1].matchAll(/title: '([^']+)'/g)].map(([, title]) => title),
-    ['Trimmer lifecycle toasts']
+    ['Trimmer lifecycle toasts', 'Precise media size limits']
   );
+  assert.match(changesBlock[1], /title: 'Precise media size limits'[\s\S]*type: 'improved'[\s\S]*Live\/pre-cache GB caps and per-file MB limits now accept whole numbers or up to two decimal places and use decimal SI units to align with Finder; blank or 0 remains unlimited\./);
 });
 
 test('all fresh-install settings defaults remain stable', () => {
@@ -1161,6 +1162,25 @@ test('automatic backup interval is configurable and bounded in settings and conf
   plugin.settings.autoBackupIntervalSeconds = 9;
   assert.equal(plugin.ensureAutoBackupIntervalSetting(), true);
   assert.equal(plugin.settings.autoBackupIntervalSeconds, 20);
+});
+
+test('media size limits accept at most two decimal places without broadening integer settings', () => {
+  assert.match(source, /id: 'maxCacheFileSize'[\s\S]*maxDecimalPlaces: 2[\s\S]*inlineValidation: true/);
+  assert.match(source, /id: 'liveCacheMaxSizeGb'[\s\S]*maxDecimalPlaces: 2/);
+  assert.match(source, /id: 'preCacheMaxSizeGb'[\s\S]*maxDecimalPlaces: 2/);
+  assert.match(source, /inputMode: config\.maxDecimalPlaces === undefined \? 'numeric' : 'decimal'/);
+  assert.match(source, /const MEDIA_CACHE_TRIM_GB = 1_000_000_000;/);
+  assert.match(source, /const MEDIA_CACHE_FILE_MB = 1_000_000;/);
+
+  const plugin = createPlugin();
+  const decimalConfig = { min: 0, emptyValue: 0, maxDecimalPlaces: 2 };
+  for (const [raw, expected] of [['0', 0], ['1', 1], ['1.', 1], ['.5', 0.5], ['1.2', 1.2], ['1.25', 1.25], ['', 0]]) {
+    assert.deepEqual(plugin.validateNumericSettingValue(raw, decimalConfig), { valid: true, value: expected });
+  }
+  for (const raw of ['-0.01', '1.234', '.', 'nope']) {
+    assert.equal(plugin.validateNumericSettingValue(raw, decimalConfig).valid, false, raw);
+  }
+  assert.equal(plugin.validateNumericSettingValue('1.5', { min: 0 }).valid, false, 'age/timer configs stay integer-only');
 });
 
 test('backup and edit-spam diagnostics remain opt-in under their warning-colored Debug category', () => {

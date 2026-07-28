@@ -177,7 +177,7 @@ test('normalization keeps explicit blank limits unlimited and repairs interval v
     liveCacheMaxAgeHours: 0,
     liveCacheMaxSizeGb: 0,
     preCacheMaxAgeHours: 0,
-    preCacheMaxSizeGb: 5,
+    preCacheMaxSizeGb: 1.5,
     mediaCacheTrimIntervalMinutes: 15
   });
   assert.equal(plugin.normalizeMediaCacheTrimSettings(settings), false);
@@ -450,7 +450,27 @@ test('size thresholds use remaining files after age and the 95%/80% targets', as
   });
 });
 
-test('size deletion debug reasons report binary megabytes with the cap in GB', async () => {
+test('decimal GB caps use SI bytes and round the live 95% target', async () => {
+  await withTempRoot(async root => {
+    const now = Date.now();
+    const oldFile = path.join(root, 'old (300).bin');
+    const newFile = path.join(root, 'new (301).bin');
+    writeSizedFile(oldFile, 1_000_000, now - 2 * 60 * 60 * 1000);
+    writeSizedFile(newFile, 9_500_000, now);
+    const plugin = createTrimPlugin(root, {
+      settings: { liveCacheMaxSizeGb: 0.01 }
+    });
+
+    await plugin.runMediaCacheTrimNow();
+    plugin.stopMediaCacheTrimmer();
+
+    // 0.01 SI GB = 10,000,000 bytes and the rounded live target is 9,500,000.
+    assert.equal(fs.existsSync(oldFile), false);
+    assert.equal(fs.existsSync(newFile), true);
+  });
+});
+
+test('size deletion debug reasons report decimal megabytes with the cap in GB', async () => {
   await withTempRoot(async root => {
     const now = Date.now();
     const smallFile = path.join(root, 'small (14694400).bin');
@@ -468,7 +488,7 @@ test('size deletion debug reasons report binary megabytes with the cap in GB', a
     plugin.stopMediaCacheTrimmer();
 
     const debugMessages = styledConsoleMessages('DEBUG · TRIM');
-    assert.ok(debugMessages.some(message => message.includes('size 7.0MB over 15GB')));
+    assert.ok(debugMessages.some(message => message.includes('size 7.3MB over 15GB')));
     assert.equal(debugMessages.some(message => message.includes('size 0.007GB over 15GB')), false);
   });
 });
