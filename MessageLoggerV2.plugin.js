@@ -673,6 +673,13 @@ module.exports = class MessageLoggerV2 {
         items: [
           'Live/pre-cache GB caps and per-file MB limits now accept whole numbers or up to two decimal places and use decimal SI units to align with Finder; blank or 0 remains unlimited.'
         ]
+      },
+      {
+        title: 'Media settings follow-up',
+        type: 'fixed',
+        items: [
+          'Age and other whole-number settings now reject decimal, scientific, and hexadecimal syntax, and cached-file deletion notices keep the View files action available for five seconds.'
+        ]
       }
     ];
   }

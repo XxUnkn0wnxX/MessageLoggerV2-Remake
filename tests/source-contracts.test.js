@@ -28,9 +28,10 @@ test('plugin metadata and updater remain pointed at the maintained main branch',
   assert.ok(changesBlock, 'getChanges block was not found');
   assert.deepEqual(
     [...changesBlock[1].matchAll(/title: '([^']+)'/g)].map(([, title]) => title),
-    ['Trimmer lifecycle toasts', 'Precise media size limits']
+    ['Trimmer lifecycle toasts', 'Precise media size limits', 'Media settings follow-up']
   );
   assert.match(changesBlock[1], /title: 'Precise media size limits'[\s\S]*type: 'improved'[\s\S]*Live\/pre-cache GB caps and per-file MB limits now accept whole numbers or up to two decimal places and use decimal SI units to align with Finder; blank or 0 remains unlimited\./);
+  assert.match(changesBlock[1], /title: 'Media settings follow-up'[\s\S]*type: 'fixed'[\s\S]*Age and other whole-number settings now reject decimal, scientific, and hexadecimal syntax, and cached-file deletion notices keep the View files action available for five seconds\./);
 });
 
 test('all fresh-install settings defaults remain stable', () => {
