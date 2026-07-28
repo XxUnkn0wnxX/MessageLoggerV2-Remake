@@ -3812,15 +3812,20 @@ module.exports = class MessageLoggerV2 {
           : `Value must be a whole number or have no more than ${config.maxDecimalPlaces} decimal places!`
       };
     }
-    if (trimmed !== '' && config.maxDecimalPlaces !== undefined) {
-      const maxDecimalPlaces = Number(config.maxDecimalPlaces);
-      const decimalPattern = Number.isInteger(maxDecimalPlaces) && maxDecimalPlaces > 0
-        ? new RegExp(`^[+-]?(?:\\d+(?:\\.\\d{0,${maxDecimalPlaces}})?|\\.\\d{1,${maxDecimalPlaces}})$`)
-        : /^[+-]?\d+$/;
-      if (!decimalPattern.test(trimmed)) {
+    if (trimmed !== '') {
+      let numericPattern = /^[+-]?\d+$/;
+      if (config.maxDecimalPlaces !== undefined) {
+        const maxDecimalPlaces = Number(config.maxDecimalPlaces);
+        numericPattern = Number.isInteger(maxDecimalPlaces) && maxDecimalPlaces > 0
+          ? new RegExp(`^[+-]?(?:\\d+(?:\\.\\d{0,${maxDecimalPlaces}})?|\\.\\d{1,${maxDecimalPlaces}})$`)
+          : /^[+-]?\d+$/;
+      }
+      if (!numericPattern.test(trimmed)) {
         return {
           valid: false,
-          message: `Value must be a whole number or have no more than ${config.maxDecimalPlaces} decimal places!`
+          message: config.maxDecimalPlaces === undefined
+            ? 'Value must be a whole number!'
+            : `Value must be a whole number or have no more than ${config.maxDecimalPlaces} decimal places!`
         };
       }
     }

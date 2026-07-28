@@ -1173,6 +1173,14 @@ test('media size limits accept at most two decimal places without broadening int
   assert.match(source, /const MEDIA_CACHE_FILE_MB = 1_000_000;/);
 
   const plugin = createPlugin();
+  const integerConfig = { min: 0, emptyValue: 0 };
+  assert.deepEqual(plugin.validateNumericSettingValue('24', integerConfig), { valid: true, value: 24 });
+  assert.deepEqual(plugin.validateNumericSettingValue('', integerConfig), { valid: true, value: 0 });
+  for (const raw of ['24.00', '24.', '2e1', '0x18']) {
+    assert.equal(plugin.validateNumericSettingValue(raw, integerConfig).valid, false, raw);
+  }
+  assert.equal(plugin.validateNumericSettingValue('24.00', integerConfig).message, 'Value must be a whole number!');
+
   const decimalConfig = { min: 0, emptyValue: 0, maxDecimalPlaces: 2 };
   for (const [raw, expected] of [['0', 0], ['1', 1], ['1.', 1], ['.5', 0.5], ['1.2', 1.2], ['1.25', 1.25], ['', 0]]) {
     assert.deepEqual(plugin.validateNumericSettingValue(raw, decimalConfig), { valid: true, value: expected });
