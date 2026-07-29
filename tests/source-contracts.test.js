@@ -21,15 +21,16 @@ function readDefaultSettings() {
 }
 
 test('plugin metadata and updater remain pointed at the maintained main branch', () => {
-  assert.match(source, /@version 2\.8\.2\.15/);
+  assert.match(source, /@version 2\.8\.2\.16/);
   assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   const changesBlock = source.match(/  getChanges\(\) \{([\s\S]*?)\n  \}\n  async checkNewUpdate/);
   assert.ok(changesBlock, 'getChanges block was not found');
   assert.deepEqual(
     [...changesBlock[1].matchAll(/title: '([^']+)'/g)].map(([, title]) => title),
-    ['Trimmer lifecycle toasts', 'Precise media size limits', 'Media settings follow-up']
+    ['Trimmer toast master switch', 'Trimmer lifecycle toasts', 'Precise media size limits', 'Media settings follow-up']
   );
+  assert.match(changesBlock[1], /title: 'Trimmer toast master switch'[\s\S]*type: 'fixed'[\s\S]*Show trimmer toasts now controls every trimmer notice, including startup\/timer, limit-change, warning, phase, and error toasts; TIMER\/TRIM console lines and error logs remain visible while it is Off\./);
   assert.match(changesBlock[1], /title: 'Precise media size limits'[\s\S]*type: 'improved'[\s\S]*Live\/pre-cache GB caps and per-file MB limits now accept whole numbers or up to two decimal places and use decimal SI units to align with Finder; blank or 0 remains unlimited\./);
   assert.match(changesBlock[1], /title: 'Media settings follow-up'[\s\S]*type: 'fixed'[\s\S]*Age and other whole-number settings now reject decimal, scientific, and hexadecimal syntax, and cached-file deletion notices keep the View files action available for five seconds\./);
 });
@@ -320,7 +321,7 @@ test('media-cache controls sit together below their master switch', () => {
       'forceLegacyMediaFetching'
     ]
   );
-  assert.match(mediaSettings, /name: 'Show trimmer start\/end toasts'[\s\S]*note: this\.createLinkedSettingNote\([\s\S]*Shows trim start\/end toasts and limit-change warnings; age \+ GB share one pair\.[\s\S]*Hides them; console TRIM phase logs remain visible\.[\s\S]*id: 'showMediaCacheTrimLifecycleToasts'[\s\S]*enableWith: 'cacheAllImages'[\s\S]*type: 'switch'/);
+  assert.match(mediaSettings, /name: 'Show trimmer toasts'[\s\S]*note: this\.createLinkedSettingNote\([\s\S]*Shows all trimmer toasts; age \+ GB share one start\/end pair\.[\s\S]*Hides every trimmer toast; console TIMER\/TRIM logs remain visible\.[\s\S]*id: 'showMediaCacheTrimLifecycleToasts'[\s\S]*enableWith: 'cacheAllImages'[\s\S]*type: 'switch'/);
   assert.equal(miscSettings.match(/id: '(?:cacheAllImages|addUserIdToSavedMediaFilename|newSaveAllFileTypes|maxCacheFileSize|newCacheAllImagesPath|newCacheAllImages|onlyRenderCachedAttachments|deleteCachedFilesWithRecords|forceLegacyMediaFetching)'/), null);
 });
 
@@ -393,6 +394,7 @@ test('settings documentation retains audited group order and current UI labels',
     'Pre-cache maximum age (hours)',
     'Pre-cache maximum size (GB)',
     'Shared cache trim timer (minutes)',
+    'Show trimmer toasts',
     'Media cache path (optional)',
     'Use BdApi notifications instead of custom toasts',
     'Block spam edit notifications (if enabled)',

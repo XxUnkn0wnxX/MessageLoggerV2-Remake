@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.15
+ * @version 2.8.2.16
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -660,6 +660,13 @@ module.exports = class MessageLoggerV2 {
   }
   getChanges() {
     return [
+      {
+        title: 'Trimmer toast master switch',
+        type: 'fixed',
+        items: [
+          'Show trimmer toasts now controls every trimmer notice, including startup/timer, limit-change, warning, phase, and error toasts; TIMER/TRIM console lines and error logs remain visible while it is Off.'
+        ]
+      },
       {
         title: 'Trimmer lifecycle toasts',
         type: 'improved',
@@ -4862,10 +4869,10 @@ module.exports = class MessageLoggerV2 {
             action: 'mediaCacheTrimIntervalChanged'
           },
           {
-            name: 'Show trimmer start/end toasts',
+            name: 'Show trimmer toasts',
             note: this.createLinkedSettingNote(
-              'Shows trim start/end toasts and limit-change warnings; age + GB share one pair.',
-              'Hides them; console TRIM phase logs remain visible.'
+              'Shows all trimmer toasts; age + GB share one start/end pair.',
+              'Hides every trimmer toast; console TIMER/TRIM logs remain visible.'
             ),
             id: 'showMediaCacheTrimLifecycleToasts',
             enableWith: 'cacheAllImages',
@@ -8045,6 +8052,9 @@ module.exports = class MessageLoggerV2 {
       this._logStyledConsoleEvent(label, message);
     }
   }
+  _mediaCacheTrimToastsEnabled() {
+    return this.settings?.showMediaCacheTrimLifecycleToasts === true;
+  }
   _mediaCacheTrimSafeError(error) {
     let message = String(error?.message || error || 'Unknown error');
     let root = null;
@@ -8055,7 +8065,7 @@ module.exports = class MessageLoggerV2 {
   }
   _mediaCacheTrimNotify(message, replaceKey, type = 'info', timeout = 5000, category = 'TIMER', dispatchToast = true) {
     this._logStyledConsoleEvent(category, message);
-    if (!dispatchToast) return;
+    if (!dispatchToast || !this._mediaCacheTrimToastsEnabled()) return;
     this.notifyUser?.(message, {
       title: 'Message Logger Media Cache',
       type,
@@ -8193,7 +8203,7 @@ module.exports = class MessageLoggerV2 {
       'TRIM'
     );
     this._mediaCacheTrimDebug(`Changed ${settingId} to ${Number(value) || 0}; pending mask is ${this._mediaCacheTrimPendingMask}.`);
-    if (this.settings?.showMediaCacheTrimLifecycleToasts === true) {
+    if (this._mediaCacheTrimToastsEnabled()) {
       this.notifyUser(MEDIA_CACHE_TRIM_LIMIT_WARNING_MESSAGE, {
         title: 'Message Logger Media Cache',
         type: 'warning',
@@ -8404,14 +8414,14 @@ module.exports = class MessageLoggerV2 {
     const useMessageTimestamp = options.useMessageTimestamp ?? kind === 'live';
     const ageLabel = this._mediaCacheTrimPhaseLabel(kind, 'age');
     const sizeLabel = this._mediaCacheTrimPhaseLabel(kind, 'size');
-    const lifecycleToastsEnabled = this.settings?.showMediaCacheTrimLifecycleToasts === true;
+    const trimToastsEnabled = this._mediaCacheTrimToastsEnabled();
     const combinedLifecycleLabel = ageSelected && sizeSelected
       ? `${this._mediaCacheTrimRootLabel(kind)} age + GB size phases`
       : '';
     const phaseStartedAt = new Map();
     const phaseDeleted = new Map();
     const dispatchCombinedLifecycleToast = phase => {
-      if (!combinedLifecycleLabel || !lifecycleToastsEnabled) return;
+      if (!combinedLifecycleLabel || !trimToastsEnabled) return;
       this.notifyUser?.(`${combinedLifecycleLabel} ${phase}.`, {
         title: 'Message Logger Media Cache',
         type: 'info',
@@ -8428,7 +8438,7 @@ module.exports = class MessageLoggerV2 {
         'info',
         5000,
         'TRIM',
-        lifecycleToastsEnabled && !combinedLifecycleLabel
+        trimToastsEnabled && !combinedLifecycleLabel
       );
     };
     const endPhase = (bit, label, filesScanned) => {
@@ -8441,7 +8451,7 @@ module.exports = class MessageLoggerV2 {
         'info',
         5000,
         'TRIM',
-        lifecycleToastsEnabled && !combinedLifecycleLabel
+        trimToastsEnabled && !combinedLifecycleLabel
       );
       this._mediaCacheTrimDebug(`${label} scanned ${filesScanned} file(s), deleted ${phaseDeleted.get(bit) || 0} file(s), duration ${Date.now() - startedAt}ms.`, 'TRIM');
     };
@@ -8625,22 +8635,26 @@ module.exports = class MessageLoggerV2 {
           'Media cache trim pass encountered unexpected errors.',
           result.errors.map(item => ({ root: item.root, message: this._mediaCacheTrimSafeError(item.error) }))
         );
-        this.notifyUser?.('Media cache trimming encountered one or more errors. View the console for details.', {
+        if (this._mediaCacheTrimToastsEnabled()) {
+          this.notifyUser?.('Media cache trimming encountered one or more errors. View the console for details.', {
+            title: 'Message Logger Media Cache Error',
+            type: 'error',
+            timeout: 8000,
+            replaceKey: 'media-cache-trim:error'
+          });
+        }
+      }
+    }).catch(error => {
+      if (this.isMissingMediaCachePathError(error)) return;
+      Logger.error('Media cache trim pass failed unexpectedly.', this._mediaCacheTrimSafeError(error));
+      if (this._mediaCacheTrimToastsEnabled()) {
+        this.notifyUser?.('Media cache trimming failed. View the console for details.', {
           title: 'Message Logger Media Cache Error',
           type: 'error',
           timeout: 8000,
           replaceKey: 'media-cache-trim:error'
         });
       }
-    }).catch(error => {
-      if (this.isMissingMediaCachePathError(error)) return;
-      Logger.error('Media cache trim pass failed unexpectedly.', this._mediaCacheTrimSafeError(error));
-      this.notifyUser?.('Media cache trimming failed. View the console for details.', {
-        title: 'Message Logger Media Cache Error',
-        type: 'error',
-        timeout: 8000,
-        replaceKey: 'media-cache-trim:error'
-      });
     }).finally(() => {
       if (this._mediaCacheTrimRunningPromise !== operation) return;
       this._mediaCacheTrimRunningPromise = null;

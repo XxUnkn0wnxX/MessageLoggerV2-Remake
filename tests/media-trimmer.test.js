@@ -495,7 +495,12 @@ test('size deletion debug reasons report decimal megabytes with the cap in GB', 
 
 test('interval changes reset the countdown without starting a trim and debounce coalesces limit edits', async () => {
   await withTempRoot(async root => {
-    const plugin = createTrimPlugin(root, { settings: { mediaCacheTrimIntervalMinutes: 5 } });
+    const plugin = createTrimPlugin(root, {
+      settings: {
+        mediaCacheTrimIntervalMinutes: 5,
+        showMediaCacheTrimLifecycleToasts: true
+      }
+    });
     plugin._mediaCacheTrimDebounceMs = 10;
     let passes = 0;
     const originalRun = plugin._runMediaCacheTrimPass.bind(plugin);
@@ -559,7 +564,7 @@ test('startup trimmer delay reuses the periodic timeout slot and stop cancels it
   assert.equal(periodicSchedules, 0);
 });
 
-test('trimmer schedule notifications use real native notifyUser defaults', () => {
+test('trimmer toast master gates schedule notifications while preserving console logs', () => {
   const nativeNotifications = [];
   const plugin = createPlugin({
     __started: true,
@@ -567,7 +572,8 @@ test('trimmer schedule notifications use real native notifyUser defaults', () =>
     settings: {
       cacheAllImages: true,
       useNotificationsInstead: true,
-      mediaCacheTrimIntervalMinutes: 5
+      mediaCacheTrimIntervalMinutes: 5,
+      showMediaCacheTrimLifecycleToasts: true
     },
     _enqueueNativeNotification(notification) {
       nativeNotifications.push(notification);
@@ -580,6 +586,12 @@ test('trimmer schedule notifications use real native notifyUser defaults', () =>
   assert.equal(nativeNotifications[0].replaceKey, 'media-cache-trim:timer');
   assert.equal(nativeNotifications[0].pauseOnHover, false);
   assert.equal(nativeNotifications[0].instantDismiss, true);
+
+  styledConsoleEvents.length = 0;
+  plugin.settings.showMediaCacheTrimLifecycleToasts = false;
+  assert.equal(plugin._scheduleMediaCacheTrimPeriodic(), true);
+  assert.equal(nativeNotifications.length, 1);
+  assert.ok(styledConsoleMessages('TIMER').includes('Shared cache trim timer scheduled for 5 minutes.'));
   plugin.stopMediaCacheTrimmer();
 });
 
@@ -637,11 +649,44 @@ test('limit warning toast is gated, replaceable, and skipped for same-value or i
     assert.equal(plugin.notifications.some(item => item.options?.replaceKey === warningKey), false);
 
     plugin.notifications.length = 0;
+    styledConsoleEvents.length = 0;
     plugin.settings.showMediaCacheTrimLifecycleToasts = false;
+    plugin._mediaCacheTrimClearDebounceTimeout();
     plugin.settings.preCacheMaxAgeHours = 13;
     assert.equal(plugin.handleMediaCacheTrimLimitChange('preCacheMaxAgeHours', 13, 12), true);
-    assert.equal(plugin.notifications.some(item => item.options?.replaceKey === warningKey), false);
+    assert.deepEqual(plugin.notifications, []);
+    assert.ok(styledConsoleMessages('TRIM').includes('Pre-cache age limit changed to 13 hours.'));
+    assert.ok(styledConsoleMessages('TIMER').includes('Cache limit trim scheduled in 20 seconds.'));
     plugin.stopMediaCacheTrimmer();
+  });
+});
+
+test('trimmer toast master gates error alerts while preserving console errors', async () => {
+  await withTempRoot(async root => {
+    for (const enabled of [false, true]) {
+      const plugin = createTrimPlugin(root, {
+        settings: {
+          liveCacheMaxAgeHours: 1,
+          showMediaCacheTrimLifecycleToasts: enabled
+        },
+        async _runMediaCacheTrimPass() {
+          return {
+            files: 0,
+            deleted: 0,
+            errors: [{ root: 'live', error: new Error('trim failure') }]
+          };
+        }
+      });
+      await plugin.runMediaCacheTrimNow();
+      assert.equal(
+        plugin.notifications.some(item => item.options?.replaceKey === 'media-cache-trim:error'),
+        enabled
+      );
+      assert.ok(loggerEvents.some(event =>
+        event[0] === 'error' && String(event[1]).includes('Media cache trim pass encountered unexpected errors.')
+      ));
+      plugin.stopMediaCacheTrimmer();
+    }
   });
 });
 
