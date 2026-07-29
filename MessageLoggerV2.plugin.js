@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.14
+ * @version 2.8.2.15
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -4863,7 +4863,10 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Show trimmer start/end toasts',
-            note: 'Show normal start/end toasts for age and GB-size phases. When both age and GB limits are enabled for one root, show one combined phase start/end pair; individual age/GB console phase lines remain visible. Also shows a replaceable warning after an actual age or GB-size limit change if the first catch-up trim may briefly make Discord unresponsive. Console lifecycle phase lines remain visible when this is Off.',
+            note: this.createLinkedSettingNote(
+              'Shows trim start/end toasts and limit-change warnings; age + GB share one pair.',
+              'Hides them; console TRIM phase logs remain visible.'
+            ),
             id: 'showMediaCacheTrimLifecycleToasts',
             enableWith: 'cacheAllImages',
             type: 'switch'

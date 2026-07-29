@@ -21,7 +21,7 @@ function readDefaultSettings() {
 }
 
 test('plugin metadata and updater remain pointed at the maintained main branch', () => {
-  assert.match(source, /@version 2\.8\.2\.14/);
+  assert.match(source, /@version 2\.8\.2\.15/);
   assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   const changesBlock = source.match(/  getChanges\(\) \{([\s\S]*?)\n  \}\n  async checkNewUpdate/);
@@ -320,7 +320,7 @@ test('media-cache controls sit together below their master switch', () => {
       'forceLegacyMediaFetching'
     ]
   );
-  assert.match(mediaSettings, /name: 'Show trimmer start\/end toasts'[\s\S]*normal start\/end toasts[\s\S]*id: 'showMediaCacheTrimLifecycleToasts'[\s\S]*enableWith: 'cacheAllImages'[\s\S]*type: 'switch'/);
+  assert.match(mediaSettings, /name: 'Show trimmer start\/end toasts'[\s\S]*note: this\.createLinkedSettingNote\([\s\S]*Shows trim start\/end toasts and limit-change warnings; age \+ GB share one pair\.[\s\S]*Hides them; console TRIM phase logs remain visible\.[\s\S]*id: 'showMediaCacheTrimLifecycleToasts'[\s\S]*enableWith: 'cacheAllImages'[\s\S]*type: 'switch'/);
   assert.equal(miscSettings.match(/id: '(?:cacheAllImages|addUserIdToSavedMediaFilename|newSaveAllFileTypes|maxCacheFileSize|newCacheAllImagesPath|newCacheAllImages|onlyRenderCachedAttachments|deleteCachedFilesWithRecords|forceLegacyMediaFetching)'/), null);
 });
 
@@ -569,12 +569,13 @@ test('linked master notes use bold semantic On and Off labels', () => {
     source.indexOf('const settingsConfig = ['),
     source.indexOf('const actions = {', source.indexOf('const settingsConfig = ['))
   );
-  assert.equal((settingsConfig.match(/note: this\.createLinkedSettingNote\(/g) || []).length, 6);
+  assert.equal((settingsConfig.match(/note: this\.createLinkedSettingNote\(/g) || []).length, 7);
   for (const masterId of [
     'restoreDeletedMessages',
     'showEditedMessages',
     'autoBackup',
     'cacheAllImages',
+    'showMediaCacheTrimLifecycleToasts',
     'blockSpamEdit',
     'antiNukeEnabled'
   ]) {
