@@ -21,15 +21,16 @@ function readDefaultSettings() {
 }
 
 test('plugin metadata and updater remain pointed at the maintained main branch', () => {
-  assert.match(source, /@version 2\.8\.2\.16/);
+  assert.match(source, /@version 2\.8\.2\.17/);
   assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   const changesBlock = source.match(/  getChanges\(\) \{([\s\S]*?)\n  \}\n  async checkNewUpdate/);
   assert.ok(changesBlock, 'getChanges block was not found');
   assert.deepEqual(
     [...changesBlock[1].matchAll(/title: '([^']+)'/g)].map(([, title]) => title),
-    ['Trimmer toast master switch', 'Trimmer lifecycle toasts', 'Precise media size limits', 'Media settings follow-up']
+    ['Critical BetterDiscord compatibility fix', 'Trimmer toast master switch', 'Trimmer lifecycle toasts', 'Precise media size limits', 'Media settings follow-up']
   );
+  assert.match(changesBlock[1], /title: 'Critical BetterDiscord compatibility fix'[\s\S]*type: 'fixed'[\s\S]*Fixed a critical compatibility failure with BetterDiscord's current chained Patcher\.instead behavior that could trigger _waitQueue errors and repeated GatewaySocket reset\/reconnect loops while MessageLoggerV2 was enabled\./);
   assert.match(changesBlock[1], /title: 'Trimmer toast master switch'[\s\S]*type: 'fixed'[\s\S]*Show trimmer toasts now controls every trimmer notice, including startup\/timer, limit-change, warning, phase, and error toasts; TIMER\/TRIM console lines and error logs remain visible while it is Off\./);
   assert.match(changesBlock[1], /title: 'Precise media size limits'[\s\S]*type: 'improved'[\s\S]*Live\/pre-cache GB caps and per-file MB limits now accept whole numbers or up to two decimal places and use decimal SI units to align with Finder; blank or 0 remains unlimited\./);
   assert.match(changesBlock[1], /title: 'Media settings follow-up'[\s\S]*type: 'fixed'[\s\S]*Age and other whole-number settings now reject decimal, scientific, and hexadecimal syntax, and cached-file deletion notices keep the View files action available for five seconds\./);
@@ -754,8 +755,14 @@ test('native BetterDiscord keybind recorders drive capture-phase logger shortcut
 });
 
 test('native and cloned Trash actions remain scoped to indexed logger deletions', () => {
-  assert.match(source, /Patcher\.instead\(DiscordModules\.MessageActions, 'deleteMessage',[\s\S]*processNativeMessageDeleteAction\(args, original\)/);
-  assert.match(source, /processNativeMessageDeleteAction\(args, original\)[\s\S]*isThreadCreatedSystemMessage\(message\)[\s\S]*handleNativeSavedRecordDelete\(channelId, messageId\)[\s\S]*Promise\.resolve\(\)[\s\S]*original\(\.\.\.args\)/);
+  assert.match(
+    source,
+    /Patcher\.instead\(DiscordModules\.MessageActions, 'deleteMessage',[\s\S]*this\.processNativeMessageDeleteAction\(\s*args,\s*\(\.\.\.nextArgs\)\s*=>\s*original\.apply\(thisObject,\s*nextArgs\s*\)\s*\)/
+  );
+  assert.match(
+    source,
+    /processNativeMessageDeleteAction\(args,\s*original\)\s*\{[\s\S]*isThreadCreatedSystemMessage\(message\)[\s\S]*return original\(\.\.\.args\);[\s\S]*handleNativeSavedRecordDelete\(channelId, messageId\)[\s\S]*Promise\.resolve\(\)[\s\S]*return original\(\.\.\.args\);/
+  );
   assert.match(source, /isIndexedSavedDeletedRecord\(record, messageId\)[\s\S]*deletedMessageSet[\s\S]*purgedMessageSet[\s\S]*nukedMessageSet[\s\S]*deletedMessageRecord[\s\S]*purgedMessageRecord[\s\S]*nukedMessageRecord/);
   assert.match(source, /inspectNativeDestructiveMessageCandidate\(candidate\)[\s\S]*memoizedProps[\s\S]*dangerous === true/);
   assert.match(source, /inspectNativeDeleteCandidate\(candidate\)[\s\S]*inspectNativeDestructiveMessageCandidate[\s\S]*2\.81h8\.36a3[\s\S]*!isTrashIcon/);

@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.16
+ * @version 2.8.2.17
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -660,6 +660,13 @@ module.exports = class MessageLoggerV2 {
   }
   getChanges() {
     return [
+      {
+        title: 'Critical BetterDiscord compatibility fix',
+        type: 'fixed',
+        items: [
+          "Fixed a critical compatibility failure with BetterDiscord's current chained Patcher.instead behavior that could trigger _waitQueue errors and repeated GatewaySocket reset/reconnect loops while MessageLoggerV2 was enabled."
+        ]
+      },
       {
         title: 'Trimmer toast master switch',
         type: 'fixed',
@@ -1595,13 +1602,16 @@ module.exports = class MessageLoggerV2 {
       Patcher.instead(
         this.dispatcher,
         'dispatch',
-        (_, args, original) => this.onDispatchEvent(args, original)
+        (thisObject, args, original) => this.onDispatchEvent(
+          args,
+          (...nextArgs) => original.apply(thisObject, nextArgs)
+        )
       ),
-      Patcher.instead(DiscordModules.MessageActions, 'startEditMessage', (_, args, original) => {
+      Patcher.instead(DiscordModules.MessageActions, 'startEditMessage', (thisObject, args, original) => {
         const channelId = args[0];
         const messageId = args[1];
         if (this.deletedMessageSet.get(channelId)?.has(messageId)) return;
-        return original(...args);
+        return original.apply(thisObject, args);
       })
     );
     this.noTintIds = new Set();
@@ -2360,8 +2370,11 @@ module.exports = class MessageLoggerV2 {
     this.Tooltip = Components.Tooltip;
     this.addOpenLogsButton();
     this.unpatches.push(
-      Patcher.instead(DiscordModules.MessageActions, 'deleteMessage', (_, args, original) => {
-        return this.processNativeMessageDeleteAction(args, original);
+      Patcher.instead(DiscordModules.MessageActions, 'deleteMessage', (thisObject, args, original) => {
+        return this.processNativeMessageDeleteAction(
+          args,
+          (...nextArgs) => original.apply(thisObject, nextArgs)
+        );
       }),
       this.patchLocalDeleteTracker(DiscordModules.HttpModule, 'delete'),
       this.patchLocalDeleteTracker(DiscordModules.HttpModule, 'del'),
@@ -11201,9 +11214,9 @@ module.exports = class MessageLoggerV2 {
   }
   patchLocalDeleteTracker(module, method) {
     if (!module || typeof module[method] !== 'function') return () => {};
-    return Patcher.instead(module, method, (_, args, original) => {
+    return Patcher.instead(module, method, (thisObject, args, original) => {
       this.rememberLocalDeleteFromArgs(args);
-      return original(...args);
+      return original.apply(thisObject, args);
     });
   }
   patchLocalDeleteXhrTracker() {
