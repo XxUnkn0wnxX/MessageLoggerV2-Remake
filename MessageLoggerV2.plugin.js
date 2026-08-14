@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.17
+ * @version 2.8.2.18
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -660,6 +660,13 @@ module.exports = class MessageLoggerV2 {
   }
   getChanges() {
     return [
+      {
+        title: 'Reliable schema-update detection',
+        type: 'fixed',
+        items: [
+          'Reordered JSON object keys no longer trigger a misleading logger data schema-update notice; real data or schema changes, including array-order changes, are still detected normally.'
+        ]
+      },
       {
         title: 'Critical BetterDiscord compatibility fix',
         type: 'fixed',

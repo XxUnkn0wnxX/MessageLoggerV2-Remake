@@ -21,15 +21,16 @@ function readDefaultSettings() {
 }
 
 test('plugin metadata and updater remain pointed at the maintained main branch', () => {
-  assert.match(source, /@version 2\.8\.2\.17/);
+  assert.match(source, /@version 2\.8\.2\.18/);
   assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   const changesBlock = source.match(/  getChanges\(\) \{([\s\S]*?)\n  \}\n  async checkNewUpdate/);
   assert.ok(changesBlock, 'getChanges block was not found');
   assert.deepEqual(
     [...changesBlock[1].matchAll(/title: '([^']+)'/g)].map(([, title]) => title),
-    ['Critical BetterDiscord compatibility fix', 'Trimmer toast master switch', 'Trimmer lifecycle toasts', 'Precise media size limits', 'Media settings follow-up']
+    ['Reliable schema-update detection', 'Critical BetterDiscord compatibility fix', 'Trimmer toast master switch', 'Trimmer lifecycle toasts', 'Precise media size limits', 'Media settings follow-up']
   );
+  assert.match(changesBlock[1], /title: 'Reliable schema-update detection'[\s\S]*type: 'fixed'[\s\S]*Reordered JSON object keys no longer trigger a misleading logger data schema-update notice; real data or schema changes, including array-order changes, are still detected normally\./);
   assert.match(changesBlock[1], /title: 'Critical BetterDiscord compatibility fix'[\s\S]*type: 'fixed'[\s\S]*Fixed a critical compatibility failure with BetterDiscord's current chained Patcher\.instead behavior that could trigger _waitQueue errors and repeated GatewaySocket reset\/reconnect loops while MessageLoggerV2 was enabled\./);
   assert.match(changesBlock[1], /title: 'Trimmer toast master switch'[\s\S]*type: 'fixed'[\s\S]*Show trimmer toasts now controls every trimmer notice, including startup\/timer, limit-change, warning, phase, and error toasts; TIMER\/TRIM console lines and error logs remain visible while it is Off\./);
   assert.match(changesBlock[1], /title: 'Precise media size limits'[\s\S]*type: 'improved'[\s\S]*Live\/pre-cache GB caps and per-file MB limits now accept whole numbers or up to two decimal places and use decimal SI units to align with Finder; blank or 0 remains unlimited\./);
