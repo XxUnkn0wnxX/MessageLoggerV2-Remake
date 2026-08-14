@@ -569,6 +569,94 @@ test('canonical output retains the core payload shape used by current logger for
   assert.ok(Array.isArray(output.suppressedForumThreadIds));
 });
 
+test('canonical payload comparison ignores attachment object key order but keeps array order semantics', () => {
+  const plugin = createNormalizationPlugin();
+  const channelId = '111111111111111111';
+  const firstAttachmentId = '222222222222222222';
+  const secondAttachmentId = '333333333333333333';
+  const firstAttachmentUrl = `https://cdn.discordapp.com/attachments/${channelId}/${firstAttachmentId}/removed-one.png`;
+  const secondAttachmentUrl = `https://cdn.discordapp.com/attachments/${channelId}/${secondAttachmentId}/removed-two.png`;
+  const canonicalPrimary = plugin.normalizePersistedDataPayload({
+    messageRecord: {
+      '100': {
+        ...record('100', channelId, {
+          saved_location: null,
+          edit_history: [{
+            content: [
+              `\`Attachment Deleted: \`${firstAttachmentUrl}`,
+              `\`Attachment Deleted: \`${secondAttachmentUrl}`
+            ].join('\n'),
+            time: 200
+          }],
+          logged_attachments: [firstAttachmentId, secondAttachmentId],
+          removed_attachments: [{
+            id: firstAttachmentId,
+            filename: 'removed-one.png',
+            url: firstAttachmentUrl,
+            proxy_url: firstAttachmentUrl,
+            content_type: 'image/png'
+          }, {
+            id: secondAttachmentId,
+            filename: 'removed-two.png',
+            url: secondAttachmentUrl,
+            proxy_url: secondAttachmentUrl,
+            content_type: 'image/png'
+          }]
+        })
+      }
+    },
+    deletedMessageRecord: { [channelId]: ['100'] },
+    editedMessageRecord: {},
+    purgedMessageRecord: {},
+    nukedMessageRecord: {},
+    suppressedForumThreadIds: [],
+    mlv2RemakeSchemaVersion: 1
+  });
+  const mutatedAttachmentOrder = plugin.cloneDataValue(canonicalPrimary);
+  const firstAttachment = mutatedAttachmentOrder.messageRecord['100'].removed_attachments[0];
+  const secondAttachment = mutatedAttachmentOrder.messageRecord['100'].removed_attachments[1];
+  mutatedAttachmentOrder.messageRecord['100'].removed_attachments = [{
+    content_type: firstAttachment.content_type,
+    proxy_url: firstAttachment.proxy_url,
+    url: firstAttachment.url,
+    filename: firstAttachment.filename,
+    id: firstAttachment.id
+  }, {
+    content_type: secondAttachment.content_type,
+    proxy_url: secondAttachment.proxy_url,
+    url: secondAttachment.url,
+    filename: secondAttachment.filename,
+    id: secondAttachment.id
+  }];
+  const normalizedMutatedAttachmentOrder = plugin.normalizePersistedDataPayload(
+    plugin.cloneDataValue(mutatedAttachmentOrder)
+  );
+  const arrayShuffled = plugin.cloneDataValue(canonicalPrimary);
+  arrayShuffled.messageRecord['100'].removed_attachments = [
+    ...arrayShuffled.messageRecord['100'].removed_attachments.slice().reverse()
+  ];
+  const versionlessPayload = plugin.cloneDataValue(canonicalPrimary);
+  delete versionlessPayload.mlv2RemakeSchemaVersion;
+  const versionlessSnapshot = plugin.serializeDataPayloadForCanonicalComparison(versionlessPayload);
+  const normalizedMissingVersion = plugin.normalizePersistedDataPayload(
+    plugin.cloneDataValue(versionlessPayload)
+  );
+
+  assert.notEqual(JSON.stringify(mutatedAttachmentOrder), JSON.stringify(normalizedMutatedAttachmentOrder));
+  assert.equal(
+    plugin.serializeDataPayloadForCanonicalComparison(mutatedAttachmentOrder),
+    plugin.serializeDataPayloadForCanonicalComparison(normalizedMutatedAttachmentOrder)
+  );
+  assert.notEqual(
+    versionlessSnapshot,
+    plugin.serializeDataPayloadForCanonicalComparison(normalizedMissingVersion)
+  );
+  assert.notEqual(
+    plugin.serializeDataPayloadForCanonicalComparison(canonicalPrimary),
+    plugin.serializeDataPayloadForCanonicalComparison(arrayShuffled)
+  );
+});
+
 test('malformed records and edit entries invalidate the candidate instead of being rewritten away', () => {
   const plugin = createNormalizationPlugin();
   const missingMessage = payload({ '100': { delete_data: { time: 100 } } });

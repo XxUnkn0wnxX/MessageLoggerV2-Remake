@@ -1341,7 +1341,7 @@ module.exports = class MessageLoggerV2 {
     }
     this.messageStore = DiscordModules.MessageStore;
     this.ChannelStore = DiscordModules.ChannelStore;
-    let loadedPayloadSnapshot = JSON.stringify(data);
+    let loadedPayloadSnapshot = this.serializeDataPayloadForCanonicalComparison(data);
     try {
       data = this.normalizePersistedDataPayload(data);
     } catch (primaryNormalizationError) {
@@ -1353,7 +1353,7 @@ module.exports = class MessageLoggerV2 {
         : null;
       if (!this.canNormalizePersistedDataPayload(backupData)) throw primaryNormalizationError;
       try {
-        loadedPayloadSnapshot = JSON.stringify(backupData);
+        loadedPayloadSnapshot = this.serializeDataPayloadForCanonicalComparison(backupData);
         data = this.normalizePersistedDataPayload(backupData);
         dataLoadedFromBackup = true;
         backupRecoveryReason = 'failed canonical normalization';
@@ -1367,7 +1367,7 @@ module.exports = class MessageLoggerV2 {
         throw error;
       }
     }
-    this._dataNeedsCanonicalRewrite = dataLoadedFromBackup || loadedPayloadSnapshot !== JSON.stringify(data);
+    this._dataNeedsCanonicalRewrite = dataLoadedFromBackup || loadedPayloadSnapshot !== this.serializeDataPayloadForCanonicalComparison(data);
     // Keep backup restoration distinct from an ordinary legacy-schema migration so every
     // progress, success, and failure message accurately describes the primary-file rebuild.
     this._canonicalRewriteReason = dataLoadedFromBackup
@@ -5406,6 +5406,19 @@ module.exports = class MessageLoggerV2 {
   cloneDataValue(value) {
     if (value === undefined) return undefined;
     return JSON.parse(JSON.stringify(value));
+  }
+  // The replacer preserves JSON.stringify's omission/null behavior and array order while
+  // rebuilding object properties in a deterministic order for comparison.
+  serializeDataPayloadForCanonicalComparison(value) {
+    return JSON.stringify(value, (_key, input) => {
+      if (input === null || typeof input !== 'object') return input;
+      if (Array.isArray(input)) return input;
+      const ordered = Object.create(null);
+      for (const key of Object.keys(input).sort()) {
+        ordered[key] = input[key];
+      }
+      return ordered;
+    });
   }
   mergePlainDataObjects(base, overlay) {
     const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);

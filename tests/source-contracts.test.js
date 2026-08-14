@@ -1521,6 +1521,13 @@ test('schema updates use canonical whole-file output and routed notifications', 
   assert.match(source, /mlv2RemakeSchemaVersion: DATA_SCHEMA_VERSION,[\s\S]*messageRecord: this\.messageRecord/);
   assert.match(source, /Logger data requires a schema update\. Updating it to the current schema\./);
   assert.match(source, /this\.notifyUser\('Logger data requires a schema update\. Updating it to the current schema\.'/);
+  const startupCanonicalization = source.slice(
+    source.indexOf('let loadedPayloadSnapshot = this.serializeDataPayloadForCanonicalComparison(data);'),
+    source.indexOf('installDataPayload(data);')
+  );
+  assert.match(startupCanonicalization, /let loadedPayloadSnapshot = this\.serializeDataPayloadForCanonicalComparison\(data\);/);
+  assert.match(startupCanonicalization, /loadedPayloadSnapshot = this\.serializeDataPayloadForCanonicalComparison\(backupData\);/);
+  assert.match(startupCanonicalization, /_dataNeedsCanonicalRewrite = dataLoadedFromBackup \|\| loadedPayloadSnapshot !== this\.serializeDataPayloadForCanonicalComparison\(data\);/);
   assert.match(source, /rewriteCanonicalDataPayload\(\)[\s\S]*writeDataPayloadAtomic\([\s\S]*this\.getName\(\) \+ 'Data'/);
   assert.match(source, /this\.notifyUser\('Logger data was updated to the current schema successfully\.'[\s\S]*title: 'Message Logger Data Update'/);
   assert.match(source, /this\.notifyUser\([\s\S]*Logger data could not be updated to the current schema\. View the console log for more details\.[\s\S]*Message Logger Data Update Error/);
