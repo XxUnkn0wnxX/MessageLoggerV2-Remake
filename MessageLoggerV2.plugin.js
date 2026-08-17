@@ -14032,12 +14032,6 @@ module.exports = class MessageLoggerV2 {
       this.messageRecord[id].delete_data.hidden = true;
       if (this.messageRecord[id].edit_history?.length) this.messageRecord[id].edits_hidden = true;
     }
-    if (this.messageRecord[id].message.attachments) {
-      const attachments = this.messageRecord[id].message.attachments;
-      for (const attachment of attachments) {
-        attachment.url = attachment.proxy_url;
-      }
-    }
     if (this.messageRecord[id].message.embeds) {
       const embeds = this.messageRecord[id].message.embeds;
       for (const embed of embeds) {
@@ -14051,6 +14045,98 @@ module.exports = class MessageLoggerV2 {
     }
     this.moveSavedRecordToCategoryIndex(id, targetMessageRecord);
     return true;
+  }
+  getSavedAttachmentDescriptor(attachment, message, derived = {}) {
+    if (!attachment || typeof attachment !== 'object' || !message || typeof message !== 'object') return null;
+    const exactText = value => {
+      return typeof value === 'string' && value.trim() ? value : null;
+    };
+    const stringId = value => {
+      if (value === null || value === undefined) return null;
+      const text = String(value).trim();
+      return text || null;
+    };
+    const isHttpUrl = value => {
+      try {
+        const protocol = new URL(value).protocol;
+        return protocol === 'http:' || protocol === 'https:';
+      } catch {
+        return false;
+      }
+    };
+    const directUrl = exactText(attachment.url);
+    const canonicalProxyUrl = exactText(attachment.proxy_url);
+    const proxyUrl = canonicalProxyUrl
+      || exactText(attachment.proxyUrl)
+      || exactText(attachment.proxyURL);
+    const attachmentId = stringId(attachment.id);
+    const messageId = stringId(message.id);
+    const channelId = stringId(message.channel_id ?? message.channelId);
+    const remoteUrls = [];
+    for (const candidate of [directUrl, proxyUrl]) {
+      if (isHttpUrl(candidate) && !remoteUrls.includes(candidate)) remoteUrls.push(candidate);
+    }
+    const getUrlBasename = value => {
+      if (!isHttpUrl(value)) return '';
+      try {
+        const encodedName = new URL(value).pathname.split('/').filter(Boolean).pop() || '';
+        let decodedName = encodedName;
+        try {
+          decodedName = decodeURIComponent(encodedName);
+        } catch {}
+        return decodedName.split(/[\\/]/).filter(Boolean).pop() || '';
+      } catch {
+        return '';
+      }
+    };
+    const suppliedFilename = exactText(attachment.filename);
+    const directFilename = getUrlBasename(directUrl);
+    const proxyFilename = getUrlBasename(proxyUrl);
+    const filename = suppliedFilename || directFilename || proxyFilename || '';
+    let extension = '';
+    for (const candidate of [suppliedFilename, directFilename, proxyFilename]) {
+      const basename = String(candidate || '').split(/[\\/]/).filter(Boolean).pop() || '';
+      const match = basename.match(/(\.[0-9a-z]+)$/i);
+      if (match) {
+        extension = match[1];
+        break;
+      }
+    }
+    let localPath = null;
+    const resolvePath = this.imageCacheServerSimulator?._resolveImagePath;
+    if (attachmentId && messageId && channelId && extension && typeof resolvePath === 'function') {
+      try {
+        const resolvedPath = resolvePath.call(
+          this.imageCacheServerSimulator,
+          attachmentId,
+          extension,
+          channelId,
+          messageId
+        );
+        localPath = typeof resolvedPath === 'string' && resolvedPath ? resolvedPath : null;
+      } catch {
+        localPath = null;
+      }
+    }
+    const blobUrl = exactText(derived?.blob_url ?? derived?.blobUrl);
+    const displayUrl = exactText(derived?.display_url ?? derived?.displayUrl);
+    const externalUrl = exactText(derived?.external_url ?? derived?.externalUrl);
+    return {
+      attachment_id: attachmentId,
+      message_id: messageId,
+      channel_id: channelId,
+      direct_url: directUrl || null,
+      proxy_url: proxyUrl || null,
+      remote_urls: remoteUrls,
+      filename,
+      extension,
+      local_path: localPath,
+      blob_url: blobUrl?.startsWith('blob:') ? blobUrl : null,
+      display_url: displayUrl && (displayUrl.startsWith('blob:') || isHttpUrl(displayUrl))
+        ? displayUrl
+        : null,
+      external_url: isHttpUrl(externalUrl) ? externalUrl : null
+    };
   }
   createButton(label, callback) {
     const classes = this.createButton.classes;

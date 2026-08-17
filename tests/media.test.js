@@ -2433,6 +2433,178 @@ test('cache-only rendering sanitizes malformed embed media in an isolated render
   assert.deepEqual(saved, canonicalBeforeRender);
 });
 
+test('saved attachment descriptors preserve direct/proxy candidates and exact local cache paths', () => {
+  const plugin = createPlugin({
+    imageCacheServerSimulator: {
+      _resolveImagePath: (attachmentId, ext, channelId, messageId) => {
+        assert.equal(ext, attachmentId === '101' ? '.PNG' : '.png');
+        assert.equal(messageId, '700');
+        assert.equal(channelId, '700');
+        return {
+          101: '/tmp/space cache/space file name #1.PNG',
+          102: '/tmp/percent% path/#special%.png',
+          103: '/tmp/unicode/测试 #文件.png',
+          104: 'C:\\cache\\windows path\\unicode 频道 #4.png'
+        }[attachmentId] || null;
+      }
+    }
+  });
+  const message = { id: '700', channel_id: '700', content: '' };
+  const sample = [
+    {
+      id: '101',
+      filename: 'space file name #1.PNG',
+      url: 'https://cdn.example/attachments/space%20file.PNG',
+      proxy_url: 'https://media.example/attachments/space%20file.PNG'
+    },
+    {
+      id: '102',
+      filename: 'percent%_file#2.png',
+      url: 'https://cdn.example/percent%25%20file.png',
+      proxy_url: 'https://media.example/percent%25%20file.png'
+    },
+    {
+      id: '103',
+      filename: '测试图片 #3.png',
+      url: 'https://cdn.example/unicode%20file.png',
+      proxy_url: 'https://media.example/unicode%20file.png'
+    },
+    {
+      id: '104',
+      filename: 'unicode windows #4.png',
+      url: 'https://cdn.example/windows%20unicode.png',
+      proxy_url: 'https://media.example/windows%20unicode.png',
+      proxyUrl: 'https://fallback.example/windows%20unicode.png'
+    }
+  ];
+  const sampleBefore = structuredClone(sample);
+  const messageBefore = structuredClone(message);
+  const descriptors = sample.map(attachment => plugin.getSavedAttachmentDescriptor(attachment, message));
+  assert.deepEqual(
+    descriptors.map(descriptor => descriptor.attachment_id),
+    ['101', '102', '103', '104']
+  );
+  assert.deepEqual(descriptors.map(descriptor => descriptor.remote_urls), [
+    [
+      'https://cdn.example/attachments/space%20file.PNG',
+      'https://media.example/attachments/space%20file.PNG'
+    ],
+    [
+      'https://cdn.example/percent%25%20file.png',
+      'https://media.example/percent%25%20file.png'
+    ],
+    [
+      'https://cdn.example/unicode%20file.png',
+      'https://media.example/unicode%20file.png'
+    ],
+    [
+      'https://cdn.example/windows%20unicode.png',
+      'https://media.example/windows%20unicode.png'
+    ]
+  ]);
+  assert.deepEqual(
+    descriptors.map(descriptor => descriptor.filename),
+    ['space file name #1.PNG', 'percent%_file#2.png', '测试图片 #3.png', 'unicode windows #4.png']
+  );
+  assert.deepEqual(
+    descriptors.map(descriptor => descriptor.extension),
+    ['.PNG', '.png', '.png', '.png']
+  );
+  assert.deepEqual(
+    descriptors.map(descriptor => descriptor.local_path),
+    [
+      '/tmp/space cache/space file name #1.PNG',
+      '/tmp/percent% path/#special%.png',
+      '/tmp/unicode/测试 #文件.png',
+      'C:\\cache\\windows path\\unicode 频道 #4.png'
+    ]
+  );
+  assert.deepEqual(sample, sampleBefore);
+  assert.deepEqual(message, messageBefore);
+
+  const legacy = plugin.getSavedAttachmentDescriptor({
+    id: '105',
+    filename: 'legacy.png',
+    url: 'https://media.example/legacy.png',
+    proxy_url: 'https://media.example/legacy.png'
+  }, message);
+  assert.deepEqual(legacy.remote_urls, ['https://media.example/legacy.png']);
+  assert.equal(legacy.direct_url, legacy.proxy_url);
+});
+
+test('saved attachment descriptors skip local path without trusted extension or identity and keep derived fields separate', () => {
+  const plugin = createPlugin({
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => '/should/not/use/this/path.png'
+    }
+  });
+  const message = { channel_id: '800', content: '' };
+  const derived = {
+    blobUrl: 'blob:https://discord.com/render-only',
+    displayUrl: 'blob:https://discord.com/render-only',
+    externalUrl: 'https://cdn.example/derived.png',
+    direct_url: 'https://attacker.example/must-not-override.png'
+  };
+  const attachment = {
+    id: '201',
+    filename: 'derived.png',
+    url: 'https://cdn.example/derived.png',
+    proxyUrl: 'https://media.example/derived.png'
+  };
+  const beforeAttachment = structuredClone(attachment);
+  const descriptor = plugin.getSavedAttachmentDescriptor(attachment, message, derived);
+
+  assert.equal(descriptor.attachment_id, '201');
+  assert.equal(descriptor.message_id, null);
+  assert.equal(descriptor.channel_id, '800');
+  assert.equal(descriptor.direct_url, attachment.url);
+  assert.equal(descriptor.proxy_url, attachment.proxyUrl);
+  assert.equal(descriptor.local_path, null);
+  assert.equal(descriptor.blob_url, derived.blobUrl);
+  assert.equal(descriptor.display_url, derived.displayUrl);
+  assert.equal(descriptor.external_url, derived.externalUrl);
+  assert.equal(Object.hasOwn(descriptor, 'openHint'), false);
+  assert.equal(descriptor.remote_urls.length, 2);
+  assert.equal(descriptor.extension, '.png');
+  assert.deepEqual(attachment, beforeAttachment);
+
+  const extensionless = plugin.getSavedAttachmentDescriptor({
+    id: '202',
+    filename: 'extensionless',
+    url: 'https://cdn.example/extensionless',
+    proxy_url: 'https://media.example/extensionless'
+  }, message);
+  assert.equal(extensionless.extension, '');
+  assert.equal(extensionless.local_path, null);
+
+  const blobOpenAttempt = plugin.getSavedAttachmentDescriptor(attachment, message, {
+    externalUrl: 'blob:https://discord.com/not-external'
+  });
+  assert.equal(blobOpenAttempt.external_url, null);
+
+  const olderProxyAlias = plugin.getSavedAttachmentDescriptor({
+    id: '203',
+    filename: 'older-alias.png',
+    url: 'https://cdn.example/older-alias.png',
+    proxyURL: 'https://media.example/older-alias.png'
+  }, message);
+  assert.equal(olderProxyAlias.proxy_url, 'https://media.example/older-alias.png');
+  assert.deepEqual(olderProxyAlias.remote_urls, [
+    'https://cdn.example/older-alias.png',
+    'https://media.example/older-alias.png'
+  ]);
+
+  const missingIdentity = plugin.getSavedAttachmentDescriptor({
+    filename: 'no-id.png',
+    url: 'https://cdn.example/no-id.png',
+    proxy_url: 'https://media.example/no-id.png'
+  }, { channel_id: '800', content: '' });
+  assert.equal(missingIdentity.attachment_id, null);
+  assert.equal(missingIdentity.message_id, null);
+  assert.equal(missingIdentity.channel_id, '800');
+  assert.equal(missingIdentity.local_path, null);
+});
+
 test('decimal per-file MB limits use SI bytes', async () => {
   const cached = [];
   const plugin = createPlugin({

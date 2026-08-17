@@ -2281,6 +2281,156 @@ test('newly captured records already match the canonical persisted shape', () =>
   assert.equal(JSON.stringify(normalized), JSON.stringify(payload));
 });
 
+test('attachment capture serialization preserves exact signed direct and proxy URLs', () => {
+  const plugin = createPlugin();
+  const attachment = {
+    id: 'signed-attachment',
+    filename: 'signed image.PNG',
+    url: 'https://cdn.discordapp.com/attachments/channel/signed-attachment/signed%20image.PNG?ex=abc&is=def&hm=direct-signature',
+    proxy_url: 'https://media.discordapp.net/attachments/channel/signed-attachment/signed%20image.PNG?ex=abc&is=def&hm=proxy-signature&format=webp',
+    width: 1920,
+    height: 1080
+  };
+  const before = structuredClone(attachment);
+
+  const normalized = plugin.normalizeSerializableMessageItems([attachment], 'attachment');
+
+  assert.deepEqual(normalized, [before]);
+  assert.deepEqual(attachment, before);
+  assert.notEqual(normalized[0], attachment);
+  assert.notEqual(normalized[0].url, normalized[0].proxy_url);
+});
+
+test('saveDeletedMessage preserves attachment direct/proxy URLs without mutating captured input when caching is disabled', () => {
+  const distinctMessage = {
+    id: '200',
+    channel_id: 'cache-channel',
+    content: 'distinct urls',
+    timestamp: 100,
+    attachments: [{
+      id: 'attach-distinct',
+      filename: 'a.png',
+      url: 'https://cdn.discordapp.com/attachments/cache-channel/attach-distinct/distinct.png?ex=abc&is=def&hm=123',
+      proxy_url: 'https://media.discordapp.net/attachments/cache-channel/distinct.webp'
+    }]
+  };
+  const legacyMessage = {
+    id: '201',
+    channel_id: 'cache-channel',
+    content: 'equal urls',
+    timestamp: 101,
+    attachments: [{
+      id: 'attach-legacy',
+      filename: 'b.png',
+      url: 'https://cdn.discordapp.com/attachments/cache-channel/attach-legacy/legacy.png?ex=abc&is=def&hm=456',
+      proxy_url: 'https://cdn.discordapp.com/attachments/cache-channel/attach-legacy/legacy.png?ex=abc&is=def&hm=456'
+    }]
+  };
+  const before = {
+    distinctMessage: structuredClone(distinctMessage),
+    legacyMessage: structuredClone(legacyMessage)
+  };
+  const plugin = createPlugin({
+    messageRecord: {},
+    messageRecordIds: new Set(),
+    deletedMessageRecord: {},
+    purgedMessageRecord: {},
+    nukedMessageRecord: {},
+    deletedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
+    settings: { cacheAllImages: false },
+    createMiniFormattedData: message => ({
+      message: structuredClone(message),
+      saved_location: { channelId: message.channel_id },
+      local_mentioned: false,
+      ghost_pinged: false,
+      logged_attachments: []
+    }),
+    getMessageLocationSnapshot: () => null
+  });
+
+  plugin.saveDeletedMessage(distinctMessage, plugin.deletedMessageRecord);
+  plugin.saveDeletedMessage(legacyMessage, plugin.deletedMessageRecord);
+
+  assert.deepEqual(distinctMessage, before.distinctMessage, 'captured distinct URL message stays unchanged');
+  assert.deepEqual(legacyMessage, before.legacyMessage, 'captured legacy URL message stays unchanged');
+  assert.deepEqual(plugin.messageRecord['200'].message.attachments, [{
+    id: 'attach-distinct',
+    filename: 'a.png',
+    url: 'https://cdn.discordapp.com/attachments/cache-channel/attach-distinct/distinct.png?ex=abc&is=def&hm=123',
+    proxy_url: 'https://media.discordapp.net/attachments/cache-channel/distinct.webp'
+  }]);
+  assert.deepEqual(plugin.messageRecord['201'].message.attachments, [{
+    id: 'attach-legacy',
+    filename: 'b.png',
+    url: 'https://cdn.discordapp.com/attachments/cache-channel/attach-legacy/legacy.png?ex=abc&is=def&hm=456',
+    proxy_url: 'https://cdn.discordapp.com/attachments/cache-channel/attach-legacy/legacy.png?ex=abc&is=def&hm=456'
+  }]);
+  assert.equal(plugin.deletedMessageRecord['cache-channel'].length, 2);
+  const serialized = JSON.stringify(plugin.messageRecord['200'].message);
+  assert.equal(serialized.includes('"localPath"'), false);
+  assert.equal(serialized.includes('"local_path"'), false);
+  assert.equal(serialized.includes('blob:'), false);
+  assert.equal(serialized.includes('file:'), false);
+});
+
+test('saveDeletedMessage preserves attachment URLs and preserved direct URL is used when cacheAllImages is enabled', () => {
+  const message = {
+    id: '300',
+    channel_id: 'cache-channel',
+    content: 'cached message',
+    timestamp: 200,
+    attachments: [{
+      id: 'attach-cached',
+      filename: 'cached.png',
+      url: 'https://cdn.discordapp.com/attachments/cache-channel/attach-cached/cached.png?ex=abc&is=def&hm=789',
+      proxy_url: 'https://media.discordapp.net/attachments/cache-channel/cached.webp'
+    }]
+  };
+  const before = structuredClone(message);
+  const cacheCalls = [];
+  const plugin = createPlugin({
+    messageRecord: {},
+    messageRecordIds: new Set(),
+    deletedMessageRecord: {},
+    purgedMessageRecord: {},
+    nukedMessageRecord: {},
+    deletedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
+    settings: { cacheAllImages: true },
+    cacheMessageImages(...args) {
+      cacheCalls.push(args);
+    },
+    createMiniFormattedData: message => ({
+      message: structuredClone(message),
+      saved_location: { channelId: message.channel_id },
+      local_mentioned: false,
+      ghost_pinged: false,
+      logged_attachments: []
+    }),
+    getMessageLocationSnapshot: () => null
+  });
+
+  plugin.saveDeletedMessage(message, plugin.deletedMessageRecord);
+
+  assert.deepEqual(message, before);
+
+  assert.equal(cacheCalls.length, 1);
+  assert.equal(cacheCalls[0][0].attachments[0].url, before.attachments[0].url);
+  assert.equal(cacheCalls[0][0].attachments[0].proxy_url, before.attachments[0].proxy_url);
+  assert.equal(cacheCalls[0][1].cacheState, 'confirmed');
+  assert.equal(plugin.messageRecord['300'].message.attachments[0].url, before.attachments[0].url);
+  assert.equal(plugin.messageRecord['300'].message.attachments[0].proxy_url, before.attachments[0].proxy_url);
+  assert.notEqual(plugin.messageRecord['300'].message.attachments[0].url, plugin.messageRecord['300'].message.attachments[0].proxy_url);
+  const serialized = JSON.stringify(plugin.messageRecord['300']);
+  assert.equal(serialized.includes('"localPath"'), false);
+  assert.equal(serialized.includes('"local_path"'), false);
+  assert.equal(serialized.includes('blob:'), false);
+  assert.equal(serialized.includes('file:'), false);
+});
+
 test('message cleanup preserves detached Components V2 trees and snapshot aliases', () => {
   const componentFromJs = {
     type: 1,
