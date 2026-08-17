@@ -4924,7 +4924,15 @@ module.exports = class MessageLoggerV2 {
           {
             name: 'Render & Cache media',
             note: this.createLinkedSettingNote(
-              'Renders saved media, caches eligible files, and retries saved live URLs after an Off-to-On transition.',
+              React.createElement(
+                'span',
+                null,
+                'Renders saved media, caches eligible files, and retries saved live URLs after an ',
+                this.createSettingStateLabel(false),
+                '-to-',
+                this.createSettingStateLabel(true),
+                ' transition.'
+              ),
               'Shows attachment placeholders; child settings stay saved.',
               ' New downloads pause while ',
               React.createElement(

@@ -1853,3 +1853,20 @@ full setting matrix in every channel type.
   Stage 3 is accepted for its four-file commit and `develop` push. Do not merge,
   tag, publish a release, change version/changelog metadata, or begin Stage 4
   implementation inside the Stage 3 commit.
+
+### 2026-08-17 - Pre-Stage 4 media-master note styling completed
+
+- At the user's request, the **Render & Cache media** note now renders the
+  embedded **Off-to-On transition** with **Off** through the existing danger
+  state label and **On** through the existing positive state label. The wording,
+  setting id, setting behavior, and the note's other state labels are unchanged.
+- Extended the deterministic source contract to require those exact semantic
+  label calls and replaced its brittle fixed-length setting lookup with the
+  setting's actual `name` boundary. RT-11 now includes the visual requirement.
+- `npm run check`, focused `tests/source-contracts.test.js` at `68/68`, full
+  `npm test` at `518/518`, and `git diff --check` pass.
+- Synced only the plugin without relaunching Discord. Repository and installed
+  SHA-256 match at
+  `ceaa39c043c00cda0d872afa58265f727e81a9addedeab7e1b92348e3bc074a7`;
+  the 11:30 hot reload completed patch removal, initialization, and UI refresh
+  without a new MessageLogger error. Stage 4 implementation remains untouched.

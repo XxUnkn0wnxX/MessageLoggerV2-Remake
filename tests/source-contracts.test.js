@@ -323,7 +323,7 @@ test('media-cache controls sit together below their master switch', () => {
       'forceLegacyMediaFetching'
     ]
   );
-  assert.match(mediaSettings, /name: 'Render & Cache media'[\s\S]*createLinkedSettingNote\([\s\S]*Renders saved media, caches eligible files, and retries saved live URLs after an Off-to-On transition\.[\s\S]*Shows attachment placeholders; child settings stay saved\.[\s\S]*Disable saving data[\s\S]*eligible logger media stays queued in memory until saving succeeds\.[\s\S]*id: 'cacheAllImages'/);
+  assert.match(mediaSettings, /name: 'Render & Cache media'[\s\S]*createLinkedSettingNote\(\s*React\.createElement\(\s*'span',\s*null,\s*'Renders saved media, caches eligible files, and retries saved live URLs after an ',\s*this\.createSettingStateLabel\(false\),\s*'-to-',\s*this\.createSettingStateLabel\(true\),\s*' transition\.'\s*\)[\s\S]*Shows attachment placeholders; child settings stay saved\.[\s\S]*Disable saving data[\s\S]*eligible logger media stays queued in memory until saving succeeds\.[\s\S]*id: 'cacheAllImages'/);
   assert.match(mediaSettings, /name: 'Show trimmer toasts'[\s\S]*note: this\.createLinkedSettingNote\([\s\S]*Shows all trimmer toasts; age \+ GB share one start\/end pair\.[\s\S]*Hides every trimmer toast; console TIMER\/TRIM logs remain visible\.[\s\S]*id: 'showMediaCacheTrimLifecycleToasts'[\s\S]*enableWith: 'cacheAllImages'[\s\S]*type: 'switch'/);
   assert.equal(miscSettings.match(/id: '(?:cacheAllImages|addUserIdToSavedMediaFilename|newSaveAllFileTypes|maxCacheFileSize|newCacheAllImagesPath|newCacheAllImages|onlyRenderCachedAttachments|deleteCachedFilesWithRecords|forceLegacyMediaFetching)'/), null);
 });
@@ -590,8 +590,10 @@ test('linked master notes use bold semantic On and Off labels', () => {
   ]) {
     const idIndex = settingsConfig.indexOf(`id: '${masterId}'`);
     assert.notEqual(idIndex, -1, `${masterId} setting was not found`);
+    const settingStart = settingsConfig.lastIndexOf('name:', idIndex);
+    assert.notEqual(settingStart, -1, `${masterId} setting name was not found`);
     assert.match(
-      settingsConfig.slice(Math.max(0, idIndex - 700), idIndex),
+      settingsConfig.slice(settingStart, idIndex),
       /note: this\.createLinkedSettingNote\(/,
       `${masterId} must use the linked master note helper`
     );
