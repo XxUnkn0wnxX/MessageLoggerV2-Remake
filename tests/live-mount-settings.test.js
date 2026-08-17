@@ -959,6 +959,135 @@ test('media cache master toggle remounts selected attachment rows and refreshes 
   assert.equal(calls.dispatches.some(event => event.type === 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT'), true);
 });
 
+test('a newly available local attachment coalesces an exact local-only presentation refresh', async () => {
+  const attachment = {
+    id: 'attachment',
+    filename: 'saved.png',
+    url: 'https://cdn.example/saved.png',
+    proxy_url: 'https://media.example/saved.png'
+  };
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    attachments: [attachment]
+  };
+  const calls = {
+    dispatches: [],
+    loggerRefreshes: 0,
+    plans: 0,
+    remounts: 0,
+    threadRefreshes: 0
+  };
+  const plugin = createPlugin({
+    __started: true,
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    messageRecord: {
+      message: {
+        message,
+        delete_data: { hidden: false }
+      }
+    },
+    dispatcher: { dispatch: event => calls.dispatches.push(event) },
+    getSavedAttachmentPresentationPlan(candidate, sourceMessage, options) {
+      calls.plans++;
+      assert.equal(candidate, attachment);
+      assert.equal(sourceMessage, message);
+      assert.deepEqual(options, { allowBlob: true });
+      return {
+        action: 'blob',
+        mediaType: 'image',
+        url: 'blob:https://discord.com/local'
+      };
+    },
+    remountSavedAttachmentPresentationRecords(record) {
+      calls.remounts++;
+      assert.equal(record, this.messageRecord.message);
+      return 1;
+    },
+    _forumThreadLogRefreshers: new Map([
+      ['thread', () => { calls.threadRefreshes++; }]
+    ]),
+    scheduleLoggerMenuRefresh() {
+      calls.loggerRefreshes++;
+    }
+  });
+
+  plugin.scheduleSavedAttachmentPresentationRefresh('message', 'attachment');
+  plugin.scheduleSavedAttachmentPresentationRefresh('message', 'attachment');
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(calls.plans, 1);
+  assert.equal(calls.remounts, 1);
+  assert.equal(calls.threadRefreshes, 1);
+  assert.equal(calls.loggerRefreshes, 1);
+  assert.deepEqual(calls.dispatches, [{ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' }]);
+  assert.equal(plugin._pendingSavedAttachmentPresentationRefreshes.size, 0);
+
+  plugin.settings.onlyRenderCachedAttachments = false;
+  plugin.scheduleSavedAttachmentPresentationRefresh('message', 'attachment');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.plans, 1, 'remote-first mode must not run the local-only completion refresh');
+
+  plugin.settings.onlyRenderCachedAttachments = true;
+  plugin.scheduleSavedAttachmentPresentationRefresh('message', 'unrelated');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.plans, 1, 'an unrelated attachment must not refresh the saved record');
+});
+
+test('local cache completion refreshes Logger-owned removed media without requiring a live remount', async () => {
+  const attachment = {
+    id: 'removed-attachment',
+    filename: 'removed.png',
+    url: 'https://cdn.example/removed.png'
+  };
+  const message = {
+    id: 'edited-message',
+    channel_id: 'channel',
+    attachments: []
+  };
+  const calls = {
+    dispatches: [],
+    loggerRefreshes: 0,
+    remounts: 0
+  };
+  const plugin = createPlugin({
+    __started: true,
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    messageRecord: {
+      'edited-message': {
+        message,
+        removed_attachments: [attachment]
+      }
+    },
+    getSavedAttachmentPresentationPlan: () => ({
+      action: 'blob',
+      mediaType: 'image',
+      url: 'blob:https://discord.com/removed'
+    }),
+    remountSavedAttachmentPresentationRecords() {
+      calls.remounts++;
+      return 0;
+    },
+    dispatcher: { dispatch: event => calls.dispatches.push(event) },
+    scheduleLoggerMenuRefresh() {
+      calls.loggerRefreshes++;
+    }
+  });
+
+  plugin.scheduleSavedAttachmentPresentationRefresh('edited-message', 'removed-attachment');
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(calls.remounts, 1);
+  assert.equal(calls.loggerRefreshes, 1);
+  assert.deepEqual(calls.dispatches, [{ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' }]);
+});
+
 test('media cache local-only setting resets the local state, refreshes attachments, and reports the toggle', () => {
   const calls = {
     cleanUps: 0,
@@ -971,6 +1100,7 @@ test('media cache local-only setting resets the local state, refreshes attachmen
     settings: { onlyRenderCachedAttachments: false },
     _failedNativeAttachmentMediaKeys: new Set(['seeded-failure']),
     _failedNativeAttachmentMediaCandidateKeys: new Set(['seeded-candidate-failure']),
+    _pendingSavedAttachmentPresentationRefreshes: new Set(['message:attachment']),
     closeLoggerOwnedAttachmentMediaViewers: () => {
       calls.closeLoggerOwnedAttachmentMediaViewersCalls++;
       calls.closeLoggerOwnedAttachmentMediaViewersOrder.push('close');
@@ -1001,4 +1131,5 @@ test('media cache local-only setting resets the local state, refreshes attachmen
   assert.deepEqual(calls.reportMajorSetting, [['onlyRenderCachedAttachments', true]]);
   assert.equal(plugin._failedNativeAttachmentMediaKeys.size, 0);
   assert.equal(plugin._failedNativeAttachmentMediaCandidateKeys.size, 0);
+  assert.equal(plugin._pendingSavedAttachmentPresentationRefreshes.size, 0);
 });

@@ -439,6 +439,7 @@ module.exports = class MessageLoggerV2 {
     this._savedAttachmentMediaErrorListener = null;
     this._savedAttachmentMediaErrorListenerTarget = null;
     this._savedAttachmentPresentationRecacheChannels = new Set();
+    this._pendingSavedAttachmentPresentationRefreshes = new Set();
     this._failedNativeAttachmentMediaCandidateKeys = new Set();
     this._nativeMediaViewerOpenContextDepth = 0;
     this._nativeAttachmentMediaViewerOwnership = null;
@@ -523,6 +524,7 @@ module.exports = class MessageLoggerV2 {
     this._archiveLoadModeSettleTimer = 0;
     this._archiveLoadModeTransitionInProgress = false;
     this._failedNativeAttachmentMediaKeys?.clear?.();
+    this._pendingSavedAttachmentPresentationRefreshes?.clear?.();
     this._failedNativeAttachmentMediaCandidateKeys?.clear?.();
     this._removeSavedAttachmentMediaErrorListener();
     // A CSS-class mode restart uses BetterDiscord's disable/enable lifecycle on this same
@@ -8888,6 +8890,7 @@ module.exports = class MessageLoggerV2 {
   resetSavedAttachmentPresentationState() {
     this.closeLoggerOwnedAttachmentMediaViewers?.();
     this._failedNativeAttachmentMediaKeys?.clear?.();
+    this._pendingSavedAttachmentPresentationRefreshes?.clear?.();
     this._failedNativeAttachmentMediaCandidateKeys?.clear?.();
     if (typeof this.imageCacheServerSimulator?.cleanUp === 'function') {
       this.imageCacheServerSimulator.cleanUp();
@@ -10004,6 +10007,52 @@ module.exports = class MessageLoggerV2 {
       if (this.__started === false) return;
       this.invalidateChannelCache?.(targetChannelId);
       this.cacheChannelMessages?.(targetChannelId);
+    };
+    if (typeof scheduleFrame === 'function') scheduleFrame(run);
+    else if (typeof globalThis.setImmediate === 'function') globalThis.setImmediate(run);
+  }
+  scheduleSavedAttachmentPresentationRefresh(messageId, attachmentId) {
+    const safeMessageId = String(messageId || '');
+    const safeAttachmentId = String(attachmentId || '');
+    if (!safeMessageId || !safeAttachmentId) return;
+    if (this.settings?.cacheAllImages === false) return;
+    const pending = this._pendingSavedAttachmentPresentationRefreshes ||= new Set();
+    const refreshKey = `${safeMessageId}:${safeAttachmentId}`;
+    if (pending.has(refreshKey)) return;
+    pending.add(refreshKey);
+    const scheduleFrame = typeof globalThis.requestAnimationFrame === 'function'
+      ? globalThis.requestAnimationFrame
+      : globalThis.setImmediate;
+    const run = () => {
+      pending.delete(refreshKey);
+      if (this.__started === false || this.settings?.cacheAllImages === false) return;
+      if (this.settings?.onlyRenderCachedAttachments !== true) return;
+      const record = this.messageRecord?.[safeMessageId];
+      if (!record?.message || (record.delete_data && record.delete_data.hidden)) return;
+      const sourceMessage = record.message;
+      const sourceMessageId = String(sourceMessage.id || '');
+      if (!sourceMessageId || sourceMessageId !== safeMessageId) return;
+      const attachments = Array.isArray(sourceMessage.attachments) ? sourceMessage.attachments : [];
+      let attachment = attachments.find(item => String(item?.id || '') === safeAttachmentId);
+      if (!attachment) {
+        attachment = this.getRecordRemovedAttachments(record).find(item => String(item?.id || '') === safeAttachmentId);
+      }
+      if (!attachment) return;
+      const plan = this.getSavedAttachmentPresentationPlan(attachment, sourceMessage, {
+        allowBlob: true
+      });
+      if (!plan || plan.action !== 'blob' || (plan.mediaType !== 'image' && plan.mediaType !== 'video')) return;
+      this.remountSavedAttachmentPresentationRecords(record);
+      this.dispatcher?.dispatch?.({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' });
+      for (const [threadId, refresh] of this._forumThreadLogRefreshers?.entries?.() || []) {
+        if (typeof refresh !== 'function') continue;
+        try {
+          refresh();
+        } catch (error) {
+          Logger.warn(`Could not refresh thread log modal for ${threadId}.`, error);
+        }
+      }
+      this.scheduleLoggerMenuRefresh?.();
     };
     if (typeof scheduleFrame === 'function') scheduleFrame(run);
     else if (typeof globalThis.setImmediate === 'function') globalThis.setImmediate(run);
@@ -15520,7 +15569,10 @@ module.exports = class MessageLoggerV2 {
         const fileIds = Array.from(sourceMessageIds, sourceId =>
           this.getMediaCacheFileId(attachmentId, attachmentIdx, sourceId)
         );
-        if (this.promotePreCachedMedia(requestState, fileIds, channelId, serverId)) return;
+        if (this.promotePreCachedMedia(requestState, fileIds, channelId, serverId)) {
+          this.scheduleSavedAttachmentPresentationRefresh(messageId, attachmentId);
+          return;
+        }
       }
       response = await this.fetchMediaCacheResponse(url);
       if (!this.canCacheMediaLocally(writeEpoch)) return;
@@ -15589,6 +15641,7 @@ module.exports = class MessageLoggerV2 {
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       if (requestState.cacheState === 'confirmed') {
         this._logStyledConsoleEvent('MEDIA CACHED', `Cached media for saved record: ${fileName}`);
+        this.scheduleSavedAttachmentPresentationRefresh(messageId, attachmentId);
       } else if (this.settings.debugLogging) {
         this._logStyledConsoleEvent('DEBUG · PRE-CACHE', `Pre-cached media: ${fileName}`);
       }

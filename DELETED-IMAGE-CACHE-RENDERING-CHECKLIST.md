@@ -29,60 +29,60 @@ This file is both the implementation checklist and the handoff record.
 - **Root rollout record:**
   `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T11-07-23-01a00d42-4986-7971-94de-11f09f6630d1.jsonl`
 - **Working branch:** `develop`
-- **Verified HEAD:** incomplete Stage 3 remount checkpoint
-  `2f3a17eed59b4a8df03702d5985de14b400ed18e`; its verified Stage 2 parent is
-  `62152b8632860a0d0037c7713314d8f9c3357daa`.
-- **Verified worktree:** `develop` tracks `origin/develop` and is ahead by the
-  Stage 2 and Stage 3 checkpoint commits. The current targeted correction
-  modifies `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
-  `tests/live-mount-settings.test.js`, `tests/source-contracts.test.js`,
-  `docs/help.md`, `docs/settings.md`, `docs/tests.md`, and this checklist on top
-  of the checkpoint.
+- **Verified pre-commit base:** Stage 3 rendering commit
+  `ed59642aa6c9c45af8865846f3efd3a8861efbf9`; the four-file follow-up containing
+  this entry is the next `develop` commit. Nothing has been pushed.
+- **Verified worktree:** the Stage 3 timing correction modifies only
+  `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
+  `tests/live-mount-settings.test.js`, and this checklist.
 - **Baseline:** `npm test` passed `471/471` before this checklist was created.
 - **Checklist verification:** the Stage 2 parent rerun of `npm test` passes
   `476/476`; the checklist new-file whitespace check is clean.
-- **Live parity:** verified. Repository and installed plugin SHA-256 both equal
-  `1aff8ea21a0ede6c77c60866778d28f436bd609f9dba90cc75c3e1ce71cb0a6c`.
+- **Live parity:** verified for the correction build. Repository and installed
+  plugin SHA-256 both equal
+  `551690965624202ce67d0dfbe6bc032b3643c396116dcd0fe140751c47cd9770`.
 - **Implementation state:** Stage 1 runtime tracing and Stage 2 persistence are
   complete. Stage 3 now has full-message remount refresh plus one shared
   attachment-presentation order across native mounts, Logger rows, deleted
   thread/forum logs, and inline history: direct CDN, distinct media proxy, then
   existing cached Blob, otherwise the classified placeholder. The archive is
   unchanged. The visible master is now **Render & Cache media** with every Media
-  child linked to it. Stage 3 is accepted for commit; Stage 4 owns the remaining
-  external-open behavior.
+  child linked to it. The reopened Stage 3 timing correction now schedules one
+  exact, coalesced local-only remount after a confirmed cache promotion or
+  write. Its live gate is accepted; forum mounts can show the classified
+  placeholder for a moment during an initial image/attachment deletion or a
+  **Render & Cache media** Off-to-On transition before the cached Blob replaces
+  it. Stage 4 still separately owns external opening.
 - **Runtime-trace state:** Stage 1 and the later native-mount fallback trace are
   complete and cleaned up. The exact helper symlinks, generated reports, and
   ignored helper sources were removed after their evidence was recorded.
 - **Current gate:** Parent syntax/check passes. The current combined media,
-  live-mount-setting, and source-contract suites pass `190/190`. `npm test`
+  live-mount-setting, and source-contract suites pass `192/192`. `npm test`
   resolves exactly to `node --check MessageLoggerV2.plugin.js && node --test
-  tests/*.test.js` and passes `509/509`; `git diff --check` is clean. Runtime
+  tests/*.test.js` and passes `511/511`; `git diff --check` is clean. Runtime
   evidence proved the target direct CDN URL is live while its media proxy is
   dead, and the saved legacy record contains that proxy in both canonical URL
   fields. The implementation therefore derives the equivalent CDN URL only in
   detached presentation state, fails one candidate at a time, and remounts the
-  exact saved message. Live sync/hash parity and the short cache/local-only
-  transition gate are complete with no new MessageLogger exception. The user
-  explicitly authorized the Stage 3 commit after confirming the remaining
-  local-only click defect is the separate Stage 4 `blob:` external-open path.
+  exact saved message. The committed build passes those gates, but fresh live
+  uploads exposed a missing cache-completion refresh in local-only mode. The
+  correction now supplies that exact remount after `PROMOTE` or a confirmed
+  write. The user confirmed it works without a setting toggle or channel
+  change; the only reported residual is a very brief placeholder transition in
+  forum mounts. No new MessageLogger exception accompanies the accepted build.
 - **Checklist state:** include this file in every user-confirmed stage commit;
   archive it only after implementation, validation, and user acceptance are
   complete.
-- **Change-control state:** the user authorized one implementation commit after
-  each stage passes its tests and the user explicitly confirms that stage. The
-  user has now explicitly authorized an additional incomplete Stage 3
-  checkpoint commit with the remaining live defect recorded. Version bumps,
+- **Change-control state:** `ed59642` is the accepted Stage 3 checkpoint. The
+  narrow local-cache-completion correction passed its parent and live gates,
+  and the user explicitly authorized its follow-up commit. Version bumps,
   changelog edits, pushes, merges, and releases remain unauthorized.
 
 ### Exact next action
 
-Create the user-authorized Stage 3 commit from the exact reviewed eight-file
-scope, then pause. The user will perform a light forum/thread check against the
-committed live build before authorizing Stage 4. The next defect is already
-confirmed: a local-only cached image renders through a Blob, but Discord passes
-that temporary `blob:` URL to the operating system instead of Logger opening
-the resolved cache path through the default file application.
+After the four-file Stage 3 follow-up containing this entry is committed, pause.
+Stage 4 may begin only after a new explicit user instruction. Do not push,
+merge, bump release metadata, or begin the external-open implementation.
 
 ### Resume procedure
 
@@ -1452,3 +1452,60 @@ full setting matrix in every channel type.
   physical cache path and use Electron's cross-platform default-file-app API.
 - Pause after the commit. The user will perform a light forum/thread check on
   the committed live build before Stage 4 begins.
+
+### 2026-08-17 - Stage 3 reopened for newly cached local-only media
+
+- After `ed59642`, the user tested newly uploaded and deleted images in normal
+  channels, threads, and forums. With local-only On, the first saved mount shows
+  its classified placeholder; local-only Off renders remotely as expected, and
+  cycling the main master makes the already-cached local image appear.
+- Fresh runtime logs show repeated successful `PROMOTE` events for those exact
+  new saved records with no following Logger presentation refresh. The current
+  `cacheImage()` path returns immediately after `promotePreCachedMedia()`, and
+  the confirmed direct-write path also ends after logging `MEDIA CACHED`; neither
+  path remounts saved attachment presentation after the file exists.
+- The correction is limited to the exact direct attachment whose confirmed
+  local file became available. It must coalesce duplicate completion events,
+  remount the saved record, and refresh Logger-owned consumers. It must not
+  alter remote-first ordering, ordinary live media, forum/thread promotion,
+  text mounting, schema, persistence, Stage 4 opening, or unrelated cached
+  embeds/stickers/Components V2.
+
+### 2026-08-17 - Stage 3 local cache-completion correction verified locally
+
+- Confirmed cache promotion and direct-write completion now schedule one
+  coalesced refresh keyed by the exact message and attachment. The callback
+  runs only while **Render & Cache media** and local-only are both On, rechecks
+  that the exact attachment resolves to a usable local Blob, and then remounts
+  only that saved record plus Logger-owned viewers.
+- Local-only still passes only `allowBlob`; CDN and proxy candidates are not
+  selected or failed by this completion path. Remote-first ordering remains
+  CDN, proxy, local Blob, then placeholder through its existing media-error
+  listener.
+- Added regression coverage for promotion, confirmed direct writes, duplicate
+  coalescing, wrong-attachment isolation, remote-first bypass, removed-media
+  Logger refresh, and transition-state cleanup.
+- Parent verification passes `node --check`, the affected media,
+  live-mount-setting, and source-contract selection at `192/192`, `npm run
+  check`, the strict `tests/*.test.js` full suite at `511/511`, and `git diff
+  --check`.
+- Synced only `MessageLoggerV2.plugin.js`; repository and installed SHA-256
+  match at
+  `551690965624202ce67d0dfbe6bc032b3643c396116dcd0fe140751c47cd9770`.
+  The 08:39 hot reload removed and reapplied Logger patches successfully with
+  no new MessageLogger exception; the simultaneous PersonalPins dispatch error
+  remains unrelated.
+
+### 2026-08-17 - Stage 3 cache-completion live gate accepted
+
+- With local-only On, the user confirmed a newly uploaded and deleted image now
+  remounts from the physical local cache without toggling settings or changing
+  channels.
+- Forum mounts show a very brief classified-placeholder flash before the Blob
+  remount completes, both on the initial image/attachment deletion and when the
+  main **Render & Cache media** gate changes from Off to On. The user accepted
+  this transition and explicitly requested the commit; it is recorded as
+  non-blocking presentation polish rather than a failed rendering or
+  forum/thread promotion path.
+- Commit only the plugin, two regression files, and this checklist. Stage 4
+  remains paused and no push or release action is authorized.

@@ -4343,8 +4343,12 @@ test('confirmed caching promotes an exact pre-cache file without fetching', asyn
     fetches++;
     throw new Error('confirmed promotion must not fetch');
   };
+  const presentationRefreshes = [];
   const plugin = createMediaCachePlugin(cacheDir, {
-    messageRecord: { confirm: { message: { id: 'confirm', author: { id: 'author' } } } }
+    messageRecord: { confirm: { message: { id: 'confirm', author: { id: 'author' } } } },
+    scheduleSavedAttachmentPresentationRefresh(...args) {
+      presentationRefreshes.push(args.map(String));
+    }
   });
   const sourceDirectory = path.join(`${cacheDir}_PreCache`, 'confirm');
   fs.mkdirSync(sourceDirectory, { recursive: true });
@@ -4359,6 +4363,7 @@ test('confirmed caching promotes an exact pre-cache file without fetching', asyn
     styledConsoleMessages('PROMOTE'),
     ['Promoted pre-cached media to saved cache: 41 (confirm).png']
   );
+  assert.deepEqual(presentationRefreshes, [['confirm', '41']]);
 });
 
 test('confirmed cache miss fetches into the main cache without creating pre-cache', async t => {
@@ -4372,8 +4377,12 @@ test('confirmed cache miss fetches into the main cache without creating pre-cach
     fetches++;
     return successfulMediaResponse();
   };
+  const presentationRefreshes = [];
   const plugin = createMediaCachePlugin(cacheDir, {
-    messageRecord: { confirmed: { message: { id: 'confirmed', author: { id: 'author' } } } }
+    messageRecord: { confirmed: { message: { id: 'confirmed', author: { id: 'author' } } } },
+    scheduleSavedAttachmentPresentationRefresh(...args) {
+      presentationRefreshes.push(args.map(String));
+    }
   });
 
   await plugin.cacheImage('https://cdn.example/confirmed.png', 0, 43, 'confirmed', 'channel', 'guild', 0, 0, 'confirmed');
@@ -4385,6 +4394,7 @@ test('confirmed cache miss fetches into the main cache without creating pre-cach
     styledConsoleMessages('MEDIA CACHED'),
     ['Cached media for saved record: 43 (confirmed).png']
   );
+  assert.deepEqual(presentationRefreshes, [['confirmed', '43']]);
 });
 
 test('a confirmed request joins an in-flight provisional fetch and writes once to main cache', async t => {
