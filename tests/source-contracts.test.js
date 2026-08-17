@@ -1588,12 +1588,16 @@ test('populateParent sources logger media rows from saved attachment presentatio
   assert.match(viewer, /const removedLoggerAttachmentEntries = loggerAttachmentPresentationEntries\.filter\(entry => entry\.removed\);/);
   assert.match(viewer, /plan\?\.action === 'remote' \|\| plan\?\.action === 'blob'/);
   assert.match(viewer, /renderedAttachment\._ml2PresentationAction = plan\.action;/);
+  assert.match(viewer, /renderedAttachment\._ml2PresentationLabel = typeof plan\?\.label === 'string' \? plan\.label : null;/);
   assert.match(viewer, /if \(!renderedAttachment\.filename && plan\.filename\) \{\s*renderedAttachment\.filename = plan\.filename;\s*\}/);
   assert.match(viewer, /const presentationAction = attachment\._ml2PresentationAction;/);
+  assert.match(viewer, /const presentationLabel = attachment\._ml2PresentationLabel;/);
   assert.match(viewer, /const isCached = presentationAction\s*\?[\s\S]*presentationAction === 'blob'/);
   assert.match(viewer, /const linkUrl = plan\.action === 'remote' \? \(plan\.url \|\| attachment\.url \|\| attachment\.proxy_url\)/);
-  assert.match(viewer, /marker\.textContent = plan\.label;/);
-  assert.match(viewer, /if \(plan\.action === 'omit' && !this\.settings\.onlyRenderCachedAttachments\) \{\s*appendUnavailableAttachmentPlaceholder\(safePlanFilename\)/);
+  assert.match(viewer, /if \(\(plan\.action === 'placeholder' \|\| plan\.action === 'omit'\) && safePlanLabel\) \{\s*appendUnavailableAttachmentPlaceholder\(safePlanLabel\);/);
+  assert.match(viewer, /createUnavailableAttachmentPlaceholder\(presentationLabel \|\| attachment\.filename\)/);
+  assert.match(viewer, /attemptToUseCachedImage\([\s\S]*presentationLabel[\s\S]*\);/);
+  assert.match(viewer, /attemptToUseCachedVideo\([\s\S]*presentationLabel[\s\S]*\);/);
   assert.match(viewer, /video\.onerror = \(\) => \{[\s\S]*if \(this\.isAttachmentLocallyCached\(attachment, message\)\)/);
 });
 

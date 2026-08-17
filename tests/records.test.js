@@ -1894,6 +1894,80 @@ test('a full deleted root promotes the absolute oldest saved context regardless 
   );
 });
 
+test('attachment-only thread promotion preserves canonical media while cache-off presentation becomes a placeholder', () => {
+  const rootId = '694';
+  const replyId = '695';
+  const author = { id: 'author', username: 'Author', public_flags: 0 };
+  const attachment = {
+    id: 'image',
+    filename: 'reply.png',
+    url: 'https://cdn.discordapp.com/attachments/694/image/reply.png',
+    proxy_url: 'https://media.discordapp.net/attachments/694/image/reply.png'
+  };
+  const plugin = createPlugin({
+    settings: { cacheAllImages: false },
+    messageRecord: {
+      [rootId]: {
+        message: {
+          id: rootId,
+          channel_id: rootId,
+          content: '[no saved message or reply content found]',
+          timestamp: 100,
+          attachments: [],
+          author
+        },
+        delete_data: {
+          time: 300,
+          forum_thread_delete: true,
+          forum_metadata: { name: 'Deleted image thread', starterMessageId: 'missing-starter' }
+        }
+      },
+      [replyId]: {
+        message: {
+          id: replyId,
+          channel_id: rootId,
+          content: '',
+          timestamp: 150,
+          attachments: [attachment],
+          author
+        },
+        delete_data: { time: 200, forum_thread_message_delete: true }
+      }
+    },
+    messageRecordIds: new Set([rootId, replyId]),
+    deletedMessageRecord: { [rootId]: [rootId, replyId] },
+    editedMessageRecord: {},
+    purgedMessageRecord: {},
+    nukedMessageRecord: {},
+    deletedMessageSet: new Map([[rootId, new Set([rootId, replyId])]]),
+    editedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
+    sortedDeletedMessageIds: new Map([[rootId, []]]),
+    sortedPurgedMessageIds: new Map(),
+    sortedNukedMessageIds: new Map(),
+    noTintIds: new Set(),
+    editModifiers: {}
+  });
+
+  assert.deepEqual(plugin.promoteOldestSavedThreadReplyIntoRoot(rootId), {
+    rootId,
+    contextMessageId: replyId
+  });
+
+  const promoted = plugin.messageRecord[rootId];
+  const canonicalBeforePresentation = structuredClone(promoted.message);
+  const rendered = plugin.getNativeDeletedAttachmentPresentationMessage(promoted.message);
+
+  assert.equal(promoted.message.content, '');
+  assert.deepEqual(promoted.message.attachments, [attachment]);
+  assert.equal(promoted.delete_data.forum_thread_delete, true);
+  assert.equal(promoted.delete_data.forum_metadata.rootContextMessageId, replyId);
+  assert.equal(rendered.content, '[image:reply.png]');
+  assert.deepEqual(rendered.attachments, []);
+  assert.deepEqual(promoted.message, canonicalBeforePresentation);
+});
+
 test('an older edit-only ghost ping beats newer Deleted and Purged context', () => {
   const rootId = '695';
   const ghostId = '696';

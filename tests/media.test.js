@@ -1931,6 +1931,173 @@ test('text, attachments, embeds, and sticker-only messages are supported payload
   assert.equal(plugin.hasSupportedMessagePayload({ content: '', attachments: [], embeds: [], sticker_items: [] }), false);
 });
 
+test('reAddDeletedMessages keeps attachment-only cache-master-off records as placeholder text rows', () => {
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: false,
+      onlyRenderCachedAttachments: false
+    },
+    messageRecord: {
+      '101': {
+        delete_data: { time: 1 },
+        message: {
+          id: '101',
+          channel_id: 'channel',
+          content: '',
+          attachments: [
+            {
+              id: 'a',
+              filename: 'photo.png',
+              url: 'https://cdn.discordapp.com/attachments/channel/101/photo.png',
+              proxy_url: 'https://media.discordapp.net/attachments/channel/101/photo.png'
+            }
+          ]
+        }
+      },
+      '102': {
+        delete_data: { time: 1 },
+        message: {
+          id: '102',
+          channel_id: 'channel',
+          content: 'kept text',
+          attachments: [
+            {
+              id: 'b',
+              filename: 'notes.txt',
+              url: 'https://cdn.discordapp.com/attachments/channel/102/notes.txt'
+            }
+          ]
+        }
+      }
+    }
+  });
+
+  const attachmentOnlyBefore = structuredClone(plugin.messageRecord['101'].message);
+  const textBefore = structuredClone(plugin.messageRecord['102'].message);
+
+  const messages = [];
+  plugin.reAddDeletedMessages(messages, ['101', '102'], true, true);
+
+  const rowsById = new Map(messages.map(msg => [msg.id, msg]));
+  const attachmentOnlyRow = rowsById.get('101');
+  const textSiblingRow = rowsById.get('102');
+
+  assert.equal(messages.length, 2);
+  assert.equal(attachmentOnlyRow?.content, '[image:photo.png]');
+  assert.equal(textSiblingRow?.id, '102');
+  assert.equal(textSiblingRow?.content, 'kept text\n[attachment:notes.txt]');
+  assert.deepEqual(plugin.messageRecord['101'].message, attachmentOnlyBefore);
+  assert.deepEqual(plugin.messageRecord['102'].message, textBefore);
+});
+
+test('reAddDeletedMessages local-only keeps cached blob rows and labels missing attachment-only rows', () => {
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: attachmentId => attachmentId === '300' ? '/cache/300.png' : null,
+      get: cacheUrl => {
+        if (cacheUrl === 'http://localhost:7474/300.png#channel,300,301') return 'blob://local/cached/image-300';
+        return null;
+      }
+    },
+    messageRecord: {
+      '301': {
+        delete_data: { time: 1 },
+        message: {
+          id: '301',
+          channel_id: 'channel',
+          content: '',
+          attachments: [
+            {
+              id: '300',
+              filename: 'photo.png',
+              url: 'https://cdn.discordapp.com/attachments/channel/301/photo.png',
+              proxy_url: 'https://media.discordapp.net/attachments/channel/301/photo.png'
+            },
+            {
+              id: '301',
+              filename: 'notes.txt',
+              url: 'https://cdn.discordapp.com/attachments/channel/301/notes.txt'
+            }
+          ]
+        }
+      }
+    }
+  });
+
+  const before = structuredClone(plugin.messageRecord['301'].message);
+  const messages = [];
+
+  plugin.reAddDeletedMessages(messages, ['301'], true, true);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].attachments.length, 1);
+  assert.equal(messages[0].attachments[0].id, '300');
+  assert.equal(messages[0].attachments[0].url, 'blob://local/cached/image-300');
+  assert.equal(messages[0].content, '[attachment:notes.txt]');
+  assert.deepEqual(plugin.messageRecord['301'].message, before);
+});
+
+test('reAddDeletedMessages remote-first has no label before native failure, then exact label after failure without cached blob', () => {
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: () => '/cache/400.png',
+      get: () => null
+    },
+    messageRecord: {
+      '401': {
+        delete_data: { time: 1 },
+        message: {
+          id: '401',
+          channel_id: 'channel',
+          content: 'remote cache-on',
+          attachments: [
+            {
+              id: '400',
+              filename: 'photo.png',
+              url: 'https://cdn.discordapp.com/attachments/channel/401/photo.png',
+              proxy_url: 'https://media.discordapp.net/attachments/channel/401/photo.png'
+            }
+          ]
+        }
+      }
+    }
+  });
+
+  const before = structuredClone(plugin.messageRecord['401'].message);
+  const beforeFailure = [];
+  plugin.reAddDeletedMessages(beforeFailure, ['401'], true, true);
+
+  assert.equal(beforeFailure.length, 1);
+  assert.equal(beforeFailure[0].content, 'remote cache-on');
+  assert.equal(beforeFailure[0].attachments.length, 1);
+  assert.equal(beforeFailure[0].attachments[0].url, 'https://cdn.discordapp.com/attachments/channel/401/photo.png');
+
+  const failureKey = plugin.getSavedAttachmentMediaFailureKey(
+    beforeFailure[0].channel_id,
+    beforeFailure[0].id,
+    '400'
+  );
+  plugin._failedNativeAttachmentMediaKeys = new Set([failureKey]);
+
+  const afterFailure = [];
+  plugin.reAddDeletedMessages(afterFailure, ['401'], true, true);
+
+  assert.equal(afterFailure.length, 1);
+  assert.equal(afterFailure[0].content, 'remote cache-on\n[image:photo.png]');
+  assert.equal(afterFailure[0].attachments.length, 0);
+  assert.deepEqual(plugin.messageRecord['401'].message, before);
+});
+
 test('media cache keys include attachments, embeds, Components V2 media, and stickers without duplicates', () => {
   const plugin = createPlugin();
   const keys = plugin.getMessageMediaCacheKeys({
@@ -2259,7 +2426,7 @@ test('edit-history marker lookup matches removed attachments by exact url/id and
   ), null);
 });
 
-test('edit-history inline segments keep all markers as text when cache master is off', () => {
+test('edit-history inline segments replace matched markers with exact placeholders when cache master is off', () => {
   const plugin = createPlugin({
     settings: { cacheAllImages: false }
   });
@@ -2296,10 +2463,11 @@ test('edit-history inline segments keep all markers as text when cache master is
   const segments = plugin.getEditHistoryContentSegments(content, removedAttachments, message);
 
   assert.equal(segments.filter(segment => segment.kind === 'removedAttachment').length, 0);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('first.gif')), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('second.mp4')), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('third.pdf')), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[image:first.gif]'), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[attachment:second.mp4]'), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[attachment:third.pdf]'), true);
   assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('missing.txt')), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('cdn.discordapp.com/attachments/channel/111111111111111111/first.gif')), false);
   assert.deepEqual(removedAttachments, before.removedAttachments);
   assert.deepEqual(message, before.message);
 });
@@ -2349,13 +2517,15 @@ test('edit-history inline segments keep text for non-media/unmatched and preserv
   assert.equal(removedSegments.every(segment => segment.presentationPlan?.action === 'remote'), true);
   assert.equal(removedSegments[0]?.presentationPlan?.url, 'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif');
   assert.equal(removedSegments[1]?.presentationPlan?.url, 'https://media.discordapp.net/attachments/channel/222222222222222222/second.webm');
+  assert.equal(removedSegments[0]?.value, '[image:first.gif]');
+  assert.equal(removedSegments[1]?.value, '[attachment:second.webm]');
   assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('third.pdf')), true);
   assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('missing.mp4')), true);
   assert.deepEqual(removedAttachments, before.removedAttachments);
   assert.deepEqual(message, before.message);
 });
 
-test('edit-history inline segments emit cached Blob plans when local-only is on and keep uncached or non-media markers as text', () => {
+test('edit-history inline segments emit cached Blob plans with exact fallbacks and classify missing local-only attachments', () => {
   const requestLog = [];
   const plugin = createPlugin({
     settings: {
@@ -2415,8 +2585,10 @@ test('edit-history inline segments emit cached Blob plans when local-only is on 
   assert.equal(removedSegments.length, 2);
   assert.equal(removedSegments.every(segment => segment.presentationPlan?.action === 'blob'), true);
   assert.equal(removedSegments.every(segment => segment.presentationPlan?.url?.startsWith('blob:')), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('missing.gif')), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('third.pdf')), true);
+  assert.equal(removedSegments[0]?.value, '[image:first.gif]');
+  assert.equal(removedSegments[1]?.value, '[attachment:second.mp4]');
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[image:missing.gif]'), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[attachment:third.pdf]'), true);
   assert.equal(requestLog.length >= 1, true);
   assert.equal(requestLog.every(url => !url.startsWith('http://cdn.discordapp.com') && !url.startsWith('https://media.discordapp.net')), true);
   assert.deepEqual(removedAttachments, before.removedAttachments);
@@ -3031,7 +3203,7 @@ test('native attachment media error flips a remote attachment to cached blob ren
   assert.equal(dispatches.length, 1);
 });
 
-test('native attachment media error omits a failed remote attachment when no cached blob exists', () => {
+test('native attachment media error labels a failed remote attachment when no cached blob exists', () => {
   const dispatches = [];
   const plugin = createPlugin({
     dispatcher: {
@@ -3054,7 +3226,7 @@ test('native attachment media error omits a failed remote attachment when no cac
         message: {
           id: '502',
           channel_id: '502',
-          content: 'body',
+          content: '',
           attachments: [
             { id: '200', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/502/photo.png' }
           ]
@@ -3077,7 +3249,42 @@ test('native attachment media error omits a failed remote attachment when no cac
 
   assert.equal(dispatches.length, 1);
   assert.equal(dispatches[0].message.attachments.length, 0);
+  assert.equal(dispatches[0].message.content, '[image:photo.png]');
   assert.deepEqual(plugin.messageRecord['502'].message, canonicalBefore);
+});
+
+test('refreshCacheOnlyMessage dispatches detached placeholder content when cache master is off', async () => {
+  const dispatches = [];
+  const plugin = createPlugin({
+    dispatcher: {
+      dispatch(action) {
+        dispatches.push(action);
+      }
+    },
+    settings: {
+      cacheAllImages: false,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: { get: () => null, _resolveImagePath: () => '/cache/700.png' }
+  });
+  const message = {
+    id: '700',
+    channel_id: '700',
+    content: '',
+    attachments: [{ id: '700', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/700/photo.png' }]
+  };
+  const canonicalBefore = structuredClone(message);
+
+  plugin.refreshCacheOnlyMessage(message);
+
+  await setImmediatePromise();
+
+  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches[0].type, 'MESSAGE_UPDATE');
+  assert.equal(dispatches[0].message.content, '[image:photo.png]');
+  assert.equal(dispatches[0].message.attachments.length, 0);
+  assert.notStrictEqual(dispatches[0].message, message);
+  assert.deepEqual(message, canonicalBefore);
 });
 
 test('native attachment media error ignores non-deleted message rows and wrong target URLs', () => {

@@ -785,6 +785,11 @@ test('media cache master toggle refreshes selected cached message rows, forum ca
     settings: { cacheAllImages: true },
     selectedChannel: { id: 'channel' },
     _failedNativeAttachmentMediaKeys: new Set(['seeded-failure']),
+    channelMessages: {
+      channel: {},
+      dmChannel: {},
+      threadChannel: {}
+    },
     messageRecord: {
       visible: {
         message: { id: '100', channel_id: 'channel', content: 'visible' },
@@ -853,7 +858,11 @@ test('media cache master toggle refreshes selected cached message rows, forum ca
   assert.equal(calls.closeLoggerOwnedAttachmentMediaViewersOrder[1], 'cleanup');
   assert.equal(calls.refreshes, 1);
   assert.equal(plugin._failedNativeAttachmentMediaKeys.size, 0);
-  assert.deepEqual(calls.invalidations, ['channel']);
+  assert.equal(calls.invalidations.length, 3);
+  assert.deepEqual(
+    [...calls.invalidations].sort(),
+    ['channel', 'dmChannel', 'threadChannel'].sort()
+  );
   assert.deepEqual(calls.cacheRefreshes, ['channel']);
   assert.equal(calls.loggerRefreshes, 1);
   assert.equal(calls.dispatches.filter(event => event.type === 'MESSAGE_UPDATE').length, 3);
@@ -893,7 +902,11 @@ test('media cache master toggle refreshes selected cached message rows, forum ca
   assert.equal(calls.closeLoggerOwnedAttachmentMediaViewersOrder[1], 'cleanup');
   assert.equal(calls.refreshes, 1);
   assert.equal(plugin._failedNativeAttachmentMediaKeys.size, 0);
-  assert.deepEqual(calls.invalidations, ['channel']);
+  assert.equal(calls.invalidations.length, 3);
+  assert.deepEqual(
+    [...calls.invalidations].sort(),
+    ['channel', 'dmChannel', 'threadChannel'].sort()
+  );
   assert.deepEqual(calls.cacheRefreshes, ['channel']);
   assert.equal(calls.loggerRefreshes, 1);
   assert.equal(calls.dispatches.some(event => event.type === 'MESSAGE_UPDATE'), true);
@@ -902,6 +915,22 @@ test('media cache master toggle refreshes selected cached message rows, forum ca
     ['cacheAllImages', false],
     ['cacheAllImages', true]
   ]);
+
+  calls.invalidations.length = 0;
+  calls.cacheRefreshes.length = 0;
+  calls.dispatches.length = 0;
+  plugin.selectedChannel = null;
+
+  plugin.refreshAttachmentRendering();
+
+  assert.equal(calls.invalidations.length, 3);
+  assert.deepEqual(
+    [...calls.invalidations].sort(),
+    ['channel', 'dmChannel', 'threadChannel'].sort()
+  );
+  assert.deepEqual(calls.cacheRefreshes, []);
+  assert.equal(calls.dispatches.some(event => event.type === 'MESSAGE_UPDATE'), false);
+  assert.equal(calls.dispatches.some(event => event.type === 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT'), true);
 });
 
 test('media cache local-only setting resets the local state, refreshes attachments, and reports the toggle', () => {

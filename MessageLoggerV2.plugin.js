@@ -5905,12 +5905,21 @@ module.exports = class MessageLoggerV2 {
         message,
         presentationOptions
       );
-      if (attachment && (plan?.action === 'remote' || plan?.action === 'blob')) {
+      if (attachment && plan && (plan.action === 'placeholder' || plan.action === 'omit')) {
+        const identity = this.getRemovedAttachmentIdentity(attachment);
+        if (identity) attachmentIds.add(identity);
+        segments.push({ kind: 'text', value: plan.label || match[0] });
+      } else if (attachment && (plan?.action === 'remote' || plan?.action === 'blob')) {
         const isMediaPlan = plan.mediaType === 'image' || plan.mediaType === 'video';
         if (isMediaPlan) {
           const identity = this.getRemovedAttachmentIdentity(attachment);
           if (identity) attachmentIds.add(identity);
-          segments.push({ kind: 'removedAttachment', attachment, presentationPlan: plan, value: match[0] });
+          segments.push({
+            kind: 'removedAttachment',
+            attachment,
+            presentationPlan: plan,
+            value: plan.label || match[0]
+          });
         } else {
           segments.push({ kind: 'text', value: match[0] });
         }
@@ -9826,6 +9835,28 @@ module.exports = class MessageLoggerV2 {
       attachments
     };
   }
+  getNativeDeletedAttachmentPresentationMessage(message) {
+    const renderMessage = this.getCacheOnlyMessage(message);
+    if (!renderMessage) return renderMessage;
+    const sourceMessage = message && typeof message === 'object' ? message : null;
+    const cacheAllImages = this.settings?.cacheAllImages !== false;
+    const presentationOptions = cacheAllImages
+      ? this.settings?.onlyRenderCachedAttachments
+        ? { allowBlob: true }
+        : { allowRemote: true }
+      : {};
+    const plans = this.getSavedAttachmentPresentationPlans(sourceMessage || renderMessage, presentationOptions);
+    const labels = plans
+      .filter(plan => plan?.action === 'placeholder' || plan?.action === 'omit')
+      .map(plan => plan?.label)
+      .filter(label => typeof label === 'string');
+    if (!labels.length) return renderMessage;
+    const baseContent = typeof renderMessage.content === 'string' ? renderMessage.content : '';
+    renderMessage.content = baseContent
+      ? `${baseContent}\n${labels.join('\n')}`
+      : labels.join('\n');
+    return renderMessage;
+  }
   getSavedAttachmentMediaFailureKey(channelId, messageId, attachmentId) {
     return `${String(channelId ?? '')}:${String(messageId ?? '')}:${String(attachmentId ?? '')}`;
   }
@@ -9921,14 +9952,14 @@ module.exports = class MessageLoggerV2 {
 
       this.dispatcher?.dispatch?.({
         type: 'MESSAGE_UPDATE',
-        message: this.getCacheOnlyMessage(record.message),
+        message: this.getNativeDeletedAttachmentPresentationMessage(record.message),
         ML2: true
       });
       return;
     }
   }
   refreshCacheOnlyMessage(message) {
-    const filtered = this.getCacheOnlyMessage(message);
+    const filtered = this.getNativeDeletedAttachmentPresentationMessage(message);
     if (filtered === message) return;
     setImmediate(() => {
       this.dispatcher.dispatch({
@@ -9951,13 +9982,13 @@ module.exports = class MessageLoggerV2 {
         if (!record?.message || record.delete_data?.hidden) continue;
         this.dispatcher?.dispatch?.({
           type: 'MESSAGE_UPDATE',
-          message: this.getCacheOnlyMessage(record.message),
+          message: this.getNativeDeletedAttachmentPresentationMessage(record.message),
           ML2: true
         });
       }
-      this.invalidateChannelCache?.(channelId);
-      this.cacheChannelMessages?.(channelId);
     }
+    this.invalidateAllChannelCache?.();
+    if (channelId) this.cacheChannelMessages?.(channelId);
     this.dispatcher?.dispatch?.({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' });
     for (const [threadId, refresh] of this._forumThreadLogRefreshers?.entries?.() || []) {
       if (typeof refresh !== 'function') continue;
@@ -14302,7 +14333,7 @@ module.exports = class MessageLoggerV2 {
     const getCleanRenderMessage = (record) => {
       // User cleanup is presentation-only. Mutating the canonical record here makes an
       // unchanged archive entry look like a session upsert on the next archive detach.
-      const message = this.getCacheOnlyMessage(record.message);
+      const message = this.getNativeDeletedAttachmentPresentationMessage(record.message);
       const author = message?.author?.id ? this.tools.getUser(message.author.id) : null;
       if (author) message.author = this.cleanupUserObject(author);
       if (Array.isArray(message?.mentions)) {
@@ -14324,7 +14355,9 @@ module.exports = class MessageLoggerV2 {
       }
       if (record.delete_data.hidden) return;
       if (this.isEphemeralMessage(record.message)) return;
-      toInsert.push(getCleanRenderMessage(record));
+      if (!record.message) return;
+      const message = getCleanRenderMessage(record);
+      if (message) toInsert.push(message);
     };
     const toInsert = [];
     if (deletedMessages.length >= 100 && !channelStart && !channelEnd) {
@@ -19849,13 +19882,17 @@ module.exports = class MessageLoggerV2 {
         const loggerMediaRenderCurrent = [];
         const loggerMediaRenderRemoved = [];
         const currentCachedAttachmentFilename = attachment => attachment?.filename || attachment?.url || attachment?.proxy_url || attachment?.proxyUrl || attachment?.proxyURL;
-        const appendUnavailableAttachmentPlaceholder = filename => {
+        const appendUnavailableAttachmentPlaceholder = label => {
           const placeholder = document.createElement('div');
           placeholder.className = this.multiClasses.markup || this.classes.markup || '';
           placeholder.dataset.ml2AttachmentMessageId = messageId;
           placeholder.style.color = 'var(--text-muted)';
           placeholder.style.marginTop = '4px';
-          placeholder.textContent = `[Attachment not cached: ${filename || 'unknown file'}]`;
+          if (typeof label === 'string' && label.startsWith('[') && label.endsWith(']')) {
+            placeholder.textContent = label;
+          } else {
+            placeholder.textContent = `[Attachment not cached: ${label || 'unknown file'}]`;
+          }
           markup.appendChild(placeholder);
           hasPayloadReference = true;
         };
@@ -19867,23 +19904,14 @@ module.exports = class MessageLoggerV2 {
           const attachmentIsMedia = this.isImage(currentCachedAttachmentFilename(attachment))
             || this.isVideo(currentCachedAttachmentFilename(attachment));
           const safePlanFilename = plan?.filename || filename;
-          const shouldRenderPlanLabel = plan.action === 'placeholder'
-            || (plan.action === 'omit' && this.settings.onlyRenderCachedAttachments);
-          if (shouldRenderPlanLabel && typeof plan.label === 'string') {
-            const marker = document.createElement('div');
-            marker.className = this.multiClasses.markup || this.classes.markup || '';
-            marker.style.color = 'var(--text-muted)';
-            marker.style.marginTop = '4px';
-            marker.textContent = plan.label;
-            markup.appendChild(marker);
-            hasPayloadReference = true;
+          const safePlanLabel = typeof plan?.label === 'string' ? plan.label : null;
+          if ((plan.action === 'placeholder' || plan.action === 'omit') && safePlanLabel) {
+            appendUnavailableAttachmentPlaceholder(safePlanLabel);
             return;
           }
-          if (plan.action === 'omit' && !this.settings.onlyRenderCachedAttachments) {
-            appendUnavailableAttachmentPlaceholder(safePlanFilename);
+          if (attachmentIsMedia) {
             return;
           }
-          if (attachmentIsMedia) return;
           const linkUrl = plan.action === 'remote' ? (plan.url || attachment.url || attachment.proxy_url) : (attachment.url || attachment.proxy_url);
           const linkText = attachment.filename || safePlanFilename;
           if (isRemoved) {
@@ -19908,6 +19936,7 @@ module.exports = class MessageLoggerV2 {
               if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)) continue;
               const renderedAttachment = { ...attachment };
               renderedAttachment._ml2PresentationAction = plan.action;
+              renderedAttachment._ml2PresentationLabel = typeof plan?.label === 'string' ? plan.label : null;
               if (!renderedAttachment.filename && plan.filename) {
                 renderedAttachment.filename = plan.filename;
               }
@@ -19970,10 +19999,14 @@ module.exports = class MessageLoggerV2 {
             placeholder.dataset.ml2AttachmentMessageId = messageId;
             placeholder.style.color = 'var(--text-muted)';
             placeholder.style.marginTop = '4px';
-            placeholder.textContent = `[Attachment not cached: ${filename || 'unknown file'}]`;
+            if (typeof filename === 'string' && filename.startsWith('[') && filename.endsWith(']')) {
+              placeholder.textContent = filename;
+            } else {
+              placeholder.textContent = `[Attachment not cached: ${filename || 'unknown file'}]`;
+            }
             return placeholder;
           };
-          const attemptToUseCachedImage = (attachmentId, attachmentIdx, hidden, filename, width, height) => {
+          const attemptToUseCachedImage = (attachmentId, attachmentIdx, hidden, filename, width, height, presentationLabel) => {
             const img = document.createElement('img');
             img.classList = DiscordModules.ClickableClasses?.clickable || '';
             img.messageId = messageId;
@@ -20020,7 +20053,7 @@ module.exports = class MessageLoggerV2 {
               );
             });
             img.onerror = () => {
-              img.replaceWith(createUnavailableAttachmentPlaceholder(filename));
+              img.replaceWith(createUnavailableAttachmentPlaceholder(presentationLabel || filename));
             };
             contentDiv.appendChild(img);
             return true;
@@ -20047,7 +20080,7 @@ module.exports = class MessageLoggerV2 {
             container.appendChild(playButton);
             return { container, video };
           };
-          const attemptToUseCachedVideo = (attachmentId, attachmentIdx, hidden, filename, width, height) => {
+          const attemptToUseCachedVideo = (attachmentId, attachmentIdx, hidden, filename, width, height, presentationLabel) => {
             const existingElement = document.getElementById(attachmentId);
             if (existingElement) {
               existingElement.id = "og-" + attachmentId;
@@ -20080,22 +20113,39 @@ module.exports = class MessageLoggerV2 {
               );
             });
             video.onerror = () => {
-              container.replaceWith(createUnavailableAttachmentPlaceholder(filename));
+              container.replaceWith(createUnavailableAttachmentPlaceholder(presentationLabel || filename));
             };
             contentDiv.appendChild(container);
             return true;
           };
           const handleCreateImage = (attachment, idx) => {
             const presentationAction = attachment._ml2PresentationAction;
+            const presentationLabel = attachment._ml2PresentationLabel;
             const isCached = presentationAction
               ? presentationAction === 'blob' || attachment.url == 'ERROR'
               : attachment.url == 'ERROR' || this.isAttachmentLocallyCached(attachment, message);
             if (this.settings.onlyRenderCachedAttachments && !isCached) return;
             const isVideoFile = this.isVideo(attachment.filename || attachment.url);
             if (isCached && isVideoFile) {
-              attemptToUseCachedVideo(attachment.id, idx, attachment.hidden, attachment.filename, attachment.width, attachment.height);
+              attemptToUseCachedVideo(
+                attachment.id,
+                idx,
+                attachment.hidden,
+                attachment.filename,
+                attachment.width,
+                attachment.height,
+                presentationLabel
+              );
             } else if (isCached) {
-              attemptToUseCachedImage(attachment.id, idx, attachment.hidden, attachment.filename, attachment.width, attachment.height);
+              attemptToUseCachedImage(
+                attachment.id,
+                idx,
+                attachment.hidden,
+                attachment.filename,
+                attachment.width,
+                attachment.height,
+                presentationLabel
+              );
             } else if (this.isVideo(attachment.url)) {
               const { container, video } = createVideoContainer(attachment.id, idx, this.clamp(attachment.width, 200, 400));
               if (!attachment.hidden) {
@@ -20128,9 +20178,17 @@ module.exports = class MessageLoggerV2 {
               video.onerror = () => {
                 if (this.isAttachmentLocallyCached(attachment, message)) {
                   container.remove();
-                  attemptToUseCachedVideo(attachment.id, idx, attachment.hidden, attachment.filename, attachment.width, attachment.height);
+                  attemptToUseCachedVideo(
+                    attachment.id,
+                    idx,
+                    attachment.hidden,
+                    attachment.filename,
+                    attachment.width,
+                    attachment.height,
+                    presentationLabel
+                  );
                 } else {
-                  container.replaceWith(createUnavailableAttachmentPlaceholder(attachment.filename));
+                  container.replaceWith(createUnavailableAttachmentPlaceholder(presentationLabel || attachment.filename));
                 }
               };
               contentDiv.appendChild(container);
@@ -20174,9 +20232,17 @@ module.exports = class MessageLoggerV2 {
               img.onerror = () => {
                 if (this.isAttachmentLocallyCached(attachment, message)) {
                   img.remove();
-                  attemptToUseCachedImage(attachment.id, idx, attachment.hidden, attachment.filename, attachment.width, attachment.height);
+                  attemptToUseCachedImage(
+                    attachment.id,
+                    idx,
+                    attachment.hidden,
+                    attachment.filename,
+                    attachment.width,
+                    attachment.height,
+                    presentationLabel
+                  );
                 } else {
-                  img.replaceWith(createUnavailableAttachmentPlaceholder(attachment.filename));
+                  img.replaceWith(createUnavailableAttachmentPlaceholder(presentationLabel || attachment.filename));
                 }
               };
               if (attachment.hidden) {

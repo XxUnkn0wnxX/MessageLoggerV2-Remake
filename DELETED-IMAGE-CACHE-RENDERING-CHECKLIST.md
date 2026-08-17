@@ -29,13 +29,14 @@ This file is both the implementation checklist and the handoff record.
 - **Root rollout record:**
   `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T11-07-23-01a00d42-4986-7971-94de-11f09f6630d1.jsonl`
 - **Working branch:** `develop`
-- **Verified HEAD:** the user-authorized Stage 3 checkpoint is the current HEAD;
-  its verified Stage 2 parent is
-  `62152b8632860a0d0037c7713314d8f9c3357daa`. Inspect `git log -1` for the
-  checkpoint's final hash after commit creation/amendment.
-- **Verified worktree:** clean immediately after the Stage 3 checkpoint on
-  `develop`, which tracks `origin/develop`. Later targeted correction changes
-  are expected to appear on top of that checkpoint.
+- **Verified HEAD:** Stage 3 checkpoint
+  `09509ff17b58c80aa46df0850d91762ed5e9b06c`; its verified Stage 2 parent is
+  `62152b8632860a0d0037c7713314d8f9c3357daa`.
+- **Verified worktree:** `develop` tracks `origin/develop` and is ahead by the
+  Stage 2 and Stage 3 checkpoint commits. The current targeted correction
+  modifies `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
+  `tests/live-mount-settings.test.js`, `tests/source-contracts.test.js`, and
+  this checklist on top of the checkpoint.
 - **Baseline:** `npm test` passed `471/471` before this checklist was created.
 - **Checklist verification:** the Stage 2 parent rerun of `npm test` passes
   `476/476`; the checklist new-file whitespace check is clean.
@@ -46,30 +47,41 @@ This file is both the implementation checklist and the handoff record.
   Logger, deleted-thread/forum-log, inline-history, setting-refresh, and scoped
   Logger-owned viewer behavior is implemented and locally verified, but its
   first live gate exposed two native-mount defects that remain in progress.
-- **Runtime-trace state:** Stage 1 is complete and cleaned up. Removing the exact
-  live symlink auto-unloaded the helper and produced a final `stop` report; the
-  symlink, report, and ignored helper were then removed.
-- **Current gate:** Stage 3 passes `npm run check`, the combined affected suites
-  (`183/183`), the bounded full `npm test` suite (`501/501`),
+- **Runtime-trace state:** Stage 1 and the later native-mount fallback trace are
+  complete and cleaned up. The exact helper symlinks, generated reports, and
+  ignored helper sources were removed after their evidence was recorded.
+- **Current gate:** The Stage 3 checkpoint passes `npm run check`, the combined
+  affected suites (`183/183`), the bounded full `npm test` suite (`501/501`),
   `git diff --check`, live hash parity, and clean MessageLogger hot reload. The
-  focused live gate failed: remote-first did not remount its cached Blob after
-  CDN failure, Cache Off left an attachment-only row shell, and saved rows
-  already present in Discord's cached channel list retained recent images.
+  correction trace then proved remote-first can remount the known expired image
+  through its existing cached Blob. It also proved Cache Off inserts an empty
+  attachment-only clone and leaves previously injected media in non-selected
+  Discord channel caches. The current correction is replacing all no-source
+  native media with classified text placeholders and invalidating every cached
+  channel on policy transitions. Stage 5 will separately add a bounded real
+  Off-to-On hydration pass for saved deleted attachments without local files.
+  The corrected affected suites pass `187/187`, the focused attachment-only
+  forum/thread promotion gate passes `7/7`, and the bounded full suite now
+  passes `506/506`. The second live gate proved local Blob resolution works
+  after a channel change, but hot reload and same-channel switch refresh leave
+  the row broken while local-only is Off. Stage 3 therefore remains incomplete.
 - **Checklist state:** include this file in every user-confirmed stage commit;
   archive it only after implementation, validation, and user acceptance are
   complete.
 - **Change-control state:** the user authorized one implementation commit after
-  each stage passes its tests and the user explicitly confirms that stage.
-  Version bumps, changelog edits, pushes, merges, and releases remain
-  unauthorized.
+  each stage passes its tests and the user explicitly confirms that stage. The
+  user has now explicitly authorized an additional incomplete Stage 3
+  checkpoint commit with the remaining live defect recorded. Version bumps,
+  changelog edits, pushes, merges, and releases remain unauthorized.
 
 ### Exact next action
 
-Create the user-authorized Stage 3 checkpoint commit with the failed live gate
-recorded. Then trace the known expired cached image's media-error/update path,
-fix cached-channel saved-row reconciliation and attachment-only row omission,
-add focused regressions, rerun the parent gates, resync live, and repeat only
-the failed Stage 3 cases before the final Stage 3 acceptance commit.
+Create the user-authorized incomplete Stage 3 checkpoint commit from the
+already-passing `506/506` tree. Then trace only the same-channel hot-reload and
+setting-refresh remount path: local-only On begins broken but works after a
+channel change, after which changing local-only Off stays rendered. Also make
+every Media settings child control visibly disabled while the media master is
+Off, preserving all child values.
 
 ### Resume procedure
 
@@ -142,8 +154,9 @@ be recorded before implementation continues.
 - [x] The native modal adapter currently collapses `url` and `proxyUrl` to the
       same value, so static source cannot prove which field Discord opens
       externally.
-- [x] Turning **Cache media locally** Off cancels cache work but does not hide
-      saved images that can still load remotely.
+- [x] The setting currently labelled **Cache media locally** cancels cache work
+      when turned Off but does not hide saved images that can still load
+      remotely. This is the pre-fix behavior being replaced.
 - [x] Turning it back On starts the trimmer but does not retry uncached deleted
       images from their saved remote URLs.
 - [x] Recently deleted images can appear correct today because their remote
@@ -196,22 +209,33 @@ be recorded before implementation continues.
 
 | Cache master | Only render locally cached attachments | Saved-attachment presentation on every covered surface |
 |---|---|---|
-| Off | Either | Native mounted rows omit every saved direct attachment; Logger-owned views render plain `[image:filename.ext]` for current image types or `[attachment:filename.ext]` for every other direct attachment |
+| Off | Either | Never render or fetch saved direct attachment media; native mounted rows and Logger-owned views show plain `[image:filename.ext]` for current image types or `[attachment:filename.ext]` for every other direct attachment |
 | On | Off | Use the existing Discord/Logger remote renderer or attachment card first; where an existing local Blob renderer already exists, use it after remote media-load failure |
-| On | Off | If remote loading fails and no existing local renderer can produce a view, omit it from native mounts and show unavailable/classified text only in Logger-owned views |
+| On | Off | If remote loading fails and no existing local renderer can produce a view, replace the failed attachment with its classified text placeholder on native mounts and Logger-owned views |
 | On | On | Bypass remote presentation for every direct attachment; use a fresh Blob only for types with an existing local Blob renderer and a physical cache file |
-| On | On | For types without an existing local renderer, omit the native attachment and show the classified Logger text; background caching may still use stored URLs under existing eligibility rules |
+| On | On | When no existing supported local Blob can be created, replace the attachment with its classified text placeholder on native mounts and Logger-owned views; the existing new-message cache flow and the explicit Stage 5 Off-to-On hydration pass may still use stored URLs |
 
-- [ ] **Cache media locally** is the master presentation gate for saved direct
-      attachments; Off overrides **Only render locally cached attachments**.
+- [ ] Rename the visible master setting to **Render & Cache media**. Keep its
+      internal `cacheAllImages` id unchanged so no setting/schema migration is
+      required.
+- [ ] **Render & Cache media** controls both saved-media presentation and cache
+      work; Off overrides **Only render locally cached attachments**.
+- [ ] Keep the linked setting note concise while preserving its existing
+      enabled/disabled and no-save guidance: On renders saved media, caches
+      eligible files, and retries saved URLs after a real Off-to-On transition;
+      Off shows attachment placeholders while child values remain saved.
+- [ ] When the master is Off, visibly disable/grey every other control in the
+      Media settings group while preserving each stored child value. Re-enable
+      them immediately when the master returns On.
 - [ ] With the local-only child Off, do not prefer a Blob merely because a
       cache file exists. The existing remote renderer/card is first and an
       already-supported Blob renderer is the media-load-error fallback.
 - [ ] With the local-only child On, bypass CDN/proxy presentation entirely but
-      retain both URLs and permit the background cache downloader to use them.
+      retain both URLs. The explicit Stage 5 Off-to-On hydration pass may use
+      them in the background without presenting them remotely.
 - [ ] Do not treat "Discord can show a remote attachment card" as permission to
       invent local rendering for that file type. If no local renderer exists,
-      local-only mode uses native omission and Logger-only classified text.
+      local-only mode uses classified placeholder text instead.
 - [ ] Turning the master Off preserves existing cache files but performs no new
       downloads or writes.
 - [ ] Turning the master Off live-refreshes every covered visible surface,
@@ -220,20 +244,19 @@ be recorded before implementation continues.
 - [ ] Changing the local-only child live-refreshes the same surfaces so the
       display order changes immediately.
 - [ ] While the master is Off, use literal `[image:filename.ext]` or
-      `[attachment:filename.ext]` text in the main Logger and deleted
-      forum/thread log views; native mounted Discord rows contain no saved
-      direct attachment node or replacement attachment node.
-- [ ] Never inject placeholder or classified attachment text into native mounted
-      Discord rows, including inline mounted edit-history wrappers. When no
-      permitted source renders there, omit the attachment/media node.
+      `[attachment:filename.ext]` text in native mounted saved messages, the
+      main Logger, and deleted forum/thread log views. No attachment/media node
+      is created and no saved media source is requested.
 - [ ] Native mount rule is fail-closed and source-specific: remote-first mounts
-      only a working CDN source or an available Blob fallback; local-only mounts
-      only an available Blob; master Off mounts nothing. If the permitted set is
-      empty, create no attachment node at all.
+      only a working CDN source or an available existing Blob fallback;
+      local-only mounts only an available existing Blob; master Off mounts no
+      media. If the permitted set is empty, render the classified text label
+      instead of an attachment node.
 - [ ] Prefer `attachment.filename`; otherwise derive only a safe basename from
       the saved URL, then fall back to `unknown file`.
-- [ ] While the master is On, keep the existing
-      `[Attachment not cached: filename]` wording for permitted-source failures.
+- [ ] Use the same exact `[image:filename.ext]` or
+      `[attachment:filename.ext]` label whenever the selected master/child
+      policy has no usable source; do not leave an empty message shell.
 - [ ] Blob substitution is render-only and must not mutate the archive.
 - [ ] Revoke or release Blob URLs through the existing cache lifecycle.
 
@@ -241,9 +264,9 @@ be recorded before implementation continues.
 
 | Cache master | Local-only child | Media viewer display | Logger-owned open action |
 |---|---|---|---|
-| Off | Either | No Logger-owned image viewer | No Logger-owned image action |
-| On | Off | CDN first, then cached Blob on display failure | Run a bounded CDN liveness check; open live HTTPS in the default browser, otherwise open the resolved cache path in the default file app |
-| On | On | Cached Blob only | Bypass CDN and open the resolved cache path directly in the default file app |
+| Off | Either | Placeholder only; no Logger-owned media viewer | Probe/open only the retained CDN URL in the default browser; if unavailable, warn and open nothing |
+| On | Off | CDN first, then an already-cached Blob on display failure; otherwise placeholder | Run a bounded CDN liveness check; open live HTTPS in the default browser, otherwise open an existing resolved cache path in the default file app; warn if neither exists |
+| On | On | Existing cached Blob only; otherwise placeholder | Bypass CDN and open the existing resolved cache path directly in the default file app; warn if absent |
 
 - [ ] Keep display source and external-open destination separate: Blob is an
       in-Discord display source, never the browser destination.
@@ -265,7 +288,8 @@ be recorded before implementation continues.
 - [ ] In local-only mode, do not probe or open the CDN; re-resolve the physical
       file and open its platform-native absolute path with `shell.openPath()`.
 - [ ] If the required local file is absent and no permitted live remote exists,
-      show a concise unavailable notice and open nothing.
+      show a concise warning toast such as **Attachment is no longer
+      available.** and open nothing.
 - [ ] Treat a nonempty `shell.openPath()` result as an error and report a concise
       unavailable/open-failed notice; also handle a rejected or missing shell
       API without throwing from the UI action.
@@ -284,27 +308,32 @@ be recorded before implementation continues.
 ### Cache Off to On rehydration
 
 - [ ] On an actual Off to On transition, enumerate canonical records containing
-      `delete_data` and de-duplicate ordinary image attachments by cache key.
-- [ ] Skip attachments whose local cache file already exists.
+      `delete_data` and de-duplicate eligible ordinary image attachments by
+      cache key.
+- [ ] Skip attachments whose resolved local cache file already exists.
 - [ ] Try the preserved direct URL first, then a distinct preserved proxy URL.
-- [ ] Reuse existing size limits, request de-duplication, abort handling,
-      media-write epoch, no-save queueing, and atomic promotion.
+- [ ] Reuse existing eligibility, size limits, request de-duplication, abort
+      handling, media-write epoch, no-save queueing, and atomic promotion.
 - [ ] Refresh mounted/Logger presentation once after the batch settles, not once
       per attachment.
-- [ ] If both saved URLs fail and no local file exists, omit the native mounted
-      attachment and leave placeholder/classified text only in Logger-owned
-      views.
+- [ ] If both saved URLs fail and no local file exists, use classified
+      placeholder text in native mounted messages and Logger-owned views.
 - [ ] Rehydration may use stored remote URLs in the background even while the
       local-only child prevents those URLs from being used for presentation.
-- [ ] Do not add an automatic archive-wide startup download in this focused
-      change; rehydration is tied to the explicit Off to On transition.
+- [ ] Do not add an automatic archive-wide startup download; rehydration is tied
+      only to an explicit real Off to On transition.
+- [ ] Keep failed availability state transient. Do not add a persisted
+      unavailable tombstone or schema field; a later real Off to On transition
+      may retry, while the attachment remains a placeholder whenever no usable
+      remote source or local file exists.
 
 ## Behavior that must remain unchanged
 
 - [x] Scope boundary: implementation changes are limited to saved direct
       attachment URL preservation, image/attachment presentation, Logger-owned
-      media viewing/opening, setting-driven presentation refresh, and the small
-      cache retry/lifecycle behavior required by those paths.
+      media viewing/opening, setting-driven presentation refresh, and source
+      liveness/lifecycle behavior required by those paths, plus the explicit
+      bounded Off-to-On deleted-image hydration pass.
 - [x] Do not require the user to manually retest already-confirmed general
       plugin behavior. The complete automated suite guards unrelated logging,
       persistence, notification, shortcut, forum, Anti-Nuke, settings, and
@@ -319,13 +348,14 @@ be recorded before implementation continues.
 - [ ] Cache Off and plugin stop still cancel in-flight work without late writes.
 - [ ] **Disable saving data** continues to block physical writes and use the
       existing deferred queue semantics.
-- [ ] Maximum cache-file size remains enforced before rehydration fetches.
+- [ ] Maximum cache-file size remains enforced for both the unchanged
+      new-message cache pipeline and Stage 5 hydration fetches.
 - [ ] Existing cached files are not deleted merely because the master is Off.
 - [ ] Updater and clipboard network transports are not changed.
 - [ ] **Cache all attachment types** eligibility/cache behavior remains
       unchanged. Approved non-image changes are presentation-only: master-Off
-      Logger labels plus local-only native omission/Logger-only classified text
-      where no existing local renderer is available.
+      labels plus no-source classified text in native and Logger views where no
+      existing permitted renderer is available.
 - [ ] No version or built-in changelog change is made during the focused fix.
 
 ## Expected implementation files
@@ -338,6 +368,8 @@ be recorded before implementation continues.
       contract belongs there.
 - [x] `tests/source-contracts.test.js` only for a meaningful structural
       invariant that behavior tests cannot cover.
+- [ ] `docs/help.md` and `docs/settings.md` for the final visible setting label
+      and short combined render/cache behavior note.
 - [ ] `docs/tests.md` only if the final runtime matrix needs a lasting update.
 
 Tracked working handoff, included in each confirmed stage commit:
@@ -356,7 +388,7 @@ stage.
 - [x] Stage 1 is the single early user-assisted runtime checkpoint. Complete
       the native-media trace and settle the display/open field contract before
       plugin behavior is edited.
-- [ ] Implement Stages 2-5 in bounded increments. After each stage, run its
+- [ ] Implement Stages 2-5 in bounded increments. After each active stage, run its
       directly affected tests and update this handoff before continuing.
 - [ ] After each implementation stage, run its focused tests, the bounded
       `npm test` suite, and `git diff --check`; report exact results and wait for
@@ -589,8 +621,8 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
 - [x] Native remote failure handling will be a capture-phase media-error path
       scoped to a mounted `chat-messages-<channel>-<message>` row whose exact
       saved record has `delete_data`. It may switch only the matching detached
-      attachment clone to the existing cached Blob or omit it; ordinary live
-      Discord media is never rewritten.
+      attachment clone to the existing cached Blob or its exact classified text
+      label; ordinary live Discord media is never rewritten.
 - [x] Keep canonical attachment URLs untouched. Remote failure state and Blob
       URLs are session-only presentation state and are cleared on setting
       transitions/stop through the existing cache lifecycle.
@@ -601,18 +633,18 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
       viewer/open action fails; MessageLogger must work in both states.
 
 - [x] Make the shared saved-attachment presentation policy master-aware.
-- [ ] Apply remote-first display when the local-only child is Off: the existing
+- [x] Apply remote-first display when the local-only child is Off: the existing
       Discord/Logger remote renderer or attachment card first, then a freshly
       resolved cached Blob only where that local renderer already exists.
 - [x] Apply local-only display when the child is On: existing cached Blob
       renderers only, with no remote presentation request for any direct
       attachment.
-- [x] In local-only mode, omit native attachments and show classified Logger
-      text for types that have no existing local renderer.
+- [x] In local-only mode, replace native and Logger attachment presentation with
+      classified text when no existing local renderer/file is available.
 - [x] Keep restored native rows and Logger-owned renderers aligned with the same
       setting-dependent policy.
-- [ ] When cache is Off, omit every saved direct attachment from native mounted
-      rows without fetching it.
+- [x] When cache is Off, replace every saved direct attachment with classified
+      text in native mounted rows without fetching it.
 - [x] When cache is Off, replace current image types in the main Logger and
       deleted forum/thread log views with literal `[image:filename.ext]` text.
 - [x] In the same Logger views, replace every other direct attachment with
@@ -623,19 +655,21 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
       deleted forum/thread log modal.
 - [x] Add the same master/local-only presentation gates to separate inline
       removed-attachment history without adding new arbitrary-file rendering.
-- [x] Refresh the selected channel, Logger window, all open Logger thread
-      modals, and edit-history wrappers after relevant setting/cache changes.
+- [x] Invalidate every Discord channel-message cache, refetch only the selected
+      channel, and refresh the Logger window, all open Logger thread modals, and
+      edit-history wrappers after relevant setting/cache changes.
 - [x] Track and close only a currently open Logger-owned media viewer when the
       cache master is turned Off.
 
 ### Stage 3 focused checks
 
-- [ ] The complete display-policy table has deterministic coverage.
+- [x] The complete Stage 3 display-policy table has deterministic coverage.
 - [x] Ordinary live messages are not filtered or Blob-rewritten.
-- [ ] Cache-master Off hides already saved attachments without deleting files.
-- [x] Cache-master Off uses no replacement media node in Discord mounts and the
-      exact `[image:filename.ext]`/`[attachment:filename.ext]` forms in
-      Logger-owned list/log views.
+- [x] Cache-master Off replaces already saved attachments with text labels
+      without deleting files.
+- [x] Cache-master Off uses no replacement media node and uses the exact
+      `[image:filename.ext]`/`[attachment:filename.ext]` forms in native mounts
+      and Logger-owned list/log views.
 - [x] Remote-first mode still starts from CDN when a local file already exists.
 - [x] Local-only mode makes no remote presentation request for images or any
       other direct attachment type.
@@ -644,13 +678,13 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
 
 ### Stage 3 result
 
-- **Implementation:** Added one detached saved-attachment presentation policy
-  for native restored rows, shared Logger/deleted-thread rows, and inline
-  removed-media history. Cache Off omits native media and uses classified text
-  only in Logger-owned list/log views; remote-first begins from the preserved
-  direct/proxy URL and falls back to an existing cached image/video Blob after
-  media-load failure; local-only bypasses remote presentation and uses only an
-  existing supported cached Blob.
+- **Checkpoint implementation:** Added one detached saved-attachment
+  presentation policy for native restored rows, shared Logger/deleted-thread
+  rows, and inline removed-media history. Remote-first begins from the
+  preserved direct/proxy URL and falls back to an existing cached image/video
+  Blob after media-load failure; local-only bypasses remote presentation and
+  uses only an existing supported cached Blob. The checkpoint's native
+  cache-Off omission policy is now superseded by classified placeholder text.
 - **Live refresh:** Cache-master and local-only transitions close only tracked
   Logger-owned attachment viewers before revoking Blob URLs, clear transient
   failure state, and refresh the selected native rows, main Logger, every open
@@ -693,9 +727,48 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
   transitions, expired-attachment reloads, cached channel loads, and repeated
   media error events without a new MessageLogger exception. The failed recent
   rows are confirmed saved deletion records, not ordinary live messages.
-- **Remaining gate:** Targeted trace and correction of the three native-mount
-  symptoms, parent regression/full gates, resync, focused live retest, and user
-  confirmation before Stage 3 is complete.
+- **Remaining gate at checkpoint:** Targeted trace and correction of the three
+  native-mount symptoms, parent regression/full gates, resync, focused live
+  retest, and user confirmation before Stage 3 is complete.
+
+- **Correction trace:** With the disposable fallback trace enabled, the known
+  expired remote attachment successfully produced a Blob presentation while
+  local-only was Off. Cache Off produced detached clones with zero attachments,
+  reinserted the attachment-only record as an empty row, and left non-selected
+  previously injected rows in Discord's cached channel results. The trace
+  helper, live symlink, and report were removed after capture.
+- **Superseding correction contract:** Any source selection that yields neither
+  a permitted remote node nor an existing supported Blob now produces the same
+  exact classified text label in native mounts and Logger-owned views. Policy
+  transitions invalidate every channel-message cache and refetch only the
+  selected channel. Stage 5 separately owns bounded CDN-to-file hydration on a
+  real Off-to-On transition.
+- **Correction implementation:** Initial restore, native media failure, reload,
+  and setting refresh now use one detached native placeholder helper. Logger
+  image/video errors and inline removed-media fallbacks carry the same plan
+  label without altering canonical attachments. Cache refresh invalidates all
+  known channel rows even when no ordinary channel is selected and refetches
+  only the selected channel when one exists.
+- **Correction focused checks:** Parent syntax and diff checks pass. The current
+  combined `tests/media.test.js`, `tests/live-mount-settings.test.js`, and
+  `tests/source-contracts.test.js` run passes `187/187` with zero failures,
+  skips, cancellations, or todos.
+- **Correction full suite:** `npm test` ran exactly
+  `node --check MessageLoggerV2.plugin.js && node --test tests/*.test.js` and
+  passed `506/506` with zero failures, skips, cancellations, or todos. The
+  dedicated attachment-only forum/thread promotion selection passed `7/7` and
+  proves only the detached presentation clone becomes a placeholder.
+- **Correction remaining gate:** The user-authorized checkpoint may be created,
+  but Stage 3 is not complete. Trace and fix the same-channel remount timing,
+  repeat the focused live cases, inspect the fresh log boundary, and wait for
+  user acceptance before the Stage 3 completion commit.
+- **Correction live sync:** Synced only `MessageLoggerV2.plugin.js`; repository
+  and live SHA-256 both equal
+  `a707f0814d91f4254a543ed8d0a543c2b5a39395924be1a11852bc439ba699d3`.
+  MessageLogger removed and reapplied its patches and completed both UI force
+  updates without a new MessageLogger error. The simultaneous `PersonalPins`
+  dispatch error is from that separate plugin. The exact leftover disposable
+  fallback-trace report was removed; no trace helper remains installed.
 
 ## Stage 4 - Viewer and Open in Browser
 
@@ -711,8 +784,8 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
       path directly with `shell.openPath()`.
 - [ ] Recheck the cache master, local-only generation, and physical file after
       every awaited probe so stale completions cannot open anything.
-- [ ] Keep unavailable/classified text limited to Logger-owned views when neither
-      remote nor local media works; native mounted rows omit the media entirely.
+- [ ] Use classified text in both native saved-message mounts and Logger-owned
+      views when neither remote nor local media works.
 - [ ] Confirm no Logger-owned action leaks onto ordinary Discord media.
 
 ### Stage 4 focused checks
@@ -722,32 +795,43 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
 - [ ] Remote-first, expired CDN plus local cache: display falls back to Blob;
       external open uses the operating system's default file app.
 - [ ] Live CDN without local cache: remote display/open works and caching starts.
-- [ ] No usable CDN and no local cache: native mount omits the attachment;
-      Logger-owned views show their placeholder/classified text; no broken modal.
+- [ ] No usable CDN and no local cache: native mounts and Logger-owned views show
+      their placeholder/classified text; no broken modal; external open warns
+      and launches nothing.
 - [ ] Local-only plus local cache: display Blob; external open uses the resolved
       local path through the default file app without a CDN request.
-- [ ] Local-only without local cache: native mount omits the attachment;
-      Logger-owned views show their placeholder/classified text; no CDN
-      display/probe/open.
+- [ ] Local-only without local cache: native mounts and Logger-owned views show
+      their placeholder/classified text; no CDN display/probe/open; external
+      open warns and launches nothing.
 
 ## Stage 5 - Off to On rehydration
 
+- [ ] Rename the visible switch from **Cache media locally** to
+      **Render & Cache media**, retaining the `cacheAllImages` id.
+- [ ] Reword its existing linked note briefly: On renders and caches media and
+      retries saved live URLs; Off shows placeholders and keeps child values;
+      retain the existing **Disable saving data** queue warning.
 - [ ] Trigger only on a real Off to On transition.
-- [ ] Scan only deleted records' normal image attachments.
+- [ ] Scan only deleted records' eligible normal image attachments.
 - [ ] De-duplicate work and skip existing files/non-images/out-of-scope media.
-- [ ] Try direct URL, then distinct proxy URL.
-- [ ] Respect size, cancellation, no-save, epoch, and atomic-write contracts.
-- [ ] Refresh once after immediate/deferred completion as appropriate.
+- [ ] Try the exact preserved direct URL, then a distinct proxy URL.
+- [ ] Respect existing size, cancellation, no-save, epoch, request-sharing, and
+      atomic-write contracts.
+- [ ] Refresh presentation once after immediate/deferred completion as
+      appropriate.
 - [ ] Confirm Off during the batch cancels without retry or late write.
+- [ ] Add no persisted unavailable marker or schema field.
 
 ### Stage 5 focused checks
 
 - [ ] Recent saved URL is re-cached and appears after Off to On.
-- [ ] Expired direct URL falls back to a live proxy when available.
-- [ ] Both URLs unavailable omits the native attachment and leaves
-      placeholder/classified text only in Logger-owned views.
+- [ ] Expired direct URL falls back to a distinct live proxy when available.
+- [ ] Both URLs unavailable and no existing local file leaves exact classified
+      placeholder text in native and Logger-owned views.
 - [ ] Existing local files are not downloaded again.
 - [ ] No startup-wide backfill occurs merely because the saved setting is On.
+- [ ] A later real Off to On may retry a prior transient failure without a
+      persisted schema marker.
 
 ## Stage 6 - Automated verification
 
@@ -756,8 +840,8 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
 - [ ] Cover immediate master/child refresh of selected native rows, the main
       Logger, every registered deleted thread modal, and edit-history wrappers.
 - [ ] Cover remote display failure to Blob, local-only remote bypass, Blob
-      cleanup, and exact master-Off `[image:filename.ext]` versus
-      `[attachment:filename.ext]` Logger classification.
+      cleanup, and exact no-source `[image:filename.ext]` versus
+      `[attachment:filename.ext]` classification in native and Logger views.
 - [ ] Prove the label classifier reuses the existing image predicate: current
       JPG/JPEG, PNG, GIF, BMP, WebP, AVIF, TIF/TIFF cases use `[image:...]`,
       while TXT, PDF, video, audio, and other direct files use `[attachment:...]`.
@@ -766,7 +850,9 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
 - [ ] Cover liveness success/failure/timeout, duplicate-click sharing,
       generation cancellation, cross-platform `shell.openExternal()` versus
       `shell.openPath()` routing, nonempty open-path errors, and missing-file
-      failure without opening a Blob externally.
+      failure with a warning toast and without opening a Blob externally.
+- [ ] Prove Off to On hydrates only eligible missing deleted-image files through
+      the preserved URL order and existing safe write pipeline.
 - [ ] Lock `newSaveAllFileTypes` eligibility/cache behavior and prove no new
       arbitrary-file renderer, player, or cache route was introduced.
 - [ ] Run `npm run check`.
@@ -809,20 +895,22 @@ and ordinary channel threads that share the same native row path.
       returns to CDN-first rendering/opening when the URL is live, or to the
       Blob/default-app local fallback when that URL is expired.
 - [ ] **Cache Off:** every currently visible native mounted saved-attachment node
-      is removed immediately; Logger/main and deleted forum/thread log views show
-      `[image:filename.ext]` for a current image and
-      `[attachment:filename.ext]` for a representative non-image direct
-      attachment; any Logger-owned media viewer closes; cache files remain;
-      deleting a new image creates no cache file.
+      is removed immediately; native saved-message rows, Logger/main, and
+      deleted forum/thread log views show `[image:filename.ext]` for a current
+      image and `[attachment:filename.ext]` for a representative non-image
+      direct attachment; any Logger-owned media viewer closes; cache files
+      remain; deleting a new image creates no cache file.
 - [ ] **Cache back On:** a prior local image follows the selected child policy;
-      a recent uncached deletion is retried from stored URLs; an expired
-      no-local image is omitted from native mounts and shows a placeholder only
-      in Logger-owned views.
+      a recent uncached deletion is retried and cached from its stored direct or
+      distinct proxy URL; an expired no-local image shows its placeholder in
+      native and Logger-owned views.
 - [ ] **Mount coverage smoke:** repeat the master Off/On presentation refresh in
       one DM and one open forum-post chat. Confirm the forum list/sidebar/browser
       text-only entries remain present.
 - [ ] **Hot reload/Cmd+R:** local images receive valid regenerated Blob URLs and
       no stale/revoked Blob remains clickable.
+- [ ] **Unavailable external open:** expired CDN plus no existing local file
+      opens nothing and shows the concise unavailable warning toast.
 - [ ] Check `debug.log` and optional `console.log` for new Logger errors.
 
 Relevant matrix coverage: focused portions of `RT-09`, `RT-11`, `RT-13`, and
@@ -1184,3 +1272,114 @@ full setting matrix in every channel type.
 - Created the user-authorized Stage 3 checkpoint with the passing local gates
   and known live failures in its commit message. It is a restore point, not
   Stage 3 completion.
+
+### 2026-08-17 - Stage 3 correction trace completed and removed
+
+- Installed the disposable `MessageLoggerMountFallbackTrace` helper only long
+  enough to capture the local-only Off and cache-master Off reproductions.
+- With cache On and local-only Off, the known expired attachment produced a
+  detached Blob output from its already-existing physical cache file; the user
+  confirmed its restored row remained rendered during this traced run.
+- With cache Off, the same canonical attachment produced a detached clone with
+  zero attachments. `reAddDeletedMessages()` then inserted the attachment-only
+  saved record as an empty row, proving the visible shell was a logger
+  presentation defect rather than Discord media rendering.
+- The trace also captured recent saved records producing zero-attachment clones
+  while previously injected copies survived in non-selected Discord channel
+  caches. The policy refresh therefore must invalidate every channel cache and
+  refetch only the selected channel.
+- Removed the exact live helper symlink, generated JSON report, and ignored
+  helper source. No disposable trace artifact remains.
+
+### 2026-08-17 - Final presentation and no-hydration contract superseded earlier omission rules
+
+- Cache master Off now uses the same exact classified text placeholders in
+  native saved-message mounts and Logger history. It renders/fetches no saved
+  attachment media and creates no new cache file; existing files and canonical
+  direct/proxy URLs remain intact.
+- Cache On with local-only Off uses CDN first, then an already-existing local
+  Blob after remote media failure. If neither source works, every covered view
+  shows the classified placeholder instead of an empty row or broken node.
+- Cache On with local-only On bypasses CDN and uses an already-existing local
+  Blob only. A missing/unsupported local source becomes the same classified
+  placeholder.
+- Turning cache On is presentation-only for historical deletions. It never
+  enumerates or downloads old deleted attachments into new cache files. New
+  live messages retain the existing cache pipeline while the master is On.
+- External opening keeps Blob and canonical destinations separate: live CDN
+  uses the configured default browser; an existing local file uses the
+  operating system's default application for that file type; no usable source
+  opens nothing and shows **Attachment is no longer available.**
+- Updated the current implementation, Stage 3-7 checks, and handoff next action
+  to make these rules authoritative over older activity-log entries that
+  described native omission or Off-to-On rehydration.
+
+### 2026-08-17 - Stage 5 Off-to-On hydration restored
+
+- The user explicitly restored Stage 5 after the temporary no-hydration
+  decision. This entry supersedes only the prior no-hydration statements; the
+  classified placeholder and source-selection rules remain unchanged.
+- A real Cache Off to On transition will enumerate eligible saved deleted-image
+  attachments that lack local files, de-duplicate them, and try the exact
+  preserved direct URL followed by a distinct proxy URL through the existing
+  limits, cancellation, no-save, epoch, request-sharing, and atomic-write path.
+- Successful responses create normal cache files and refresh presentation once
+  the batch settles. Existing files are skipped.
+- Expired/unavailable URLs with no existing local file remain exact classified
+  placeholders in native mounted messages and Logger history. External open
+  warns and launches nothing when neither source is usable.
+- Failure remains transient rather than persisted: no schema/tombstone is
+  added, and a later real Off to On transition may retry the stored URLs. No
+  automatic archive-wide startup hydration is added.
+
+### 2026-08-17 - Master media setting wording finalized
+
+- Rename the visible **Cache media locally** switch to **Render & Cache media**
+  because it now governs both saved-media rendering and cache activity.
+- Keep the internal `cacheAllImages` id unchanged, so this is a presentation
+  change and does not require a schema migration.
+- Preserve the useful linked-note behavior in shorter wording: On renders saved
+  media, caches eligible files, and retries saved live URLs after an Off-to-On
+  transition; Off shows classified attachment placeholders while retaining
+  child values. Keep the existing no-save queue warning.
+
+### 2026-08-17 - Stage 3 native placeholder correction implemented
+
+- Added one detached native saved-attachment presentation helper and used it
+  for initial restoration, media-error fallback, reload, and switch-driven
+  refresh. Attachment-only saved rows now become exact classified text rather
+  than empty shells when no permitted media source exists.
+- Carried the same plan label through Logger remote/Blob image and video errors,
+  and through inline removed-attachment media fallbacks. Saved direct/proxy URLs
+  and canonical records remain unchanged.
+- Policy refresh now invalidates every known Discord channel-message cache,
+  including DM and thread caches, while refetching only the selected channel.
+  Global invalidation still occurs when no ordinary channel is selected.
+- Parent focused verification passes `187/187` across the affected media,
+  live-mount-setting, and source-contract suites. `npm run check` passes and the
+  bounded `npm test` command runs only `tests/*.test.js`, passing `505/505`.
+  A separate attachment-only forum/thread promotion selection passes `7/7`,
+  and the final bounded suite passes `506/506` after that regression was added.
+  Whitespace is clean; the focused live retest is the remaining Stage 3 gate.
+- Synced only the plugin after all local gates. Repository/live SHA-256 match at
+  `a707f0814d91f4254a543ed8d0a543c2b5a39395924be1a11852bc439ba699d3`,
+  hot reload completed without a new MessageLogger error, and the last
+  generated fallback-trace report was removed. User live acceptance is the
+  remaining Stage 3 gate.
+
+### 2026-08-17 - Stage 3 second live gate isolated same-channel remount defect
+
+- Local-only Off still fails immediately after plugin hot reload. Toggling the
+  media master Off and back On does not recover the row.
+- Toggling local-only On also remains broken in the same channel, but changing
+  to another channel and back rebuilds the row and renders the existing local
+  Blob correctly. After that successful rebuild, toggling local-only Off keeps
+  the image rendered.
+- This proves the physical cache file and Blob resolver work. The remaining
+  defect is scoped to hot-reload/same-channel saved-row remount or refresh
+  timing, not CDN-to-Blob source selection itself.
+- The master must also visibly disable every other Media settings control while
+  Off, without clearing child values. This dependency requirement is now part
+  of the focused correction.
+- The user explicitly authorized committing the current passing tree as an
+  incomplete Stage 3 checkpoint. Do not mark Stage 3 complete in that commit.
