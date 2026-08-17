@@ -29,26 +29,32 @@ This file is both the implementation checklist and the handoff record.
 - **Root rollout record:**
   `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T11-07-23-01a00d42-4986-7971-94de-11f09f6630d1.jsonl`
 - **Working branch:** `develop`
-- **Verified HEAD:** `131c928f2c8b5c73e2d28efc69699eb9d6c87ca9`
-- **Verified worktree:** tracking `origin/develop`; Stage 2 currently modifies
-  `MessageLoggerV2.plugin.js`, `tests/media.test.js`, and
-  `tests/records.test.js`, with this checklist still untracked until the first
-  user-confirmed stage commit.
+- **Verified HEAD:** the user-authorized Stage 3 checkpoint is the current HEAD;
+  its verified Stage 2 parent is
+  `62152b8632860a0d0037c7713314d8f9c3357daa`. Inspect `git log -1` for the
+  checkpoint's final hash after commit creation/amendment.
+- **Verified worktree:** clean immediately after the Stage 3 checkpoint on
+  `develop`, which tracks `origin/develop`. Later targeted correction changes
+  are expected to appear on top of that checkpoint.
 - **Baseline:** `npm test` passed `471/471` before this checklist was created.
 - **Checklist verification:** the Stage 2 parent rerun of `npm test` passes
   `476/476`; the checklist new-file whitespace check is clean.
-- **Live parity:** the Stage 2 repository and live plugin SHA-256 both equal
-  `05b38b9c2403d09cd1a9e6deb9619f3b9f70ac54ffd1964d67c9ab9a451d5f15`.
-- **Implementation state:** Stage 1 runtime tracing is complete. Stage 2 URL
-  persistence and the read-only attachment descriptor are implemented, locally
-  verified, and synced live, pending its focused user test, confirmation, and
-  first stage commit.
+- **Live parity:** the Stage 3 repository and live plugin SHA-256 both equal
+  `fd659400e598e038c0ad12a14236c5cce0f950d6d3996bcdb4e26fec6ab64ff2`.
+- **Implementation state:** Stage 1 runtime tracing and Stage 2 persistence are
+  complete. Stage 2 is committed and synced live. Stage 3's shared native,
+  Logger, deleted-thread/forum-log, inline-history, setting-refresh, and scoped
+  Logger-owned viewer behavior is implemented and locally verified, but its
+  first live gate exposed two native-mount defects that remain in progress.
 - **Runtime-trace state:** Stage 1 is complete and cleaned up. Removing the exact
   live symlink auto-unloaded the helper and produced a final `stop` report; the
   symlink, report, and ignored helper were then removed.
-- **Current gate:** The user confirmed Stage 2 after its automated and live
-  gates passed. Create and verify the four-file Stage 2 commit, then begin Stage
-  3 mounted and Logger rendering work.
+- **Current gate:** Stage 3 passes `npm run check`, the combined affected suites
+  (`183/183`), the bounded full `npm test` suite (`501/501`),
+  `git diff --check`, live hash parity, and clean MessageLogger hot reload. The
+  focused live gate failed: remote-first did not remount its cached Blob after
+  CDN failure, Cache Off left an attachment-only row shell, and saved rows
+  already present in Discord's cached channel list retained recent images.
 - **Checklist state:** include this file in every user-confirmed stage commit;
   archive it only after implementation, validation, and user acceptance are
   complete.
@@ -59,10 +65,11 @@ This file is both the implementation checklist and the handoff record.
 
 ### Exact next action
 
-Stage only `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
-`tests/records.test.js`, and this checklist; create and verify the Stage 2
-commit. Only after that commit is verified, begin Stage 3 mounted and Logger
-rendering work.
+Create the user-authorized Stage 3 checkpoint commit with the failed live gate
+recorded. Then trace the known expired cached image's media-error/update path,
+fix cached-channel saved-row reconciliation and attachment-only row omission,
+add focused regressions, rerun the parent gates, resync live, and repeat only
+the failed Stage 3 cases before the final Stage 3 acceptance commit.
 
 ### Resume procedure
 
@@ -177,12 +184,12 @@ be recorded before implementation continues.
 
 ### Persisted data
 
-- [ ] Preserve the exact captured direct `attachment.url` and
+- [x] Preserve the exact captured direct `attachment.url` and
       `attachment.proxy_url` as separate fields whether caching is On or Off.
-- [ ] Never persist a Blob URL or local `file:` URL into the saved message.
-- [ ] Never invent a direct CDN URL for legacy records that already contain only
+- [x] Never persist a Blob URL or local `file:` URL into the saved message.
+- [x] Never invent a direct CDN URL for legacy records that already contain only
       a proxy URL; retain and use the valid value they still have.
-- [ ] Keep canonical saved records unchanged while producing detached render
+- [x] Keep canonical saved records unchanged while producing detached render
       clones.
 
 ### Display policy
@@ -294,6 +301,15 @@ be recorded before implementation continues.
 
 ## Behavior that must remain unchanged
 
+- [x] Scope boundary: implementation changes are limited to saved direct
+      attachment URL preservation, image/attachment presentation, Logger-owned
+      media viewing/opening, setting-driven presentation refresh, and the small
+      cache retry/lifecycle behavior required by those paths.
+- [x] Do not require the user to manually retest already-confirmed general
+      plugin behavior. The complete automated suite guards unrelated logging,
+      persistence, notification, shortcut, forum, Anti-Nuke, settings, and
+      recovery contracts; live testing stays limited to the changed
+      image/render/cache matrix.
 - [ ] Ordinary live Discord messages retain Discord's normal rendering and
       media actions.
 - [ ] Text-only restored forum cards, sidebar entries, and thread-browser cards
@@ -318,9 +334,9 @@ be recorded before implementation continues.
 - [x] `tests/media.test.js`
 - [x] `tests/records.test.js` or `tests/persistence.test.js` only if needed to
       lock URL preservation at the appropriate boundary.
-- [ ] `tests/live-mount-settings.test.js` only if the shared mount/setting
+- [x] `tests/live-mount-settings.test.js` only if the shared mount/setting
       contract belongs there.
-- [ ] `tests/source-contracts.test.js` only for a meaningful structural
+- [x] `tests/source-contracts.test.js` only for a meaningful structural
       invariant that behavior tests cannot cover.
 - [ ] `docs/tests.md` only if the final runtime matrix needs a lasting update.
 
@@ -550,53 +566,136 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
 - **Fresh log review:** No new MessageLogger error appeared through the live
   save. One `PersonalPins` dispatch error occurred during hot reload and is
   unrelated to MessageLogger Stage 2.
-- **Commit state:** User confirmation received. This checklist snapshot belongs
-  in the Stage 2 commit with the three tracked implementation/test files; the
-  enclosing commit is verified immediately after creation.
+- **Commit state:** Committed and verified as
+  `62152b8632860a0d0037c7713314d8f9c3357daa` (`Preserve deleted attachment
+  source URLs`). The commit contains exactly the plugin, media tests, record
+  tests, and this checklist.
 
 ## Stage 3 - Mounted and Logger rendering
 
-- [ ] Make the shared saved-attachment presentation policy master-aware.
+### Stage 3 bounded design
+
+- [x] Native guild, DM/group-DM, thread, and forum-post chat mounts share
+      `LOAD_MESSAGES_SUCCESS -> reAddDeletedMessages() -> getCacheOnlyMessage()`;
+      no channel-type-specific implementation is needed.
+- [x] Main Logger rows and deleted forum/thread log modals share
+      `populateParent()`; every registered thread-modal refresher must be
+      invoked, not only the selected channel's refresher.
+- [x] Inline removed-media history is the only separate React consumer; it is
+      refreshed by broadcasting `MLV2_FORCE_UPDATE_MESSAGE_CONTENT`.
+- [x] Use the Stage 2 descriptor plus the existing `isImage()`/`isVideo()`
+      predicates. Do not introduce a MIME/cache-eligibility system or an
+      arbitrary-file renderer.
+- [x] Native remote failure handling will be a capture-phase media-error path
+      scoped to a mounted `chat-messages-<channel>-<message>` row whose exact
+      saved record has `delete_data`. It may switch only the matching detached
+      attachment clone to the existing cached Blob or omit it; ordinary live
+      Discord media is never rewritten.
+- [x] Keep canonical attachment URLs untouched. Remote failure state and Blob
+      URLs are session-only presentation state and are cleared on setting
+      transitions/stop through the existing cache lifecycle.
+- [x] ImageUtilities 5.6.7 is enabled. Its current rescaling settings are Off,
+      it does not patch media `onError` or Blob rendering, and it need not be
+      disabled for mounted/Logger Blob tests. It does modify the native viewer
+      and media context menus, so use one disabled control only if Stage 4's
+      viewer/open action fails; MessageLogger must work in both states.
+
+- [x] Make the shared saved-attachment presentation policy master-aware.
 - [ ] Apply remote-first display when the local-only child is Off: the existing
       Discord/Logger remote renderer or attachment card first, then a freshly
       resolved cached Blob only where that local renderer already exists.
-- [ ] Apply local-only display when the child is On: existing cached Blob
+- [x] Apply local-only display when the child is On: existing cached Blob
       renderers only, with no remote presentation request for any direct
       attachment.
-- [ ] In local-only mode, omit native attachments and show classified Logger
+- [x] In local-only mode, omit native attachments and show classified Logger
       text for types that have no existing local renderer.
-- [ ] Keep restored native rows and Logger-owned renderers aligned with the same
+- [x] Keep restored native rows and Logger-owned renderers aligned with the same
       setting-dependent policy.
 - [ ] When cache is Off, omit every saved direct attachment from native mounted
       rows without fetching it.
-- [ ] When cache is Off, replace current image types in the main Logger and
+- [x] When cache is Off, replace current image types in the main Logger and
       deleted forum/thread log views with literal `[image:filename.ext]` text.
-- [ ] In the same Logger views, replace every other direct attachment with
+- [x] In the same Logger views, replace every other direct attachment with
       literal `[attachment:filename.ext]` text.
 - [ ] Cover the shared native row path for guild channels, DMs/group DMs, open
       threads, and open forum-post chats.
-- [ ] Cover the shared `populateParent()` path for the main Logger and every open
+- [x] Cover the shared `populateParent()` path for the main Logger and every open
       deleted forum/thread log modal.
-- [ ] Add the same master/local-only presentation gates to separate inline
+- [x] Add the same master/local-only presentation gates to separate inline
       removed-attachment history without adding new arbitrary-file rendering.
-- [ ] Refresh the selected channel, Logger window, all open Logger thread
+- [x] Refresh the selected channel, Logger window, all open Logger thread
       modals, and edit-history wrappers after relevant setting/cache changes.
-- [ ] Track and close only a currently open Logger-owned media viewer when the
+- [x] Track and close only a currently open Logger-owned media viewer when the
       cache master is turned Off.
 
 ### Stage 3 focused checks
 
 - [ ] The complete display-policy table has deterministic coverage.
-- [ ] Ordinary live messages are not filtered or Blob-rewritten.
+- [x] Ordinary live messages are not filtered or Blob-rewritten.
 - [ ] Cache-master Off hides already saved attachments without deleting files.
-- [ ] Cache-master Off uses no replacement media node in Discord mounts and the
+- [x] Cache-master Off uses no replacement media node in Discord mounts and the
       exact `[image:filename.ext]`/`[attachment:filename.ext]` forms in
       Logger-owned list/log views.
-- [ ] Remote-first mode still starts from CDN when a local file already exists.
-- [ ] Local-only mode makes no remote presentation request for images or any
+- [x] Remote-first mode still starts from CDN when a local file already exists.
+- [x] Local-only mode makes no remote presentation request for images or any
       other direct attachment type.
-- [ ] Existing remote-only text/PDF/other cards do not gain a new Blob renderer.
-- [ ] Object URL cleanup remains bounded across refresh/hot reload.
+- [x] Existing remote-only text/PDF/other cards do not gain a new Blob renderer.
+- [x] Object URL cleanup remains bounded across refresh/hot reload.
+
+### Stage 3 result
+
+- **Implementation:** Added one detached saved-attachment presentation policy
+  for native restored rows, shared Logger/deleted-thread rows, and inline
+  removed-media history. Cache Off omits native media and uses classified text
+  only in Logger-owned list/log views; remote-first begins from the preserved
+  direct/proxy URL and falls back to an existing cached image/video Blob after
+  media-load failure; local-only bypasses remote presentation and uses only an
+  existing supported cached Blob.
+- **Live refresh:** Cache-master and local-only transitions close only tracked
+  Logger-owned attachment viewers before revoking Blob URLs, clear transient
+  failure state, and refresh the selected native rows, main Logger, every open
+  deleted thread/forum log, and inline edit-history wrappers.
+- **Viewer ownership:** Native viewer ownership is recorded through duplicate-
+  safe scoped `ModalStack.openModal`/`closeModal` observers; a later ordinary
+  Discord viewer overwrites Logger ownership and is not closed by a cache
+  setting transition. Custom Logger image/video modal keys are tracked
+  separately.
+- **Host correction:** Parent review caught and fixed an initially unbound
+  `BoundPatcher.after` call before live sync. The final implementation binds the
+  BetterDiscord scoped patcher receiver and has a regression assertion for both
+  observer installs.
+- **Focused parent checks:** `npm run check` passed. The combined
+  `tests/media.test.js`, `tests/live-mount-settings.test.js`, and
+  `tests/source-contracts.test.js` run passed `183/183` with zero failures,
+  skips, cancellations, or todos.
+- **Full parent suite:** `npm test` ran exactly
+  `node --check MessageLoggerV2.plugin.js && node --test tests/*.test.js` and
+  passed `501/501` with zero failures, skips, cancellations, or todos.
+- **Review/checks:** Parent reviewed the complete Stage 3 source and test diff;
+  `git diff --check` is clean. No version, changelog, schema, cache-all-file-
+  types, updater, clipboard, arbitrary-file renderer, or external-open behavior
+  changed.
+- **Live sync:** Synced only `MessageLoggerV2.plugin.js`; repository/live SHA-256
+  both equal
+  `fd659400e598e038c0ad12a14236c5cce0f950d6d3996bcdb4e26fec6ab64ff2`.
+  BetterDiscord removed/reapplied MessageLogger patches and completed the UI
+  refresh with no new MessageLogger error. A simultaneous `PersonalPins`
+  dispatch error is from that separate plugin.
+- **First live result:** Local-only On passed for the known older cached image:
+  the native mounted row and full viewer both rendered the Blob. Local-only Off
+  failed after the remote URL expired: neither the mounted row nor full viewer
+  recovered to the local Blob. Cache Off removed that old image but left its
+  empty attachment-only message shell; the exact Logger placeholder worked.
+  Two recent saved image rows in another channel remained mounted because
+  Discord reused previously injected cached-channel messages instead of passing
+  them through the new presentation clone.
+- **Runtime evidence:** Normal logs show the local-only and cache-master setting
+  transitions, expired-attachment reloads, cached channel loads, and repeated
+  media error events without a new MessageLogger exception. The failed recent
+  rows are confirmed saved deletion records, not ordinary live messages.
+- **Remaining gate:** Targeted trace and correction of the three native-mount
+  symptoms, parent regression/full gates, resync, focused live retest, and user
+  confirmation before Stage 3 is complete.
 
 ## Stage 4 - Viewer and Open in Browser
 
@@ -1005,3 +1104,83 @@ full setting matrix in every channel type.
 - Authorized commit scope is exactly the plugin, the media and record test
   files, and this checklist. Stage 3 must not begin until that commit is
   created and verified.
+
+### 2026-08-17 - Stage 2 commit verified and focused scope reaffirmed
+
+- Created and verified Stage 2 commit
+  `62152b8632860a0d0037c7713314d8f9c3357daa`; its scope is exactly the plugin,
+  media tests, record tests, and this checklist.
+- The user reaffirmed that remaining work is primarily image rendering with
+  only the small cache-logic adjustments necessary for that rendering.
+- General plugin behavior will be protected by the full automated suite, not a
+  broad manual retest. User live checks remain limited to the changed
+  attachment render/cache/open behavior.
+
+### 2026-08-17 - Stage 3 source map and ImageUtilities control audited
+
+- Confirmed one shared restored-message clone path covers guilds, DMs/group
+  DMs, open threads, and open forum-post chats; main Logger and deleted
+  thread-log rows share `populateParent()`, while inline removed-media history
+  is the only separate React consumer.
+- Locked Stage 3 to detached presentation clones, an ML2-record-scoped native
+  media-error fallback, Logger/inline consumers, and setting refresh. No
+  logging, filtering, schema, persistence, cache eligibility, or arbitrary-file
+  behavior belongs in this stage.
+- Audited enabled ImageUtilities 5.6.7. Its current message/viewer rescaling is
+  disabled and it has no media-error or Blob-render override, so it remains
+  enabled for the normal Stage 3 test. It alters the native viewer/context menu;
+  use a disabled control only if the later viewer/open action fails.
+
+### 2026-08-17 - Stage 3A native mounted-row policy verified
+
+- Added a detached saved-attachment presentation plan that preserves canonical
+  records and selects remote, cached Blob, placeholder metadata, or omission
+  from the cache-master and local-only settings.
+- Native restored guild, DM/group-DM, thread, and forum-post rows now start from
+  the preserved direct/proxy remote source in remote-first mode, use cached
+  image/video Blobs in local-only mode, and omit direct attachments when the
+  cache master is Off.
+- Added a capture-phase, exact saved-row media-error listener so only failed
+  deleted-message image/video mounts can retry from an existing cached Blob;
+  ordinary live Discord media is ignored.
+- Cache-master and local-only transitions clear transient media-failure and
+  Blob presentation state, then refresh selected restored rows, the Logger,
+  all open Logger thread modals, and inline edit-history wrappers.
+- Parent checks pass: syntax, `105/105` combined media/live-mount focused tests,
+  and `git diff --check`. The full suite and live sync remain gated on the rest
+  of Stage 3.
+
+### 2026-08-17 - Stage 3B shared Logger rows verified
+
+- Added a pure Logger presentation-entry planner over canonical current and
+  removed direct attachments. It preserves order, deduplicates removed-history
+  identities, and never mutates saved records or their direct/proxy URLs.
+- Wired the planner into shared `populateParent()`, covering both the main
+  Logger and every deleted thread/forum log modal without a separate modal
+  implementation.
+- Cache-master Off and local-only missing/unsupported entries now use exact
+  classified Logger text. Remote-first omissions retain the existing
+  `[Attachment not cached: filename]` wording.
+- Remote-first Logger media no longer switches to an existing cache before a
+  load failure. Cached image/video Blob plans enter the existing local renderer,
+  while proxy-only remote non-media links use the selected planned URL and no
+  new arbitrary-file renderer is introduced.
+- Parent checks pass: syntax, `165/165` combined media/source-contract focused
+  tests, and `git diff --check`. Inline removed-media history and Logger-owned
+  viewer shutdown remain before the complete Stage 3 gate.
+
+### 2026-08-17 - Stage 3 first live gate exposed native-mount gaps
+
+- Local-only On passed on the known older cached image in its restored native
+  row and full viewer.
+- Local-only Off failed to recover that expired remote image to its existing
+  cached Blob in both the restored row and viewer.
+- Cache Off removed the old attachment but left an empty attachment-only row;
+  its Logger-owned `[image:Capture3.PNG]` placeholder passed.
+- Two recent saved deletion records in another channel retained their images
+  after Cache Off. Log timing and saved-data inspection confirm Discord reused
+  cached-channel copies of those injected rows, while the setting refresh only
+  replaced records in the selected channel.
+- Created the user-authorized Stage 3 checkpoint with the passing local gates
+  and known live failures in its commit message. It is a restore point, not
+  Stage 3 completion.

@@ -765,3 +765,183 @@ test('logger and injected-menu Jump availability follows the corresponding displ
   plugin.settings.showEditedMessages = true;
   assert.equal(plugin.canJumpToSavedRecord(edited), true);
 });
+
+test('media cache master toggle refreshes selected cached message rows, forum callbacks, and inline rerender', () => {
+  const threadRefreshes = [];
+  const calls = {
+    stops: 0,
+    starts: 0,
+    invalidations: [],
+    cacheRefreshes: [],
+    dispatches: [],
+    loggerRefreshes: 0,
+    cleanUps: 0,
+    refreshes: 0,
+    reportMajorSetting: [],
+    closeLoggerOwnedAttachmentMediaViewersCalls: 0,
+    closeLoggerOwnedAttachmentMediaViewersOrder: []
+  };
+  const plugin = createPlugin({
+    settings: { cacheAllImages: true },
+    selectedChannel: { id: 'channel' },
+    _failedNativeAttachmentMediaKeys: new Set(['seeded-failure']),
+    messageRecord: {
+      visible: {
+        message: { id: '100', channel_id: 'channel', content: 'visible' },
+        delete_data: { hidden: false }
+      },
+      hidden: {
+        message: { id: 'hidden', channel_id: 'channel', content: 'hidden' },
+        delete_data: { hidden: true }
+      },
+      purged: {
+        message: { id: '200', channel_id: 'channel', content: 'purged' },
+        delete_data: { hidden: false }
+      },
+      nuked: {
+        message: { id: '300', channel_id: 'channel', content: 'nuked' },
+        delete_data: { hidden: false }
+      }
+    },
+    deletedMessageRecord: { channel: ['visible', 'hidden'] },
+    purgedMessageRecord: { channel: ['purged'] },
+    nukedMessageRecord: { channel: ['nuked'] },
+    getCacheOnlyMessage: message => ({ ...structuredClone(message), content: `${message.content} (cache-only)` }),
+    dispatcher: { dispatch: event => calls.dispatches.push(event) },
+    invalidateChannelCache: id => calls.invalidations.push(id),
+    cacheChannelMessages: id => calls.cacheRefreshes.push(id),
+    scheduleLoggerMenuRefresh: () => { calls.loggerRefreshes++; },
+    _forumThreadLogRefreshers: new Map([
+      ['channel', () => {
+        threadRefreshes.push('channel');
+        throw new Error('callback failure');
+      }],
+      ['other-thread', () => threadRefreshes.push('other-thread')],
+      ['extra-thread', () => threadRefreshes.push('extra-thread')]
+    ]),
+    stopMediaCacheTrimmer: () => { calls.stops++; },
+    startMediaCacheTrimmer: () => { calls.starts++; },
+    notifyDataSaveModeTransitionChange: () => {},
+    closeLoggerOwnedAttachmentMediaViewers: () => {
+      calls.closeLoggerOwnedAttachmentMediaViewersCalls++;
+      calls.closeLoggerOwnedAttachmentMediaViewersOrder.push('close');
+      return {};
+    },
+    reportMajorSettingChange: (name, value) => {
+      calls.reportMajorSetting.push([name, value]);
+    },
+    imageCacheServerSimulator: {
+      cleanUp: () => {
+        calls.closeLoggerOwnedAttachmentMediaViewersOrder.push('cleanup');
+        calls.cleanUps++;
+      }
+    }
+  });
+  const originalRefreshAttachmentRendering = plugin.refreshAttachmentRendering?.bind(plugin);
+  plugin.refreshAttachmentRendering = () => {
+    calls.refreshes++;
+    return originalRefreshAttachmentRendering?.();
+  };
+
+  plugin.handleMediaCachingSetting(false);
+
+  assert.equal(calls.stops, 1);
+  assert.equal(calls.starts, 0);
+  assert.equal(calls.closeLoggerOwnedAttachmentMediaViewersCalls, 1);
+  assert.equal(calls.cleanUps, 1);
+  assert.equal(calls.closeLoggerOwnedAttachmentMediaViewersOrder[0], 'close');
+  assert.equal(calls.closeLoggerOwnedAttachmentMediaViewersOrder[1], 'cleanup');
+  assert.equal(calls.refreshes, 1);
+  assert.equal(plugin._failedNativeAttachmentMediaKeys.size, 0);
+  assert.deepEqual(calls.invalidations, ['channel']);
+  assert.deepEqual(calls.cacheRefreshes, ['channel']);
+  assert.equal(calls.loggerRefreshes, 1);
+  assert.equal(calls.dispatches.filter(event => event.type === 'MESSAGE_UPDATE').length, 3);
+  assert.deepEqual(
+    calls.dispatches.filter(event => event.type === 'MESSAGE_UPDATE').map(event => event.message.id),
+    ['100', '200', '300']
+  );
+  assert.equal(
+    calls.dispatches.find(event => event.type === 'MESSAGE_UPDATE' && event.message.id === '100')?.message.content,
+    'visible (cache-only)'
+  );
+  assert.equal(calls.dispatches.some(event => event.type === 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT'), true);
+  assert.equal(threadRefreshes.filter(name => name === 'channel').length, 1);
+  assert.deepEqual(
+    threadRefreshes.sort(),
+    ['channel', 'other-thread', 'extra-thread'].sort()
+  );
+
+  calls.invalidations.length = 0;
+  calls.cacheRefreshes.length = 0;
+  calls.dispatches.length = 0;
+  calls.loggerRefreshes = 0;
+  threadRefreshes.length = 0;
+  calls.cleanUps = 0;
+  calls.refreshes = 0;
+  calls.closeLoggerOwnedAttachmentMediaViewersCalls = 0;
+  calls.closeLoggerOwnedAttachmentMediaViewersOrder.length = 0;
+  plugin._failedNativeAttachmentMediaKeys.add('another-seeded-failure');
+
+  plugin.handleMediaCachingSetting(true);
+
+  assert.equal(calls.stops, 1);
+  assert.equal(calls.starts, 1);
+  assert.equal(calls.closeLoggerOwnedAttachmentMediaViewersCalls, 1);
+  assert.equal(calls.cleanUps, 1);
+  assert.equal(calls.closeLoggerOwnedAttachmentMediaViewersOrder[0], 'close');
+  assert.equal(calls.closeLoggerOwnedAttachmentMediaViewersOrder[1], 'cleanup');
+  assert.equal(calls.refreshes, 1);
+  assert.equal(plugin._failedNativeAttachmentMediaKeys.size, 0);
+  assert.deepEqual(calls.invalidations, ['channel']);
+  assert.deepEqual(calls.cacheRefreshes, ['channel']);
+  assert.equal(calls.loggerRefreshes, 1);
+  assert.equal(calls.dispatches.some(event => event.type === 'MESSAGE_UPDATE'), true);
+  assert.equal(calls.dispatches.some(event => event.type === 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT'), true);
+  assert.deepEqual(calls.reportMajorSetting, [
+    ['cacheAllImages', false],
+    ['cacheAllImages', true]
+  ]);
+});
+
+test('media cache local-only setting resets the local state, refreshes attachments, and reports the toggle', () => {
+  const calls = {
+    cleanUps: 0,
+    refreshes: 0,
+    reportMajorSetting: [],
+    closeLoggerOwnedAttachmentMediaViewersCalls: 0,
+    closeLoggerOwnedAttachmentMediaViewersOrder: []
+  };
+  const plugin = createPlugin({
+    settings: { onlyRenderCachedAttachments: false },
+    _failedNativeAttachmentMediaKeys: new Set(['seeded-failure']),
+    closeLoggerOwnedAttachmentMediaViewers: () => {
+      calls.closeLoggerOwnedAttachmentMediaViewersCalls++;
+      calls.closeLoggerOwnedAttachmentMediaViewersOrder.push('close');
+      return {};
+    },
+    reportMajorSettingChange: (name, value) => {
+      calls.reportMajorSetting.push([name, value]);
+    },
+    imageCacheServerSimulator: {
+      cleanUp: () => {
+        calls.closeLoggerOwnedAttachmentMediaViewersOrder.push('cleanup');
+        calls.cleanUps++;
+      }
+    }
+  });
+  plugin.refreshAttachmentRendering = () => {
+    calls.refreshes++;
+  };
+
+  plugin.handleLocalOnlyCachedAttachmentRenderingSetting(true);
+
+  assert.equal(calls.closeLoggerOwnedAttachmentMediaViewersCalls, 1);
+  assert.equal(calls.cleanUps, 1);
+  assert.equal(calls.closeLoggerOwnedAttachmentMediaViewersOrder[0], 'close');
+  assert.equal(calls.closeLoggerOwnedAttachmentMediaViewersOrder[1], 'cleanup');
+  assert.equal(calls.refreshes, 1);
+  assert.equal(calls.reportMajorSetting.length, 1);
+  assert.deepEqual(calls.reportMajorSetting, [['onlyRenderCachedAttachments', true]]);
+  assert.equal(plugin._failedNativeAttachmentMediaKeys.size, 0);
+});

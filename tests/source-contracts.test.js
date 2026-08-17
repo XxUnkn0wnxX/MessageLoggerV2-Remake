@@ -676,8 +676,20 @@ test('date order applies to optional timestamps and forced logger dates', () => 
   assert.match(editHistoryGate, /renderEdited[\s\S]*React\.cloneElement\([\s\S]*originalElement/);
   assert.match(editHistoryGate, /const parseEditHistoryContent = \([\s\S]*getEditHistoryContentSegments\(content, removedAttachments, currentRecord\.message\)/);
   assert.match(editHistoryGate, /renderEditHistoryAttachment[\s\S]*removedAttachment/);
+  assert.match(editHistoryGate, /const renderEditHistoryAttachment = \(\s*attachment,\s*key,\s*fallback,\s*presentationPlan\s*\)\s*=>/);
+  assert.match(editHistoryGate, /segment\?\.presentationPlan/);
+  assert.match(editHistoryGate, /presentationPlan\?\.action !== 'remote'[\s\S]*presentationPlan\?\.action !== 'blob'/);
+  assert.match(editHistoryGate, /typeof presentationPlan\?\.url !== 'string'[\s\S]*!presentationPlan\.url/);
+  assert.match(editHistoryGate, /if \(mediaType !== 'image' && mediaType !== 'video'\)/);
+  assert.match(editHistoryGate, /const initialMediaType = presentationPlan\?\.mediaType/);
+  assert.match(editHistoryGate, /if \(displayPlan\?\.action !== 'remote'[\s\S]*plugin\.settings\?\.cacheAllImages === false[\s\S]*plugin\.settings\?\.onlyRenderCachedAttachments\)/);
+  assert.match(editHistoryGate, /getSavedAttachmentPresentationPlan\([\s\S]*allowBlob: true[^\)]*\)/);
+  assert.match(editHistoryGate, /setDisplayPlan\(\{[\s\S]*action: blobPlan\.action,[\s\S]*mediaType: blobPlan\.mediaType,[\s\S]*url: blobPlan\.url[\s\S]*\}\)/);
+  assert.match(editHistoryGate, /url: displayPlan\.url,[\s\S]*placeholder: displayPlan\.url,[\s\S]*original: displayPlan\.url/);
+  assert.match(editHistoryGate, /const mediaKey = `\$\{key\}-\$\{presentationPlan\.action\}-\$\{presentationPlan\.url\}`/);
   assert.match(editHistoryGate, /const \[errored, setErrored\] = React\.useState\(false\)/);
   assert.doesNotMatch(editHistoryGate, /Hooks\.useState/);
+  assert.doesNotMatch(editHistoryGate, /isAttachmentLocallyCached\(/);
   assert.doesNotMatch(editHistoryGate, /currentRecord\.message\.(attachments|embeds|components)\s*=/);
   assert.match(source, /if \(record\?\.edit_history && Array\.isArray\(ret\.props\.children\)\)[\s\S]*return React\.createElement\(EditHistoryContent,[\s\S]*originalElement: ret/);
   assert.doesNotMatch(source, /if \(showEditHistory\)/);
@@ -1559,12 +1571,30 @@ test('removed explicit uploads remain logger-only and never become embed history
   assert.match(attachmentDiff, /removed_attachments: removedAttachments/);
   assert.doesNotMatch(attachmentDiff, /embeds|components/);
   assert.doesNotMatch(cacheOnlyMessage, /removed_attachments|removedAttachments/);
-  assert.match(viewer, /getRecordRemovedAttachments\(record\)/);
-  assert.match(viewer, /removedAttachmentsForRender/);
   assert.match(viewer, /ml2RemovedAttachmentHost/);
   assert.match(viewer, /'Removed attachment'/);
   assert.match(source, /hasImageMedia\([\s\S]*getRecordRemovedAttachments\(this\.getSavedMessage\(x\)\)/);
   assert.doesNotMatch(source, /removed_embeds|removedEmbeds/);
+});
+
+test('populateParent sources logger media rows from saved attachment presentation entries', () => {
+  const viewer = source.slice(
+    source.indexOf('populateParent(parent, messages)'),
+    source.indexOf('sortMessagesByAge(map, useCaptureBatchOrder')
+  );
+
+  assert.match(viewer, /const loggerAttachmentPresentationEntries = record\s*\?\s*this\.getLoggerSavedAttachmentPresentationEntries\(sourceMessage, record\)\s*:\s*\[\];/);
+  assert.match(viewer, /const currentLoggerAttachmentEntries = loggerAttachmentPresentationEntries\.filter\(entry => !entry\.removed\);/);
+  assert.match(viewer, /const removedLoggerAttachmentEntries = loggerAttachmentPresentationEntries\.filter\(entry => entry\.removed\);/);
+  assert.match(viewer, /plan\?\.action === 'remote' \|\| plan\?\.action === 'blob'/);
+  assert.match(viewer, /renderedAttachment\._ml2PresentationAction = plan\.action;/);
+  assert.match(viewer, /if \(!renderedAttachment\.filename && plan\.filename\) \{\s*renderedAttachment\.filename = plan\.filename;\s*\}/);
+  assert.match(viewer, /const presentationAction = attachment\._ml2PresentationAction;/);
+  assert.match(viewer, /const isCached = presentationAction\s*\?[\s\S]*presentationAction === 'blob'/);
+  assert.match(viewer, /const linkUrl = plan\.action === 'remote' \? \(plan\.url \|\| attachment\.url \|\| attachment\.proxy_url\)/);
+  assert.match(viewer, /marker\.textContent = plan\.label;/);
+  assert.match(viewer, /if \(plan\.action === 'omit' && !this\.settings\.onlyRenderCachedAttachments\) \{\s*appendUnavailableAttachmentPlaceholder\(safePlanFilename\)/);
+  assert.match(viewer, /video\.onerror = \(\) => \{[\s\S]*if \(this\.isAttachmentLocallyCached\(attachment, message\)\)/);
 });
 
 test('component-only records receive a visible Logger viewer fallback before empty-row pruning', () => {

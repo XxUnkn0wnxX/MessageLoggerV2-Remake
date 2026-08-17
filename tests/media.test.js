@@ -7,6 +7,7 @@ const test = require('node:test');
 const {
   captureConsoleEvent,
   createPlugin,
+  Patcher,
   loggerEvents,
   resetHarness
 } = require('./helpers/plugin-harness');
@@ -89,6 +90,40 @@ function mockAbortControllerWithSignalCapture() {
     }
   };
   return { controller, signal };
+}
+
+function createFakeEventTarget() {
+  const state = {
+    addCalls: [],
+    removeCalls: [],
+    listeners: []
+  };
+  return {
+    addEventListener(eventName, listener, capture) {
+      if (eventName === 'error') {
+        state.addCalls.push({ eventName, listener, capture });
+        state.listeners.push({ eventName, listener, capture });
+      }
+    },
+    removeEventListener(eventName, listener, capture) {
+      if (eventName === 'error') {
+        state.removeCalls.push({ eventName, listener, capture });
+      }
+      state.listeners = state.listeners.filter(
+        candidate => candidate.eventName !== eventName
+          || candidate.listener !== listener
+          || candidate.capture !== capture
+      );
+    },
+    dispatchErrorEvent(event) {
+      for (const entry of [...state.listeners]) {
+        if (entry.eventName === 'error') {
+          entry.listener(event);
+        }
+      }
+    },
+    state
+  };
 }
 
 function delay(ms) {
@@ -2224,58 +2259,168 @@ test('edit-history marker lookup matches removed attachments by exact url/id and
   ), null);
 });
 
-test('edit-history inline segments keep uncached or non-media markers as text and preserve source record', () => {
-  const record = {
-    message: { id: '100', channel_id: 'channel', content: 'current' },
-    removed_attachments: [
-      {
-        id: '111111111111111111',
-        filename: 'first.gif',
-        url: 'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif'
-      },
-      {
-        id: '222222222222222222',
-        filename: 'second.mp4',
-        url: 'https://cdn.discordapp.com/attachments/channel/222222222222222222/second.mp4'
-      },
-      {
-        id: '333333333333333333',
-        filename: 'third.pdf',
-        url: 'https://cdn.discordapp.com/attachments/channel/333333333333333333/third.pdf'
-      },
-      {
-        id: '444444444444444444',
-        filename: 'fourth.png',
-        url: 'https://cdn.discordapp.com/attachments/channel/444444444444444444/fourth.png'
-      }
-    ],
-    edit_history: []
-  };
+test('edit-history inline segments keep all markers as text when cache master is off', () => {
   const plugin = createPlugin({
-    settings: { antiNukeEnabled: true, reverseOrder: false },
-    messageRecord: { 100: record }
+    settings: { cacheAllImages: false }
   });
-  const before = structuredClone(record);
-  plugin.isAttachmentLocallyCached = attachment => attachment.id !== '444444444444444444';
-  const segments = plugin.getEditHistoryContentSegments(
-    '`Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif'
+  const message = {
+    id: '100',
+    channel_id: 'channel'
+  };
+  const removedAttachments = [
+    {
+      id: '111111111111111111',
+      filename: 'first.gif',
+      url: 'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif',
+      proxy_url: 'https://media.discordapp.net/attachments/channel/111111111111111111/first.gif'
+    },
+    {
+      id: '222222222222222222',
+      filename: 'second.mp4',
+      url: 'https://cdn.discordapp.com/attachments/channel/222222222222222222/second.mp4',
+      proxy_url: 'https://media.discordapp.net/attachments/channel/222222222222222222/second.mp4'
+    },
+    {
+      id: '333333333333333333',
+      filename: 'third.pdf',
+      url: 'https://cdn.discordapp.com/attachments/channel/333333333333333333/third.pdf',
+      proxy_url: 'https://media.discordapp.net/attachments/channel/333333333333333333/third.pdf'
+    }
+  ];
+  const before = structuredClone({ message, removedAttachments });
+  const content = '`Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif'
+    + '` `Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/222222222222222222/second.mp4'
     + '` `Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/333333333333333333/third.pdf'
-    + '` `Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/444444444444444444/fourth.png'
-    + '` `Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/555555555555555555/missing.png'
-    + '` `Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/222222222222222222/second.mp4',
-    plugin.messageRecord[100].removed_attachments,
-    record.message
-  );
+    + '` `Attachment Deleted: `https://example.com/attachments/channel/444444444444444444/missing.txt';
 
-  assert.equal(segments.filter(segment => segment.kind === 'removedAttachment').length, 2);
+  const segments = plugin.getEditHistoryContentSegments(content, removedAttachments, message);
+
+  assert.equal(segments.filter(segment => segment.kind === 'removedAttachment').length, 0);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('first.gif')), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('second.mp4')), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('third.pdf')), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('missing.txt')), true);
+  assert.deepEqual(removedAttachments, before.removedAttachments);
+  assert.deepEqual(message, before.message);
+});
+
+test('edit-history inline segments keep text for non-media/unmatched and preserve input markers when planning remote-first', () => {
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    }
+  });
+  const message = {
+    id: '100',
+    channel_id: 'channel'
+  };
+  const removedAttachments = [
+    {
+      id: '111111111111111111',
+      filename: 'first.gif',
+      url: 'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif',
+      proxy_url: 'https://media.discordapp.net/attachments/channel/111111111111111111/first.gif'
+    },
+    {
+      id: '222222222222222222',
+      filename: 'second.webm',
+      // proxy-only selection.
+      proxy_url: 'https://media.discordapp.net/attachments/channel/222222222222222222/second.webm'
+    },
+    {
+      id: '333333333333333333',
+      filename: 'third.pdf',
+      url: 'https://cdn.discordapp.com/attachments/channel/333333333333333333/third.pdf',
+      proxy_url: 'https://media.discordapp.net/attachments/channel/333333333333333333/third.pdf'
+    }
+  ];
+  const before = structuredClone({ message, removedAttachments });
+  const content = '`Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif'
+    + '` `Attachment Deleted: `https://media.discordapp.net/attachments/channel/222222222222222222/second.webm'
+    + '` `Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/333333333333333333/third.pdf'
+    + '` `Attachment Deleted: `https://media.discordapp.net/attachments/channel/444444444444444444/missing.mp4';
+  const segments = plugin.getEditHistoryContentSegments(content, removedAttachments, message);
   const removedSegments = segments.filter(segment => segment.kind === 'removedAttachment');
+
+  assert.equal(removedSegments.length, 2);
   assert.equal(removedSegments[0]?.attachment?.id, '111111111111111111');
   assert.equal(removedSegments[1]?.attachment?.id, '222222222222222222');
+  assert.equal(removedSegments.every(segment => segment.presentationPlan?.action === 'remote'), true);
+  assert.equal(removedSegments[0]?.presentationPlan?.url, 'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif');
+  assert.equal(removedSegments[1]?.presentationPlan?.url, 'https://media.discordapp.net/attachments/channel/222222222222222222/second.webm');
   assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('third.pdf')), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('fourth.png')), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('missing.png')), true);
-  assert.equal(removedSegments.every(segment => segment.value.includes('`Attachment Deleted: `')), true);
-  assert.deepEqual(record, before);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('missing.mp4')), true);
+  assert.deepEqual(removedAttachments, before.removedAttachments);
+  assert.deepEqual(message, before.message);
+});
+
+test('edit-history inline segments emit cached Blob plans when local-only is on and keep uncached or non-media markers as text', () => {
+  const requestLog = [];
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    imageCacheServerSimulator: {
+      _resolveImagePath: (attachmentId, extension) => {
+        if (attachmentId === '444444444444444444') return null;
+        if (attachmentId === '555555555555555555') return null;
+        return `/tmp/${attachmentId}${extension}`;
+      },
+      get: url => {
+        requestLog.push(url);
+        return `blob:${url}`;
+      }
+    }
+  });
+  const message = {
+    id: '100',
+    channel_id: 'channel'
+  };
+  const removedAttachments = [
+    {
+      id: '111111111111111111',
+      filename: 'first.gif',
+      url: 'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif',
+      proxy_url: 'https://media.discordapp.net/attachments/channel/111111111111111111/first.gif'
+    },
+    {
+      id: '222222222222222222',
+      filename: 'second.mp4',
+      url: 'https://cdn.discordapp.com/attachments/channel/222222222222222222/second.mp4',
+      proxy_url: 'https://media.discordapp.net/attachments/channel/222222222222222222/second.mp4'
+    },
+    {
+      id: '444444444444444444',
+      filename: 'missing.gif',
+      url: 'https://cdn.discordapp.com/attachments/channel/444444444444444444/missing.gif',
+      proxy_url: 'https://media.discordapp.net/attachments/channel/444444444444444444/missing.gif'
+    },
+    {
+      id: '555555555555555555',
+      filename: 'third.pdf',
+      url: 'https://cdn.discordapp.com/attachments/channel/555555555555555555/third.pdf',
+      proxy_url: 'https://media.discordapp.net/attachments/channel/555555555555555555/third.pdf'
+    }
+  ];
+  const before = structuredClone({ message, removedAttachments });
+  const content = '`Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif'
+    + '` `Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/222222222222222222/second.mp4'
+    + '` `Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/444444444444444444/missing.gif'
+    + '` `Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/555555555555555555/third.pdf';
+  const segments = plugin.getEditHistoryContentSegments(content, removedAttachments, message);
+  const removedSegments = segments.filter(segment => segment.kind === 'removedAttachment');
+
+  assert.equal(removedSegments.length, 2);
+  assert.equal(removedSegments.every(segment => segment.presentationPlan?.action === 'blob'), true);
+  assert.equal(removedSegments.every(segment => segment.presentationPlan?.url?.startsWith('blob:')), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('missing.gif')), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('third.pdf')), true);
+  assert.equal(requestLog.length >= 1, true);
+  assert.equal(requestLog.every(url => !url.startsWith('http://cdn.discordapp.com') && !url.startsWith('https://media.discordapp.net')), true);
+  assert.deepEqual(removedAttachments, before.removedAttachments);
+  assert.deepEqual(message, before.message);
 });
 
 test('edit-history inline segment planning is per-edit and reused markers stay deterministic per pass', () => {
@@ -2286,7 +2431,6 @@ test('edit-history inline segment planning is per-edit and reused markers stay d
   const plugin = createPlugin({
     settings: { antiNukeEnabled: true, reverseOrder: false }
   });
-  plugin.isAttachmentLocallyCached = () => true;
   const firstEdit = plugin.getEditHistoryContentSegments(
     '`Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif',
     removed,
@@ -2312,46 +2456,842 @@ test('edit-history inline segment planning is per-edit and reused markers stay d
   assert.equal(duplicateInOneEdit.some(segment => segment.kind === 'text' && segment.value.includes('first.gif')), true);
 });
 
-test('cache-only rendering preserves cached files and names unavailable files', () => {
+test('cache-only rendering omits native attachments when master is off and exposes exact placeholder labels', () => {
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [
+      {
+        id: 'img-id',
+        filename: 'photo.png',
+        url: 'https://cdn.discordapp.com/attachments/channel/111/photo.png',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/111/photo.png'
+      },
+      {
+        id: 'txt-id',
+        filename: 'notes.txt',
+        url: 'https://cdn.discordapp.com/attachments/channel/111/notes.txt',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/111/notes.txt'
+      }
+    ]
+  };
+  const canonicalBefore = structuredClone(message);
   const plugin = createPlugin({
-    settings: { onlyRenderCachedAttachments: true },
-    imageCacheServerSimulator: { exists: id => id === 'cached' }
+    settings: {
+      cacheAllImages: false,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: { exists: () => false }
+  });
+  const rendered = plugin.getCacheOnlyMessage(message);
+  const firstPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[0], message, {});
+  const secondPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[1], message, {});
+
+  assert.equal(rendered.content, 'body');
+  assert.equal(rendered.attachments.length, 0);
+  assert.equal(firstPlan.action, 'placeholder');
+  assert.equal(firstPlan.label, '[image:photo.png]');
+  assert.equal(secondPlan.action, 'placeholder');
+  assert.equal(secondPlan.label, '[attachment:notes.txt]');
+  assert.deepEqual(message, canonicalBefore);
+});
+
+test('cache-only rendering uses direct, then proxy media URLs when master is on and local-only is off', () => {
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [
+      {
+        id: 'img-id',
+        filename: 'photo.png',
+        url: 'https://cdn.discordapp.com/attachments/channel/111/photo.png',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/111/photo.png'
+      },
+      {
+        id: 'proxy-id',
+        filename: 'fallback.jpg',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/111/fallback.jpg'
+      },
+      { id: 'no-url-id', filename: 'missing.png' }
+    ]
+  };
+  const canonicalBefore = structuredClone(message);
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: { exists: () => false }
+  });
+  const rendered = plugin.getCacheOnlyMessage(message);
+  const firstPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[0], message, { allowRemote: true });
+  const secondPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[1], message, { allowRemote: true });
+  const thirdPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[2], message, { allowRemote: true });
+
+  assert.equal(rendered.content, 'body');
+  assert.equal(rendered.attachments.length, 2);
+  assert.equal(firstPlan.action, 'remote');
+  assert.equal(firstPlan.url, 'https://cdn.discordapp.com/attachments/channel/111/photo.png');
+  assert.equal(firstPlan.fallbackUrl, 'https://media.discordapp.net/attachments/channel/111/photo.png');
+  assert.equal(secondPlan.action, 'remote');
+  assert.equal(secondPlan.url, 'https://media.discordapp.net/attachments/channel/111/fallback.jpg');
+  assert.equal(secondPlan.fallbackUrl, null);
+  assert.equal(thirdPlan.action, 'omit');
+  assert.deepEqual(rendered.attachments[0].url, message.attachments[0].url);
+  assert.equal(rendered.attachments[1].url, message.attachments[1].proxy_url);
+  assert.deepEqual(message, canonicalBefore);
+});
+
+test('cache master defaults to enabled when cacheAllImages is undefined', () => {
+  const plugin = createPlugin({
+    settings: { onlyRenderCachedAttachments: false },
+    imageCacheServerSimulator: { exists: () => false }
   });
   const message = {
     id: 'message',
     channel_id: 'channel',
     content: 'body',
     attachments: [
-      { id: 'cached', filename: 'kept.png' },
-      { id: 'missing', filename: 'too-large.png' }
+      {
+        id: 'img-id',
+        filename: 'photo.png',
+        url: 'https://cdn.discordapp.com/attachments/channel/111/photo.png',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/111/photo.png'
+      }
+    ]
+  };
+  const rendered = plugin.getCacheOnlyMessage(message);
+
+  assert.equal(rendered.content, 'body');
+  assert.equal(rendered.attachments.length, 1);
+  assert.equal(rendered.attachments[0].url, 'https://cdn.discordapp.com/attachments/channel/111/photo.png');
+});
+
+test('cache-only plan indices remain aligned when malformed attachments are present', () => {
+  const plugin = createPlugin({
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    imageCacheServerSimulator: { exists: () => false }
+  });
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [
+      { id: 'img-id-1', filename: 'first.png', url: 'https://cdn.discordapp.com/attachments/channel/111/first.png' },
+      null,
+      { id: 'img-id-3', filename: 'third.jpg', url: 'https://cdn.discordapp.com/attachments/channel/111/third.jpg' }
+    ]
+  };
+  const rendered = plugin.getCacheOnlyMessage(message);
+
+  assert.equal(rendered.attachments.length, 2);
+  assert.equal(rendered.attachments[0].id, 'img-id-1');
+  assert.equal(rendered.attachments[1].id, 'img-id-3');
+});
+
+test('cache-only rendering uses cached blob URLs only for supported local-only media', () => {
+  const blobMap = new Map([
+    ['100', 'blob://local/cached/image-100'],
+    ['101', 'blob://local/cached/video-101']
+  ]);
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: (attachmentId, ext, channelId, messageId) => {
+        assert.equal(channelId, 'channel');
+        assert.equal(messageId, 'message');
+        if (ext === '.png' && attachmentId === '100') return '/cache/100.png';
+        if (ext === '.mp4' && attachmentId === '101') return '/cache/101.mp4';
+        return null;
+      },
+      get: cacheUrl => {
+        const resolved = /^http:\/\/localhost:7474\/([^#]+)#/.exec(cacheUrl);
+        if (!resolved) return null;
+        const key = resolved[1].replace(/\.[^.]+$/, '');
+        return blobMap.get(key) || null;
+      }
+    }
+  });
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [
+      { id: '100', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/channel/111/photo.png' },
+      { id: '101', filename: 'clip.mp4', url: 'https://cdn.discordapp.com/attachments/channel/111/clip.mp4' },
+      { id: '102', filename: 'notes.txt', url: 'https://cdn.discordapp.com/attachments/channel/111/notes.txt' },
+      { id: '103', filename: 'missing.png', url: 'https://cdn.discordapp.com/attachments/channel/111/missing.png' }
+    ]
+  };
+  const canonicalBefore = structuredClone(message);
+
+  const rendered = plugin.getCacheOnlyMessage(message);
+  const firstPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[0], message, { allowBlob: true });
+  const secondPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[1], message, { allowBlob: true });
+  const thirdPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[2], message, { allowBlob: true });
+  const fourthPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[3], message, { allowBlob: true });
+
+  assert.equal(firstPlan.action, 'blob');
+  assert.equal(firstPlan.url, 'blob://local/cached/image-100');
+  assert.equal(secondPlan.action, 'blob');
+  assert.equal(secondPlan.url, 'blob://local/cached/video-101');
+  assert.equal(thirdPlan.action, 'omit');
+  assert.equal(fourthPlan.action, 'omit');
+  assert.equal(rendered.attachments.length, 2);
+  assert.equal(rendered.attachments[0].url, 'blob://local/cached/image-100');
+  assert.equal(rendered.attachments[1].url, 'blob://local/cached/video-101');
+  assert.equal(rendered.attachments[0].proxy_url, 'blob://local/cached/image-100');
+  assert.equal(rendered.attachments[1].proxy_url, 'blob://local/cached/video-101');
+  assert.equal(rendered.content, 'body');
+  assert.deepEqual(message, canonicalBefore);
+});
+
+test('cache-only cached blob plan only accepts blob URLs from simulator output', () => {
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: () => '/cache/100.png',
+      get: () => 'https://cdn.example.com/fallback.png'
+    }
+  });
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [
+      { id: '100', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/channel/111/photo.png' }
     ]
   };
 
-  const filtered = plugin.getCacheOnlyMessage(message);
+  const plan = plugin.getSavedAttachmentPresentationPlan(message.attachments[0], message, { allowBlob: true });
+  const rendered = plugin.getCacheOnlyMessage(message);
 
-  assert.deepEqual(filtered.attachments, [{ id: 'cached', filename: 'kept.png' }]);
-  assert.equal(filtered.content, 'body\n[Attachment not cached: too-large.png]');
-  assert.equal(message.attachments.length, 2);
+  assert.equal(plan.action, 'omit');
+  assert.equal(rendered.attachments.length, 0);
 });
 
-test('rendered message copies cannot mutate canonical saved records', () => {
-  const plugin = createPlugin({ settings: { onlyRenderCachedAttachments: false } });
-  const saved = {
+test('logger saved-attachment presentation entries keep canonical current order and dedupe removed identities', () => {
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [
+      { filename: 'current-first.png', url: 'https://cdn.discordapp.com/attachments/channel/100/current-first.png' },
+      null,
+      { id: '200', filename: 'current-by-id.mp4', url: 'https://cdn.discordapp.com/attachments/channel/200/current-by-id.mp4' },
+      { filename: 'current-by-url.txt', proxy_url: 'https://media.discordapp.net/attachments/channel/201/current-by-url.txt' }
+    ]
+  };
+  const record = {
+    removed_attachments: [
+      { id: '200', filename: 'removed-dupe-by-id', url: 'https://cdn.discordapp.com/attachments/channel/ignored/current-by-id.mp4' },
+      { filename: 'removed-dupe-by-url', url: 'https://media.discordapp.net/attachments/channel/201/current-by-url.txt' },
+      { id: '300', filename: 'removed-1.txt', url: 'https://cdn.discordapp.com/attachments/channel/300/removed-1.txt' },
+      { id: '301', filename: 'removed-2.gif', url: 'https://cdn.discordapp.com/attachments/channel/301/removed-2.gif' },
+      { id: '301', filename: 'removed-2-merged.gif', proxy_url: 'https://media.discordapp.net/attachments/channel/301/removed-2-merged.gif' }
+    ]
+  };
+  const plugin = createPlugin({
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath() {
+        return null;
+      },
+      get() {
+        return null;
+      }
+    }
+  });
+
+  const entries = plugin.getLoggerSavedAttachmentPresentationEntries(message, record);
+  const names = entries.map(entry => entry.attachment.filename);
+
+  assert.deepEqual(
+    names,
+    [
+      'current-first.png',
+      'current-by-id.mp4',
+      'current-by-url.txt',
+      'removed-1.txt',
+      'removed-2-merged.gif'
+    ]
+  );
+  assert.deepEqual(
+    entries.map(entry => entry.removed),
+    [false, false, false, true, true]
+  );
+  assert.equal(entries.some(entry => entry.removed && entry.attachment.id === '200'), false);
+  assert.equal(entries.some(entry => entry.removed && entry.attachment.filename === 'removed-dupe-by-url'), false);
+  assert.equal(entries.some(entry => entry.removed && entry.attachment.id === '300'), true);
+  assert.equal(entries.filter(entry => entry.removed && entry.attachment.id === '301').length, 1);
+  assert.equal(entries.every(entry => entry.plan.action === 'remote'), true);
+});
+
+test('logger saved-attachment presentation entries expose exact image/attachment placeholder labels when master media cache is off', () => {
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [
+      { id: '100', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/channel/100/photo.png' },
+      { id: '101', filename: 'notes.txt', url: 'https://cdn.discordapp.com/attachments/channel/101/notes.txt' }
+    ]
+  };
+  const record = {
+    removed_attachments: [
+      { id: '200', filename: 'removed-image.png', url: 'https://cdn.discordapp.com/attachments/channel/200/removed-image.png' },
+      { id: '201', filename: 'removed-note.txt', url: 'https://cdn.discordapp.com/attachments/channel/201/removed-note.txt' }
+    ]
+  };
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: false,
+      onlyRenderCachedAttachments: false
+    }
+  });
+
+  const entries = plugin.getLoggerSavedAttachmentPresentationEntries(message, record);
+
+  assert.deepEqual(
+    entries.map(entry => entry.plan.label),
+    ['[image:photo.png]', '[attachment:notes.txt]', '[image:removed-image.png]', '[attachment:removed-note.txt]']
+  );
+  assert.equal(entries.every(entry => entry.plan.action === 'placeholder'), true);
+});
+
+test('logger saved-attachment presentation entries use remote display for remote-first without selecting cached blob', () => {
+  const imageCacheGets = [];
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: () => '/cache/offline-cache-file.png',
+      get(url) {
+        imageCacheGets.push(url);
+        throw new Error(`blob URL read should not happen for remote plan: ${url}`);
+      }
+    }
+  });
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [
+      {
+        id: '100',
+        filename: 'photo.png',
+        url: 'https://cdn.discordapp.com/attachments/channel/100/photo.png',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/100/photo.png'
+      },
+      {
+        id: '101',
+        filename: 'proxy-only.gif',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/101/proxy-only.gif'
+      },
+      {
+        id: '102',
+        filename: 'notes.txt'
+      }
+    ]
+  };
+  const record = {
+    removed_attachments: [
+      { id: '200', filename: 'removed.png', proxy_url: 'https://media.discordapp.net/attachments/channel/200/removed.png' }
+    ]
+  };
+  const entries = plugin.getLoggerSavedAttachmentPresentationEntries(message, record);
+
+  assert.equal(entries[0].plan.action, 'remote');
+  assert.equal(entries[0].plan.url, 'https://cdn.discordapp.com/attachments/channel/100/photo.png');
+  assert.equal(entries[0].plan.fallbackUrl, 'https://media.discordapp.net/attachments/channel/100/photo.png');
+  assert.equal(entries[1].plan.action, 'remote');
+  assert.equal(entries[1].plan.url, 'https://media.discordapp.net/attachments/channel/101/proxy-only.gif');
+  assert.equal(entries[1].plan.fallbackUrl, null);
+  assert.equal(entries[2].plan.action, 'omit');
+  assert.equal(entries[3].plan.action, 'remote');
+  assert.equal(entries[3].plan.url, 'https://media.discordapp.net/attachments/channel/200/removed.png');
+  assert.equal(imageCacheGets.length, 0);
+});
+
+test('logger saved-attachment presentation entries in local-only mode keep only cached media blobs', () => {
+  const blobMap = new Map([
+    ['100.png', 'blob://local/cached/image-100'],
+    ['101.mp4', 'blob://local/cached/video-101'],
+    ['200.gif', 'blob://local/cached/removed-200']
+  ]);
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: (attachmentId, extension) => {
+        if (attachmentId === '102') return null;
+        if (attachmentId === '101') return '/cache/101.mp4';
+        if (attachmentId === '100') return '/cache/100.png';
+        if (attachmentId === '200') return '/cache/200.gif';
+        return null;
+      },
+      get(cacheUrl) {
+        const matched = /^http:\/\/localhost:7474\/([^#]+)#/.exec(cacheUrl);
+        if (!matched) return null;
+        return blobMap.get(matched[1]) || null;
+      }
+    }
+  });
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [
+      { id: '100', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/channel/100/photo.png' },
+      { id: '101', filename: 'clip.mp4', url: 'https://cdn.discordapp.com/attachments/channel/101/clip.mp4' },
+      { id: '102', filename: 'missing.webp', url: 'https://cdn.discordapp.com/attachments/channel/102/missing.webp' },
+      { id: '103', filename: 'notes.txt', url: 'https://cdn.discordapp.com/attachments/channel/103/notes.txt' }
+    ]
+  };
+  const record = {
+    removed_attachments: [
+      { id: '200', filename: 'removed.gif', url: 'https://cdn.discordapp.com/attachments/channel/200/removed.gif' },
+      { id: '201', filename: 'removed.doc', url: 'https://cdn.discordapp.com/attachments/channel/201/removed.doc' }
+    ]
+  };
+  const messageBefore = structuredClone(message);
+  const recordBefore = structuredClone(record);
+  const entries = plugin.getLoggerSavedAttachmentPresentationEntries(message, record);
+
+  assert.equal(entries.length, 6);
+  assert.equal(entries[0].attachment.id, '100');
+  assert.equal(entries[0].plan.action, 'blob');
+  assert.equal(entries[0].plan.url, 'blob://local/cached/image-100');
+  assert.equal(entries[1].plan.action, 'blob');
+  assert.equal(entries[1].plan.url, 'blob://local/cached/video-101');
+  assert.equal(entries[2].plan.action, 'omit');
+  assert.equal(entries[3].plan.action, 'omit');
+  assert.equal(entries[4].plan.action, 'blob');
+  assert.equal(entries[4].plan.url, 'blob://local/cached/removed-200');
+  assert.equal(entries[5].plan.action, 'omit');
+  assert.deepEqual(message, messageBefore);
+  assert.deepEqual(record, recordBefore);
+});
+
+test('native attachment media error listener lifecycle installs once, forwards once, and removes safely', () => {
+  const dispatches = [];
+  const fakeTarget = createFakeEventTarget();
+  const originalDocument = global.document;
+  const plugin = createPlugin({
+    dispatcher: {
+      dispatch(action) {
+        dispatches.push(action);
+      }
+    },
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: () => '/cache/601.png',
+      get: () => 'blob://local/cached/image-601'
+    },
+    messageRecord: {
+      '601': {
+        delete_data: { time: 1 },
+        message: {
+          id: '601',
+          channel_id: '601',
+          content: 'body',
+          attachments: [
+            { id: '601', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/601/photo.png' }
+          ]
+        }
+      }
+    }
+  });
+
+  try {
+    global.document = fakeTarget;
+    plugin._installSavedAttachmentMediaErrorListener();
+    plugin._installSavedAttachmentMediaErrorListener();
+    assert.equal(fakeTarget.state.addCalls.length, 1);
+
+    fakeTarget.dispatchErrorEvent({
+      target: {
+        tagName: 'IMG',
+        currentSrc: 'https://cdn.discordapp.com/attachments/601/photo.png',
+        closest: () => ({ id: 'chat-messages-601-601' })
+      }
+    });
+    assert.equal(dispatches.length, 1);
+
+    plugin._removeSavedAttachmentMediaErrorListener();
+    assert.equal(fakeTarget.state.removeCalls.length, 1);
+    assert.equal(fakeTarget.state.removeCalls[0].eventName, 'error');
+    assert.equal(fakeTarget.state.removeCalls[0].listener, fakeTarget.state.addCalls[0].listener);
+    assert.equal(fakeTarget.state.removeCalls[0].capture, true);
+
+    plugin._removeSavedAttachmentMediaErrorListener();
+    assert.equal(fakeTarget.state.removeCalls.length, 1);
+  } finally {
+    global.document = originalDocument;
+  }
+});
+
+test('native attachment media error flips a remote attachment to cached blob rendering', () => {
+  const dispatches = [];
+  const plugin = createPlugin({
+    dispatcher: {
+      dispatch(action) {
+        dispatches.push(action);
+      }
+    },
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: (attachmentId, ext, channelId, messageId) => {
+        assert.equal(ext, '.png');
+        assert.equal(attachmentId, '100');
+        assert.equal(channelId, '501');
+        assert.equal(messageId, '501');
+        return '/cache/501.png';
+      },
+      get: cacheUrl => {
+        const matched = /^http:\/\/localhost:7474\/(.+?)#/.exec(cacheUrl);
+        if (!matched) return null;
+        const key = matched[1];
+        return key === '100.png' ? 'blob://local/cached/image-100' : null;
+      }
+    },
+    messageRecord: {
+      '501': {
+        delete_data: { time: 1 },
+        message: {
+          id: '501',
+          channel_id: '501',
+          content: 'body',
+          attachments: [
+            { id: '100', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/501/photo.png' },
+            { id: '101', filename: 'notes.txt', url: 'https://cdn.discordapp.com/attachments/501/notes.txt' }
+          ]
+        }
+      }
+    }
+  });
+
+  const message = plugin.messageRecord['501'].message;
+  const canonicalBefore = structuredClone(message);
+  const remoteRender = plugin.getCacheOnlyMessage(message);
+
+  assert.equal(remoteRender.attachments.length, 2);
+  assert.equal(remoteRender.attachments[0].url, 'https://cdn.discordapp.com/attachments/501/photo.png');
+  assert.equal(remoteRender.attachments[1].url, 'https://cdn.discordapp.com/attachments/501/notes.txt');
+
+  const messageRow = { id: 'chat-messages-501-501' };
+  plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: 'https://cdn.discordapp.com/attachments/501/photo.png',
+      closest: () => messageRow
+    }
+  });
+
+  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches[0].type, 'MESSAGE_UPDATE');
+  assert.equal(dispatches[0].message.attachments.length, 2);
+  assert.equal(dispatches[0].message.attachments[0].url, 'blob://local/cached/image-100');
+  assert.equal(dispatches[0].message.attachments[1].url, 'https://cdn.discordapp.com/attachments/501/notes.txt');
+  assert.deepEqual(plugin.messageRecord['501'].message, canonicalBefore);
+
+  plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: 'https://cdn.discordapp.com/attachments/501/photo.png',
+      closest: () => messageRow
+    }
+  });
+
+  assert.equal(dispatches.length, 1);
+});
+
+test('native attachment media error omits a failed remote attachment when no cached blob exists', () => {
+  const dispatches = [];
+  const plugin = createPlugin({
+    dispatcher: {
+      dispatch(action) {
+        dispatches.push(action);
+      }
+    },
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: () => '/cache/502.png',
+      get: () => null
+    },
+    messageRecord: {
+      '502': {
+        delete_data: { time: 1 },
+        message: {
+          id: '502',
+          channel_id: '502',
+          content: 'body',
+          attachments: [
+            { id: '200', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/502/photo.png' }
+          ]
+        }
+      }
+    }
+  });
+
+  const message = plugin.messageRecord['502'].message;
+  const canonicalBefore = structuredClone(message);
+  const messageRow = { id: 'chat-messages-502-502' };
+
+  plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: 'https://cdn.discordapp.com/attachments/502/photo.png',
+      closest: () => messageRow
+    }
+  });
+
+  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches[0].message.attachments.length, 0);
+  assert.deepEqual(plugin.messageRecord['502'].message, canonicalBefore);
+});
+
+test('native attachment media error ignores non-deleted message rows and wrong target URLs', () => {
+  const dispatches = [];
+  const plugin = createPlugin({
+    dispatcher: {
+      dispatch(action) {
+        dispatches.push(action);
+      }
+    },
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: () => '/cache/503.png',
+      get: () => 'blob://local/cached/image-503'
+    },
+    messageRecord: {
+      '503': {
+        message: {
+          id: '503',
+          channel_id: '503',
+          content: 'body',
+          attachments: [
+            { id: '300', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/503/photo.png' }
+          ]
+        }
+      },
+      '504': {
+        delete_data: { time: 1 },
+        message: {
+          id: '504',
+          channel_id: '504',
+          content: 'body',
+          attachments: [
+            { id: '400', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/504/photo.png' }
+          ]
+        }
+      }
+    }
+  });
+
+  const wrongUrlRow = { id: 'chat-messages-504-504' };
+  plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: 'https://cdn.discordapp.com/attachments/504/other.png',
+      closest: () => wrongUrlRow
+    }
+  });
+  plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: 'https://cdn.discordapp.com/attachments/503/photo.png',
+      closest: () => ({ id: 'chat-messages-503-503' })
+    }
+  });
+
+  assert.equal(dispatches.length, 0);
+});
+
+test('native attachment media error ignores events when cache master is disabled', () => {
+  const dispatches = [];
+  const plugin = createPlugin({
+    dispatcher: {
+      dispatch(action) {
+        dispatches.push(action);
+      }
+    },
+    settings: {
+      cacheAllImages: false,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: () => '/cache/505.png',
+      get: () => 'blob://local/cached/image-505'
+    },
+    messageRecord: {
+      '505': {
+        delete_data: { time: 1 },
+        message: {
+          id: '505',
+          channel_id: '505',
+          content: 'body',
+          attachments: [
+            { id: '500', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/505/photo.png' }
+          ]
+        }
+      }
+    }
+  });
+
+  plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: 'https://cdn.discordapp.com/attachments/505/photo.png',
+      closest: () => ({ id: 'chat-messages-505-505' })
+    }
+  });
+
+  assert.equal(dispatches.length, 0);
+});
+
+test('native attachment media error ignores events when local-only mode is enabled', () => {
+  const dispatches = [];
+  const plugin = createPlugin({
+    dispatcher: {
+      dispatch(action) {
+        dispatches.push(action);
+      }
+    },
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: () => '/cache/506.png',
+      get: () => 'blob://local/cached/image-506'
+    },
+    messageRecord: {
+      '506': {
+        delete_data: { time: 1 },
+        message: {
+          id: '506',
+          channel_id: '506',
+          content: 'body',
+          attachments: [
+            { id: '600', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/506/photo.png' }
+          ]
+        }
+      }
+    }
+  });
+
+  plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: 'https://cdn.discordapp.com/attachments/506/photo.png',
+      closest: () => ({ id: 'chat-messages-506-506' })
+    }
+  });
+
+  assert.equal(dispatches.length, 0);
+});
+
+test('cache-only media type classification checks proxy candidates when filename has no extension', () => {
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: { exists: () => false }
+  });
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [
+      {
+        id: 'video-id',
+        filename: 'downloaded-clip',
+        url: 'https://cdn.discordapp.com/attachments/channel/111/downloaded-clip',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/111/downloaded-clip.mp4'
+      }
+    ]
+  };
+
+  const plan = plugin.getSavedAttachmentPresentationPlan(message.attachments[0], message, { allowRemote: true });
+  const rendered = plugin.getCacheOnlyMessage(message);
+
+  assert.equal(plan.action, 'remote');
+  assert.equal(plan.label, '[attachment:downloaded-clip]');
+  assert.equal(rendered.attachments.length, 1);
+  assert.equal(rendered.attachments[0].url, 'https://cdn.discordapp.com/attachments/channel/111/downloaded-clip');
+});
+
+test('resolved attachment labels use safe unknown filenames and clones stay detached', () => {
+  const plugin = createPlugin({
+    settings: { cacheAllImages: false },
+    imageCacheServerSimulator: { exists: () => false }
+  });
+  const message = {
     id: 'message',
     channel_id: 'channel',
     content: 'body',
     attachments: [],
     author: { id: 'user', username: 'User', public_flags: 128 }
   };
+  const rendered = plugin.getCacheOnlyMessage(message);
+  const plan = plugin.getSavedAttachmentPresentationPlan(
+    {
+      id: 'file-id',
+      filename: undefined,
+      url: '',
+      proxy_url: 42
+    },
+    message,
+    {}
+  );
 
-  const rendered = plugin.getCacheOnlyMessage(saved);
   rendered.author.publicFlags = 128;
   delete rendered.author.public_flags;
   rendered.content = 'renderer mutation';
 
-  assert.notEqual(rendered, saved);
-  assert.deepEqual(saved.author, { id: 'user', username: 'User', public_flags: 128 });
-  assert.equal(saved.content, 'body');
+  assert.equal(plan.label, '[attachment:unknown file]');
+  assert.notEqual(rendered, message);
+  assert.equal(rendered.author.username, 'User');
+  assert.equal(rendered.content, 'renderer mutation');
+  assert.equal(message.author.public_flags, 128);
+  assert.equal(message.content, 'body');
 });
 
 test('cache-only rendering sanitizes malformed embed media in an isolated render clone', () => {
@@ -3924,4 +4864,342 @@ test('removing a folded thread root deletes media cached under its original star
   assert.equal(plugin.deleteCachedFilesForRecord(record), 1);
   assert.equal(fs.existsSync(path.join(cacheDir, 'attachment (401).png')), false);
   assert.equal(fs.existsSync(path.join(cacheDir, 'unrelated (999).png')), true);
+});
+
+test('native and custom attachment-media viewer ownership helpers enforce scoped close behavior', () => {
+  const closeCalls = [];
+  const openKeys = new Set();
+  const plugin = createMediaCachePlugin('');
+  plugin.ModalStack = {
+    hasModalOpen: key => openKeys.has(key),
+    closeModal: key => {
+      closeCalls.push(key);
+      openKeys.delete(key);
+    }
+  };
+  plugin.tools = { getNativeMediaModal: () => ({ modalKey: 'native-viewer-modal' }) };
+
+  plugin._nativeMediaViewerOpenContextDepth = 1;
+  openKeys.add('native-viewer-modal');
+  assert.equal(plugin.recordNativeAttachmentMediaViewerOpen('native-viewer-modal'), true);
+  assert.deepEqual(plugin._nativeAttachmentMediaViewerOwnership, {
+    key: 'native-viewer-modal',
+    owner: 'logger'
+  });
+  const closeOnLoggerOpen = plugin.closeLoggerOwnedAttachmentMediaViewers();
+  assert.equal(closeOnLoggerOpen.nativeClosed, true);
+  assert.equal(closeOnLoggerOpen.customClosed, 0);
+  assert.equal(closeCalls.includes('native-viewer-modal'), true);
+  assert.equal(plugin._nativeAttachmentMediaViewerOwnership, null);
+
+  openKeys.clear();
+  closeCalls.length = 0;
+  plugin._nativeMediaViewerOpenContextDepth = 1;
+  openKeys.add('native-viewer-modal');
+  assert.equal(plugin.recordNativeAttachmentMediaViewerOpen('native-viewer-modal'), true);
+  plugin._nativeMediaViewerOpenContextDepth = 0;
+  assert.equal(plugin.recordNativeAttachmentMediaViewerOpen('native-viewer-modal'), true);
+  assert.deepEqual(plugin._nativeAttachmentMediaViewerOwnership, {
+    key: 'native-viewer-modal',
+    owner: 'discord'
+  });
+  const preventCloseAfterContextEnds = plugin.closeLoggerOwnedAttachmentMediaViewers();
+  assert.equal(preventCloseAfterContextEnds.nativeClosed, false);
+  assert.equal(openKeys.has('native-viewer-modal'), true);
+
+  openKeys.clear();
+  closeCalls.length = 0;
+  openKeys.add('native-viewer-modal');
+  plugin._nativeAttachmentMediaViewerOwnership = { key: 'stale-viewer-modal', owner: 'logger' };
+  plugin.ModalStack = {
+    hasModalOpen: key => key === 'native-viewer-modal' || key === 'stale-viewer-modal',
+  };
+  assert.equal(plugin.recordNativeAttachmentMediaViewerOpen('different-modal-key'), false);
+  assert.equal(plugin.closeLoggerOwnedAttachmentMediaViewers().nativeClosed, false);
+  assert.equal(openKeys.has('native-viewer-modal'), true);
+  assert.equal(plugin._nativeAttachmentMediaViewerOwnership, null);
+
+  openKeys.clear();
+  closeCalls.length = 0;
+  openKeys.add('native-viewer-modal');
+  plugin._nativeAttachmentMediaViewerOwnership = { key: 'native-viewer-modal', owner: 'logger' };
+  plugin.ModalStack = {
+    hasModalOpen: key => openKeys.has(key)
+  };
+  assert.equal(plugin.closeLoggerOwnedAttachmentMediaViewers().nativeClosed, false);
+  assert.equal(openKeys.has('native-viewer-modal'), true);
+  assert.deepEqual(plugin._nativeAttachmentMediaViewerOwnership, { key: 'native-viewer-modal', owner: 'logger' });
+
+  plugin.ModalStack.closeModal = key => {
+    closeCalls.push(key);
+    openKeys.delete(key);
+  };
+  assert.equal(plugin.closeLoggerOwnedAttachmentMediaViewers().nativeClosed, true);
+  assert.equal(closeCalls.includes('native-viewer-modal'), true);
+  assert.equal(openKeys.has('native-viewer-modal'), false);
+  assert.equal(plugin._nativeAttachmentMediaViewerOwnership, null);
+
+  openKeys.clear();
+  closeCalls.length = 0;
+  openKeys.add('ml2-attachment-media-1');
+  openKeys.add('ml2-attachment-media-2');
+  openKeys.add('ml2-other-menu');
+  openKeys.add('logger-menu');
+  openKeys.add('discord-menu');
+  plugin._loggerOwnedAttachmentMediaModalKeys.clear();
+  plugin.trackLoggerOwnedAttachmentMediaModalKey('ml2-attachment-media-1');
+  plugin.trackLoggerOwnedAttachmentMediaModalKey('ml2-attachment-media-stale');
+  plugin.trackLoggerOwnedAttachmentMediaModalKey('ml2-attachment-media-2');
+  plugin.ModalStack = {
+    hasModalOpen: key => openKeys.has(key),
+    closeModal: key => {
+      closeCalls.push(key);
+      openKeys.delete(key);
+    }
+  };
+  const customCloseResult = plugin.closeLoggerOwnedAttachmentMediaViewers();
+  assert.equal(customCloseResult.nativeClosed, false);
+  assert.equal(customCloseResult.customClosed, 2);
+  assert.deepEqual(closeCalls, ['ml2-attachment-media-1', 'ml2-attachment-media-2']);
+  assert.equal(plugin._loggerOwnedAttachmentMediaModalKeys.has('ml2-attachment-media-stale'), false);
+  assert.equal(plugin._loggerOwnedAttachmentMediaModalKeys.has('ml2-attachment-media-1'), false);
+  assert.equal(plugin._loggerOwnedAttachmentMediaModalKeys.has('ml2-attachment-media-2'), false);
+  assert.equal(openKeys.has('ml2-attachment-media-stale'), false);
+  assert.equal(openKeys.has('logger-menu'), true);
+  assert.equal(openKeys.has('discord-menu'), true);
+  const repeatedClose = plugin.closeLoggerOwnedAttachmentMediaViewers();
+  assert.equal(repeatedClose.nativeClosed, false);
+  assert.equal(repeatedClose.customClosed, 0);
+
+  openKeys.clear();
+  closeCalls.length = 0;
+  openKeys.add('ml2-attachment-media-1');
+  openKeys.add('ml2-attachment-media-2');
+  plugin._loggerOwnedAttachmentMediaModalKeys.clear();
+  plugin.trackLoggerOwnedAttachmentMediaModalKey('ml2-attachment-media-1');
+  plugin.trackLoggerOwnedAttachmentMediaModalKey('ml2-attachment-media-2');
+  plugin.ModalStack = {
+    hasModalOpen: key => openKeys.has(key)
+  };
+  const customCloseWithoutApi = plugin.closeLoggerOwnedAttachmentMediaViewers();
+  assert.equal(customCloseWithoutApi.customClosed, 0);
+  assert.equal(openKeys.has('ml2-attachment-media-1'), true);
+  assert.equal(openKeys.has('ml2-attachment-media-2'), true);
+  assert.equal(plugin._loggerOwnedAttachmentMediaModalKeys.has('ml2-attachment-media-1'), true);
+  assert.equal(plugin._loggerOwnedAttachmentMediaModalKeys.has('ml2-attachment-media-2'), true);
+
+  plugin.ModalStack.closeModal = key => {
+    throw new Error('custom attachment modal close failure');
+  };
+  const customCloseWithThrow = plugin.closeLoggerOwnedAttachmentMediaViewers();
+  assert.equal(customCloseWithThrow.customClosed, 0);
+  assert.equal(openKeys.has('ml2-attachment-media-1'), true);
+  assert.equal(openKeys.has('ml2-attachment-media-2'), true);
+  assert.equal(plugin._loggerOwnedAttachmentMediaModalKeys.has('ml2-attachment-media-1'), true);
+  assert.equal(plugin._loggerOwnedAttachmentMediaModalKeys.has('ml2-attachment-media-2'), true);
+
+  plugin.ModalStack.closeModal = key => {
+    closeCalls.push(key);
+    openKeys.delete(key);
+  };
+  const customCloseAfterRecovery = plugin.closeLoggerOwnedAttachmentMediaViewers();
+  assert.equal(customCloseAfterRecovery.customClosed, 2);
+  assert.equal(openKeys.has('ml2-attachment-media-1'), false);
+  assert.equal(openKeys.has('ml2-attachment-media-2'), false);
+  assert.equal(plugin._loggerOwnedAttachmentMediaModalKeys.has('ml2-attachment-media-1'), false);
+  assert.equal(plugin._loggerOwnedAttachmentMediaModalKeys.has('ml2-attachment-media-2'), false);
+});
+
+test('installNativeAttachmentMediaViewerOwnershipTracking is duplicate-safe and fail-safe', () => {
+  const plugin = createMediaCachePlugin('');
+  const originalAfter = Patcher.after;
+  plugin.unpatches = [];
+  plugin.tools = {
+    getNativeMediaModal: () => ({ modalKey: 'native-viewer-modal' })
+  };
+  plugin.ModalStack = {
+    openModal: () => {},
+    closeModal: () => {}
+  };
+  const hookCallbacks = {};
+  const removedHooks = [];
+  const patchReceivers = [];
+  try {
+    Patcher.after = function(target, methodName, callback) {
+      assert.equal(this, Patcher);
+      patchReceivers.push(this === Patcher);
+      hookCallbacks[methodName] = callback;
+      const entry = { methodName, removed: false };
+      removedHooks.push(entry);
+      return () => {
+        entry.removed = true;
+      };
+    };
+    assert.equal(plugin.installNativeAttachmentMediaViewerOwnershipTracking(), true);
+    assert.equal(plugin._nativeAttachmentMediaViewerOwnershipTrackingInstalled, true);
+    assert.equal(plugin.installNativeAttachmentMediaViewerOwnershipTracking(), true);
+    assert.equal(plugin.installNativeAttachmentMediaViewerOwnershipTracking(), true);
+    assert.equal(removedHooks.length, 2);
+    assert.equal(patchReceivers.length, 2);
+    assert.equal(patchReceivers.every(Boolean), true);
+
+    plugin._nativeMediaViewerOpenContextDepth = 1;
+    hookCallbacks.openModal(null, [null, { modalKey: 'native-viewer-modal' }], 'fallback');
+    assert.deepEqual(plugin._nativeAttachmentMediaViewerOwnership, {
+      key: 'native-viewer-modal',
+      owner: 'logger'
+    });
+    hookCallbacks.openModal(null, [null], 'native-viewer-modal');
+    assert.deepEqual(plugin._nativeAttachmentMediaViewerOwnership, {
+      key: 'native-viewer-modal',
+      owner: 'logger'
+    });
+
+    plugin._nativeMediaViewerOpenContextDepth = 0;
+    hookCallbacks.openModal(null, [null, { modalKey: 'native-viewer-modal' }], 'fallback');
+    assert.deepEqual(plugin._nativeAttachmentMediaViewerOwnership, {
+      key: 'native-viewer-modal',
+      owner: 'discord'
+    });
+
+    hookCallbacks.openModal(null, [null, { modalKey: 'discord-viewer-modal' }], 'fallback');
+    assert.deepEqual(plugin._nativeAttachmentMediaViewerOwnership, {
+      key: 'native-viewer-modal',
+      owner: 'discord'
+    });
+
+    hookCallbacks.closeModal(null, ['native-viewer-modal']);
+    assert.equal(plugin._nativeAttachmentMediaViewerOwnership, null);
+
+    const teardown = plugin.unpatches.pop();
+    assert.equal(typeof teardown, 'function');
+    assert.equal(teardown(), undefined);
+    assert.equal(plugin._nativeAttachmentMediaViewerOwnershipTrackingInstalled, false);
+    assert.equal(plugin._nativeAttachmentMediaViewerOwnership, null);
+    assert.equal(removedHooks.every(hook => hook.removed), true);
+    assert.equal(teardown(), undefined);
+    assert.equal(plugin._nativeAttachmentMediaViewerOwnershipTrackingInstalled, false);
+
+    plugin.unpatches.length = 0;
+
+    Patcher.after = undefined;
+    plugin._nativeAttachmentMediaViewerOwnershipTrackingInstalled = false;
+    plugin._nativeAttachmentMediaViewerOwnership = null;
+    plugin.ModalStack = {
+      openModal: () => {},
+      closeModal: () => {}
+    };
+    assert.equal(plugin.installNativeAttachmentMediaViewerOwnershipTracking(), false);
+    assert.equal(plugin._nativeAttachmentMediaViewerOwnershipTrackingInstalled, false);
+    assert.equal(plugin.unpatches.length, 0);
+
+    let openPatchRolledBack = false;
+    let patchCalls = 0;
+    Patcher.after = () => {
+      patchCalls++;
+      if (patchCalls === 1) {
+        return () => {
+          openPatchRolledBack = true;
+        };
+      }
+      throw new Error('forced close patch failure');
+    };
+    plugin.ModalStack = {
+      openModal: () => {},
+      closeModal: () => {}
+    };
+    assert.equal(plugin.installNativeAttachmentMediaViewerOwnershipTracking(), false);
+    assert.equal(openPatchRolledBack, true);
+    assert.equal(plugin._nativeAttachmentMediaViewerOwnershipTrackingInstalled, false);
+    assert.equal(plugin.unpatches.length, 0);
+  } finally {
+    Patcher.after = originalAfter;
+  }
+});
+
+test('createModal native IMAGE path restores depth and installs ownership tracking before open', () => {
+  const calls = [];
+  const plugin = createMediaCachePlugin('');
+  plugin.ModalStack = {};
+  plugin._nativeMediaViewerOpenContextDepth = 2;
+  const depthSamples = [];
+  let installCount = 0;
+
+  plugin.installNativeAttachmentMediaViewerOwnershipTracking = () => {
+    calls.push('install');
+    installCount += 1;
+  };
+  plugin.tools = {
+    getNativeMediaModal: () => ({
+      openMediaModal: () => {
+        calls.push('open');
+        depthSamples.push(plugin._nativeMediaViewerOpenContextDepth);
+      }
+    })
+  };
+
+  plugin.createModal({ type: 'IMAGE', url: 'https://cdn.example/image.png' }, true, 'native-image-ok');
+
+  assert.deepEqual(calls, ['install', 'open']);
+  assert.equal(installCount, 1);
+  assert.equal(depthSamples[0], 3);
+  assert.equal(plugin._nativeMediaViewerOpenContextDepth, 2);
+
+  plugin._nativeMediaViewerOpenContextDepth = 2;
+  calls.length = 0;
+  plugin.tools = {
+    getNativeMediaModal: () => ({
+      openMediaModal: () => {
+        calls.push('open-throw');
+        depthSamples.push(plugin._nativeMediaViewerOpenContextDepth);
+        throw new Error('openMediaModal failed');
+      }
+    })
+  };
+
+  assert.throws(() => {
+    plugin.createModal({ type: 'IMAGE', url: 'https://cdn.example/image.png' }, true, 'native-image-error');
+  }, /openMediaModal failed/);
+  assert.deepEqual(calls, ['install', 'open-throw']);
+  assert.equal(depthSamples[depthSamples.length - 1], 3);
+  assert.equal(plugin._nativeMediaViewerOpenContextDepth, 2);
+});
+
+test('createModal tracks video and fallback-image modal keys in both modal trackers', () => {
+  const trackedModalKeys = [];
+  const trackedAttachmentMediaKeys = [];
+  const plugin = createMediaCachePlugin('');
+  plugin.trackLoggerOwnedModalKey = (key, requestedKey) => {
+    trackedModalKeys.push([key, requestedKey]);
+    return key;
+  };
+  plugin.trackLoggerOwnedAttachmentMediaModalKey = key => {
+    trackedAttachmentMediaKeys.push(key);
+  };
+  plugin.createModal.imageModal = function ImageModal() { return {}; };
+  plugin.ModalStack = {
+    openModal: (_renderer, options) => {
+      if (options?.modalKey === 'video-modal') return 'video-opened-key';
+      if (options?.modalKey === 'image-modal') return 'image-opened-key';
+      return `fallback-${String(options?.modalKey)}`;
+    }
+  };
+  plugin.tools = {
+    getNativeMediaModal: () => ({})
+  };
+
+  const returnedVideoKey = plugin.createModal({
+    type: 'VIDEO',
+    url: 'https://cdn.example/video.mp4'
+  }, false, 'video-modal');
+  assert.equal(returnedVideoKey, undefined);
+  assert.deepEqual(trackedModalKeys[0], ['video-opened-key', 'video-modal']);
+  assert.deepEqual(trackedAttachmentMediaKeys[0], 'video-opened-key');
+
+  const returnedImageKey = plugin.createModal({
+    url: 'https://cdn.example/image.png'
+  }, true, 'image-modal');
+  assert.equal(returnedImageKey, undefined);
+  assert.deepEqual(trackedModalKeys[1], ['image-opened-key', 'image-modal']);
+  assert.deepEqual(trackedAttachmentMediaKeys[1], 'image-opened-key');
 });
