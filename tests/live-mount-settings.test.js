@@ -766,7 +766,7 @@ test('logger and injected-menu Jump availability follows the corresponding displ
   assert.equal(plugin.canJumpToSavedRecord(edited), true);
 });
 
-test('media cache master toggle refreshes selected cached message rows, forum callbacks, and inline rerender', () => {
+test('media cache master toggle remounts selected attachment rows and refreshes all logger surfaces', async () => {
   const threadRefreshes = [];
   const calls = {
     stops: 0,
@@ -785,6 +785,7 @@ test('media cache master toggle refreshes selected cached message rows, forum ca
     settings: { cacheAllImages: true },
     selectedChannel: { id: 'channel' },
     _failedNativeAttachmentMediaKeys: new Set(['seeded-failure']),
+    _failedNativeAttachmentMediaCandidateKeys: new Set(['seeded-candidate-failure']),
     channelMessages: {
       channel: {},
       dmChannel: {},
@@ -792,19 +793,39 @@ test('media cache master toggle refreshes selected cached message rows, forum ca
     },
     messageRecord: {
       visible: {
-        message: { id: '100', channel_id: 'channel', content: 'visible' },
+        message: {
+          id: '100',
+          channel_id: 'channel',
+          content: 'visible',
+          attachments: [{ id: 'media-100', filename: 'visible.png', url: 'https://cdn.example/visible.png' }]
+        },
         delete_data: { hidden: false }
       },
       hidden: {
-        message: { id: 'hidden', channel_id: 'channel', content: 'hidden' },
+        message: {
+          id: 'hidden',
+          channel_id: 'channel',
+          content: 'hidden',
+          attachments: [{ id: 'media-hidden', filename: 'hidden.png', url: 'https://cdn.example/hidden.png' }]
+        },
         delete_data: { hidden: true }
       },
       purged: {
-        message: { id: '200', channel_id: 'channel', content: 'purged' },
+        message: {
+          id: '200',
+          channel_id: 'channel',
+          content: 'purged',
+          attachments: [{ id: 'media-200', filename: 'purged.png', url: 'https://cdn.example/purged.png' }]
+        },
         delete_data: { hidden: false }
       },
       nuked: {
-        message: { id: '300', channel_id: 'channel', content: 'nuked' },
+        message: {
+          id: '300',
+          channel_id: 'channel',
+          content: 'nuked',
+          attachments: [{ id: 'media-300', filename: 'nuked.png', url: 'https://cdn.example/nuked.png' }]
+        },
         delete_data: { hidden: false }
       }
     },
@@ -848,7 +869,9 @@ test('media cache master toggle refreshes selected cached message rows, forum ca
     return originalRefreshAttachmentRendering?.();
   };
 
+  plugin.settings.cacheAllImages = false;
   plugin.handleMediaCachingSetting(false);
+  await new Promise(resolve => setImmediate(resolve));
 
   assert.equal(calls.stops, 1);
   assert.equal(calls.starts, 0);
@@ -858,22 +881,20 @@ test('media cache master toggle refreshes selected cached message rows, forum ca
   assert.equal(calls.closeLoggerOwnedAttachmentMediaViewersOrder[1], 'cleanup');
   assert.equal(calls.refreshes, 1);
   assert.equal(plugin._failedNativeAttachmentMediaKeys.size, 0);
-  assert.equal(calls.invalidations.length, 3);
+  assert.equal(plugin._failedNativeAttachmentMediaCandidateKeys.size, 0);
+  assert.equal(calls.invalidations.length, 4);
   assert.deepEqual(
     [...calls.invalidations].sort(),
-    ['channel', 'dmChannel', 'threadChannel'].sort()
+    ['channel', 'channel', 'dmChannel', 'threadChannel'].sort()
   );
   assert.deepEqual(calls.cacheRefreshes, ['channel']);
   assert.equal(calls.loggerRefreshes, 1);
-  assert.equal(calls.dispatches.filter(event => event.type === 'MESSAGE_UPDATE').length, 3);
+  assert.equal(calls.dispatches.filter(event => event.type === 'MESSAGE_DELETE').length, 3);
   assert.deepEqual(
-    calls.dispatches.filter(event => event.type === 'MESSAGE_UPDATE').map(event => event.message.id),
+    calls.dispatches.filter(event => event.type === 'MESSAGE_DELETE').map(event => event.id),
     ['100', '200', '300']
   );
-  assert.equal(
-    calls.dispatches.find(event => event.type === 'MESSAGE_UPDATE' && event.message.id === '100')?.message.content,
-    'visible (cache-only)'
-  );
+  assert.equal(calls.dispatches.some(event => event.type === 'MESSAGE_UPDATE'), false);
   assert.equal(calls.dispatches.some(event => event.type === 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT'), true);
   assert.equal(threadRefreshes.filter(name => name === 'channel').length, 1);
   assert.deepEqual(
@@ -891,8 +912,11 @@ test('media cache master toggle refreshes selected cached message rows, forum ca
   calls.closeLoggerOwnedAttachmentMediaViewersCalls = 0;
   calls.closeLoggerOwnedAttachmentMediaViewersOrder.length = 0;
   plugin._failedNativeAttachmentMediaKeys.add('another-seeded-failure');
+  plugin._failedNativeAttachmentMediaCandidateKeys.add('another-seeded-candidate-failure');
 
+  plugin.settings.cacheAllImages = true;
   plugin.handleMediaCachingSetting(true);
+  await new Promise(resolve => setImmediate(resolve));
 
   assert.equal(calls.stops, 1);
   assert.equal(calls.starts, 1);
@@ -902,14 +926,16 @@ test('media cache master toggle refreshes selected cached message rows, forum ca
   assert.equal(calls.closeLoggerOwnedAttachmentMediaViewersOrder[1], 'cleanup');
   assert.equal(calls.refreshes, 1);
   assert.equal(plugin._failedNativeAttachmentMediaKeys.size, 0);
-  assert.equal(calls.invalidations.length, 3);
+  assert.equal(plugin._failedNativeAttachmentMediaCandidateKeys.size, 0);
+  assert.equal(calls.invalidations.length, 4);
   assert.deepEqual(
     [...calls.invalidations].sort(),
-    ['channel', 'dmChannel', 'threadChannel'].sort()
+    ['channel', 'channel', 'dmChannel', 'threadChannel'].sort()
   );
   assert.deepEqual(calls.cacheRefreshes, ['channel']);
   assert.equal(calls.loggerRefreshes, 1);
-  assert.equal(calls.dispatches.some(event => event.type === 'MESSAGE_UPDATE'), true);
+  assert.equal(calls.dispatches.filter(event => event.type === 'MESSAGE_DELETE').length, 3);
+  assert.equal(calls.dispatches.some(event => event.type === 'MESSAGE_UPDATE'), false);
   assert.equal(calls.dispatches.some(event => event.type === 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT'), true);
   assert.deepEqual(calls.reportMajorSetting, [
     ['cacheAllImages', false],
@@ -944,6 +970,7 @@ test('media cache local-only setting resets the local state, refreshes attachmen
   const plugin = createPlugin({
     settings: { onlyRenderCachedAttachments: false },
     _failedNativeAttachmentMediaKeys: new Set(['seeded-failure']),
+    _failedNativeAttachmentMediaCandidateKeys: new Set(['seeded-candidate-failure']),
     closeLoggerOwnedAttachmentMediaViewers: () => {
       calls.closeLoggerOwnedAttachmentMediaViewersCalls++;
       calls.closeLoggerOwnedAttachmentMediaViewersOrder.push('close');
@@ -973,4 +1000,5 @@ test('media cache local-only setting resets the local state, refreshes attachmen
   assert.equal(calls.reportMajorSetting.length, 1);
   assert.deepEqual(calls.reportMajorSetting, [['onlyRenderCachedAttachments', true]]);
   assert.equal(plugin._failedNativeAttachmentMediaKeys.size, 0);
+  assert.equal(plugin._failedNativeAttachmentMediaCandidateKeys.size, 0);
 });

@@ -16,7 +16,7 @@ Default shortcuts, configurable under Misc settings:
 - `Ctrl+N`: selected channel.
 - `Ctrl+S`: selected server; unavailable in DMs.
 
-> Logged content and enabled media caches remain local to this device. Review **Cache media locally** under **Media settings** and **Disable saving data** under **Misc settings** before using the plugin.
+> Logged content and enabled media caches remain local to this device. Review **Render & Cache media** under **Media settings** and **Disable saving data** under **Misc settings** before using the plugin.
 
 ## 📂 Opening Logs
 
@@ -230,7 +230,7 @@ Changing **Obfuscate CSS classes** restarts MessageLogger by temporarily disabli
 
 ### High-impact setting feedback
 
-These settings report one console entry and one routed alert: **Only log whitelist**, **Auto backup data**, **Cache media locally**, **Enable Anti Nuke**, **Automatic updates**, **Only render locally cached attachments**, and **Delete cached files with log records**.
+These settings report one console entry and one routed alert: **Only log whitelist**, **Auto backup data**, **Render & Cache media**, **Enable Anti Nuke**, **Automatic updates**, **Only render locally cached attachments**, and **Delete cached files with log records**.
 
 - Enabled: info color.
 - Disabled: theme-neutral presentation; native cards use a neutral icon when BetterDiscord cannot request grey.
@@ -257,8 +257,8 @@ Enable **Show Hidden tab in logger** under Display settings. Disabling the tab d
 
 ### Attachments are unavailable
 
-- Remote attachment and sticker URLs can expire or return `403`/`404`. Keep **Cache media locally** enabled when local preservation matters.
-- **Disable saving data** creates no new local media files even if **Cache media locally** remains enabled. Eligible logger media requests wait in memory and download only after a successful primary archive save; reload, plugin stop, or disabling media caching discards the queue.
+- Remote attachment and sticker URLs can expire or return `403`/`404`. Keep **Render & Cache media** enabled when local preservation matters.
+- **Disable saving data** creates no new local media files even if **Render & Cache media** remains enabled. Eligible logger media requests wait in memory and download only after a successful primary archive save; reload, plugin stop, or disabling media caching discards the queue.
 - Enable **Only render locally cached attachments** to block CDN fallback. Missing files remain as full-filename placeholders; already-expired content cannot be recovered.
 - **Cache all attachment types** is incomplete in 2.8.2.13. Arbitrary non-image files may remain CDN-backed or uncached when On and may still be logged as attachment references when Off.
 - **Delete cached files with log records** removes related media during permanent record, purge, cap, or thread/forum cleanup. It cannot be undone and reports successful deletion through the console and selected notification mode.

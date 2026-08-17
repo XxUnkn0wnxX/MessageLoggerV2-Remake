@@ -323,6 +323,7 @@ test('media-cache controls sit together below their master switch', () => {
       'forceLegacyMediaFetching'
     ]
   );
+  assert.match(mediaSettings, /name: 'Render & Cache media'[\s\S]*createLinkedSettingNote\([\s\S]*Renders saved media, caches eligible files, and retries saved live URLs after an Off-to-On transition\.[\s\S]*Shows attachment placeholders; child settings stay saved\.[\s\S]*Disable saving data[\s\S]*eligible logger media stays queued in memory until saving succeeds\.[\s\S]*id: 'cacheAllImages'/);
   assert.match(mediaSettings, /name: 'Show trimmer toasts'[\s\S]*note: this\.createLinkedSettingNote\([\s\S]*Shows all trimmer toasts; age \+ GB share one start\/end pair\.[\s\S]*Hides every trimmer toast; console TIMER\/TRIM logs remain visible\.[\s\S]*id: 'showMediaCacheTrimLifecycleToasts'[\s\S]*enableWith: 'cacheAllImages'[\s\S]*type: 'switch'/);
   assert.equal(miscSettings.match(/id: '(?:cacheAllImages|addUserIdToSavedMediaFilename|newSaveAllFileTypes|maxCacheFileSize|newCacheAllImagesPath|newCacheAllImages|onlyRenderCachedAttachments|deleteCachedFilesWithRecords|forceLegacyMediaFetching)'/), null);
 });
@@ -517,6 +518,11 @@ test('settings dependencies match the approved master controls', () => {
     ['preCacheMaxSizeGb', 'cacheAllImages'],
     ['mediaCacheTrimIntervalMinutes', 'cacheAllImages'],
     ['showMediaCacheTrimLifecycleToasts', 'cacheAllImages'],
+    ['newCacheAllImagesPath', 'cacheAllImages'],
+    ['newCacheAllImages', 'cacheAllImages'],
+    ['onlyRenderCachedAttachments', 'cacheAllImages'],
+    ['deleteCachedFilesWithRecords', 'cacheAllImages'],
+    ['forceLegacyMediaFetching', 'cacheAllImages'],
     ['antiNukeToasts', 'antiNukeEnabled'],
     ['antiNukeThreadCap', 'antiNukeEnabled'],
     ['antiNukeMessageCap', 'antiNukeEnabled'],
@@ -525,7 +531,6 @@ test('settings dependencies match the approved master controls', () => {
     ['debugToasts', 'debugLogging']
   ]);
   assert.doesNotMatch(settingsConfig, /id: 'ignoreLocalEdits',[\s\S]{0,80}(?:enableWith|disableWith):/);
-  assert.doesNotMatch(settingsConfig, /id: 'newCacheAllImagesPath',[\s\S]{0,80}(?:enableWith|disableWith):/);
   assert.doesNotMatch(settingsConfig, /id: 'deletedMessageColor',[\s\S]{0,80}(?:enableWith|disableWith):/);
 });
 
@@ -683,8 +688,9 @@ test('date order applies to optional timestamps and forced logger dates', () => 
   assert.match(editHistoryGate, /if \(mediaType !== 'image' && mediaType !== 'video'\)/);
   assert.match(editHistoryGate, /const initialMediaType = presentationPlan\?\.mediaType/);
   assert.match(editHistoryGate, /if \(displayPlan\?\.action !== 'remote'[\s\S]*plugin\.settings\?\.cacheAllImages === false[\s\S]*plugin\.settings\?\.onlyRenderCachedAttachments\)/);
-  assert.match(editHistoryGate, /getSavedAttachmentPresentationPlan\([\s\S]*allowBlob: true[^\)]*\)/);
-  assert.match(editHistoryGate, /setDisplayPlan\(\{[\s\S]*action: blobPlan\.action,[\s\S]*mediaType: blobPlan\.mediaType,[\s\S]*url: blobPlan\.url[\s\S]*\}\)/);
+  assert.match(editHistoryGate, /markSavedAttachmentMediaCandidateFailure\([\s\S]*displayPlan\.url/);
+  assert.match(editHistoryGate, /getSavedAttachmentPresentationPlan\([\s\S]*(currentRecord\?\.message|currentRecord\.message)[\s\S]*allowRemote:\s*true[\s\S]*\}\)/);
+  assert.match(editHistoryGate, /setDisplayPlan\(\{[\s\S]*action: nextPlan\.action,[\s\S]*mediaType: nextPlan\.mediaType,[\s\S]*url: nextPlan\.url[\s\S]*\}\)/);
   assert.match(editHistoryGate, /url: displayPlan\.url,[\s\S]*placeholder: displayPlan\.url,[\s\S]*original: displayPlan\.url/);
   assert.match(editHistoryGate, /const mediaKey = `\$\{key\}-\$\{presentationPlan\.action\}-\$\{presentationPlan\.url\}`/);
   assert.match(editHistoryGate, /const \[errored, setErrored\] = React\.useState\(false\)/);
@@ -1066,7 +1072,7 @@ test('first-install help matches the current logging-scope onboarding', () => {
   assert.match(source, /Open the <strong>Message Logger<\/strong> submenu/);
   assert.match(source, /Only log whitelist<\/strong> under <strong>Ignores and overrides/);
   assert.match(source, /Always log selected channel<\/strong> and <strong>Always log DMs/);
-  assert.match(source, /Cache media locally<\/strong> under <strong>Media settings<\/strong> and <strong>Disable saving data<\/strong> under <strong>Misc settings/);
+  assert.match(source, /Render &amp; Cache media<\/strong> under <strong>Media settings<\/strong> and <strong>Disable saving data<\/strong> under <strong>Misc settings/);
   assert.match(source, /<div class="\$\{this\.style\.textIndent\}">\s*<strong>1\.<\/strong>/);
   assert.doesNotMatch(source, /<strong class="\$\{this\.style\.startupHelpTitle\}">First setup:<\/strong>/);
   assert.doesNotMatch(source, /startupHelpIntro|ml2-startup-help-intro/);
@@ -1399,7 +1405,7 @@ test('CSS class mode changes use a confirmed controlled restart on both save pat
 test('high-impact setting changes use routed theme-aware state feedback', () => {
   for (const [settingName, action] of [
     ['Only log whitelist', 'reportLoggingScope'],
-    ['Cache media locally', 'reportMediaCaching'],
+    ['Render & Cache media', 'reportMediaCaching'],
     ['Enable Anti Nuke', 'reportAntiNuke'],
     ['Delete cached files with log records', 'reportCachedFileDeletion']
   ]) {
@@ -1590,15 +1596,20 @@ test('populateParent sources logger media rows from saved attachment presentatio
   assert.match(viewer, /renderedAttachment\._ml2PresentationAction = plan\.action;/);
   assert.match(viewer, /renderedAttachment\._ml2PresentationLabel = typeof plan\?\.label === 'string' \? plan\.label : null;/);
   assert.match(viewer, /if \(!renderedAttachment\.filename && plan\.filename\) \{\s*renderedAttachment\.filename = plan\.filename;\s*\}/);
+  assert.match(viewer, /renderedAttachment\.proxy_url = plan\.url;/);
   assert.match(viewer, /const presentationAction = attachment\._ml2PresentationAction;/);
   assert.match(viewer, /const presentationLabel = attachment\._ml2PresentationLabel;/);
   assert.match(viewer, /const isCached = presentationAction\s*\?[\s\S]*presentationAction === 'blob'/);
   assert.match(viewer, /const linkUrl = plan\.action === 'remote' \? \(plan\.url \|\| attachment\.url \|\| attachment\.proxy_url\)/);
+  assert.match(viewer, /const getLoggerAttachmentEntry = \(mediaAttachment\) =>/);
+  assert.match(viewer, /this\.markSavedAttachmentMediaCandidateFailure\([\s\S]*mediaAttachment.url\)/);
+  assert.match(viewer, /const fallbackToNextLoggerRemotePlan = \(mediaElement,\s*hostElement,\s*mediaAttachment,\s*useCachedRenderer,\s*width,\s*height\)\s*=>/);
   assert.match(viewer, /if \(\(plan\.action === 'placeholder' \|\| plan\.action === 'omit'\) && safePlanLabel\) \{\s*appendUnavailableAttachmentPlaceholder\(safePlanLabel\);/);
   assert.match(viewer, /createUnavailableAttachmentPlaceholder\(presentationLabel \|\| attachment\.filename\)/);
   assert.match(viewer, /attemptToUseCachedImage\([\s\S]*presentationLabel[\s\S]*\);/);
   assert.match(viewer, /attemptToUseCachedVideo\([\s\S]*presentationLabel[\s\S]*\);/);
-  assert.match(viewer, /video\.onerror = \(\) => \{[\s\S]*if \(this\.isAttachmentLocallyCached\(attachment, message\)\)/);
+  assert.match(viewer, /fallbackToNextLoggerRemotePlan\(video,\s*container,\s*attachment,\s*attemptToUseCachedVideo/);
+  assert.match(viewer, /fallbackToNextLoggerRemotePlan\(img,\s*img,\s*attachment,\s*attemptToUseCachedImage/);
 });
 
 test('component-only records receive a visible Logger viewer fallback before empty-row pruning', () => {

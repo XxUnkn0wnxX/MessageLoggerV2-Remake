@@ -2004,6 +2004,8 @@ test('reAddDeletedMessages local-only keeps cached blob rows and labels missing 
         return null;
       }
     },
+    invalidateChannelCache: id => invalidations.push(id),
+    cacheChannelMessages: id => cacheRefreshes.push(id),
     messageRecord: {
       '301': {
         delete_data: { time: 1 },
@@ -2516,7 +2518,7 @@ test('edit-history inline segments keep text for non-media/unmatched and preserv
   assert.equal(removedSegments[1]?.attachment?.id, '222222222222222222');
   assert.equal(removedSegments.every(segment => segment.presentationPlan?.action === 'remote'), true);
   assert.equal(removedSegments[0]?.presentationPlan?.url, 'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif');
-  assert.equal(removedSegments[1]?.presentationPlan?.url, 'https://media.discordapp.net/attachments/channel/222222222222222222/second.webm');
+  assert.equal(removedSegments[1]?.presentationPlan?.url, 'https://cdn.discordapp.com/attachments/channel/222222222222222222/second.webm');
   assert.equal(removedSegments[0]?.value, '[image:first.gif]');
   assert.equal(removedSegments[1]?.value, '[attachment:second.webm]');
   assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('third.pdf')), true);
@@ -2708,11 +2710,13 @@ test('cache-only rendering uses direct, then proxy media URLs when master is on 
   assert.equal(firstPlan.url, 'https://cdn.discordapp.com/attachments/channel/111/photo.png');
   assert.equal(firstPlan.fallbackUrl, 'https://media.discordapp.net/attachments/channel/111/photo.png');
   assert.equal(secondPlan.action, 'remote');
-  assert.equal(secondPlan.url, 'https://media.discordapp.net/attachments/channel/111/fallback.jpg');
-  assert.equal(secondPlan.fallbackUrl, null);
+  assert.equal(secondPlan.url, 'https://cdn.discordapp.com/attachments/channel/111/fallback.jpg');
+  assert.equal(secondPlan.fallbackUrl, 'https://media.discordapp.net/attachments/channel/111/fallback.jpg');
   assert.equal(thirdPlan.action, 'omit');
-  assert.deepEqual(rendered.attachments[0].url, message.attachments[0].url);
-  assert.equal(rendered.attachments[1].url, message.attachments[1].proxy_url);
+  assert.deepEqual(rendered.attachments[0].url, firstPlan.url);
+  assert.equal(rendered.attachments[0].proxy_url, firstPlan.url);
+  assert.equal(rendered.attachments[1].url, secondPlan.url);
+  assert.equal(rendered.attachments[1].proxy_url, secondPlan.url);
   assert.deepEqual(message, canonicalBefore);
 });
 
@@ -2991,11 +2995,12 @@ test('logger saved-attachment presentation entries use remote display for remote
   assert.equal(entries[0].plan.url, 'https://cdn.discordapp.com/attachments/channel/100/photo.png');
   assert.equal(entries[0].plan.fallbackUrl, 'https://media.discordapp.net/attachments/channel/100/photo.png');
   assert.equal(entries[1].plan.action, 'remote');
-  assert.equal(entries[1].plan.url, 'https://media.discordapp.net/attachments/channel/101/proxy-only.gif');
-  assert.equal(entries[1].plan.fallbackUrl, null);
+  assert.equal(entries[1].plan.url, 'https://cdn.discordapp.com/attachments/channel/101/proxy-only.gif');
+  assert.equal(entries[1].plan.fallbackUrl, 'https://media.discordapp.net/attachments/channel/101/proxy-only.gif');
   assert.equal(entries[2].plan.action, 'omit');
   assert.equal(entries[3].plan.action, 'remote');
-  assert.equal(entries[3].plan.url, 'https://media.discordapp.net/attachments/channel/200/removed.png');
+  assert.equal(entries[3].plan.url, 'https://cdn.discordapp.com/attachments/channel/200/removed.png');
+  assert.equal(entries[3].plan.fallbackUrl, 'https://media.discordapp.net/attachments/channel/200/removed.png');
   assert.equal(imageCacheGets.length, 0);
 });
 
@@ -3062,8 +3067,10 @@ test('logger saved-attachment presentation entries in local-only mode keep only 
   assert.deepEqual(record, recordBefore);
 });
 
-test('native attachment media error listener lifecycle installs once, forwards once, and removes safely', () => {
+test('native attachment media error listener lifecycle installs once, forwards once, and removes safely', async () => {
   const dispatches = [];
+  const invalidations = [];
+  const cacheRefreshes = [];
   const fakeTarget = createFakeEventTarget();
   const originalDocument = global.document;
   const plugin = createPlugin({
@@ -3081,6 +3088,8 @@ test('native attachment media error listener lifecycle installs once, forwards o
       _resolveImagePath: () => '/cache/601.png',
       get: () => 'blob://local/cached/image-601'
     },
+    invalidateChannelCache: id => invalidations.push(id),
+    cacheChannelMessages: id => cacheRefreshes.push(id),
     messageRecord: {
       '601': {
         delete_data: { time: 1 },
@@ -3111,6 +3120,10 @@ test('native attachment media error listener lifecycle installs once, forwards o
     });
     assert.equal(dispatches.length, 1);
 
+    await setImmediatePromise();
+    assert.deepEqual(invalidations, ['601']);
+    assert.deepEqual(cacheRefreshes, ['601']);
+
     plugin._removeSavedAttachmentMediaErrorListener();
     assert.equal(fakeTarget.state.removeCalls.length, 1);
     assert.equal(fakeTarget.state.removeCalls[0].eventName, 'error');
@@ -3124,8 +3137,10 @@ test('native attachment media error listener lifecycle installs once, forwards o
   }
 });
 
-test('native attachment media error flips a remote attachment to cached blob rendering', () => {
+test('native attachment media error remounts one failed remote attachment with cached blob presentation', async () => {
   const dispatches = [];
+  const invalidations = [];
+  const cacheRefreshes = [];
   const plugin = createPlugin({
     dispatcher: {
       dispatch(action) {
@@ -3152,6 +3167,8 @@ test('native attachment media error flips a remote attachment to cached blob ren
         return key === '100.png' ? 'blob://local/cached/image-100' : null;
       }
     },
+    invalidateChannelCache: id => invalidations.push(id),
+    cacheChannelMessages: id => cacheRefreshes.push(id),
     messageRecord: {
       '501': {
         delete_data: { time: 1 },
@@ -3186,11 +3203,21 @@ test('native attachment media error flips a remote attachment to cached blob ren
   });
 
   assert.equal(dispatches.length, 1);
-  assert.equal(dispatches[0].type, 'MESSAGE_UPDATE');
-  assert.equal(dispatches[0].message.attachments.length, 2);
-  assert.equal(dispatches[0].message.attachments[0].url, 'blob://local/cached/image-100');
-  assert.equal(dispatches[0].message.attachments[1].url, 'https://cdn.discordapp.com/attachments/501/notes.txt');
+  assert.deepEqual(dispatches[0], {
+    type: 'MESSAGE_DELETE',
+    id: '501',
+    channelId: '501',
+    ML2: true
+  });
+  const fallbackRender = plugin.getNativeDeletedAttachmentPresentationMessage(message);
+  assert.equal(fallbackRender.attachments.length, 2);
+  assert.equal(fallbackRender.attachments[0].url, 'blob://local/cached/image-100');
+  assert.equal(fallbackRender.attachments[1].url, 'https://cdn.discordapp.com/attachments/501/notes.txt');
   assert.deepEqual(plugin.messageRecord['501'].message, canonicalBefore);
+
+  await setImmediatePromise();
+  assert.deepEqual(invalidations, ['501']);
+  assert.deepEqual(cacheRefreshes, ['501']);
 
   plugin.handleSavedAttachmentMediaError({
     target: {
@@ -3203,8 +3230,117 @@ test('native attachment media error flips a remote attachment to cached blob ren
   assert.equal(dispatches.length, 1);
 });
 
-test('native attachment media error labels a failed remote attachment when no cached blob exists', () => {
+test('native attachment media error retries failed proxy candidates from derived CDN to original URL and then shows blob', async () => {
   const dispatches = [];
+  const invalidations = [];
+  const cacheRefreshes = [];
+  const plugin = createPlugin({
+    dispatcher: {
+      dispatch(action) {
+        dispatches.push(action);
+      }
+    },
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: (attachmentId, ext, channelId, messageId) => {
+        assert.equal(ext, '.png');
+        assert.equal(attachmentId, '601');
+        assert.equal(channelId, '601');
+        assert.equal(messageId, '601');
+        return '/cache/601.png';
+      },
+      get: cacheUrl => {
+        const matched = /^http:\/\/localhost:7474\/(.+?)#/.exec(cacheUrl);
+        if (!matched) return null;
+        const key = matched[1];
+        return key === '601.png' ? 'blob://local/cached/image-601' : null;
+      }
+    },
+    invalidateChannelCache: id => invalidations.push(id),
+    cacheChannelMessages: id => cacheRefreshes.push(id),
+    messageRecord: {
+      '601': {
+        delete_data: { time: 1 },
+        message: {
+          id: '601',
+          channel_id: '601',
+          content: 'body',
+          attachments: [
+            {
+              id: '601',
+              filename: 'legacy photo.png',
+              url: 'https://media.discordapp.net/attachments/601/legacy%20photo.png?width=640&height=360',
+              proxy_url: 'https://media.discordapp.net/attachments/601/legacy%20photo.png?width=640&height=360'
+            }
+          ]
+        }
+      }
+    }
+  });
+
+  const message = plugin.messageRecord['601'].message;
+  const canonicalBefore = structuredClone(message);
+  const sourceRow = { id: 'chat-messages-601-601' };
+  const cdnUrl = 'https://cdn.discordapp.com/attachments/601/legacy%20photo.png?width=640&height=360';
+  const proxyUrl = 'https://media.discordapp.net/attachments/601/legacy%20photo.png?width=640&height=360';
+
+  const remoteRender = plugin.getCacheOnlyMessage(message);
+  assert.equal(remoteRender.attachments.length, 1);
+  assert.equal(remoteRender.attachments[0].url, cdnUrl);
+  assert.equal(remoteRender.attachments[0].proxy_url, cdnUrl);
+
+  plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: cdnUrl,
+      closest: () => sourceRow
+    }
+  });
+  assert.equal(dispatches.length, 1);
+  const afterCdnFailure = plugin.getNativeDeletedAttachmentPresentationMessage(message);
+  assert.equal(afterCdnFailure.attachments.length, 1);
+  assert.equal(afterCdnFailure.attachments[0].url, proxyUrl);
+  assert.equal(afterCdnFailure.attachments[0].proxy_url, proxyUrl);
+
+  await setImmediatePromise();
+  assert.deepEqual(invalidations, ['601']);
+  assert.deepEqual(cacheRefreshes, ['601']);
+
+  plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: cdnUrl,
+      closest: () => sourceRow
+    }
+  });
+  assert.equal(dispatches.length, 1);
+
+  plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: proxyUrl,
+      closest: () => sourceRow
+    }
+  });
+  assert.equal(dispatches.length, 2);
+  await setImmediatePromise();
+  assert.deepEqual(invalidations, ['601', '601']);
+  assert.deepEqual(cacheRefreshes, ['601', '601']);
+  const afterProxyFailure = plugin.getNativeDeletedAttachmentPresentationMessage(message);
+  assert.equal(afterProxyFailure.attachments.length, 1);
+  assert.equal(afterProxyFailure.attachments[0].url, 'blob://local/cached/image-601');
+  assert.equal(afterProxyFailure.attachments[0].proxy_url, 'blob://local/cached/image-601');
+  assert.deepEqual(message, canonicalBefore);
+});
+
+test('native attachment media error remounts one failed remote attachment as a placeholder without cached blob', async () => {
+  const dispatches = [];
+  const invalidations = [];
+  const cacheRefreshes = [];
   const plugin = createPlugin({
     dispatcher: {
       dispatch(action) {
@@ -3220,6 +3356,8 @@ test('native attachment media error labels a failed remote attachment when no ca
       _resolveImagePath: () => '/cache/502.png',
       get: () => null
     },
+    invalidateChannelCache: id => invalidations.push(id),
+    cacheChannelMessages: id => cacheRefreshes.push(id),
     messageRecord: {
       '502': {
         delete_data: { time: 1 },
@@ -3228,7 +3366,12 @@ test('native attachment media error labels a failed remote attachment when no ca
           channel_id: '502',
           content: '',
           attachments: [
-            { id: '200', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/502/photo.png' }
+            {
+              id: '200',
+              filename: 'photo.png',
+              url: 'https://media.discordapp.net/attachments/502/photo.png',
+              proxy_url: 'https://media.discordapp.net/attachments/502/photo.png'
+            }
           ]
         }
       }
@@ -3238,19 +3381,122 @@ test('native attachment media error labels a failed remote attachment when no ca
   const message = plugin.messageRecord['502'].message;
   const canonicalBefore = structuredClone(message);
   const messageRow = { id: 'chat-messages-502-502' };
+  const cdnUrl = 'https://cdn.discordapp.com/attachments/502/photo.png';
+  const proxyUrl = 'https://media.discordapp.net/attachments/502/photo.png';
 
   plugin.handleSavedAttachmentMediaError({
     target: {
       tagName: 'IMG',
-      currentSrc: 'https://cdn.discordapp.com/attachments/502/photo.png',
+      currentSrc: cdnUrl,
       closest: () => messageRow
     }
   });
 
   assert.equal(dispatches.length, 1);
-  assert.equal(dispatches[0].message.attachments.length, 0);
-  assert.equal(dispatches[0].message.content, '[image:photo.png]');
+  let fallbackRender = plugin.getNativeDeletedAttachmentPresentationMessage(message);
+  assert.equal(fallbackRender.attachments.length, 1);
+  assert.equal(fallbackRender.attachments[0].url, proxyUrl);
+  assert.equal(fallbackRender.attachments[0].proxy_url, proxyUrl);
+
+  plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: proxyUrl,
+      closest: () => messageRow
+    }
+  });
+
+  assert.equal(dispatches.length, 2);
+  assert.deepEqual(dispatches[0], {
+    type: 'MESSAGE_DELETE',
+    id: '502',
+    channelId: '502',
+    ML2: true
+  });
+  assert.deepEqual(dispatches[1], {
+    type: 'MESSAGE_DELETE',
+    id: '502',
+    channelId: '502',
+    ML2: true
+  });
+  fallbackRender = plugin.getNativeDeletedAttachmentPresentationMessage(message);
+  assert.equal(fallbackRender.attachments.length, 0);
+  assert.equal(fallbackRender.content, '[image:photo.png]');
   assert.deepEqual(plugin.messageRecord['502'].message, canonicalBefore);
+
+  await setImmediatePromise();
+  assert.deepEqual(invalidations, ['502']);
+  assert.deepEqual(cacheRefreshes, ['502']);
+});
+
+test('attachment presentation remount coalesces channels and protects Discord-owned thread mounts', async () => {
+  const dispatches = [];
+  const invalidations = [];
+  const cacheRefreshes = [];
+  const ordinaryOne = {
+    delete_data: { time: 1 },
+    message: {
+      id: 'ordinary-one',
+      channel_id: 'channel',
+      content: 'one',
+      attachments: [{ id: 'media-one', filename: 'one.png', url: 'https://cdn.example/one.png' }]
+    }
+  };
+  const ordinaryTwo = {
+    delete_data: { time: 2 },
+    message: {
+      id: 'ordinary-two',
+      channel_id: 'channel',
+      content: 'two',
+      attachments: [{ id: 'media-two', filename: 'two.png', url: 'https://cdn.example/two.png' }]
+    }
+  };
+  const threadRoot = {
+    delete_data: { time: 3, forum_thread_message_delete: true },
+    message: {
+      id: 'thread',
+      channel_id: 'thread',
+      content: 'thread root',
+      attachments: [{ id: 'thread-media', filename: 'thread.png', url: 'https://cdn.example/thread.png' }]
+    }
+  };
+  const canonicalBefore = structuredClone([ordinaryOne, ordinaryTwo, threadRoot]);
+  const plugin = createPlugin({
+    settings: { cacheAllImages: false, onlyRenderCachedAttachments: false },
+    tools: {
+      getChannel: id => ({ id, type: id === 'thread' ? 11 : 0 })
+    },
+    dispatcher: {
+      dispatch(action) {
+        dispatches.push(action);
+      }
+    },
+    invalidateChannelCache: id => invalidations.push(id),
+    cacheChannelMessages: id => cacheRefreshes.push(id),
+    imageCacheServerSimulator: { get: () => null }
+  });
+
+  const affectedChannels = plugin.remountSavedAttachmentPresentationRecords([
+    ordinaryOne,
+    ordinaryTwo,
+    threadRoot
+  ]);
+
+  assert.equal(affectedChannels, 2);
+  assert.deepEqual(dispatches.slice(0, 2), [
+    { type: 'MESSAGE_DELETE', id: 'ordinary-one', channelId: 'channel', ML2: true },
+    { type: 'MESSAGE_DELETE', id: 'ordinary-two', channelId: 'channel', ML2: true }
+  ]);
+  assert.equal(dispatches[2].type, 'MESSAGE_UPDATE');
+  assert.equal(dispatches[2].ML2, true);
+  assert.equal(dispatches[2].message.id, 'thread');
+  assert.equal(dispatches[2].message.attachments.length, 0);
+  assert.equal(dispatches[2].message.content, 'thread root\n[image:thread.png]');
+
+  await setImmediatePromise();
+  assert.deepEqual([...invalidations].sort(), ['channel', 'thread']);
+  assert.deepEqual([...cacheRefreshes].sort(), ['channel', 'thread']);
+  assert.deepEqual([ordinaryOne, ordinaryTwo, threadRoot], canonicalBefore);
 });
 
 test('refreshCacheOnlyMessage dispatches detached placeholder content when cache master is off', async () => {
@@ -3750,6 +3996,47 @@ test('saved attachment descriptors skip local path without trusted extension or 
   assert.equal(missingIdentity.message_id, null);
   assert.equal(missingIdentity.channel_id, '800');
   assert.equal(missingIdentity.local_path, null);
+});
+
+test('media.discordapp.net media attachment URLs normalize to CDN while preserving signature query and fragment', () => {
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    }
+  });
+  const attachedUrl = 'https://media.discordapp.net/attachments/channel/999/signed%20photo.png?download=1&width=640&height=360#sig=abc123';
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [
+      {
+        id: 'signed-id',
+        filename: 'signed photo.png',
+        url: attachedUrl,
+        proxy_url: attachedUrl
+      }
+    ]
+  };
+  const attachment = message.attachments[0];
+  const attachmentBefore = structuredClone(attachment);
+
+  const descriptor = plugin.getSavedAttachmentDescriptor(attachment, message);
+  assert.deepEqual(descriptor.remote_urls, [
+    'https://cdn.discordapp.com/attachments/channel/999/signed%20photo.png?download=1&width=640&height=360#sig=abc123',
+    attachedUrl
+  ]);
+
+  const plan = plugin.getSavedAttachmentPresentationPlan(attachment, message, { allowRemote: true });
+  assert.equal(plan.action, 'remote');
+  assert.equal(plan.url, 'https://cdn.discordapp.com/attachments/channel/999/signed%20photo.png?download=1&width=640&height=360#sig=abc123');
+
+  const rendered = plugin.getCacheOnlyMessage(message);
+  assert.equal(rendered.attachments.length, 1);
+  assert.equal(rendered.attachments[0].url, 'https://cdn.discordapp.com/attachments/channel/999/signed%20photo.png?download=1&width=640&height=360#sig=abc123');
+  assert.equal(rendered.attachments[0].proxy_url, 'https://cdn.discordapp.com/attachments/channel/999/signed%20photo.png?download=1&width=640&height=360#sig=abc123');
+  assert.deepEqual(attachment, attachmentBefore);
 });
 
 test('decimal per-file MB limits use SI bytes', async () => {

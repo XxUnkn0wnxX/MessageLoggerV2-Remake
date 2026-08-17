@@ -438,6 +438,8 @@ module.exports = class MessageLoggerV2 {
     this._archiveLoadModeSettleTimer = 0;
     this._savedAttachmentMediaErrorListener = null;
     this._savedAttachmentMediaErrorListenerTarget = null;
+    this._savedAttachmentPresentationRecacheChannels = new Set();
+    this._failedNativeAttachmentMediaCandidateKeys = new Set();
     this._nativeMediaViewerOpenContextDepth = 0;
     this._nativeAttachmentMediaViewerOwnership = null;
     this._loggerOwnedAttachmentMediaModalKeys = new Set();
@@ -507,6 +509,7 @@ module.exports = class MessageLoggerV2 {
     this._activeNoSaveMergeRollbackContext = null;
     this._noSaveMergePromise = null;
     this._discardNoSaveSessionOnResume = false;
+    this._savedAttachmentPresentationRecacheChannels?.clear?.();
     this._forumUploadAsReplyPatchGeneration += 1;
     this._forumUploadAsReplyPatchInstalled = false;
     this._forumUploadAsReplySendPatchInstalled = false;
@@ -520,6 +523,7 @@ module.exports = class MessageLoggerV2 {
     this._archiveLoadModeSettleTimer = 0;
     this._archiveLoadModeTransitionInProgress = false;
     this._failedNativeAttachmentMediaKeys?.clear?.();
+    this._failedNativeAttachmentMediaCandidateKeys?.clear?.();
     this._removeSavedAttachmentMediaErrorListener();
     // A CSS-class mode restart uses BetterDiscord's disable/enable lifecycle on this same
     // instance. Its settings panel remains mounted, so retain the controlled/custom-input
@@ -4909,10 +4913,10 @@ module.exports = class MessageLoggerV2 {
         shown: false,
         settings: [
           {
-            name: 'Cache media locally',
+            name: 'Render & Cache media',
             note: this.createLinkedSettingNote(
-              'Caches media and enables linked child controls.',
-              'Disables them; child values stay saved.',
+              'Renders saved media, caches eligible files, and retries saved live URLs after an Off-to-On transition.',
+              'Shows attachment placeholders; child settings stay saved.',
               ' New downloads pause while ',
               React.createElement(
                 'span',
@@ -5034,6 +5038,7 @@ module.exports = class MessageLoggerV2 {
             name: 'Media cache path (optional)',
             note: 'Use an existing folder instead of MLV2_IMAGE_CACHE.',
             id: 'newCacheAllImagesPath',
+            enableWith: 'cacheAllImages',
             type: 'textbox',
             validator: 'cachePath'
           },
@@ -5047,6 +5052,7 @@ module.exports = class MessageLoggerV2 {
               ' for organized forum and thread media storage.'
             ),
             id: 'newCacheAllImages',
+            enableWith: 'cacheAllImages',
             type: 'switch',
             disabled: true,
             onChange: () => {
@@ -5058,6 +5064,7 @@ module.exports = class MessageLoggerV2 {
             name: 'Only render locally cached attachments',
             note: 'Hide uncached attachments instead of loading them from Discord.',
             id: 'onlyRenderCachedAttachments',
+            enableWith: 'cacheAllImages',
             type: 'switch',
             action: 'refreshAttachmentRendering'
           },
@@ -5065,6 +5072,7 @@ module.exports = class MessageLoggerV2 {
             name: 'Delete cached files with log records',
             note: 'Also delete cached media with log records. This cannot be undone.',
             id: 'deleteCachedFilesWithRecords',
+            enableWith: 'cacheAllImages',
             type: 'switch',
             action: 'reportCachedFileDeletion'
           },
@@ -5072,6 +5080,7 @@ module.exports = class MessageLoggerV2 {
             name: 'Force legacy media fetching',
             note: 'Use Discord renderer networking for persistent media-cache downloads instead of BetterDiscord native networking.',
             id: 'forceLegacyMediaFetching',
+            enableWith: 'cacheAllImages',
             type: 'switch',
             action: 'reportForceLegacyMediaFetching'
           }
@@ -5164,7 +5173,7 @@ module.exports = class MessageLoggerV2 {
             note: React.createElement(
               'span',
               { style: { color: 'var(--status-warning)' } },
-              'Shared newest-first attachment cap. Cache media locally governs this cap and all Anti-Nuke attachment caching: while local media caching is ',
+              'Shared newest-first attachment cap. Render & Cache media governs this cap and all Anti-Nuke attachment caching: while media rendering and caching are ',
               this.createSettingStateLabel(false),
               ', no attachment bytes are cached and the saved cap has no effect. When both masters are ',
               this.createSettingStateLabel(true),
@@ -8879,6 +8888,7 @@ module.exports = class MessageLoggerV2 {
   resetSavedAttachmentPresentationState() {
     this.closeLoggerOwnedAttachmentMediaViewers?.();
     this._failedNativeAttachmentMediaKeys?.clear?.();
+    this._failedNativeAttachmentMediaCandidateKeys?.clear?.();
     if (typeof this.imageCacheServerSimulator?.cleanUp === 'function') {
       this.imageCacheServerSimulator.cleanUp();
     }
@@ -9685,9 +9695,55 @@ module.exports = class MessageLoggerV2 {
           sources: remoteSources
         };
       }
-      const primary = remoteSources[0] || null;
-      const fallback = remoteSources[1] || null;
-      if (!primary) return {
+      const candidatePlans = remoteSources
+        .map(candidate => {
+          return {
+            candidate,
+            failureKey: this.getSavedAttachmentMediaCandidateFailureKey(
+              descriptor.channel_id,
+              descriptor.message_id,
+              descriptor.attachment_id,
+              candidate
+            )
+          };
+        })
+        .filter(entry => entry.candidate && entry.failureKey);
+      const allCandidatesFailed = candidatePlans.length > 0 && candidatePlans
+        .every(entry => this._failedNativeAttachmentMediaCandidateKeys?.has?.(entry.failureKey));
+      const nextAvailableCandidate = candidatePlans
+        .find(entry => !this._failedNativeAttachmentMediaCandidateKeys?.has?.(entry.failureKey));
+      const nextAvailableFallback = nextAvailableCandidate
+        ? candidatePlans
+          .slice(candidatePlans.findIndex(entry => entry === nextAvailableCandidate) + 1)
+          .find(entry => !this._failedNativeAttachmentMediaCandidateKeys?.has?.(entry.failureKey))
+        : null;
+      if (allCandidatesFailed) {
+        if (!this._failedNativeAttachmentMediaKeys?.has?.(mediaFailureKey)) {
+          this._failedNativeAttachmentMediaKeys = this._failedNativeAttachmentMediaKeys || new Set();
+          this._failedNativeAttachmentMediaKeys.add(mediaFailureKey);
+        }
+        const cachedBlobUrl = getCachedBlobUrl();
+        if (cachedBlobUrl) {
+          return {
+            attachment_id: descriptor.attachment_id,
+            mediaType,
+            filename: sourceText,
+            action: 'blob',
+            label,
+            sources: remoteSources,
+            url: cachedBlobUrl
+          };
+        }
+        return {
+          attachment_id: descriptor.attachment_id,
+          mediaType,
+          filename: sourceText,
+          action: 'omit',
+          label,
+          sources: remoteSources
+        };
+      }
+      if (!nextAvailableCandidate) return {
         attachment_id: descriptor.attachment_id,
         mediaType,
         filename: sourceText,
@@ -9702,8 +9758,8 @@ module.exports = class MessageLoggerV2 {
         action: 'remote',
         label,
         sources: remoteSources,
-        url: primary,
-        fallbackUrl: fallback
+        url: nextAvailableCandidate.candidate,
+        fallbackUrl: nextAvailableFallback ? nextAvailableFallback.candidate : null
       };
     }
     if (!allowBlob || !descriptor.local_path || (!isImage && !isVideo)) {
@@ -9827,7 +9883,7 @@ module.exports = class MessageLoggerV2 {
       if (!sourceAttachment) continue;
       const rendered = { ...sourceAttachment };
       if (plan.url) rendered.url = plan.url;
-      if (plan.action === 'blob' && plan.url) rendered.proxy_url = plan.url;
+      if (plan.url) rendered.proxy_url = plan.url;
       attachments.push(rendered);
     }
     return {
@@ -9859,6 +9915,133 @@ module.exports = class MessageLoggerV2 {
   }
   getSavedAttachmentMediaFailureKey(channelId, messageId, attachmentId) {
     return `${String(channelId ?? '')}:${String(messageId ?? '')}:${String(attachmentId ?? '')}`;
+  }
+  getSavedAttachmentMediaCandidateFailureKey(channelId, messageId, attachmentId, candidateUrl) {
+    const normalizedUrl = this.normalizeSavedAttachmentMediaUrl(candidateUrl);
+    if (!normalizedUrl) return null;
+    return `${String(channelId ?? '')}:${String(messageId ?? '')}:${String(attachmentId ?? '')}:${normalizedUrl}`;
+  }
+  normalizeSavedAttachmentMediaUrl(candidateUrl) {
+    try {
+      const parsed = new URL(candidateUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+      return `${parsed.protocol}//${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}`;
+    } catch {
+      return null;
+    }
+  }
+  getSavedAttachmentMediaCandidateFailureKeyForSource(descriptor, sourceUrl) {
+    if (!descriptor || !Array.isArray(descriptor.remote_urls) || !sourceUrl) return null;
+    const sourceParsed = (() => {
+      try {
+        return new URL(sourceUrl);
+      } catch {
+        return null;
+      }
+    })();
+    if (!sourceParsed || (sourceParsed.protocol !== 'http:' && sourceParsed.protocol !== 'https:')) return null;
+    const candidates = descriptor.remote_urls;
+    const sourceNormalized = this.normalizeSavedAttachmentMediaUrl(sourceParsed.href);
+    if (!sourceNormalized) return null;
+    let pathMatchKey = null;
+    for (const candidate of candidates) {
+      const failureKey = this.getSavedAttachmentMediaCandidateFailureKey(
+        descriptor.channel_id,
+        descriptor.message_id,
+        descriptor.attachment_id,
+        candidate
+      );
+      const candidateNormalized = this.normalizeSavedAttachmentMediaUrl(candidate);
+      if (!failureKey || !candidateNormalized) continue;
+      if (candidateNormalized === sourceNormalized) {
+        return failureKey;
+      }
+      if (!pathMatchKey) {
+        try {
+          const candidateParsed = new URL(candidate);
+          if (
+            candidateParsed.protocol === sourceParsed.protocol
+            && candidateParsed.host === sourceParsed.host
+            && candidateParsed.pathname === sourceParsed.pathname
+          ) {
+            pathMatchKey = failureKey;
+          }
+        } catch {}
+      }
+    }
+    return pathMatchKey;
+  }
+  markSavedAttachmentMediaCandidateFailure(attachment, sourceMessage, sourceUrl) {
+    if (!attachment || !sourceMessage || typeof sourceUrl !== 'string') return false;
+    const descriptor = this.getSavedAttachmentDescriptor(attachment, sourceMessage);
+    if (!descriptor || !descriptor.attachment_id || !descriptor.message_id || !descriptor.channel_id) return false;
+    const failureKey = this.getSavedAttachmentMediaCandidateFailureKeyForSource(descriptor, sourceUrl);
+    if (!failureKey) return false;
+
+    const terminalFailureKey = this.getSavedAttachmentMediaFailureKey(
+      descriptor.channel_id,
+      descriptor.message_id,
+      descriptor.attachment_id
+    );
+    if (this._failedNativeAttachmentMediaKeys?.has?.(terminalFailureKey)) return false;
+
+    this._failedNativeAttachmentMediaCandidateKeys = this._failedNativeAttachmentMediaCandidateKeys || new Set();
+    if (this._failedNativeAttachmentMediaCandidateKeys.has(failureKey)) return false;
+    this._failedNativeAttachmentMediaCandidateKeys.add(failureKey);
+    return true;
+  }
+  _scheduleSavedAttachmentPresentationRecache(channelId) {
+    const targetChannelId = String(channelId ?? '');
+    if (!targetChannelId) return;
+    const pending = this._savedAttachmentPresentationRecacheChannels ||= new Set();
+    if (pending.has(targetChannelId)) return;
+    pending.add(targetChannelId);
+    const scheduleFrame = typeof globalThis.requestAnimationFrame === 'function'
+      ? globalThis.requestAnimationFrame
+      : globalThis.setImmediate;
+    const run = () => {
+      pending.delete(targetChannelId);
+      if (this.__started === false) return;
+      this.invalidateChannelCache?.(targetChannelId);
+      this.cacheChannelMessages?.(targetChannelId);
+    };
+    if (typeof scheduleFrame === 'function') scheduleFrame(run);
+    else if (typeof globalThis.setImmediate === 'function') globalThis.setImmediate(run);
+  }
+  remountSavedAttachmentPresentationRecords(records) {
+    const channelIds = new Set();
+    const items = Array.isArray(records) ? records : [records];
+    for (const record of items) {
+      if (!record?.delete_data) continue;
+      const message = record.message;
+      if (!message?.id || !message.channel_id) continue;
+      const attachments = Array.isArray(message.attachments) && message.attachments.length ? message.attachments : [];
+      if (!attachments.length || record.delete_data.hidden) continue;
+      const channelId = String(message.channel_id);
+      const liveSavedChannel = this.tools?.getChannel?.(channelId);
+      const keepsDiscordOwnedThreadMount = [10, 11, 12].includes(Number(liveSavedChannel?.type))
+        && (
+          !!record.delete_data.forum_thread_message_delete
+          || String(message.id) === channelId
+        );
+      if (keepsDiscordOwnedThreadMount) {
+        this.dispatcher?.dispatch?.({
+          type: 'MESSAGE_UPDATE',
+          message: this.getNativeDeletedAttachmentPresentationMessage(message),
+          ML2: true
+        });
+      } else {
+        this.dispatcher?.dispatch?.({
+          type: 'MESSAGE_DELETE',
+          id: message.id,
+          channelId: channelId,
+          ML2: true
+        });
+      }
+      channelIds.add(channelId);
+    }
+    for (const channelId of channelIds) this._scheduleSavedAttachmentPresentationRecache(channelId);
+    return channelIds.size;
   }
   _installSavedAttachmentMediaErrorListener() {
     if (this._savedAttachmentMediaErrorListener) return;
@@ -9912,20 +10095,9 @@ module.exports = class MessageLoggerV2 {
       : [];
     if (!attachments.length) return;
 
-    const sourcePath = parsedSource.pathname;
-    const isSameUrlOrPath = (candidateUrl) => {
-      if (candidateUrl === sourceUrl) return true;
-      try {
-        return new URL(candidateUrl).pathname === sourcePath;
-      } catch {
-        return false;
-      }
-    };
-
     for (const attachment of attachments) {
       const descriptor = this.getSavedAttachmentDescriptor(attachment, record.message);
-      if (!descriptor || !Array.isArray(descriptor.remote_urls)
-        || !descriptor.remote_urls.some(isSameUrlOrPath)) continue;
+      if (!descriptor || !Array.isArray(descriptor.remote_urls) || !descriptor.remote_urls.length) continue;
 
       const classificationSources = [
         descriptor.filename,
@@ -9939,22 +10111,10 @@ module.exports = class MessageLoggerV2 {
       const isImage = classificationSources.some(source => this.isImage(source));
       const isVideo = !isImage && classificationSources.some(source => this.isVideo(source));
       if (!isImage && !isVideo) continue;
-      if (!descriptor.attachment_id || !descriptor.message_id || !descriptor.channel_id) continue;
 
-      const failureKey = this.getSavedAttachmentMediaFailureKey(
-        descriptor.channel_id,
-        descriptor.message_id,
-        descriptor.attachment_id
-      );
-      if (this._failedNativeAttachmentMediaKeys?.has?.(failureKey)) return;
-      this._failedNativeAttachmentMediaKeys = this._failedNativeAttachmentMediaKeys || new Set();
-      this._failedNativeAttachmentMediaKeys.add(failureKey);
+      if (!this.markSavedAttachmentMediaCandidateFailure(attachment, record.message, sourceUrl)) continue;
 
-      this.dispatcher?.dispatch?.({
-        type: 'MESSAGE_UPDATE',
-        message: this.getNativeDeletedAttachmentPresentationMessage(record.message),
-        ML2: true
-      });
+      this.remountSavedAttachmentPresentationRecords(record);
       return;
     }
   }
@@ -9971,24 +10131,24 @@ module.exports = class MessageLoggerV2 {
   }
   refreshAttachmentRendering() {
     const channelId = DiscordModules.SelectedChannelStore?.getChannelId?.() || this.selectedChannel?.id;
+    let remountedCount = 0;
     if (channelId) {
       const ids = new Set([
         ...((this.deletedMessageRecord || {})[channelId] || []),
         ...((this.purgedMessageRecord || {})[channelId] || []),
         ...((this.nukedMessageRecord || {})[channelId] || [])
       ]);
+      const records = [];
       for (const id of ids) {
         const record = this.messageRecord?.[id];
-        if (!record?.message || record.delete_data?.hidden) continue;
-        this.dispatcher?.dispatch?.({
-          type: 'MESSAGE_UPDATE',
-          message: this.getNativeDeletedAttachmentPresentationMessage(record.message),
-          ML2: true
-        });
+        if (!record?.delete_data || !record.message || record.delete_data?.hidden) continue;
+        if (!Array.isArray(record.message?.attachments) || !record.message.attachments.length) continue;
+        records.push(record);
       }
+      remountedCount = this.remountSavedAttachmentPresentationRecords(records) || 0;
     }
     this.invalidateAllChannelCache?.();
-    if (channelId) this.cacheChannelMessages?.(channelId);
+    if (channelId && !remountedCount) this.cacheChannelMessages?.(channelId);
     this.dispatcher?.dispatch?.({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' });
     for (const [threadId, refresh] of this._forumThreadLogRefreshers?.entries?.() || []) {
       if (typeof refresh !== 'function') continue;
@@ -14067,7 +14227,7 @@ module.exports = class MessageLoggerV2 {
            </div></br>
            To log all eligible unmuted servers and channels, disable <strong>Only log whitelist</strong> under <strong>Ignores and overrides</strong>.</br>
            <strong>Always log selected channel</strong> and <strong>Always log DMs</strong> are enabled by default and can override the normal whitelist, blacklist, mute, and NSFW scope rules for their targets.</br>
-           Logged message content and any enabled media cache remain local to this device. Review <strong>Cache media locally</strong> under <strong>Media settings</strong> and <strong>Disable saving data</strong> under <strong>Misc settings</strong> if needed.
+           Logged message content and any enabled media cache remain local to this device. Review <strong>Render &amp; Cache media</strong> under <strong>Media settings</strong> and <strong>Disable saving data</strong> under <strong>Misc settings</strong> if needed.
          </div>`
       : '';
     // The generic help greeting is useful when the modal is opened manually, but it adds
@@ -14590,12 +14750,33 @@ module.exports = class MessageLoggerV2 {
     const proxyUrl = canonicalProxyUrl
       || exactText(attachment.proxyUrl)
       || exactText(attachment.proxyURL);
+    const toCdnProxyUrl = value => {
+      if (!value) return null;
+      let parsed;
+      try {
+        parsed = new URL(value);
+      } catch {
+        return null;
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+      if (parsed.hostname !== 'media.discordapp.net') return null;
+      const startsWithAttachments = parsed.pathname.startsWith('/attachments/')
+        || parsed.pathname.startsWith('/ephemeral-attachments/');
+      if (!startsWithAttachments) return null;
+      return `https://cdn.discordapp.com${parsed.pathname}${parsed.search}${parsed.hash}`;
+    };
     const attachmentId = stringId(attachment.id);
     const messageId = stringId(message.id);
     const channelId = stringId(message.channel_id ?? message.channelId);
     const remoteUrls = [];
+    const addRemoteUrl = candidate => {
+      if (!isHttpUrl(candidate) || remoteUrls.includes(candidate)) return;
+      remoteUrls.push(candidate);
+    };
     for (const candidate of [directUrl, proxyUrl]) {
-      if (isHttpUrl(candidate) && !remoteUrls.includes(candidate)) remoteUrls.push(candidate);
+      if (!candidate) continue;
+      addRemoteUrl(toCdnProxyUrl(candidate));
+      addRemoteUrl(candidate);
     }
     const getUrlBasename = value => {
       if (!isHttpUrl(value)) return '';
@@ -17189,12 +17370,14 @@ module.exports = class MessageLoggerV2 {
         fallback
       }) => {
         const initialMediaType = presentationPlan?.mediaType;
+        const initialLabel = typeof presentationPlan?.label === 'string' ? presentationPlan.label : null;
         const initialDisplayUrl = typeof presentationPlan?.url === 'string'
           ? presentationPlan.url
           : '';
         const [displayPlan, setDisplayPlan] = React.useState({
           action: presentationPlan?.action,
           mediaType: initialMediaType,
+          label: initialLabel,
           url: initialDisplayUrl
         });
         const [errored, setErrored] = React.useState(false);
@@ -17210,22 +17393,28 @@ module.exports = class MessageLoggerV2 {
             setErrored(true);
             return;
           }
-          let blobPlan;
+
+          let nextPlan;
           try {
-            blobPlan = plugin.getSavedAttachmentPresentationPlan(
+            plugin.markSavedAttachmentMediaCandidateFailure(
               attachment,
               currentRecord?.message,
-              { allowBlob: true }
+              displayPlan.url
+            );
+            nextPlan = plugin.getSavedAttachmentPresentationPlan(
+              attachment,
+              currentRecord?.message,
+              { allowRemote: true }
             );
           } catch {}
-          if (blobPlan?.action === 'blob'
-            && typeof blobPlan.url === 'string'
-            && blobPlan.url
-            && blobPlan.url !== displayPlan.url) {
+          if (nextPlan && (nextPlan.action === 'remote' || nextPlan.action === 'blob')
+            && typeof nextPlan.url === 'string'
+            && nextPlan.url !== displayPlan.url) {
             setDisplayPlan({
-              action: blobPlan.action,
-              mediaType: blobPlan.mediaType,
-              url: blobPlan.url
+              action: nextPlan.action,
+              mediaType: nextPlan.mediaType,
+              label: nextPlan.label,
+              url: nextPlan.url
             });
             return;
           }
@@ -19942,9 +20131,7 @@ module.exports = class MessageLoggerV2 {
               }
               if (plan.url) {
                 renderedAttachment.url = plan.url;
-                if (plan.action === 'blob') {
-                  renderedAttachment.proxy_url = plan.url;
-                }
+                renderedAttachment.proxy_url = plan.url;
               }
               if (entry.removed) {
                 loggerMediaRenderRemoved.push(renderedAttachment);
@@ -20121,6 +20308,84 @@ module.exports = class MessageLoggerV2 {
           const handleCreateImage = (attachment, idx) => {
             const presentationAction = attachment._ml2PresentationAction;
             const presentationLabel = attachment._ml2PresentationLabel;
+            const getLoggerAttachmentEntry = (mediaAttachment) => {
+              const mediaAttachmentId = mediaAttachment?.id;
+              const mediaAttachmentIdentity = this.getRemovedAttachmentIdentity(mediaAttachment);
+              if (mediaAttachmentId == null && mediaAttachmentIdentity == null) return null;
+              for (const entry of loggerAttachmentPresentationEntries) {
+                const entryAttachment = entry?.attachment;
+                if (mediaAttachmentId != null && String(entryAttachment?.id) === String(mediaAttachmentId)) return entry;
+                if (mediaAttachmentIdentity != null
+                  && String(this.getRemovedAttachmentIdentity(entryAttachment)) === String(mediaAttachmentIdentity)) {
+                  return entry;
+                }
+              }
+              return null;
+            };
+            const fallbackToNextLoggerRemotePlan = (mediaElement, hostElement, mediaAttachment, useCachedRenderer, width, height) => {
+              const fallbackHost = hostElement || mediaElement;
+              const loggerAttachmentEntry = getLoggerAttachmentEntry(mediaAttachment);
+              const sourceAttachment = loggerAttachmentEntry?.attachment;
+              if (!sourceAttachment) {
+                fallbackHost?.replaceWith(
+                  createUnavailableAttachmentPlaceholder(presentationLabel || mediaAttachment.filename)
+                );
+                return;
+              }
+              let nextPlan;
+              try {
+                this.markSavedAttachmentMediaCandidateFailure(
+                  sourceAttachment,
+                  sourceMessage,
+                  mediaAttachment.url
+                );
+                nextPlan = this.getSavedAttachmentPresentationPlan(
+                  sourceAttachment,
+                  sourceMessage,
+                  { allowRemote: true }
+                );
+              } catch {}
+              if (nextPlan?.action === 'remote' && typeof nextPlan.url === 'string') {
+                if (nextPlan.url === mediaAttachment.url) {
+                  fallbackHost?.replaceWith(
+                    createUnavailableAttachmentPlaceholder(
+                      typeof nextPlan.label === 'string'
+                        ? nextPlan.label
+                        : (presentationLabel || mediaAttachment.filename)
+                    )
+                  );
+                  return;
+                }
+                mediaAttachment.url = nextPlan.url;
+                mediaAttachment.proxy_url = nextPlan.url;
+                mediaAttachment._ml2PresentationAction = nextPlan.action;
+                mediaAttachment._ml2PresentationLabel = typeof nextPlan.label === 'string'
+                  ? nextPlan.label
+                  : mediaAttachment._ml2PresentationLabel;
+                mediaElement.src = nextPlan.url;
+                return;
+              }
+              if (nextPlan?.action === 'blob' && typeof nextPlan.url === 'string') {
+                fallbackHost?.remove();
+                useCachedRenderer(
+                  mediaAttachment.id,
+                  idx,
+                  mediaAttachment.hidden,
+                  mediaAttachment.filename,
+                  width,
+                  height,
+                  typeof nextPlan.label === 'string' ? nextPlan.label : presentationLabel
+                );
+                return;
+              }
+              fallbackHost?.replaceWith(
+                createUnavailableAttachmentPlaceholder(
+                  typeof nextPlan?.label === 'string'
+                    ? nextPlan.label
+                    : (presentationLabel || mediaAttachment.filename)
+                )
+              );
+            };
             const isCached = presentationAction
               ? presentationAction === 'blob' || attachment.url == 'ERROR'
               : attachment.url == 'ERROR' || this.isAttachmentLocallyCached(attachment, message);
@@ -20176,6 +20441,12 @@ module.exports = class MessageLoggerV2 {
                 });
               }
               video.onerror = () => {
+                if (presentationAction === 'remote'
+                  && this.settings.cacheAllImages !== false
+                  && !this.settings.onlyRenderCachedAttachments) {
+                  fallbackToNextLoggerRemotePlan(video, container, attachment, attemptToUseCachedVideo, attachment.width, attachment.height);
+                  return;
+                }
                 if (this.isAttachmentLocallyCached(attachment, message)) {
                   container.remove();
                   attemptToUseCachedVideo(
@@ -20230,6 +20501,12 @@ module.exports = class MessageLoggerV2 {
                 });
               }
               img.onerror = () => {
+                if (presentationAction === 'remote'
+                  && this.settings.cacheAllImages !== false
+                  && !this.settings.onlyRenderCachedAttachments) {
+                  fallbackToNextLoggerRemotePlan(img, img, attachment, attemptToUseCachedImage, attachment.width, attachment.height);
+                  return;
+                }
                 if (this.isAttachmentLocallyCached(attachment, message)) {
                   img.remove();
                   attemptToUseCachedImage(

@@ -12,13 +12,13 @@ On current BetterDiscord builds, dependent controls are greyed out while their m
 | Display edited messages in chat | Max number of shown edits; Show oldest edit instead of newest if over the shown edits limit |
 | Disable saving data | Disable loading archived data |
 | Auto backup data (won't fully prevent losing data, just prevent total data loss) | Auto backup interval (seconds) |
-| Cache media locally | Add user id to saved media filename; Cache all attachment types; Max cache file size (MB, 0 = no limit); Live/pre-cache age and GB limits; Shared cache trim timer; Total attachment cap when Anti Nuke is On |
+| Render & Cache media | Every other Media setting; Total attachment cap when Anti Nuke is On |
 | Block spam edit notifications (if enabled) | Edit spam threshold |
 | Enable Anti Nuke | Show nuke detection toasts; Thread and forum post cap; Total message cap; Total attachment cap |
 
-The deleted-message color, media-cache path, Media-group cached-file policies, and self-message/edit ignores remain independent by design.
+The deleted-message color and self-message/edit ignores remain independent by design. Media child values stay saved while their master is Off.
 
-**Total attachment cap** has two masters. It is available only while both **Enable Anti Nuke** and **Cache media locally** are On; turning either master Off preserves the saved cap.
+**Total attachment cap** has two masters. It is available only while both **Enable Anti Nuke** and **Render & Cache media** are On; turning either master Off preserves the saved cap.
 
 ## 🎯 Logging Scope
 
@@ -103,9 +103,9 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Cache media locally | On | Master switch for caching attachments, embed images, Components V2 thumbnails/media galleries, and stickers. Media without a saved logger record is staged in an exact per-message `_PreCache` folder; confirmation promotes the matching file into the normal cache without downloading it again. While **Disable saving data** is on, eligible logger media requests remain in a memory-only queue and no media files are created. The queue drains only after the primary archive save succeeds; disabling media caching or reloading first discards it. A download allows 15 seconds for the initial response, then uses a rolling 30-second no-data watchdog: it may continue longer while non-empty bytes keep arriving. Turning this switch Off or stopping the plugin immediately cancels active media work without a retry or late file write. |
+| Render & Cache media | On | Master switch for saved attachment presentation and for caching eligible attachments, embed images, Components V2 thumbnails/media galleries, and stickers. Off shows saved direct attachments as classified filename placeholders, retains existing files and child values, and cancels active media work without a retry or late file write. On retries saved live attachment URLs for presentation. Media without a saved logger record is staged in an exact per-message `_PreCache` folder; confirmation promotes the matching file into the normal cache without downloading it again. While **Disable saving data** is on, eligible logger media requests remain in a memory-only queue and no media files are created. The queue drains only after the primary archive save succeeds; disabling media caching or reloading first discards it. A download allows 15 seconds for the initial response, then uses a rolling 30-second no-data watchdog: it may continue longer while non-empty bytes keep arriving. |
 | Add user id to saved media filename | Off | Includes the author ID in hierarchical cache filenames. |
-| Cache all attachment types | Off | Known limitation in 2.8.2.13: arbitrary non-image files may remain CDN-backed or uncached when On and may still appear as attachment references when Off. Established image, embed, sticker, and visual Components V2 caching remains supported by **Cache media locally**. |
+| Cache all attachment types | Off | Known limitation in 2.8.2.13: arbitrary non-image files may remain CDN-backed or uncached when On and may still appear as attachment references when Off. Established image, embed, sticker, and visual Components V2 caching remains supported by **Render & Cache media**. |
 | Max cache file size (MB, 0 = no limit) | `0` MB | Skips larger attachment files; blank or `0` disables the limit. Whole numbers and values with up to two decimal places are accepted (decimal SI MB = 1,000,000 bytes). Embed images and stickers are unaffected. |
 | Live cache maximum age (hours) | `0` | Deletes eligible live-cache files older than this age, using the source message date in each filename when valid and the file modified date as a fallback. This remains whole-number-only; blank or `0` is unlimited. |
 | Live cache maximum size (GB) | `0` | Deletes oldest eligible live-cache files until usage is at or below 95% of the cap, ordering by source message date when valid and file modified date otherwise. Whole numbers and values with up to two decimal places are accepted (decimal SI GB = 1,000,000,000 bytes). Blank or `0` is unlimited. Setting or lowering this GB limit on a large cache can briefly make Discord unresponsive during the first catch-up trim; later passes are normally lighter. |
@@ -129,7 +129,7 @@ BetterDiscord stores the plugin's data beside the installed plugin:
 - `MLV2_IMAGE_CACHE/`: default attachment cache.
 - `MLV2_IMAGE_CACHE_PreCache/`: provisional per-message media awaiting a saved logger record.
 
-The shared cache trimmer runs only while **Cache media locally** is On. It walks the active live root and its `${root}_PreCache` sibling through BetterDiscord's synchronous filesystem bridge, yielding after small work batches so Discord can keep processing UI work. It applies age before size, skips symlinks, preserves both roots, and never deletes a file through the Logger record-deletion path. Live age cutoffs and oldest-first size ordering use the source message date encoded in each valid cache filename, falling back to the file modified date when the source ID is missing or invalid; pre-cache age and size always use the file modified date. When a size reduction is required, one fresh verification scan catches files written during the first reduction and performs one final oldest-first correction toward the live 95% or pre-cache 80% target. A limit edit waits for one coalesced 20-second change delay; the periodic timer waits for the full configured interval after startup, completion, or an interval reset.
+The shared cache trimmer runs only while **Render & Cache media** is On. It walks the active live root and its `${root}_PreCache` sibling through BetterDiscord's synchronous filesystem bridge, yielding after small work batches so Discord can keep processing UI work. It applies age before size, skips symlinks, preserves both roots, and never deletes a file through the Logger record-deletion path. Live age cutoffs and oldest-first size ordering use the source message date encoded in each valid cache filename, falling back to the file modified date when the source ID is missing or invalid; pre-cache age and size always use the file modified date. When a size reduction is required, one fresh verification scan catches files written during the first reduction and performs one final oldest-first correction toward the live 95% or pre-cache 80% target. A limit edit waits for one coalesced 20-second change delay; the periodic timer waits for the full configured interval after startup, completion, or an interval reset.
 
 The next eligible write recreates its exact missing main-cache or pre-cache directory. Every MessageLogger console event uses the orange `MessageLoggerV2` identity pill. Normal categories add a blue pill. Debug output adds a red `DEBUG` pill and, when applicable, a separate blue subcategory pill such as `PRE-CACHE` or `TRIM`; uncategorized events add no second pill. The orange identity and red `DEBUG` pills use black text; blue category and subcategory pills use the current off-white text. Provisional write messages are visible only with console Debug logging enabled; promotions and confirmed network writes remain normal info messages and show only the filename. The scheduled trimmer also scans and prunes orphaned pre-cache folders according to the active age and size limits.
 
@@ -218,14 +218,14 @@ Older configs that stored this Guild-only value under DM toast settings are migr
 | Show nuke detection toasts | On | Reports only deleted channels that captured Anti-Nuke records, avoiding empty/uncached false positives. Uses the destructive deleted/purged event color and selected native/custom mode; ordinary logging and alert scope do not suppress it. |
 | Thread and forum post cap | `15` | Limits structural thread/forum-post roots captured per deleted parent channel. Blank or `0` is unlimited. |
 | Total message cap | `45` | One shared allowance for replies across captured threads/forum posts plus ordinary parent-channel messages. Root payloads, including a distinct starter folded into a channel-thread root, do not consume this cap. Blank or `0` is unlimited. |
-| Total attachment cap | `15` | One total shared allowance for Discord file attachments across the deleted channel while **Cache media locally** is On. A single message can consume the entire cap. While local media caching is Off, no Anti-Nuke attachment bytes are cached, the saved cap is inactive, and attachment metadata remains in the saved record. When active, blank or `0` is unlimited. |
+| Total attachment cap | `15` | One total shared allowance for Discord file attachments across the deleted channel while **Render & Cache media** is On. A single message can consume the entire cap. While media rendering and caching are Off, no Anti-Nuke attachment bytes are cached, the saved cap is inactive, and attachment metadata remains in the saved record. When active, blank or `0` is unlimited. |
 
 All three caps apply to one parent-channel deletion event:
 
 - Thread/forum roots, then their replies, then ordinary parent-channel messages are captured newest-first.
 - Anti-Nuke channel-thread roots use the same metadata and starter-body schema as ordinary deleted threads; their dedicated Nuked category and marker keep them separate from ordinary bulk deletes.
 - Attachments count only after their message is admitted. Excluded messages never store attachments; roots remain even if their attachments exceed the budget.
-- The attachment cap is inactive while **Cache media locally** is Off; the thread and message caps remain active.
+- The attachment cap is inactive while **Render & Cache media** is Off; the thread and message caps remain active.
 - Anti Nuke bypasses normal logging scope and unrelated author ignores. Ordinarily ignored bot/app/webhook messages and hidden records are still eligible for Anti-Nuke capture when present in deleted-channel history. Ephemeral messages are always excluded.
 - Hidden Nuked records remain in **Hidden** while Anti Nuke is off. Unhiding one keeps it stored and makes it visible again when Anti Nuke is re-enabled.
 - Blank or `0` is unlimited and can freeze Discord or use substantial disk space on large channels.
@@ -292,7 +292,7 @@ Settings can also produce their own state-change notification. This is separate 
 | **Disable saving data** | Both states: enabled reports memory-only behavior and whether the archive is loaded or detached; disabled reports normal saving or recovery resuming. |
 | **Disable loading archived data** | Both states: reports archive unload or in-memory reload only after the transition succeeds. |
 | **Auto backup data** | Both states: enabled reports active or saving-paused backup behavior as info; disabled reports shutdown and any pending cancellation as neutral. |
-| **Cache media locally** | Both states: enabled uses info; disabled uses neutral. |
+| **Render & Cache media** | Both states: enabled uses info; disabled uses neutral. |
 | **Enable Anti Nuke** | Both states: enabled uses info; disabled uses neutral and explains that existing Nuked records remain saved. |
 | **Automatic updates** | Both states: enabled uses info; disabled uses neutral. |
 | **Only render locally cached attachments** | Both states: enabled uses info; disabled uses neutral. |
