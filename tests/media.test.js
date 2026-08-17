@@ -126,6 +126,12 @@ function createFakeEventTarget() {
   };
 }
 
+function createNativeMediaClosest(messageRow) {
+  return selector => selector === '[data-ml2-attachment-video-host="true"]'
+    ? null
+    : messageRow;
+}
+
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -2851,6 +2857,55 @@ test('cache-only rendering uses direct, then proxy media URLs when master is on 
   assert.deepEqual(message, canonicalBefore);
 });
 
+test('cache-only audio attachments classify as media and keep CDN then proxy ordering', () => {
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [
+      {
+        id: 'audio-ext',
+        filename: 'clip.mp3',
+        url: 'https://cdn.discordapp.com/attachments/channel/111/clip.mp3',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/111/clip.mp3'
+      },
+      {
+        id: 'audio-type',
+        filename: 'recording',
+        content_type: 'audio/ogg',
+        original_content_type: 'audio/ogg',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/111/recording.ogg'
+      }
+    ]
+  };
+  const canonicalBefore = structuredClone(message);
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: { exists: () => false }
+  });
+
+  const firstPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[0], message, { allowRemote: true });
+  const secondPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[1], message, { allowRemote: true });
+  const rendered = plugin.getCacheOnlyMessage(message);
+
+  assert.equal(firstPlan.action, 'remote');
+  assert.equal(firstPlan.mediaType, 'audio');
+  assert.equal(firstPlan.label, '[attachment:clip.mp3]');
+  assert.equal(firstPlan.url, 'https://cdn.discordapp.com/attachments/channel/111/clip.mp3');
+  assert.equal(firstPlan.fallbackUrl, 'https://media.discordapp.net/attachments/channel/111/clip.mp3');
+  assert.equal(secondPlan.action, 'remote');
+  assert.equal(secondPlan.mediaType, 'audio');
+  assert.equal(secondPlan.label, '[attachment:recording]');
+  assert.equal(secondPlan.url, 'https://cdn.discordapp.com/attachments/channel/111/recording.ogg');
+  assert.equal(secondPlan.fallbackUrl, 'https://media.discordapp.net/attachments/channel/111/recording.ogg');
+  assert.equal(rendered.attachments.length, 2);
+  assert.deepEqual(rendered.attachments[1].url, secondPlan.url);
+  assert.deepEqual(message, canonicalBefore);
+});
+
 test('cache master defaults to enabled when cacheAllImages is undefined', () => {
   const plugin = createPlugin({
     settings: { onlyRenderCachedAttachments: false },
@@ -2956,6 +3011,71 @@ test('cache-only rendering uses cached blob URLs only for supported local-only m
   assert.equal(rendered.attachments[0].proxy_url, 'blob://local/cached/image-100');
   assert.equal(rendered.attachments[1].proxy_url, 'blob://local/cached/video-101');
   assert.equal(rendered.content, 'body');
+  assert.deepEqual(message, canonicalBefore);
+});
+
+test('cache-only local rendering includes cached audio blobs and omits missing audio and generic files', () => {
+  const blobMap = new Map([
+    ['100.mp3', 'blob://local/cached/audio-100'],
+    ['101.ogg', 'blob://local/cached/audio-101']
+  ]);
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: (attachmentId, ext, channelId, messageId) => {
+        assert.equal(channelId, 'channel');
+        assert.equal(messageId, 'message');
+        if (ext === '.mp3' && attachmentId === '100') return '/cache/100.mp3';
+        if (ext === '.ogg' && attachmentId === '101') return '/cache/101.ogg';
+        if (ext === '.wav' && attachmentId === '102') return '/cache/102.wav';
+        return null;
+      },
+      get: cacheUrl => {
+        const resolved = /^http:\/\/localhost:7474\/([^#]+)#/.exec(cacheUrl);
+        if (!resolved) return null;
+        return blobMap.get(resolved[1]) || null;
+      }
+    }
+  });
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [
+      { id: '100', filename: 'clip.mp3', url: 'https://cdn.discordapp.com/attachments/channel/111/clip.mp3' },
+      { id: '101', filename: 'recording.ogg', url: 'https://cdn.discordapp.com/attachments/channel/111/recording.ogg' },
+      {
+        id: '102',
+        filename: 'missing-audio',
+        content_type: 'audio/wave'
+      },
+      { id: '103', filename: 'notes.txt', url: 'https://cdn.discordapp.com/attachments/channel/111/notes.txt' }
+    ]
+  };
+  const canonicalBefore = structuredClone(message);
+  const firstPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[0], message, { allowBlob: true });
+  const secondPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[1], message, { allowBlob: true });
+  const thirdPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[2], message, { allowBlob: true });
+  const fourthPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[3], message, { allowBlob: true });
+  const rendered = plugin.getCacheOnlyMessage(message);
+
+  assert.equal(firstPlan.action, 'blob');
+  assert.equal(firstPlan.mediaType, 'audio');
+  assert.equal(firstPlan.url, 'blob://local/cached/audio-100');
+  assert.equal(secondPlan.action, 'blob');
+  assert.equal(secondPlan.mediaType, 'audio');
+  assert.equal(secondPlan.url, 'blob://local/cached/audio-101');
+  assert.equal(thirdPlan.action, 'omit');
+  assert.equal(thirdPlan.mediaType, 'audio');
+  assert.equal(fourthPlan.action, 'omit');
+  assert.equal(fourthPlan.mediaType, 'attachment');
+  assert.equal(rendered.attachments.length, 2);
+  assert.equal(rendered.attachments[0].url, 'blob://local/cached/audio-100');
+  assert.equal(rendered.attachments[1].url, 'blob://local/cached/audio-101');
   assert.deepEqual(message, canonicalBefore);
 });
 
@@ -3198,6 +3318,229 @@ test('logger saved-attachment presentation entries in local-only mode keep only 
   assert.deepEqual(record, recordBefore);
 });
 
+test('saved MessageContent projection removes only Logger-owned live videos in every policy mode', () => {
+  const canonicalMessage = {
+    id: 'accessories-message',
+    channel_id: 'accessories-channel',
+    content: '',
+    attachments: [
+      {
+        id: 'video',
+        filename: 'clip.mp4',
+        content_type: 'video/mp4',
+        url: 'https://cdn.discordapp.com/attachments/accessories-channel/video/clip.mp4',
+        proxy_url: 'https://media.discordapp.net/attachments/accessories-channel/video/clip.mp4'
+      },
+      {
+        id: 'image',
+        filename: 'photo.png',
+        content_type: 'image/png',
+        url: 'https://cdn.discordapp.com/attachments/accessories-channel/image/photo.png'
+      },
+      {
+        id: 'video',
+        filename: 'collision.png',
+        content_type: 'image/png',
+        url: 'https://cdn.discordapp.com/attachments/accessories-channel/video/clip.mp4'
+      },
+      {
+        id: 'audio',
+        filename: 'sound.mp3',
+        content_type: 'audio/mpeg',
+        url: 'https://cdn.discordapp.com/attachments/accessories-channel/audio/sound.mp3'
+      },
+      {
+        id: 'generic',
+        filename: 'notes.txt',
+        content_type: 'text/plain',
+        url: 'https://cdn.discordapp.com/attachments/accessories-channel/generic/notes.txt'
+      }
+    ]
+  };
+  const canonicalBefore = structuredClone(canonicalMessage);
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: {
+      _resolveImagePath: (attachmentId, extension) => attachmentId === 'video'
+        ? `/cache/${attachmentId}${extension}`
+        : null,
+      get: cacheUrl => cacheUrl.includes('/video.mp4#')
+        ? 'blob://local/cached/accessories-video'
+        : null
+    },
+    messageRecord: {
+      'accessories-message': {
+        delete_data: { time: 1 },
+        message: canonicalMessage
+      }
+    }
+  });
+  plugin.shouldPresentSavedMessage = () => true;
+  const displayedMessage = plugin.getCacheOnlyMessage(canonicalMessage);
+  const displayedBefore = structuredClone(displayedMessage);
+  const preservedFilenames = ['photo.png', 'collision.png', 'sound.mp3', 'notes.txt'];
+
+  const projected = plugin.getSavedAttachmentMessageContentPresentationMessage(displayedMessage);
+
+  assert.notStrictEqual(projected, displayedMessage);
+  assert.deepEqual(projected.attachments.map(attachment => attachment.filename), preservedFilenames);
+  assert.deepEqual(displayedMessage, displayedBefore);
+  assert.deepEqual(canonicalMessage, canonicalBefore);
+
+  plugin.settings.onlyRenderCachedAttachments = true;
+  const localOnlyProjection = plugin.getSavedAttachmentMessageContentPresentationMessage(
+    displayedMessage
+  );
+  assert.deepEqual(localOnlyProjection.attachments.map(attachment => attachment.filename), preservedFilenames);
+  plugin.settings.onlyRenderCachedAttachments = false;
+
+  plugin.settings.cacheAllImages = false;
+  const cacheOffProjection = plugin.getSavedAttachmentMessageContentPresentationMessage(
+    displayedMessage
+  );
+  assert.deepEqual(cacheOffProjection.attachments.map(attachment => attachment.filename), preservedFilenames);
+  plugin.settings.cacheAllImages = true;
+
+  let setUsed = false;
+  const immutableDisplayedMessage = {
+    ...displayedMessage,
+    set(key, value) {
+      setUsed = true;
+      return { ...this, [key]: value };
+    }
+  };
+  const immutableProjection = plugin.getSavedAttachmentMessageContentPresentationMessage(
+    immutableDisplayedMessage
+  );
+  assert.equal(setUsed, true);
+  assert.deepEqual(immutableProjection.attachments.map(attachment => attachment.filename), preservedFilenames);
+
+  plugin.shouldPresentSavedMessage = () => false;
+  assert.strictEqual(
+    plugin.getSavedAttachmentMessageContentPresentationMessage(displayedMessage),
+    displayedMessage
+  );
+  plugin.shouldPresentSavedMessage = () => true;
+  const wrongChannelMessage = { ...displayedMessage, channel_id: 'other-channel' };
+  assert.strictEqual(
+    plugin.getSavedAttachmentMessageContentPresentationMessage(wrongChannelMessage),
+    wrongChannelMessage
+  );
+
+  const legacyCanonicalMessage = {
+    id: 'legacy-message',
+    channel_id: 'accessories-channel',
+    content: '',
+    attachments: [{
+      filename: 'legacy.mp4',
+      content_type: 'video/mp4',
+      url: 'https://cdn.discordapp.com/attachments/accessories-channel/legacy/legacy.mp4'
+    }]
+  };
+  const legacyCanonicalBefore = structuredClone(legacyCanonicalMessage);
+  plugin.messageRecord['legacy-message'] = {
+    delete_data: { time: 1 },
+    message: legacyCanonicalMessage
+  };
+  const legacyDisplayedMessage = {
+    ...legacyCanonicalMessage,
+    attachments: [{
+      ...legacyCanonicalMessage.attachments[0],
+      url: 'blob:https://discord.com/local-video',
+      proxy_url: 'blob:https://discord.com/local-video'
+    }]
+  };
+  const legacyDisplayedBefore = structuredClone(legacyDisplayedMessage);
+  const legacyProjection = plugin.getSavedAttachmentMessageContentPresentationMessage(
+    legacyDisplayedMessage
+  );
+  assert.notStrictEqual(legacyProjection, legacyDisplayedMessage);
+  assert.deepEqual(legacyProjection.attachments, []);
+  assert.deepEqual(legacyDisplayedMessage, legacyDisplayedBefore);
+  assert.deepEqual(legacyCanonicalMessage, legacyCanonicalBefore);
+});
+
+test('saved MessageAccessories render exposes projected video-free props only during the native call', () => {
+  const canonicalMessage = {
+    id: 'accessories-render',
+    channel_id: 'accessories-render',
+    content: '',
+    attachments: [
+      {
+        id: 'video',
+        filename: 'clip.webm',
+        content_type: 'video/webm',
+        url: 'https://cdn.discordapp.com/attachments/accessories-render/video/clip.webm'
+      },
+      {
+        id: 'audio',
+        filename: 'sound.ogg',
+        content_type: 'audio/ogg',
+        url: 'https://cdn.discordapp.com/attachments/accessories-render/audio/sound.ogg'
+      }
+    ]
+  };
+  const canonicalBefore = structuredClone(canonicalMessage);
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: { get: () => null },
+    messageRecord: {
+      'accessories-render': {
+        delete_data: { time: 1 },
+        message: canonicalMessage
+      }
+    }
+  });
+  plugin.shouldPresentSavedMessage = () => true;
+  const originalProps = {
+    message: plugin.getCacheOnlyMessage(canonicalMessage),
+    compact: false
+  };
+  const instance = { props: originalProps };
+  let originalCalls = 0;
+
+  const result = plugin.renderSavedAttachmentMessageAccessories(
+    instance,
+    ['render-options'],
+    function (...args) {
+      originalCalls += 1;
+      assert.strictEqual(this, instance);
+      assert.deepEqual(args, ['render-options']);
+      assert.notStrictEqual(this.props, originalProps);
+      assert.deepEqual(this.props.message.attachments.map(attachment => attachment.id), ['audio']);
+      return 'native-render-result';
+    }
+  );
+
+  assert.equal(result, 'native-render-result');
+  assert.equal(originalCalls, 1);
+  assert.strictEqual(instance.props, originalProps);
+  assert.deepEqual(canonicalMessage, canonicalBefore);
+
+  const lockedInstance = {};
+  Object.defineProperty(lockedInstance, 'props', {
+    value: originalProps,
+    writable: false
+  });
+  const lockedResult = plugin.renderSavedAttachmentMessageAccessories(
+    lockedInstance,
+    [],
+    function () {
+      assert.strictEqual(this, lockedInstance);
+      assert.strictEqual(this.props, originalProps);
+      return 'locked-render-result';
+    }
+  );
+  assert.equal(lockedResult, 'locked-render-result');
+  assert.strictEqual(lockedInstance.props, originalProps);
+});
+
 test('native attachment media error listener lifecycle installs once, forwards once, and removes safely', async () => {
   const dispatches = [];
   const invalidations = [];
@@ -3246,7 +3589,7 @@ test('native attachment media error listener lifecycle installs once, forwards o
       target: {
         tagName: 'IMG',
         currentSrc: 'https://cdn.discordapp.com/attachments/601/photo.png',
-        closest: () => ({ id: 'chat-messages-601-601' })
+        closest: createNativeMediaClosest({ id: 'chat-messages-601-601' })
       }
     });
     assert.equal(dispatches.length, 1);
@@ -3329,7 +3672,7 @@ test('native attachment media error remounts one failed remote attachment with c
     target: {
       tagName: 'IMG',
       currentSrc: 'https://cdn.discordapp.com/attachments/501/photo.png',
-      closest: () => messageRow
+      closest: createNativeMediaClosest(messageRow)
     }
   });
 
@@ -3354,7 +3697,7 @@ test('native attachment media error remounts one failed remote attachment with c
     target: {
       tagName: 'IMG',
       currentSrc: 'https://cdn.discordapp.com/attachments/501/photo.png',
-      closest: () => messageRow
+      closest: createNativeMediaClosest(messageRow)
     }
   });
 
@@ -3428,7 +3771,7 @@ test('native attachment media error retries failed proxy candidates from derived
     target: {
       tagName: 'IMG',
       currentSrc: cdnUrl,
-      closest: () => sourceRow
+      closest: createNativeMediaClosest(sourceRow)
     }
   });
   assert.equal(dispatches.length, 1);
@@ -3445,7 +3788,7 @@ test('native attachment media error retries failed proxy candidates from derived
     target: {
       tagName: 'IMG',
       currentSrc: cdnUrl,
-      closest: () => sourceRow
+      closest: createNativeMediaClosest(sourceRow)
     }
   });
   assert.equal(dispatches.length, 1);
@@ -3454,7 +3797,7 @@ test('native attachment media error retries failed proxy candidates from derived
     target: {
       tagName: 'IMG',
       currentSrc: proxyUrl,
-      closest: () => sourceRow
+      closest: createNativeMediaClosest(sourceRow)
     }
   });
   assert.equal(dispatches.length, 2);
@@ -3466,6 +3809,100 @@ test('native attachment media error retries failed proxy candidates from derived
   assert.equal(afterProxyFailure.attachments[0].url, 'blob://local/cached/image-601');
   assert.equal(afterProxyFailure.attachments[0].proxy_url, 'blob://local/cached/image-601');
   assert.deepEqual(message, canonicalBefore);
+});
+
+test('native audio source error retries CDN then proxy and then shows cached audio blob', async () => {
+  const dispatches = [];
+  const invalidations = [];
+  const cacheRefreshes = [];
+  const plugin = createPlugin({
+    dispatcher: {
+      dispatch(action) {
+        dispatches.push(action);
+      }
+    },
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: (attachmentId, ext, channelId, messageId) => {
+        assert.equal(attachmentId, '701');
+        assert.equal(ext, '.mp3');
+        assert.equal(channelId, '701');
+        assert.equal(messageId, '701');
+        return '/cache/701.mp3';
+      },
+      get: cacheUrl => {
+        const matched = /^http:\/\/localhost:7474\/(.+?)#/.exec(cacheUrl);
+        if (!matched || matched[1] !== '701.mp3') return null;
+        return 'blob://local/cached/audio-701';
+      }
+    },
+    invalidateChannelCache: id => invalidations.push(id),
+    cacheChannelMessages: id => cacheRefreshes.push(id),
+    messageRecord: {
+      '701': {
+        delete_data: { time: 1 },
+        message: {
+          id: '701',
+          channel_id: '701',
+          content: 'body',
+          attachments: [{
+            id: '701',
+            filename: 'recording',
+            content_type: 'audio/mpeg',
+            original_content_type: 'audio/mpeg',
+            url: 'https://cdn.discordapp.com/attachments/701/recording.mp3',
+            proxy_url: 'https://media.discordapp.net/attachments/701/recording.mp3'
+          }]
+        }
+      }
+    }
+  });
+
+  const message = plugin.messageRecord['701'].message;
+  const canonicalBefore = structuredClone(message);
+  const sourceRow = { id: 'chat-messages-701-701' };
+  const cdnUrl = 'https://cdn.discordapp.com/attachments/701/recording.mp3';
+  const proxyUrl = 'https://media.discordapp.net/attachments/701/recording.mp3';
+
+  let plan = plugin.getSavedAttachmentPresentationPlan(message.attachments[0], message, { allowRemote: true });
+  assert.equal(plan.mediaType, 'audio');
+  assert.equal(plan.action, 'remote');
+  assert.equal(plan.url, cdnUrl);
+
+  plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'SOURCE',
+      src: cdnUrl,
+      closest: createNativeMediaClosest(sourceRow)
+    }
+  });
+  assert.equal(dispatches.length, 1);
+  plan = plugin.getSavedAttachmentPresentationPlan(message.attachments[0], message, { allowRemote: true });
+  assert.equal(plan.mediaType, 'audio');
+  assert.equal(plan.action, 'remote');
+  assert.equal(plan.url, proxyUrl);
+
+  plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'AUDIO',
+      currentSrc: proxyUrl,
+      closest: createNativeMediaClosest(sourceRow)
+    }
+  });
+  assert.equal(dispatches.length, 2);
+  plan = plugin.getSavedAttachmentPresentationPlan(message.attachments[0], message, { allowRemote: true });
+  assert.equal(plan.mediaType, 'audio');
+  assert.equal(plan.action, 'blob');
+  assert.equal(plan.url, 'blob://local/cached/audio-701');
+  assert.deepEqual(message, canonicalBefore);
+
+  await setImmediatePromise();
+  assert.deepEqual(invalidations, ['701']);
+  assert.deepEqual(cacheRefreshes, ['701']);
 });
 
 test('native attachment media error remounts one failed remote attachment as a placeholder without cached blob', async () => {
@@ -3519,7 +3956,7 @@ test('native attachment media error remounts one failed remote attachment as a p
     target: {
       tagName: 'IMG',
       currentSrc: cdnUrl,
-      closest: () => messageRow
+      closest: createNativeMediaClosest(messageRow)
     }
   });
 
@@ -3533,7 +3970,7 @@ test('native attachment media error remounts one failed remote attachment as a p
     target: {
       tagName: 'IMG',
       currentSrc: proxyUrl,
-      closest: () => messageRow
+      closest: createNativeMediaClosest(messageRow)
     }
   });
 
@@ -3707,6 +4144,59 @@ test('refreshCacheOnlyMessage dispatches latest blob presentation if cache state
   assert.equal(dispatches[0].message.content, '');
   assert.notStrictEqual(dispatches[0].message, message);
   assert.deepEqual(message, canonicalBefore);
+});
+
+test('scheduleSavedAttachmentPresentationRefresh accepts cached audio blobs for remount scheduling', async () => {
+  let remountCalls = 0;
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    dispatcher: {
+      dispatch() {}
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: (attachmentId, extension, channelId, messageId) => {
+        assert.equal(extension, '.mp3');
+        assert.equal(attachmentId, '900');
+        assert.equal(messageId, '900');
+        assert.equal(channelId, '900');
+        return '/cache/900.mp3';
+      },
+      get: cacheUrl => {
+        const matched = /^http:\/\/localhost:7474\/([^#]+)#/.exec(cacheUrl);
+        if (!matched) return null;
+        return matched[1] === '900.mp3' ? 'blob://local/cached/audio-900' : null;
+      }
+    },
+    messageRecord: {
+      '900': {
+        delete_data: { time: 1 },
+        message: {
+          id: '900',
+          channel_id: '900',
+          content: '',
+          attachments: [
+            {
+              id: '900',
+              filename: 'audio.mp3',
+              url: 'https://cdn.discordapp.com/attachments/900/audio.mp3',
+              content_type: 'audio/mpeg'
+            }
+          ]
+        }
+      }
+    }
+  });
+  plugin.remountSavedAttachmentPresentationRecords = () => {
+    remountCalls += 1;
+  };
+
+  plugin.scheduleSavedAttachmentPresentationRefresh('900', '900');
+  await setImmediatePromise();
+  assert.equal(remountCalls, 1);
 });
 
 test('protected attachment remount transitions through a hidden sentinel until the exact placeholder disappears', () => {
@@ -4073,14 +4563,14 @@ test('native attachment media error ignores non-deleted message rows and wrong t
     target: {
       tagName: 'IMG',
       currentSrc: 'https://cdn.discordapp.com/attachments/504/other.png',
-      closest: () => wrongUrlRow
+      closest: createNativeMediaClosest(wrongUrlRow)
     }
   });
   plugin.handleSavedAttachmentMediaError({
     target: {
       tagName: 'IMG',
       currentSrc: 'https://cdn.discordapp.com/attachments/503/photo.png',
-      closest: () => ({ id: 'chat-messages-503-503' })
+      closest: createNativeMediaClosest({ id: 'chat-messages-503-503' })
     }
   });
 
@@ -4123,7 +4613,7 @@ test('native attachment media error ignores events when cache master is disabled
     target: {
       tagName: 'IMG',
       currentSrc: 'https://cdn.discordapp.com/attachments/505/photo.png',
-      closest: () => ({ id: 'chat-messages-505-505' })
+      closest: createNativeMediaClosest({ id: 'chat-messages-505-505' })
     }
   });
 
@@ -4166,7 +4656,7 @@ test('native attachment media error ignores events when local-only mode is enabl
     target: {
       tagName: 'IMG',
       currentSrc: 'https://cdn.discordapp.com/attachments/506/photo.png',
-      closest: () => ({ id: 'chat-messages-506-506' })
+      closest: createNativeMediaClosest({ id: 'chat-messages-506-506' })
     }
   });
 

@@ -33,17 +33,19 @@ This file is both the implementation checklist and the handoff record.
 - **Predecessor rollout record:**
   `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T11-07-23-01a00d42-4986-7971-94de-11f09f6630d1.jsonl`
 - **Working branch:** `develop`
-- **Verified HEAD:** accepted Stage 3 note-styling commit
-  `89d51f7a59f3ff7be79ebeb551a4f17c3a8cab69`; local `develop` and
-  `origin/develop` match.
-- **Verified worktree:** only `MessageLoggerV2.plugin.js`,
-  `tests/media.test.js`, `tests/clipboard.test.js`,
-  `tests/source-contracts.test.js`, and this checklist are tracked Stage 4
-  modifications. After live acceptance, the ignored open-mount helper, its
-  exact live symlink, and its 12-event report were moved to the recoverable
-  Trash folder
-  `$HOME/.Trash/MessageLoggerOpenMountTrace-2026-08-18-stage4-accepted`;
-  no Stage 4 trace artifact remains installed.
+- **Verified HEAD:** accepted Stage 4 local commit
+  `4433a618775e8416d0b9abac9af3857695dd99a7`; local `develop` is one commit
+  ahead of `origin/develop`. A read-only `git ls-remote` confirmed the actual
+  remote `develop` remains at
+  `89d51f7a59f3ff7be79ebeb551a4f17c3a8cab69`; nothing was pushed.
+- **Verified worktree:** the accepted Stage 4 commit remains HEAD. The current
+  reopened Stage 3 correction modifies this checklist,
+  `MessageLoggerV2.plugin.js`, `tests/media.test.js`, and
+  `tests/source-contracts.test.js`. Ignored evidence remains in `tmp/1.html`
+  and `tmp/MessageLoggerAttachmentMountTrace.plugin.js`; the helper's exact
+  symlink is still installed in the BetterDiscord plugins folder together with
+  the fresh Off/On ownership reports. None of those ignored/runtime artifacts
+  may be committed.
 - **Baseline:** `npm test` passed `471/471` before this checklist was created.
 - **Current Stage 4 verification:** the parent has rerun `npm run check`,
   `tests/clipboard.test.js` at `16/16`, `tests/media.test.js` at `156/156`,
@@ -52,9 +54,10 @@ This file is both the implementation checklist and the handoff record.
   build. After the escaping-native-action correction, the parent reran
   `npm run check`, clipboard `16/16`, media `156/156`, source contracts
   `68/68`, full `npm test` at `561/561`, and `git diff --check` successfully.
-- **Live parity:** the corrected repository SHA-256 is
-  `9cf2fad325fe7d4ea4f234bfbf1fc1c632692ff487d5f273f1fdfcd054f365f1`;
-  the installed plugin matches that exact hash after the controlled live sync.
+- **Live parity:** the current reopened Stage 3 repository build and installed
+  BetterDiscord plugin are byte-identical at SHA-256
+  `cf3347cce594996a198903364ed7b38cdc8b3f52a157f991f5abda92d1be457e`.
+  The temporary unmodified `main` control is no longer installed.
 - **Implementation state:** Stages 1-3 are complete, accepted, committed, and
   pushed. Stage 4 is implemented, parent-verified, live-synced, and accepted,
   with one operating-system-neutral open policy for
@@ -76,32 +79,38 @@ This file is both the implementation checklist and the handoff record.
   occurred on either escaping path. The user then verified both corrected
   controls and ordinary-viewer isolation; the helper, symlink, and report are
   now in Trash.
-- **Current gate:** Stage 4 is accepted. Commit its five tracked files locally
-  without pushing, then prepare the Downloads media fixture matrix and resume
-  the reopened Stage 3 deleted-MP4/native-media mount investigation. Stage 9
-  warning-detail cleanup remains deferred until the rendering work is done.
-- **Worker state:** the user reported Spark at 47%; no quota/rate-limit fallback
-  trigger occurred. Spark completed the target-scoped native-viewer and
-  authored-content resolver slices. The parent reran every focused and full
-  suite. A final independent reviewer could not start because the runtime
-  continued to report stale thread capacity even though only the root thread
-  was visible; the Sol parent therefore completed the final read-only review.
+- **Current gate:** Stage 4 is accepted and locally committed without a push.
+  The reopened Stage 3 live video/audio correction is accepted: the user
+  confirmed one working video block with no duplicate Discord placeholder.
+  The parent pre-commit gate passes `npm run check`, all `569/569` tests, plugin
+  syntax, and `git diff --check`. Commit this accepted stage locally without a
+  push. Logger-view audio remains a separate post-commit change and Stage 9
+  warning detail remains deferred.
+- **Worker state:** the user reported Spark at 24%, but Spark returned an
+  explicit `Selected model is at capacity` failure. Per the session routing
+  rule, bounded work moved to Luna Extra High for the rest of this session;
+  the Sol parent is unchanged. Spark applied the first traced MessageContent
+  suppression slice before interruption, Luna completed the classification-
+  based legacy/collision cleanup, and the parent ran all focused checks.
 - **Checklist state:** include this file in every user-confirmed stage commit;
   archive it only after implementation, validation, and user acceptance are
   complete.
 - **Change-control state:** The user accepted Stage 4 and authorized its local
-  commit, explicitly without a push. Do not push, merge, switch branches, tag,
-  release, bump the version, or edit the changelog.
+  commit, explicitly without a push; commit `4433a61` is local only. Do not
+  push, merge, switch branches, tag, release, bump the version, or edit the
+  changelog. Await the current Stage 3 fixture pass/fail matrix before the full
+  pre-commit gate or any further rendering edit.
 
 ### Exact next action
 
-Commit the accepted Stage 4 five-file change locally without pushing. Verify
-that local `develop` advances while `origin/develop` remains at
-`89d51f7a59f3ff7be79ebeb551a4f17c3a8cab69`. Then create the requested
-copyright-free image/video/audio fixture matrix in a new Downloads subfolder,
-record each container and codec, and resume the trace-first Stage 3 deleted-MP4
-native-mount investigation. Do not merge, switch branches, tag, release, bump
-the version, or edit the changelog.
+Commit the four accepted tracked Stage 3 files locally without pushing. Confirm
+the resulting local commit and clean tracked boundary, then begin Logger-view
+audio as a separate change. Reuse Discord's native audio presentation rather
+than inventing a second player where practical, and keep its CDN -> proxy ->
+local Blob/placeholder policy aligned with the now-accepted attachment route.
+Use only focused tests during implementation, then restore the full gate before
+the next requested commit. Do not merge, switch branches, tag, release, bump the
+version, or edit the changelog.
 
 ### Resume procedure
 
@@ -719,6 +728,17 @@ image implementation first. After that image gate, return here for the Stage 3
 native-video trace; the requested media fixture pack is preparation for that
 later matrix and must not pull video/audio fixes into Stage 4.
 
+- [x] Create and validate the copyright-free fixture pack at
+      `$HOME/Downloads/MessageLoggerV2-Media-Format-Tests`. Its 15
+      numbered cases cover the current Logger/Discord rendering scope: five
+      documented image extensions; MP4 H.264, HEVC, and AV1; MOV H.264; WebM
+      VP8 and VP9; MP3; OGG/Opus; TXT preview; and a PDF generic-row control.
+      `README.md` and `TEST-RESULTS.md` record the exact settings, order,
+      container, codec, and four result surfaces. All media passed format
+      inspection and full decoding.
+- [ ] Have the user test all numbered fixtures before installing a trace.
+      Trace only the formats that fail their new-upload or saved/deleted native
+      mounts; retain passing formats as controls.
 - [ ] Reproduce one newly uploaded then deleted MP4 with **Render & Cache
       media** On and the local-only child Off, then repeat with the child On.
 - [ ] Confirm the exact classified placeholder, native Store attachment state,
@@ -733,16 +753,19 @@ later matrix and must not pull video/audio fixes into Stage 4.
       matrix and test every format Discord's native direct-attachment renderer
       actually supports. Keep four results distinct: Discord native live row,
       restored Logger-owned native row, Logger custom view, and local Blob.
-- [ ] Start the audit from the plugin's current extension claims—images:
+- [x] Start the audit from the plugin's current extension claims—images:
       JPG/JPEG, PNG, GIF, BMP, WebP, AVIF, TIF/TIFF; videos: MP4, WebM, MOV,
-      AVI, MKV—but do not describe those extensions as Discord-supported until
-      the current live renderer proves them. Audit native audio rendering
-      separately because MessageLogger currently has no dedicated audio
-      classifier.
-- [ ] Record container and codec together for audiovisual samples. Upload
+      AVI, MKV—and compare them with current official Discord guidance. Per the
+      user's intersection-only scope, exclude BMP, AVIF, TIF/TIFF, AVI, MKV,
+      and unestablished audio extensions from the final upload set rather than
+      claiming Discord support. Audit MP3 and OGG/Opus separately because
+      MessageLogger currently has no dedicated audio classifier.
+- [x] Record container and codec together for audiovisual samples. Upload
       acceptance, a recognized filename extension, caching, and actual inline
       decoding/rendering are separate results; one valid MP4 result must not be
-      generalized to every MP4 codec combination.
+      generalized to every MP4 codec combination. The fixture manifest records
+      all combinations and the blank results sheet keeps the four surfaces
+      distinct.
 - [ ] Correct only the proved native saved-direct-video mount/refresh path.
       Preserve direct/proxy/Blob ordering, local-only remote bypass, image
       behavior, Logger rendering, ordinary Discord media, arbitrary-file scope,
@@ -2357,3 +2380,366 @@ retry behavior, persistence, rendering, or external-open behavior.
   not push. Then prepare the requested Downloads media fixtures and resume the
   trace-first Stage 3 deleted-MP4/native-media renderer investigation; keep the
   accepted Stage 4 routing policy unchanged.
+
+### 2026-08-18 - Stage 4 committed locally and Stage 3 fixtures prepared
+
+- Committed the accepted five-file Stage 4 change on `develop` as
+  `4433a618775e8416d0b9abac9af3857695dd99a7` (`Complete saved attachment open
+  routing`). The parent reran full `npm test` at `561/561`, `git diff --check`,
+  and repository/live hash parity immediately before the commit.
+- Did not push. Local `develop` is ahead by one; a read-only `git ls-remote`
+  confirmed actual remote `develop` remains at
+  `89d51f7a59f3ff7be79ebeb551a4f17c3a8cab69`.
+- Created the 744 KB copyright-free fixture pack at
+  `$HOME/Downloads/MessageLoggerV2-Media-Format-Tests` using
+  ImageMagick 7.1.2-8 and FFmpeg 8.0.1 with speed-first settings. The final 15
+  numbered cases are five images, six video container/codec combinations, two
+  native-audio candidates, TXT preview, and a PDF generic-row control; the
+  three generation sources are isolated under `00-sources`.
+- Kept the final upload matrix inside the Logger/Discord render boundary.
+  Logger-only or unestablished candidates (BMP, AVIF, TIF/TIFF, AVI, MKV,
+  AAC, FLAC, M4A, standalone Opus, WAV, and extra Vorbis/Opus variants) were
+  moved to the recoverable Trash folder
+  `$HOME/.Trash/MessageLoggerV2-Media-Format-Tests-out-of-scope-2026-08-18`
+  instead of being presented as supported.
+- ImageMagick identified all five final images at 320x180, including a two-frame
+  GIF. FFprobe confirmed every declared container and codec; strict complete
+  FFmpeg decoding passed all six video and both audio files; `file` identified
+  the controls as plain text and PDF 1.4.
+- `README.md` records scope, sources, settings, and one-file-per-message test
+  order. `TEST-RESULTS.md` has separate columns for new-upload, deleted remote-
+  first, deleted local-only, and Logger-view behavior. At the user's direction,
+  install no trace yet: wait for their complete pass/fail matrix, then trace
+  only the failing native mount types.
+- A final cleanup audit caught BetterDiscord writing the same 12-event report
+  once more while unloading the already-loaded helper after its symlink was
+  removed. Moved that unarmed late copy to
+  `MessageLoggerOpenMountTrace-report-after-unload.json` in the existing Stage
+  4 Trash folder, waited, and reverified that the ignored helper, live symlink,
+  and live report paths all remain absent.
+
+### 2026-08-18 - Stage 3 video/audio failure matrix isolated and manual mount trace installed
+
+- The user completed the relevant fixture pass. All five image cases work.
+  Every deleted video case shows Discord's **Image failed to load.** card in
+  both remote-first and local-only modes, while the Logger viewer renders the
+  videos. Both audio cases render through Discord in remote-first mode, show
+  placeholder text in local-only mode, and have no Logger-view audio renderer.
+  New-upload and TXT/PDF control cells remain unrecorded rather than inferred.
+- Stage 4 remains accepted: the open file/attachment policy works. Do not alter
+  its global routing while correcting Stage 3 rendering.
+- The saved V01 record retains `content_type: video/mp4`, dimensions, duration,
+  and its `.mp4` identity; A01 retains Discord's normalized
+  `content_type: audio/mpeg3` plus `original_content_type: audio/mpeg`. Their
+  physical `.mp4` and `.mp3` cache files both exist. This rules out a missing
+  cache write and makes the next gate the actual native DOM/React mount shape.
+- Installed the ignored, snapshot-only helper
+  `tmp/MessageLoggerAttachmentMountTrace.plugin.js` through the live symlink
+  `$HOME/Library/Application Support/BetterDiscord/plugins/MessageLoggerAttachmentMountTrace.plugin.js`.
+  It starts idle, performs no network calls or renderer/action interception,
+  and exposes `MessageLoggerAttachmentMountTrace.dump(label)`, `.status()`, and
+  `.clear()` only while enabled.
+- Run one manual `dump("off")` with **Only render locally cached attachments**
+  Off and one `dump("on")` after switching it On, keeping the fixture rows in
+  the selected channel. Reports are written separately as
+  `MessageLoggerAttachmentMountTrace-report-<label>-<timestamp>.json` in the
+  BetterDiscord plugins folder. The snapshots are restricted to V01-V06 and
+  A01-A02 saved rows and capture attachment metadata, the current presentation
+  plan, cache-file existence, DOM media/failure nodes, and bounded React
+  component/prop shape with signed URL queries and message content excluded.
+- Spark produced the initial helper slice. Parent review corrected its empty
+  collection snapshot, tightened fixture scoping/redaction and traversal
+  bounds, made plan inspection match the actual Off/On state without retaining
+  failure-set mutations, and added attachment MIME/dimension/duration fields.
+  Parent `node --check`, empty-runtime lifecycle smoke, and a mocked V01
+  failure-card smoke all pass. Repository/plugin source and live
+  `MessageLoggerV2.plugin.js` were not changed for this trace.
+- The first live `dump("off")` reached a React fiber without a DOM state node
+  and exposed one helper-only null `tagName` guard. Added that guard, passed a
+  targeted null-state fiber check plus `node --check` and `git diff --check`,
+  and reconfirmed helper/live-symlink hash parity before retrying the dump.
+
+### 2026-08-18 - Stage 3 Off/On mount trace proved video-poster and audio-plan defects
+
+- Captured complete state-separated reports for all six saved videos and both
+  saved audio fixtures:
+  `MessageLoggerAttachmentMountTrace-report-off-2026-08-17T14-36-19-537Z.json`
+  and
+  `MessageLoggerAttachmentMountTrace-report-on-2026-08-17T14-37-07-661Z.json`.
+  Both are in the BetterDiscord plugins folder and contain every fixture row.
+- Video classification is correct in both states. V01-V06 retain their video
+  MIME, dimensions, duration, and `mediaType: video`; their selected plan is
+  remote with local-only Off and Blob with local-only On. Discord then enters
+  its playable video path but passes the selected stream through its poster
+  `Image` component. Logger has replaced canonical `proxy_url` with the same
+  raw CDN video or video Blob, so that poster fails and Discord replaces the
+  row with **Image failed to load.** No native `VIDEO` node survives.
+- Audio is a separate defect. With local-only Off Discord mounts real
+  `AUDIO`/`SOURCE` nodes. With it On, A01/A02 are deliberately planned as
+  generic `attachment` plus `omit`, despite their physical `.mp3`/`.ogg` cache
+  files existing, so Logger supplies the visible filename placeholder.
+- The user locked the live-render policy to CDN, then proxy, then cached local
+  Blob, then exact filename placeholder when local-only is Off; local Blob,
+  then placeholder with zero remote fallback when it is On. Images, videos,
+  and audio must mount through their proper media containers rather than using
+  an image renderer for non-image files. Stage 4 opening remains unchanged.
+- The user also split the remaining work into commit gates. First fix and
+  live-verify restored live mounts, run the complete parent gate, and commit
+  that change without pushing. Only after that commit may a separate stage
+  port Discord's native audio renderer into the Logger viewer.
+- Parent baseline before the live-render implementation remains `561/561`.
+  The first bounded implementation slice adds first-class audio MIME/extension
+  planning, cached MP3/OGG Blob eligibility, and cache-completion remounts; its
+  three focused parent tests pass. It does not touch either renderer.
+
+### 2026-08-18 - Stage 3 video/audio live-render build ready for manual gate
+
+- Restored videos no longer pass through Discord's failing poster `Image`
+  route. `SavedAttachmentPresentationContent` removes only planned video
+  attachments from the detached native render input and mounts Logger-owned
+  React `<video controls preload="metadata">` hosts with the existing exact
+  message/attachment ownership markers. Native image and audio attachments
+  remain in Discord's renderer, and canonical saved records are not mutated.
+- The video host owns its exact fallback chain. Remote-first mode advances the
+  failed CDN candidate to proxy, then to a cached Blob when available, and
+  finally to the plan's exact filename label. Local-only begins at the cached
+  Blob and changes directly to that label on failure; it never asks for a
+  remote plan. The global native-media error listener excludes Logger's video
+  host so one failure cannot advance the chain twice.
+- Audio is now a first-class saved media type for `.mp3`, `.ogg`, `.oga`, and
+  `.opus` attachments or `audio/*` MIME metadata. Cached audio may receive a
+  Blob plan, cache completion can remount it, and Discord's native
+  `<audio>/<source>` renderer remains the live container. Native `AUDIO` and
+  `SOURCE` errors use the shared candidate-failure/remount path, giving audio
+  the same CDN -> proxy -> cached Blob -> exact filename policy when
+  remote-first is active. Local-only retains its existing zero-remote guard.
+- The accepted Stage 4 global open-attachment policy and the Logger viewer are
+  unchanged. In particular, Logger-view audio remains intentionally deferred
+  until this live-render build passes the user's manual gate and is committed
+  locally without pushing.
+- Luna completed the two bounded renderer/error-routing slices after Spark
+  reported model capacity. Parent review corrected only stale fake-DOM/source
+  contract expectations, including the established same-channel recache
+  coalescing behavior. The final parent gate passes `npm run check`, focused
+  media/source contracts, `git diff --check`, and the complete `566/566`
+  tracked test suite.
+- Required live matrix before commit: retest V01-V06 and A01-A02 from
+  `~/Downloads/MessageLoggerV2-Media-Format-Tests`, first with **Only render
+  locally cached attachments** Off and then On. Each video must show a real
+  video control rather than **Image failed to load**; each audio item must show
+  Discord's audio control rather than placeholder text; Stage 4 **Open
+  attachment/Open link/Open in Browser** routes must remain functional. Mixed
+  image/video ordering and Discord layout styling remain live-only checks for
+  messages containing more than one media type.
+- Live-synced only `MessageLoggerV2.plugin.js`; repository and BetterDiscord
+  copies match SHA-256
+  `5b330c86dab516fe19ab6a6c63574c5a8b5f163333c59c891d6494a5ff80387b`.
+  BetterDiscord hot-reloaded the plugin through patch removal and a clean new
+  initialization with no immediate MessageLogger error. Discord was not
+  relaunched. Keep the ignored mount-trace helper and the two prior reports in
+  place until this manual gate is accepted or a failing row needs a fresh dump.
+
+### 2026-08-18 - Stage 3 duplicate native video accessory suppression ready for live gate
+
+- Fresh post-render reports
+  `MessageLoggerAttachmentMountTrace-report-off-fixed-2026-08-17T15-01-38-483Z.json`
+  and
+  `MessageLoggerAttachmentMountTrace-report-on-fixed-2026-08-17T15-02-18-303Z.json`
+  prove that V01-V06 now mount one healthy Logger-owned native `VIDEO` host in
+  both modes. Each row also retained a separate Discord accessory branch ending
+  in its old SVG **Image failed to load.** card. A01/A02 retained real native
+  `AUDIO`/`SOURCE` nodes in both reports, so audio rendering is not part of this
+  duplicate defect.
+- The duplicate is not the Logger video host or a React alternate-fiber
+  artifact. The custom path is
+  `SavedAttachmentPresentationContent -> SavedAttachmentPresentationVideo -> VIDEO`,
+  while the stale native path separately enters Discord's class-based message
+  accessories renderer with the original one-video attachment list. The
+  Logger re-entry already receives zero video attachments.
+- Added a guarded `MessageAccessories.renderAttachments` policy hook resolved
+  through the mainstream/fork-compatible `renderEmbeds` and
+  `renderAttachments` prototype keys. For an exact, visible saved deletion it
+  gives only that synchronous native call a detached attachment projection
+  with Logger-owned remote/Blob videos removed. Images, audio, generic files,
+  canonical records, and unrelated messages remain untouched. The component's
+  original props reference is restored in `finally`; lookup or projection
+  failure leaves Discord's native behavior active.
+- Behavioral coverage proves remote-first and cached local-only projection,
+  video-only filtering, image/audio/generic preservation, immutable `.set`
+  support, canonical/input immutability, exact channel/display gating, native
+  receiver/argument preservation, one original call, and exact prop
+  restoration. Source-contract coverage binds module discovery, the patch
+  point, video/action policy, identity matching, immutable projection, and the
+  `finally` restore path.
+- Spark completed the isolated source-contract slice after the full activity
+  grace window. Parent review corrected two test-only regex assumptions; no
+  production behavior changed. The parent gate passes `npm run check`, focused
+  media behavior, source contracts, `git diff --check`, and the complete
+  `569/569` suite.
+- Live-synced only `MessageLoggerV2.plugin.js`; repository and BetterDiscord
+  copies are byte-identical at SHA-256
+  `457a511d0ff102405ecb1f957cffd5bea26ef0e8ff0faeec7b4d68a1f92eab2f`.
+  The 15:20:08 hot reload removed the old patches, initialized the new build,
+  applied all patches, completed its UI refresh, and scheduled the shared cache
+  timer. No `MessageAccessories` lookup warning or MessageLogger exception
+  appeared at that boundary. The simultaneous `PersonalPins` exception remains
+  unrelated, and the later named cache 404 is an ordinary media warning.
+  Discord was not relaunched. The user's Off/On duplicate-card check remains
+  before the Stage 3 commit gate; nothing is committed or pushed.
+
+### 2026-08-18 - Stage 3 duplicate gate still failing; enhanced ownership trace ready
+
+- The user confirmed that the `MessageAccessories.renderAttachments` build
+  still produces two video mounts. Treat that hook as an unaccepted runtime
+  hypothesis: keep it only long enough to observe whether it fires, and do not
+  commit it or replace it with another static guess.
+- The ignored body snapshot `tmp/1.html` makes the surviving layout boundary
+  explicit. Each V01-V06 row has one native Discord visual-media placeholder
+  under `message-accessories-<message id>`, while the working Logger `<video>`
+  is a separate sibling inside the message `contents` container. A01/A02 have
+  one native audio/source mount and no Logger video host. The body dump remains
+  ignored and must not be committed.
+- Enhanced ignored helper
+  `tmp/MessageLoggerAttachmentMountTrace.plugin.js` to version `1.0.3`, schema
+  `mount-trace-v3`, through the existing exact BetterDiscord symlink. Its new
+  manual `armRenderOwnershipTrace(label)` / `disarmRenderOwnershipTrace()` APIs
+  install observation-only, bounded hooks for the live Logger accessories
+  callback, the semantically resolved native accessories method, and the two
+  MessageContent calls. Reports preserve all capped events, including the
+  zero-attachment Logger re-entry.
+- Each fixture row now also records the exact native placeholder/failure fiber
+  ancestry and compares its live type, prototype, and `renderAttachments`
+  function identity with the resolved module. It targets both the current
+  `imagePlaceholderVisible` body shape and the earlier Discord failure-asset /
+  **Image failed to load.** shapes. It records names, IDs, filenames, counts,
+  method names, and sanitized URL categories only—never message text, authors,
+  signed queries, function bodies, stacks, headers, tokens, or cookies.
+- Parent validation passes `node --check`, exact helper/live-symlink hash
+  parity, a three-hook lifecycle mock that retains the zero-attachment re-entry,
+  a native-placeholder fiber/prototype identity mock, and `git diff --check`.
+  The helper neither changes arguments/props/results nor invokes originals,
+  dispatches, forces renders, or performs network work. Fresh Off/On ownership
+  reports are now required before changing the tracked production hook.
+
+### 2026-08-18 - Stage 3 ownership trace proved the duplicate and early suppression is ready
+
+- Captured the required reports:
+  `MessageLoggerAttachmentMountTrace-report-off-owner-2026-08-17T15-34-35-212Z.json`
+  and
+  `MessageLoggerAttachmentMountTrace-report-on-owner-2026-08-17T15-35-13-102Z.json`.
+  Both are valid `mount-trace-v3` reports with no trace diagnostics and all
+  three targets resolved.
+- The live Logger `renderSavedAttachmentAccessories` callback recorded zero
+  calls in both reports. The actual native
+  `MessageAccessories.prototype.renderAttachments` recorded 13 calls Off and
+  11 calls On, while `MessageContentComponent.type` recorded 20 calls in each
+  state. The failed V01 placeholder fiber reaches the exact live `cO`
+  MessageAccessories type/prototype and patched `renderAttachments` function at
+  distance 22. This rules out a wrong Webpack export and proves the production
+  accessories callback was not an effective ownership boundary.
+- V01-V06 each enter the first non-reentry MessageContent render with one video
+  attachment, then enter Logger's marked reentry with zero video attachments.
+  A01/A02 retain one audio attachment in both calls. This makes the first
+  MessageContent input the earliest trace-proven place to prevent Discord's
+  stale video accessory without disturbing native audio.
+- Removed the ineffective MessageAccessories resolver/hook and its receiver-
+  swap helper. The first non-reentry MessageContent pass now applies the saved
+  content policy and removes only displayed attachments independently classified
+  as video. Logger's working video host remains the sole video renderer; image,
+  audio, and generic attachments stay with Discord's native render path.
+- The projection uses displayed attachment classification instead of ID/URL
+  cross-matching. This covers ID-less legacy Blob clones and avoids hiding a
+  non-video attachment that shares a malformed ID or URL with a video. It keeps
+  Immutable `.set('attachments', ...)` support plus a detached object fallback;
+  canonical saved records remain unchanged.
+- Source inspection confirmed the Logger viewer does not reuse Discord's live
+  MessageAccessories video component: it constructs its own HTML `<video>` and
+  play overlay. Keeping the analogous Logger-owned live video host is therefore
+  the smaller working path; routing local Blob video back through the already-
+  failing native image/placeholder path would not reuse the Logger viewer.
+- Parent-focused validation passes plugin syntax, `tests/media.test.js` plus
+  `tests/source-contracts.test.js` at `231/231`, and `git diff --check`. The
+  focused media coverage includes remote-first, local-only, master-off,
+  ID-less Blob video, shared malformed ID/URL preservation, canonical
+  immutability, native audio/image/generic retention, and the first-render
+  source contract. The user explicitly paused the full suite for this live-gate
+  stage, so no new full-suite result is claimed.
+- Spark applied the initial traced suppression before an explicit model-capacity
+  failure. Luna completed the bounded classification cleanup, and a read-only
+  reviewer found no remaining normal-flow duplicate or canonical-write path
+  after those edge cases were closed. Nothing is committed or pushed. The next
+  action is controlled live sync followed by the user's Off/On V01-V06 and
+  A01/A02 check.
+- Live-synced only `MessageLoggerV2.plugin.js`; repository and installed hashes
+  match at
+  `1d06b24f2fb07a6845a67bc2e9f532f58da1a3199e7eeb6d029e34cef69f953b`.
+  The 15:47:01 hot reload removed the previous patches, found ImageModal,
+  applied the new patches, completed its UI refresh, and scheduled the shared
+  cache timer. No MessageLogger exception or removed-MessageAccessories warning
+  appears in the fresh boundary. The simultaneous `PersonalPins` exception is
+  unrelated. The user's Off/On duplicate-card check remains; nothing is
+  committed or pushed.
+
+### 2026-08-18 - Main-branch live control installed for duplicate attribution
+
+- The first-render suppression build still produced two blocks in the user's
+  live check. At the user's request, installed a reversible unmodified
+  `main`-branch control to determine whether the second block predates the
+  current Stage 3 renderer.
+- Local `main` and `origin/main` both resolve to
+  `131c928f2c8b5c73e2d28efc69699eb9d6c87ca9` (`release: bump
+  MessageLoggerV2 to 2.8.2.18`). No branch switch, checkout, tracked-file edit,
+  merge, commit, or push occurred. `git archive` extracted only that plugin blob
+  to `/tmp/mlv2-main-control.osPtFj/MessageLoggerV2.plugin.js`.
+- The installed BetterDiscord plugin now exactly matches the `main` control at
+  SHA-256
+  `4240e49193286cc7b99d32a12822150b59fc010bde8aad3deda1550cba7751fc`.
+  The 15:48:26 hot reload removed/applied patches and completed its UI refresh
+  without a MessageLogger exception; the concurrent `PersonalPins` exception
+  is unrelated.
+- The user confirmed that `main` produced no duplicate block. The then-current
+  repository Stage 3 build was restored live at SHA-256
+  `1d06b24f2fb07a6845a67bc2e9f532f58da1a3199e7eeb6d029e34cef69f953b`
+  before the follow-up ownership edit recorded below. Nothing was committed or
+  pushed, and the full suite remained paused.
+
+### 2026-08-18 - Main control passed; top-level native accessory ownership live gate
+
+- The user confirmed the unmodified `main` control has no duplicate video
+  block. This isolates the second block to the reopened Stage 3 custom live
+  video path rather than Discord's baseline mount.
+- Restored the working repository build after the control, then replaced the
+  ineffective `MessageAccessories.renderAttachments`/first-MessageContent-only
+  ownership attempts with a guarded top-level
+  `MessageAccessories.prototype.render` projection. During only an exact
+  visible saved-deletion render, its detached props expose a video-free message
+  to Discord while Logger keeps the working video host. Original props are
+  restored in `finally`; a missing resolver or non-writable props fail closed
+  to Discord's unchanged native render. Images, audio, generic attachments,
+  canonical records, and unrelated messages remain untouched.
+- Parent-focused validation passes plugin syntax,
+  `tests/media.test.js` plus `tests/source-contracts.test.js` at `232/232`, and
+  `git diff --check`. The full suite remains deliberately paused for the live
+  gate.
+- Live-synced only `MessageLoggerV2.plugin.js`; repository and installed hashes
+  match at
+  `cf3347cce594996a198903364ed7b38cdc8b3f52a157f991f5abda92d1be457e`.
+  The 15:54:39-15:54:42 hot reload removed the previous patches, found
+  ImageModal, applied all patches, completed its UI refresh, and scheduled the
+  shared cache timer. No MessageLogger exception or MessageAccessories lookup
+  warning appears in that boundary. The simultaneous PersonalPins exception is
+  unrelated. Nothing is committed or pushed.
+
+### 2026-08-18 - Stage 3 live render accepted and full pre-commit gate passed
+
+- The user confirmed the top-level native accessory ownership build removes the
+  duplicate Discord placeholder while retaining the working Logger video
+  renderer. This closes the Stage 3 live-render gate for the tested video and
+  audio attachment fixtures.
+- The parent resumed the deferred complete gate after that runtime acceptance:
+  `node --check MessageLoggerV2.plugin.js`, `npm run check`, all `569/569`
+  tests through `npm test`, and `git diff --check` pass.
+- The accepted commit scope is exactly this checklist,
+  `MessageLoggerV2.plugin.js`, `tests/media.test.js`, and
+  `tests/source-contracts.test.js`. Do not include ignored trace helpers,
+  reports, or `tmp/1.html`; do not push the commit.

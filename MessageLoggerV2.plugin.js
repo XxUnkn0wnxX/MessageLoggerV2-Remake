@@ -252,6 +252,10 @@ const DiscordModules = (() => {
       ModalSize: Webpack.getByKeys('SMALL', 'MEDIUM', 'LARGE', 'DYNAMIC', { searchExports: true }),
     })),
     MessageContentComponent: lazyGet('MessageContentComponent', () => Webpack.getModule(e => e?.type?.toString()?.includes('.isCommandType()') && !e?.type?.toString()?.includes('.isFirstMessageInForumPost'))),
+    MessageAccessories: lazyGet('MessageAccessories', () => Webpack.getModule(
+      Filters.byPrototypeKeys('renderEmbeds', 'renderAttachments'),
+      { searchExports: true }
+    )),
     I18nModule: lazyGet('I18nModule', () => Webpack.getModule(m => Object.values(m).some(x => x != null && Object.getPrototypeOf(x)?.withFormatters != null))),
     SystemLocaleUtils: lazyGet('SystemLocaleUtils', () => Webpack.getByKeys?.('getSystemLocale', { searchExports: true })),
     TextModule: lazyGet('TextModule', () => Webpack.getBySource('case"always-white"', { searchExports: true })),
@@ -10209,6 +10213,8 @@ module.exports = class MessageLoggerV2 {
     const classifierSources = [
       descriptor.filename,
       attachment?.filename,
+      attachment?.content_type,
+      attachment?.original_content_type,
       attachment?.url,
       attachment?.proxy_url,
       attachment?.proxyUrl,
@@ -10217,9 +10223,10 @@ module.exports = class MessageLoggerV2 {
     ];
     const isImage = classifierSources.some(source => this.isImage(source));
     const isVideo = !isImage && classifierSources.some(source => this.isVideo(source));
+    const isAudio = !isImage && !isVideo && classifierSources.some(source => this.isAudio(source));
     const labelType = isImage ? 'image' : 'attachment';
     const label = `[${labelType}:${sourceText}]`;
-    const mediaType = isImage ? 'image' : isVideo ? 'video' : 'attachment';
+    const mediaType = isImage ? 'image' : isVideo ? 'video' : isAudio ? 'audio' : 'attachment';
 
     if (!cacheAllImages || (!allowRemote && !allowBlob)) {
       return {
@@ -10233,7 +10240,7 @@ module.exports = class MessageLoggerV2 {
     }
     const getCachedBlobUrl = () => {
       if (!descriptor.attachment_id || !descriptor.message_id || !descriptor.channel_id
-        || !descriptor.local_path || (!isImage && !isVideo)
+        || !descriptor.local_path || (!isImage && !isVideo && !isAudio)
       ) return null;
       const cacheUrl = `http://localhost:7474/${descriptor.attachment_id}${descriptor.extension || ''}#${descriptor.channel_id},${descriptor.attachment_id},${descriptor.message_id}`;
       const blobUrl = this.imageCacheServerSimulator?.get?.(cacheUrl);
@@ -10331,7 +10338,7 @@ module.exports = class MessageLoggerV2 {
         fallbackUrl: nextAvailableFallback ? nextAvailableFallback.candidate : null
       };
     }
-    if (!allowBlob || !descriptor.local_path || (!isImage && !isVideo)) {
+    if (!allowBlob || !descriptor.local_path || (!isImage && !isVideo && !isAudio)) {
       return {
         attachment_id: descriptor.attachment_id,
         mediaType,
@@ -10386,6 +10393,67 @@ module.exports = class MessageLoggerV2 {
       });
     }
     return plans;
+  }
+  getSavedAttachmentMessageContentPresentationMessage(message) {
+    if (!message || typeof message !== 'object' || !Array.isArray(message.attachments)
+      || !message.attachments.length) return message;
+    const messageId = String(message.id || '');
+    const channelId = String(message.channel_id ?? message.channelId ?? '');
+    if (!messageId || !channelId) return message;
+
+    const record = this.messageRecord?.[messageId];
+    const sourceMessage = record?.message;
+    if (!record?.delete_data || record.delete_data.hidden || !sourceMessage) return message;
+    if (String(sourceMessage.id || '') !== messageId
+      || String(sourceMessage.channel_id ?? sourceMessage.channelId ?? '') !== channelId
+    ) return message;
+    if (this.shouldPresentSavedMessage?.(channelId, messageId) === false) return message;
+
+    const sourceAttachments = Array.isArray(sourceMessage.attachments)
+      ? sourceMessage.attachments
+      : [];
+    if (!sourceAttachments.length) return message;
+    const cacheAllImages = this.settings?.cacheAllImages !== false;
+    const presentationOptions = cacheAllImages
+      ? this.settings?.onlyRenderCachedAttachments
+        ? { allowBlob: true }
+        : { allowRemote: true }
+      : {};
+    const displayedPlans = this.getSavedAttachmentPresentationPlans(message, presentationOptions);
+    const attachments = message.attachments.filter((_, index) => displayedPlans[index]?.mediaType !== 'video');
+    if (attachments.length === message.attachments.length) return message;
+    try {
+      if (typeof message.set === 'function') {
+        const updatedMessage = message.set('attachments', attachments);
+        if (updatedMessage && typeof updatedMessage === 'object') return updatedMessage;
+      }
+    } catch {}
+    return { ...message, attachments };
+  }
+  renderSavedAttachmentMessageAccessories(thisObject, args, original) {
+    if (typeof original !== 'function') return;
+    const originalProps = thisObject?.props;
+    const message = originalProps?.message;
+    const projectedMessage = this.getSavedAttachmentMessageContentPresentationMessage(message);
+    if (!originalProps || projectedMessage === message) {
+      return original.apply(thisObject, args);
+    }
+
+    const projectedProps = { ...originalProps, message: projectedMessage };
+    let swapped = false;
+    try {
+      thisObject.props = projectedProps;
+      swapped = thisObject.props === projectedProps;
+    } catch {}
+    if (!swapped) {
+      try { thisObject.props = originalProps; } catch {}
+      return original.apply(thisObject, args);
+    }
+    try {
+      return original.apply(thisObject, args);
+    } finally {
+      try { thisObject.props = originalProps; } catch {}
+    }
   }
   getLoggerSavedAttachmentPresentationEntries(message, record) {
     const renderMessage = message && typeof message === 'object' ? message : null;
@@ -10767,7 +10835,11 @@ module.exports = class MessageLoggerV2 {
       const plan = this.getSavedAttachmentPresentationPlan(attachment, sourceMessage, {
         allowBlob: true
       });
-      if (!plan || plan.action !== 'blob' || (plan.mediaType !== 'image' && plan.mediaType !== 'video')) return;
+      if (!plan || plan.action !== 'blob' || (
+        plan.mediaType !== 'image'
+        && plan.mediaType !== 'video'
+        && plan.mediaType !== 'audio'
+      )) return;
       this.remountSavedAttachmentPresentationRecords(record);
       this.dispatcher?.dispatch?.({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' });
       for (const [threadId, refresh] of this._forumThreadLogRefreshers?.entries?.() || []) {
@@ -11011,7 +11083,8 @@ module.exports = class MessageLoggerV2 {
     if (this.settings?.cacheAllImages === false || this.settings?.onlyRenderCachedAttachments) return;
     const target = event?.target;
     const mediaTag = String(target?.tagName || '').toUpperCase();
-    if (mediaTag !== 'IMG' && mediaTag !== 'VIDEO') return;
+    if (mediaTag !== 'IMG' && mediaTag !== 'VIDEO' && mediaTag !== 'AUDIO' && mediaTag !== 'SOURCE') return;
+    if (target.closest?.('[data-ml2-attachment-video-host="true"]')) return;
 
     const sourceUrl = target.currentSrc || target.src;
     if (typeof sourceUrl !== 'string' || !sourceUrl.trim()) return;
@@ -11044,6 +11117,8 @@ module.exports = class MessageLoggerV2 {
       const classificationSources = [
         descriptor.filename,
         attachment?.filename,
+        attachment?.content_type,
+        attachment?.original_content_type,
         attachment?.url,
         attachment?.proxy_url,
         attachment?.proxyUrl,
@@ -11052,7 +11127,8 @@ module.exports = class MessageLoggerV2 {
       ];
       const isImage = classificationSources.some(source => this.isImage(source));
       const isVideo = !isImage && classificationSources.some(source => this.isVideo(source));
-      if (!isImage && !isVideo) continue;
+      const isAudio = !isImage && !isVideo && classificationSources.some(source => this.isAudio(source));
+      if (!isImage && !isVideo && !isAudio) continue;
 
       if (!this.markSavedAttachmentMediaCandidateFailure(attachment, record.message, sourceUrl)) continue;
 
@@ -14107,6 +14183,10 @@ module.exports = class MessageLoggerV2 {
   }
   isVideo(url) {
     return this._testUrlPattern(url, /\.(mp4|webm|mov|avi|mkv)$/i);
+  }
+  isAudio(url) {
+    if (typeof url === 'string' && /^audio\//i.test(url.trim())) return true;
+    return this._testUrlPattern(url, /\.(mp3|ogg|oga|opus)$/i);
   }
   toSerializableArray(value) {
     if (!value) return [];
@@ -18450,6 +18530,20 @@ module.exports = class MessageLoggerV2 {
     const SuffixEdited = React.memo(e => React.createElement(this.Tooltip, { text: e.timestamp ? this.createTimeStamp(e.timestamp.get()._i) : null }, tt => React.createElement('time', { dateTime: e.timestamp.toISOString(), className: this.getEditedTimestampClasses(), role: 'note', ...tt }, ` (${i18n.Messages.MESSAGE_EDITED})`)));
     SuffixEdited.displayName = 'SuffixEdited';
     let MessageContent = DiscordModules.MessageContentComponent;
+    const MessageAccessories = DiscordModules.MessageAccessories;
+    if (MessageAccessories?.prototype && typeof MessageAccessories.prototype.render === 'function') {
+      this.unpatches.push(Patcher.instead(
+        MessageAccessories.prototype,
+        'render',
+        (thisObject, args, original) => this.renderSavedAttachmentMessageAccessories(
+          thisObject,
+          args,
+          original
+        )
+      ));
+    } else {
+      Logger.warn('Could not patch MessageAccessories.render; restored videos may keep a duplicate native attachment mount.');
+    }
     const DeletedContentTooltip = ({ plugin, deletedAt, block = false, children }) => React.createElement(
       plugin.Tooltip,
       {
@@ -18467,6 +18561,120 @@ module.exports = class MessageLoggerV2 {
           : React.createElement('span', tooltipProps, children)
     );
     DeletedContentTooltip.displayName = 'DeletedContentTooltip';
+    const SavedAttachmentPresentationVideo = ({
+      plugin,
+      attachment,
+      sourceMessage,
+      presentationPlan
+    }) => {
+      const initialPlan = {
+        action: presentationPlan?.action,
+        mediaType: presentationPlan?.mediaType,
+        label: typeof presentationPlan?.label === 'string' ? presentationPlan.label : null,
+        url: typeof presentationPlan?.url === 'string' ? presentationPlan.url : ''
+      };
+      const [displayPlan, setDisplayPlan] = React.useState(initialPlan);
+      const [placeholderLabel, setPlaceholderLabel] = React.useState(null);
+      const messageId = String(sourceMessage?.id || '');
+      const attachmentId = String(attachment?.id || '');
+      const naturalWidth = Number(attachment?.width);
+      const displayWidth = Number.isFinite(naturalWidth) && naturalWidth > 0
+        ? Math.max(200, Math.min(naturalWidth, 400))
+        : 256;
+      const markerProps = {
+        'data-ml2-attachment-message-id': messageId,
+        'data-ml2-attachment-id': attachmentId,
+        'data-ml2-attachment-video-host': 'true'
+      };
+      const getPlanLabel = plan => typeof plan?.label === 'string'
+        ? plan.label
+        : (attachment?.filename || 'unknown file');
+      const renderPlaceholder = label => React.createElement(
+        'div',
+        {
+          ...markerProps,
+          style: {
+            display: 'inline-block',
+            marginTop: '4px',
+            marginRight: '4px',
+            color: 'var(--text-muted)'
+          }
+        },
+        label
+      );
+      if (placeholderLabel) return renderPlaceholder(placeholderLabel);
+      if (displayPlan?.mediaType !== 'video'
+        || (displayPlan?.action !== 'remote' && displayPlan?.action !== 'blob')
+        || typeof displayPlan?.url !== 'string'
+        || !displayPlan.url) {
+        return null;
+      }
+      const onError = () => {
+        const currentUrl = displayPlan.url;
+        if (displayPlan.action !== 'remote' || plugin.settings?.onlyRenderCachedAttachments) {
+          setPlaceholderLabel(getPlanLabel(displayPlan));
+          return;
+        }
+        let nextPlan;
+        try {
+          plugin.markSavedAttachmentMediaCandidateFailure(
+            attachment,
+            sourceMessage,
+            currentUrl
+          );
+          nextPlan = plugin.getSavedAttachmentPresentationPlan(
+            attachment,
+            sourceMessage,
+            { allowRemote: true }
+          );
+        } catch {}
+        if (nextPlan
+          && (nextPlan.action === 'remote' || nextPlan.action === 'blob')
+          && nextPlan.mediaType === 'video'
+          && typeof nextPlan.url === 'string'
+          && nextPlan.url
+          && nextPlan.url !== currentUrl) {
+          setDisplayPlan({
+            action: nextPlan.action,
+            mediaType: nextPlan.mediaType,
+            label: nextPlan.label,
+            url: nextPlan.url
+          });
+          return;
+        }
+        setPlaceholderLabel(getPlanLabel(nextPlan || displayPlan));
+      };
+      return React.createElement(
+        'div',
+        {
+          ...markerProps,
+          style: {
+            display: 'inline-block',
+            maxWidth: '100%',
+            marginTop: '4px',
+            marginRight: '4px',
+            borderRadius: '8px',
+            overflow: 'hidden',
+            background: '#111'
+          }
+        },
+        React.createElement('video', {
+          ...markerProps,
+          src: displayPlan.url,
+          controls: true,
+          preload: 'metadata',
+          width: displayWidth,
+          style: {
+            display: 'block',
+            maxWidth: '100%',
+            height: 'auto',
+            borderRadius: '8px'
+          },
+          onError
+        })
+      );
+    };
+    SavedAttachmentPresentationVideo.displayName = 'SavedAttachmentPresentationVideo';
     const SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER = '__mlv2SavedAttachmentPresentationContent';
     const SavedAttachmentPresentationContent = ({ plugin, contentModule, contentProps }) => {
       const [, forceUpdate] = Hooks.useForceUpdate();
@@ -18482,11 +18690,46 @@ module.exports = class MessageLoggerV2 {
         if (callbacks) callbacks.add(forceUpdate);
         return plugin._unregisterMessageCallback.bind(plugin, messageId, forceUpdate);
       }, [messageId]);
-      return React.createElement(contentModule.type, {
+      const record = plugin.messageRecord?.[messageId];
+      const sourceMessage = record?.message;
+      const cacheAllImages = plugin.settings?.cacheAllImages !== false;
+      const presentationOptions = cacheAllImages
+        ? plugin.settings?.onlyRenderCachedAttachments
+          ? { allowBlob: true }
+          : { allowRemote: true }
+        : {};
+      const canonicalAttachments = Array.isArray(sourceMessage?.attachments)
+        ? sourceMessage.attachments
+        : [];
+      const canonicalPlans = sourceMessage
+        ? plugin.getSavedAttachmentPresentationPlans(sourceMessage, presentationOptions)
+        : [];
+      const videoEntries = [];
+      canonicalPlans.forEach((plan, index) => {
+        if (plan?.mediaType !== 'video') return;
+        const attachment = canonicalAttachments[index];
+        if (plan.action === 'remote' || plan.action === 'blob') {
+          videoEntries.push({ attachment, presentationPlan: plan, index });
+        }
+      });
+      const nativeMessage = plugin.getSavedAttachmentMessageContentPresentationMessage(displayedMessage);
+      const nativeContent = React.createElement(contentModule.type, {
         ...sourceProps,
-        message: displayedMessage,
+        message: nativeMessage,
         [SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER]: true
       });
+      const mediaMode = `${cacheAllImages ? 'cache-on' : 'cache-off'}-${plugin.settings?.onlyRenderCachedAttachments ? 'local-only' : 'remote-first'}`;
+      const loggerVideoContent = videoEntries.map(({ attachment, presentationPlan, index }) => React.createElement(
+        SavedAttachmentPresentationVideo,
+        {
+          key: `${String(attachment?.id || index)}-${presentationPlan.action}-${presentationPlan.url || presentationPlan.label}-${mediaMode}`,
+          plugin,
+          attachment,
+          sourceMessage,
+          presentationPlan
+        }
+      ));
+      return React.createElement(React.Fragment, {}, nativeContent, ...loggerVideoContent);
     };
     SavedAttachmentPresentationContent.displayName = 'SavedAttachmentPresentationContent';
     const EditHistoryContent = ({ plugin, messageId, originalElement, compact }) => {
@@ -18785,8 +19028,11 @@ module.exports = class MessageLoggerV2 {
           const message = args?.[0]?.message;
           if (!message) return;
           const contentMessage = this.getNativeDeletedAttachmentPresentationMessageForMessageContent(message);
-          if (contentMessage === message) return;
-          args[0] = { ...args[0], message: contentMessage };
+          const presentationMessage = props?.[SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER]
+            ? contentMessage
+            : this.getSavedAttachmentMessageContentPresentationMessage(contentMessage);
+          if (presentationMessage === message) return;
+          args[0] = { ...args[0], message: presentationMessage };
         }),
         Patcher.after(mcc, 'type', (_, [props], ret) => {
           if (typeof props.className === 'string' && props.className.includes('repliedTextContent')) return;

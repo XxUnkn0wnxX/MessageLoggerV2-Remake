@@ -681,7 +681,7 @@ test('date order applies to optional timestamps and forced logger dates', () => 
   assert.match(savedAttachmentPresentationContent, /const SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER = '__mlv2SavedAttachmentPresentationContent'/);
   assert.match(savedAttachmentPresentationContent, /const SavedAttachmentPresentationContent = \(\{ plugin, contentModule, contentProps \}\) => \{[\s\S]*const \[,\s*forceUpdate\] = Hooks\.useForceUpdate\(\);[\s\S]*getNativeDeletedAttachmentPresentationMessageForMessageContent\(sourceProps\.message\)[\s\S]*const messageId = String\(displayedMessage\?\.id \|\| ''\);[\s\S]*React\.useEffect\(/);
   assert.match(savedAttachmentPresentationContent, /if \(!messageId\) return;[\s\S]*if \(callbacks\) callbacks\.add\(forceUpdate\);[\s\S]*plugin\._unregisterMessageCallback\.bind\(plugin, messageId, forceUpdate\)/);
-  assert.match(savedAttachmentPresentationContent, /return React\.createElement\(contentModule\.type, \{[\s\S]*\[\s*SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER\s*\]\s*:\s*true/);
+  assert.match(savedAttachmentPresentationContent, /(?:return|const nativeContent =) React\.createElement\(contentModule\.type, \{[\s\S]*\[\s*SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER\s*\]\s*:\s*true/);
   const savedAttachmentTransitionState = source.slice(
     source.indexOf('  constructor(meta) {'),
     source.indexOf('  getName() {')
@@ -811,6 +811,91 @@ test('date order applies to optional timestamps and forced logger dates', () => 
   assert.match(source, /if \(record\?\.delete_data\?\.time && ret\)[\s\S]*return React\.createElement\(DeletedContentTooltip,[\s\S]*deletedAt: record\.delete_data\.time/);
   assert.doesNotMatch(source, /if \(showEditHistory\)/);
   assert.doesNotMatch(source, /const deletedChildren = ret\.props\.children\.slice\(\)/);
+});
+
+test('saved live rows render video attachments through Logger-owned React hosts', () => {
+  const videoContent = source.slice(
+    source.indexOf('const SavedAttachmentPresentationVideo'),
+    source.indexOf("SavedAttachmentPresentationVideo.displayName = 'SavedAttachmentPresentationVideo'")
+  );
+  const savedContent = source.slice(
+    source.indexOf('const SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER'),
+    source.indexOf("SavedAttachmentPresentationContent.displayName = 'SavedAttachmentPresentationContent'")
+  );
+  assert.match(savedContent, /getSavedAttachmentPresentationPlans\(sourceMessage, presentationOptions\)/);
+  assert.match(savedContent, /if \(plan\?\.mediaType !== 'video'\) return;/);
+  assert.match(savedContent, /const nativeMessage = plugin\.getSavedAttachmentMessageContentPresentationMessage\(displayedMessage\)/);
+  assert.doesNotMatch(savedContent, /videoAttachmentKeys|getAttachmentKeys/);
+  assert.match(videoContent, /'data-ml2-attachment-message-id': messageId/);
+  assert.match(videoContent, /'data-ml2-attachment-id': attachmentId/);
+  assert.match(videoContent, /'data-ml2-attachment-video-host': 'true'/);
+  assert.match(videoContent, /React\.createElement\('video', \{[\s\S]*src: displayPlan\.url[\s\S]*controls: true[\s\S]*preload: 'metadata'/);
+  assert.doesNotMatch(videoContent, /['"]img['"]|poster/);
+  assert.match(videoContent, /markSavedAttachmentMediaCandidateFailure\([\s\S]*currentUrl/);
+  assert.match(videoContent, /getSavedAttachmentPresentationPlan\([\s\S]*\{ allowRemote: true \}/);
+  assert.match(videoContent, /nextPlan\.url !== currentUrl/);
+  assert.match(videoContent, /setPlaceholderLabel\(getPlanLabel\(nextPlan \|\| displayPlan\)\)/);
+  const mediaErrorHandler = source.slice(
+    source.indexOf('  handleSavedAttachmentMediaError(event = {}) {'),
+    source.indexOf('  refreshCacheOnlyMessage(message) {')
+  );
+  assert.match(mediaErrorHandler, /target\.closest\?\.\('\[data-ml2-attachment-video-host="true"\]'\)\) return;/);
+});
+
+test('saved restored video ownership projects MessageAccessories.render before attachment rendering', () => {
+  const modulesSlice = source.slice(
+    source.indexOf('const DiscordModules = (() => {'),
+    source.indexOf('class PopoutManager', source.indexOf('const DiscordModules = (() => {'))
+  );
+  assert.match(
+    modulesSlice,
+    /MessageAccessories: lazyGet\('MessageAccessories', \(\) => Webpack\.getModule\(\s*Filters\.byPrototypeKeys\('renderEmbeds', 'renderAttachments'\),\s*\{\s*searchExports: true\s*\}\s*\)\),/
+  );
+  assert.doesNotMatch(source, /renderSavedAttachmentAccessories/);
+  assert.doesNotMatch(source, /getSavedAttachmentPresentationIdentityKeys/);
+  const projection = source.slice(
+    source.indexOf('  getSavedAttachmentMessageContentPresentationMessage(message) {'),
+    source.indexOf('  renderSavedAttachmentMessageAccessories(thisObject, args, original) {')
+  );
+  assert.match(projection, /const displayedPlans = this\.getSavedAttachmentPresentationPlans\(message, presentationOptions\)/);
+  assert.match(projection, /message\.attachments\.filter\(\(_, index\) => displayedPlans\[index\]\?\.mediaType !== 'video'\)/);
+  assert.doesNotMatch(projection, /loggerVideoKeys|getSavedAttachmentPresentationIdentityKeys/);
+  assert.match(
+    projection,
+    /if \(typeof message\.set === 'function'\)[\s\S]*const updatedMessage = message\.set\('attachments', attachments\);[\s\S]*if \(updatedMessage && typeof updatedMessage === 'object'\) return updatedMessage;[\s\S]*catch \{\}[\s\S]*return \{\s*\.\.\.message, attachments\s*\};/
+  );
+  const accessoriesOwner = source.slice(
+    source.indexOf('  renderSavedAttachmentMessageAccessories(thisObject, args, original) {'),
+    source.indexOf('  getLoggerSavedAttachmentPresentationEntries(message, record) {')
+  );
+  assert.match(
+    accessoriesOwner,
+    /projectedMessage = this\.getSavedAttachmentMessageContentPresentationMessage\(message\)[\s\S]*return original\.apply\(thisObject, args\)/
+  );
+  assert.match(
+    accessoriesOwner,
+    /thisObject\.props = projectedProps;[\s\S]*swapped = thisObject\.props === projectedProps;[\s\S]*finally \{\s*try \{ thisObject\.props = originalProps; \} catch \{\}\s*\}/
+  );
+  assert.match(
+    source,
+    /const MessageAccessories = DiscordModules\.MessageAccessories;[\s\S]{0,240}Patcher\.instead\(\s*MessageAccessories\.prototype,\s*'render',[\s\S]{0,220}this\.renderSavedAttachmentMessageAccessories\(\s*thisObject,\s*args,\s*original\s*\)\s*\)/
+  );
+  assert.doesNotMatch(
+    source,
+    /Patcher\.instead\(\s*MessageAccessories\.prototype,\s*'renderAttachments'/
+  );
+  const messageContentPatch = source.slice(
+    source.indexOf('    this.installEditHistoryPatch = (mcc) => {'),
+    source.indexOf('    if (!this.installEditHistoryPatch(MessageContent))')
+  );
+  assert.match(
+    messageContentPatch,
+    /Patcher\.before\(mcc, 'type',[\s\S]*getNativeDeletedAttachmentPresentationMessageForMessageContent\(message\)[\s\S]*SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER[\s\S]*getSavedAttachmentMessageContentPresentationMessage\(contentMessage\)/
+  );
+  assert.match(
+    messageContentPatch,
+    /if \(presentationMessage === message\) return;\s*args\[0\] = \{ \.\.\.args\[0\], message: presentationMessage \};/
+  );
 });
 
 test('native preferred system languages are normalized before date defaults initialize', async () => {
