@@ -1860,7 +1860,7 @@ test('populateParent routes audio through one native host and the shared saved-a
     source.indexOf('populateParent(parent, messages)'),
     source.indexOf('sortMessagesByAge(map, useCaptureBatchOrder')
   );
-  assert.match(viewer, /\['image', 'video', 'audio'\]\.includes\(plan\.mediaType\)/);
+  assert.match(viewer, /\['image', 'video', 'audio', 'text', 'pdf'\]\.includes\(plan\.mediaType\)/);
   assert.match(viewer, /attachmentSources\.some\(source => this\.isImage\(source\)[\s\S]*this\.isAudio\(source\)\)\) continue;/);
   const audioStart = viewer.indexOf("const isAudioFile = attachment?._ml2PresentationMediaType === 'audio'");
   const audioEnd = viewer.indexOf('const isCached = presentationAction', audioStart);
@@ -1878,6 +1878,77 @@ test('populateParent routes audio through one native host and the shared saved-a
   assert.match(audioBranch, /nextUrl !== failedSource[\s\S]*nextUrl !== attachment\.url/);
   assert.match(audioBranch, /cleanupLoggerNativeAudioRoots\(audioHost\)[\s\S]*audioHost\.replaceWith\(createUnavailableAttachmentPlaceholder/);
   assert.doesNotMatch(audioBranch, /createModal\(|attemptToUseCachedImage|attemptToUseCachedVideo/);
+});
+
+test('populateParent keeps document rendering isolated, exact, and per attachment', () => {
+  const viewer = source.slice(
+    source.indexOf('populateParent(parent, messages)'),
+    source.indexOf('sortMessagesByAge(map, useCaptureBatchOrder')
+  );
+  const markerStart = viewer.indexOf('const appendRemoteCachedFailureMarker =');
+  const markerEnd = viewer.indexOf('if (record) {', markerStart);
+  const failureMarker = viewer.slice(markerStart, markerEnd);
+  const documentStart = viewer.indexOf("const isDocumentFile = attachment?._ml2PresentationMediaType === 'text'");
+  const audioStart = viewer.indexOf("if (isAudioFile) {", documentStart);
+  const documentBranch = viewer.slice(documentStart, audioStart);
+  const renderLoop = viewer.slice(
+    viewer.indexOf('const handleCreateImage = (attachment, idx) =>'),
+    viewer.indexOf('for (const sticker of this.getMessageStickerItems(message))')
+  );
+
+  assert.ok(markerStart >= 0 && markerEnd > markerStart);
+  assert.match(failureMarker, /\['image', 'video', 'audio', 'text', 'pdf'\]\.includes\(plan\.mediaType\)/);
+  const placeholderIndex = failureMarker.indexOf("plan.action === 'placeholder' || plan.action === 'omit'");
+  const rendererSuppressionIndex = failureMarker.indexOf('if (attachmentIsMedia) {');
+  const genericPayloadIndex = failureMarker.indexOf('appendPayloadReference(');
+  assert.ok(placeholderIndex >= 0 && rendererSuppressionIndex > placeholderIndex);
+  assert.ok(genericPayloadIndex > rendererSuppressionIndex, 'non-renderer attachment entries retain payload-link handling');
+  assert.match(viewer, /for \(const attachment of message\.attachments \|\| \[\]\) \{[\s\S]*appendPayloadReference\(isVoiceMessage \? 'Voice message' : 'Attachment', attachment\.filename, attachment\.url\);/);
+
+  assert.ok(documentStart >= 0 && audioStart > documentStart, 'document rendering must precede audio rendering');
+  assert.match(documentBranch, /attachment\?\._ml2PresentationMediaType === 'text'[\s\S]*attachment\?\._ml2PresentationMediaType === 'pdf'/);
+  assert.match(documentBranch, /const loggerAttachmentEntry = getLoggerAttachmentEntry\(attachment\);[\s\S]*const sourceAttachment = loggerAttachmentEntry\?\.attachment \|\| null;/);
+  assert.match(documentBranch, /const documentHost = document\.createElement\('div'\);[\s\S]*markLoggerAttachmentTarget\(documentHost, sourceAttachment \|\| attachment\);[\s\S]*contentDiv\.appendChild\(documentHost\);/);
+  assert.match(documentBranch, /const onDocumentUnavailable = \(\) => \{[\s\S]*cleanupLoggerNativeDocumentRoots\(documentHost\);[\s\S]*documentHost\.replaceWith\(createUnavailableAttachmentPlaceholder\([\s\S]*presentationLabel \|\| attachment\.filename,[\s\S]*sourceAttachment \|\| attachment/);
+  assert.match(documentBranch, /this\.mountLoggerNativeDocument\([\s\S]*documentHost,[\s\S]*message,[\s\S]*attachment,[\s\S]*sourceMessage,[\s\S]*onDocumentUnavailable[\s\S]*\);[\s\S]*return;/);
+  assert.doesNotMatch(documentBranch, /createModal\(|createElement\('(?:iframe|a)'\)|addEventListener\('click'|onMediaItemContextMenu/);
+  assert.doesNotMatch(documentBranch, /message\.attachments|attachments\s*\[\s*0\s*\]|\.find\(/);
+  assert.match(renderLoop, /for \(let ii = 0; ii < renderedMedia\.length; ii\+\+\) handleCreateImage\(renderedMedia\[ii\], ii\);/);
+  assert.ok(renderLoop.indexOf('const documentHost = document.createElement') >= 0);
+  assert.ok(renderLoop.indexOf('getLoggerAttachmentEntry(attachment)') >= 0);
+});
+
+test('native document rendering uses guarded semantic discovery and lifecycle cleanup', () => {
+  const nativeDocument = source.slice(
+    source.indexOf('  isLoggerNativeDocumentMessage(candidate) {'),
+    source.indexOf('  isLoggerNativeAudioPlayer(candidate) {')
+  );
+  const documentProps = nativeDocument.slice(
+    nativeDocument.indexOf('  createLoggerNativeDocumentProps(message, channel) {'),
+    nativeDocument.indexOf('  createLoggerNativeDocumentErrorBoundary(')
+  );
+  const documentCleanup = source.slice(
+    source.indexOf('  cleanupLoggerNativeDocumentRoots(rootNode = null, force = false) {'),
+    source.indexOf('  refreshCopiedNativeDeleteControls() {')
+  );
+  const stop = source.slice(source.indexOf('  stop() {'), source.indexOf('  checkVersionNewer(current, remote) {'));
+  const observer = source.slice(source.indexOf('const tintObserver = new MutationObserver'), source.indexOf('  return () => {', source.indexOf('const tintObserver = new MutationObserver')));
+  const refilter = source.slice(source.indexOf('  refilterMessages() {'), source.indexOf('  refreshLoggerMenu() {'));
+
+  assert.match(nativeDocument, /typeof candidate\.prototype\?\.isPoll === 'function'[\s\S]*typeof candidate\.prototype\?\.hasFlag === 'function'/);
+  assert.match(nativeDocument, /Webpack\.getModule\([\s\S]*isLoggerNativeDocumentMessageClass\(moduleExport\),[\s\S]*\{ searchExports: true \}/);
+  assert.match(nativeDocument, /typeof Utils\?\.loadEntry === 'function'[\s\S]*await Utils\.loadEntry\(messageAccessories\)/);
+  assert.match(nativeDocument, /_loggerNativeDocumentMessageLoadGeneration !== generation/);
+  assert.match(nativeDocument, /content: '',[\s\S]*flags: typeof source\.flags === 'number' \? source\.flags : 0,[\s\S]*attachments: \[\{ \.\.\.attachment \}\]/);
+  assert.match(nativeDocument, /ReactDOM\.createRoot\(host\)/);
+  assert.match(nativeDocument, /host\.dataset\.ml2AttachmentMessageId = messageId;[\s\S]*host\.dataset\.ml2AttachmentId = attachmentId;[\s\S]*host\.dataset\.ml2AttachmentDocumentHost = 'true';/);
+  assert.doesNotMatch(documentProps, /onMediaItemContextMenu/);
+  assert.match(nativeDocument, /cleanupLoggerNativeDocumentRoots\(host\)/);
+  assert.match(documentCleanup, /entry\?\.cleanup\?\.\(\)[\s\S]*root\?\.unmount\?\.\(\)[\s\S]*_loggerNativeDocumentRoots\.delete\(key\)/);
+  assert.match(stop, /cleanupLoggerNativeDocumentRoots\?\.\(null, true\)/);
+  assert.match(observer, /cleanupLoggerNativeDocumentRoots\(node\)/);
+  assert.match(refilter, /cleanupLoggerNativeDocumentRoots\(messagesDIV\)/);
+  assert.doesNotMatch(nativeDocument, /['"](?:eA|Ay)['"]/);
 });
 
 test('native Logger audio host uses semantic discovery, guarded lazy loading, markers, and browser fallback', () => {

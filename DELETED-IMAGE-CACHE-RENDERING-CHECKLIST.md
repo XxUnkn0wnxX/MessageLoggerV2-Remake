@@ -34,18 +34,19 @@ This file is both the implementation checklist and the handoff record.
 - **Predecessor rollout record:**
   `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T11-07-23-01a00d42-4986-7971-94de-11f09f6630d1.jsonl`
 - **Working branch:** `develop`
-- **Verified HEAD:** accepted Stage 3 point 2 audio commit
-  `4ba35ef1bd260254cc49d985f97e4e5c4d44b2d5`. Local `develop`,
-  `origin/develop`, and a fresh `git ls-remote` of the actual remote
-  `refs/heads/develop` all match that SHA; the branch is clean and no commits
-  are ahead or behind.
-- **Verified worktree:** the accepted Stage 3 point 2 audio implementation and
-  tests are committed and pushed. Gate 3.1 currently modifies this checklist,
-  `MessageLoggerV2.plugin.js`, `tests/media.test.js`, and
-  `tests/source-contracts.test.js`. The ignored v1.0.6 trace helper,
-  `tmp/1.html`, and runtime reports remain outside commit scope. The helper's
-  exact symlink is installed in the BetterDiscord plugins folder. None of those
-  ignored/runtime artifacts may be committed.
+- **Verified HEAD:** accepted Gate 3.1 document-restoration commit
+  `3478423f4f9de98a864578cf0fbb126f10b19b1e`. Rewritten
+  `origin/develop` is `9dfd6d85be45072f85441d378db38858b1aba1a6`, so local
+  `develop` remains exactly one accepted commit ahead. A fresh `git ls-remote`
+  verified the remote ref after the privacy rewrite.
+- **Verified worktree:** Gate 3.2 modifies this checklist,
+  `MessageLoggerV2.plugin.js`, `tests/clipboard.test.js`,
+  `tests/media.test.js`, and `tests/source-contracts.test.js`. The ignored
+  v1.0.8 trace helper, `tmp/1.html`, and runtime reports remain outside commit
+  scope; the helper's exact symlink is still installed in the BetterDiscord
+  plugins folder. The ignored repository `AGENTS.md` now requires `$HOME` in
+  every persistent path and a privacy scan before commits, merges, rewrites,
+  or pushes. None of those ignored/runtime artifacts may be committed.
 - **Baseline:** `npm test` passed `471/471` before this checklist was created.
 - **Current Stage 4 verification:** the parent has rerun `npm run check`,
   `tests/clipboard.test.js` at `16/16`, `tests/media.test.js` at `156/156`,
@@ -54,10 +55,18 @@ This file is both the implementation checklist and the handoff record.
   build. After the escaping-native-action correction, the parent reran
   `npm run check`, clipboard `16/16`, media `156/156`, source contracts
   `68/68`, full `npm test` at `561/561`, and `git diff --check` successfully.
-- **Live parity:** the focused-tested Gate 3.1 TXT/PDF restored-row build and
-  installed BetterDiscord plugin are byte-identical at SHA-256
-  `375fdbb28cd9620914f9ca3f38d28dff6601eb9410ddbffe0cc908af4d808f12`.
-  The temporary unmodified `main` control is no longer installed.
+- **Current Gate 3.2 verification:** parent `node --check`, the combined
+  `tests/media.test.js` plus `tests/source-contracts.test.js` gate at `246/246`,
+  the batch attachment context suite at `18/18`, and `git diff --check` pass.
+  The full suite remains deliberately paused until the user accepts the live
+  Logger-view gate.
+- **Live parity:** Gate 3.2 was synced using only the tracked plugin. Repository
+  and installed BetterDiscord plugin SHA-256 both equal
+  `4ab847d2b0153b96ec3862af7ebaf0d6ede6eeca721f37737db8671217fefa96`,
+  and `cmp` confirmed byte-for-byte parity. The fresh hot-reload boundary
+  cleanly removed the prior patches, initialized the new plugin, reapplied its
+  patches, updated the UI, and scheduled the cache timer without a new
+  MessageLoggerV2 error. Earlier document-probe errors predate this reload.
 - **Implementation state:** Stages 1-3 are complete, accepted, committed, and
   pushed. Stage 4 is implemented, parent-verified, live-synced, and accepted,
   with one operating-system-neutral open policy for
@@ -79,15 +88,21 @@ This file is both the implementation checklist and the handoff record.
   occurred on either escaping path. The user then verified both corrected
   controls and ordinary-viewer isolation; the helper, symlink, and report are
   now in Trash.
-- **Current gate:** Stage 4, the reopened Stage 3 video correction, and Stage 3
-  point 2 Logger-view audio are accepted and published on `develop`. Gate 3.1
-  is now live-accepted: exact TXT/PDF attachments receive correctly typed
-  cached Blobs and render through Discord's native restored-row components,
-  while the Stage 4 local-open descriptor path remains intact. Parent syntax,
-  the combined focused media/source-contract gate at `241/241`, and
-  `git diff --check` pass. The full suite remains paused. Commit this accepted
-  gate without pushing, then begin Gate 3.2 Logger-view rendering. Stage 9
-  warning detail remains deferred.
+- **Current gate:** Gate 3.2 implementation, focused deterministic coverage,
+  live sync, and user acceptance are complete. Logger viewer now gives each
+  TXT/PDF attachment its own
+  detached Discord-native `MessageAccessories` host, exact message/attachment
+  ownership markers, isolated placeholder fallback, and lifecycle cleanup,
+  independently of the live-mount toggle. A multi-file batch resolves each
+  image/video/audio/TXT/PDF/generic target to its own **Open Attachment** action
+  and fails closed on ambiguous subtrees. The focused batch suite constructs
+  one grouped image/video/audio/TXT/PDF/generic record and verifies exact
+  per-sibling descriptors, Blob/local source ownership, menu actions, native
+  action reconciliation, and fail-closed ambiguity; independent TXT/PDF hosts
+  and cleanup are covered separately. The user accepted remote-first,
+  local-only, multi-document, context-menu, live-mount-Off, and mixed-file batch
+  viewer cases. The full suite remains paused until the release metadata and
+  documentation slice is ready. Stage 9 warning detail remains deferred.
 - **Worker state:** the user reported Spark at 24%, but Spark returned an
   explicit `Selected model is at capacity` failure. Per the session routing
   rule, bounded work moved to Luna Extra High for the rest of this session;
@@ -97,22 +112,40 @@ This file is both the implementation checklist and the handoff record.
 - **Checklist state:** include this file in every user-confirmed stage commit
   and keep it in the repository root after the current release. Do not archive
   it unless the user explicitly requests that in a later session.
+- **Privacy state:** every expanded home path in this checklist was converted
+  to `$HOME`. The 12 `develop` commits after `main` were rewritten, and only
+  the already-published replacement tip was force-pushed with an exact lease;
+  the local Gate 3.1 commit remains unpushed. `main`,
+  `fix/attachment-gate`, its handoff, both Networking checklist locations,
+  commit subjects/bodies, Git notes, and tag messages had no path/name leak and
+  required no rewrite. Existing Git author identity metadata is separate and
+  was intentionally left unchanged.
 - **Change-control state:** The accepted Stage 4, reopened Stage 3 video, and
   Stage 3 point 2 audio commits are now published on `develop` through
-  `4ba35ef1bd260254cc49d985f97e4e5c4d44b2d5`. Do not merge, switch branches,
-  tag, release, bump the version, or edit the changelog during point 3. Keep
-  focused tests only until point 3 is accepted; the full gate and final live
-  smoke test belong immediately before the later release step.
+  `9dfd6d85be45072f85441d378db38858b1aba1a6`; accepted Gate 3.1 is the local
+  commit `3478423f4f9de98a864578cf0fbb126f10b19b1e`. Do not merge, switch
+  branches, or push during Gate 3.2. The user has now authorized the final
+  release slice, after point 3 is complete and live-accepted, to bump the plugin
+  version and replace the stale built-in changelog with a concise summary of
+  everything since the last `main` release, including Logger-view TXT/PDF. The
+  same slice must update the user-facing settings and test/runtime documentation
+  for source ordering, cache/display toggle ownership, live-mount versus Logger-
+  viewer independence, supported render types, placeholders, and the global
+  **Open Attachment** route. After the accepted release is merged to `main`,
+  merge that final `main` into `fix/attachment-gate` and verify/push that branch
+  as the paused Stage 5 handoff. Keep focused tests only until point 3 is accepted;
+  do not edit those docs or release metadata until the Logger-view render is
+  working and live-accepted. The ordered final slice is documentation, version
+  and changelog, full gate, final live smoke, then merge and push.
 
 ### Exact next action
 
-Commit the accepted Gate 3.1 TXT/PDF restored-row checkpoint locally without
-pushing. Then implement Gate 3.2 by porting the trace-proven Discord native
-TXT/PDF presentation into Logger viewer while reusing the shared source and
-Stage 4 open policy independently of the live-mount toggle. Keep the full suite
-paused until point 3 is complete; then run it before the user's final release
-smoke test. Do not merge, switch branches, tag, release, bump the version, or
-edit the changelog yet.
+Commit the accepted five-file Gate 3.2 checkpoint without pushing. Then update
+the user-facing documentation and release metadata, including the concise
+version/changelog requested for the final release. Run the complete automated
+gate, sync only the final plugin, obtain the user's final release smoke, merge
+`develop` to `main`, and merge the resulting `main` into
+`fix/attachment-gate` before publishing all requested refs.
 
 ### Resume procedure
 
@@ -157,7 +190,7 @@ be recorded before implementation continues.
 
 - [x] Finish Stage 3 point 2 (Logger-view audio), obtain its focused live
       acceptance, and commit it locally without pushing.
-- [ ] Finish Stage 3 point 3 (TXT/PDF cached-Blob/restored and Logger-view
+- [x] Finish Stage 3 point 3 (TXT/PDF cached-Blob/restored and Logger-view
       parity, including `Open Attachment`) with trace-first implementation and
       focused validation.
 - [ ] Only after point 3 is complete, run the full automated suite and obtain
@@ -672,7 +705,7 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
   save. One `PersonalPins` dispatch error occurred during hot reload and is
   unrelated to MessageLogger Stage 2.
 - **Commit state:** Committed and verified as
-  `62152b8632860a0d0037c7713314d8f9c3357daa` (`Preserve deleted attachment
+  `26f8558b6559a440ca6631ca44ececfcf767a612` (`Preserve deleted attachment
   source URLs`). The commit contains exactly the plugin, media tests, record
   tests, and this checklist.
 
@@ -820,7 +853,7 @@ presentation. Disabling the live restored-message mount affects only live chat
 rows and must never disable or degrade the Logger viewer.
 
 1. [x] **Video live/restored rendering:** accepted and committed locally as
-       `b9a1ebc41f0b8ca7324fb9e14b900b6a7fecd55e`. Discord-native duplicate
+       `82106f79028bedcad6c1968c5bacac52fd12cce7`. Discord-native duplicate
        ownership is suppressed and the working Logger video presentation keeps
        the shared remote/local policy. Nothing was pushed.
 2. [x] **Logger-view audio rendering:** reuse the semantically traced Discord
@@ -829,7 +862,7 @@ rows and must never disable or degrade the Logger viewer.
        user verified remote-first and local-only Logger-view playback and the
        accepted open behavior. Its focused gate is the authorized point 2
        checkpoint; the full suite remains paused until point 3 is complete.
-3. [ ] **TXT/PDF Blob and Logger-view rendering:** the user reports that
+3. [x] **TXT/PDF Blob and Logger-view rendering:** the user reports that
        Discord's ordinary/live remote text and PDF presentations already work,
        while their local Blob/restored path does not and the Logger viewer has
        no inline renderer. Preserve the working remote presentation and trace
@@ -852,7 +885,7 @@ rows and must never disable or degrade the Logger viewer.
            media/source-contract tests under the parent.
      - [x] Live-sync and confirm C01 TXT and C02 PDF render through Discord's
            native restored-row components from cached Blobs.
-   - [ ] **Gate 3.2 — Logger viewer second:** after Gate 3.1 is accepted, port
+   - [x] **Gate 3.2 — Logger viewer second:** after Gate 3.1 is accepted, port
          the proven TXT/PDF native presentation into Logger's viewer using the
          same guarded/native-first pattern established for audio. The Logger
          viewer owns this path independently of the live restored-message mount
@@ -860,26 +893,26 @@ rows and must never disable or degrade the Logger viewer.
          attachment rendering.
    - [x] Cover extension and MIME discovery for `.txt` / `text/plain` and
          `.pdf` / `application/pdf` without minified export names or keys.
-   - [ ] With local-only Off, preserve CDN -> proxy -> cached Blob -> exact
+   - [x] With local-only Off, preserve CDN -> proxy -> cached Blob -> exact
          placeholder order. With local-only On, begin from the verified cache
          only and make zero remote presentation requests. Cache-master Off
          remains the exact attachment placeholder. Apply this source order to
          both live mounts and Logger views; only the live-mount toggle may skip
          the former, while Logger-view rendering continues through its own path.
-   - [ ] Reuse Discord's trace-proven native text/PDF presentation in restored
+   - [x] Reuse Discord's trace-proven native text/PDF presentation in restored
          live Blob mounts and the Logger viewer where available. Do not use an
          unsandboxed custom iframe, execute attachment text, or route either
          format through image/video/audio renderers.
-   - [ ] Show the neutral Stage 4 `Open Attachment` action on every exact-owned
+   - [x] Show the neutral Stage 4 `Open Attachment` action on every exact-owned
          text/PDF preview or container where practical, including restored live
          rows, Logger-view rows, and native preview surfaces. Remote opens use
          accepted HTTP(S) candidates; local-only opens the verified physical
          cache path through the OS default application, never a Blob URL.
-   - [ ] Fail closed for ambiguous or foreign mounts and preserve canonical
+   - [x] Fail closed for ambiguous or foreign mounts and preserve canonical
          records, signed URLs, current/removed order, mixed attachments, and all
          existing image/video/audio/sticker/embed/Components V2 behavior.
          Prevent duplicate native/Logger mounts and duplicate Attachment text.
-   - [ ] Add focused deterministic coverage for classification, both policy
+   - [x] Add focused deterministic coverage for classification, both policy
          modes, master Off, missing cache/module, render failure, mixed formats,
          duplicate suppression, canonical immutability, menu/open ownership,
          and lifecycle cleanup. Then run trace-backed live TXT/PDF checks on
@@ -1187,7 +1220,7 @@ full setting matrix in every channel type.
   **Open Link** / **Open in Browser** partial failure was subsequently traced,
   corrected through the global attachment policy, and accepted.
 - **Last accepted pre-point-3 checkpoint:** commit
-  `4ba35ef1bd260254cc49d985f97e4e5c4d44b2d5`; repository/live plugin hashes
+  `9dfd6d85be45072f85441d378db38858b1aba1a6`; repository/live plugin hashes
   matched at
   `f4dc7aa4bdc225c7b80094e9aa0d6438cce3fafb4b88c38c894ebd876d033b62`
   before the current unsynced TXT/PDF Gate 3.1 work began.
@@ -1521,7 +1554,7 @@ behavior, persistence, rendering, or external-open behavior.
 ### 2026-08-17 - Stage 2 commit verified and focused scope reaffirmed
 
 - Created and verified Stage 2 commit
-  `62152b8632860a0d0037c7713314d8f9c3357daa`; its scope is exactly the plugin,
+  `26f8558b6559a440ca6631ca44ececfcf767a612`; its scope is exactly the plugin,
   media tests, record tests, and this checklist.
 - The user reaffirmed that remaining work is primarily image rendering with
   only the small cache-logic adjustments necessary for that rendering.
@@ -1776,7 +1809,7 @@ behavior, persistence, rendering, or external-open behavior.
 
 ### 2026-08-17 - Stage 3 reopened for newly cached local-only media
 
-- After `ed59642`, the user tested newly uploaded and deleted images in normal
+- After `d8cded3`, the user tested newly uploaded and deleted images in normal
   channels, threads, and forums. With local-only On, the first saved mount shows
   its classified placeholder; local-only Off renders remotely as expected, and
   cycling the main master makes the already-cached local image appear.
@@ -2003,7 +2036,7 @@ behavior, persistence, rendering, or external-open behavior.
 
 - Reconstructed the handoff from this complete checklist and the referenced
   session's final trace/decision window, then reverified `develop`, HEAD
-  `2a719ea00d7019c20b1f6c5b65fe616a7eae0990`, the four-file tracked scope,
+  `7074e129692d15af91619430431dc40b229b9f04`, the four-file tracked scope,
   trace artifacts, and the preceding repo/live plugin hash parity.
 - Implemented one protected forum/thread-only two-phase transition. Eligibility
   requires the live MessageStore content and exact mounted message-content node
@@ -2528,12 +2561,12 @@ behavior, persistence, rendering, or external-open behavior.
 ### 2026-08-18 - Stage 4 committed locally and Stage 3 fixtures prepared
 
 - Committed the accepted five-file Stage 4 change on `develop` as
-  `4433a618775e8416d0b9abac9af3857695dd99a7` (`Complete saved attachment open
+  `64464efd45bcb3e95c7d752cd35dc8a908c84eaa` (`Complete saved attachment open
   routing`). The parent reran full `npm test` at `561/561`, `git diff --check`,
   and repository/live hash parity immediately before the commit.
 - Did not push. Local `develop` is ahead by one; a read-only `git ls-remote`
   confirmed actual remote `develop` remains at
-  `89d51f7a59f3ff7be79ebeb551a4f17c3a8cab69`.
+  `eec8f4e664c5fc3eaf3007473e067e4a0ddff440`.
 - Created the 744 KB copyright-free fixture pack at
   `$HOME/Downloads/MessageLoggerV2-Media-Format-Tests` using
   ImageMagick 7.1.2-8 and FFmpeg 8.0.1 with speed-first settings. The final 15
@@ -2891,7 +2924,7 @@ behavior, persistence, rendering, or external-open behavior.
 ### 2026-08-18 - Logger-view native audio ownership trace ready
 
 - The accepted Stage 3 correction is committed locally as
-  `b9a1ebc41f0b8ca7324fb9e14b900b6a7fecd55e`; nothing was pushed. Logger-view
+  `82106f79028bedcad6c1968c5bacac52fd12cce7`; nothing was pushed. Logger-view
   audio now proceeds as a separate change.
 - Existing A01/A02 reports prove deleted live rows use Discord's native
   `H -> eA -> audio/source` React chain for remote and Blob URLs, but the old
@@ -2997,7 +3030,7 @@ behavior, persistence, rendering, or external-open behavior.
   again at 16:41:57 with the expected refreshes and no MessageLogger exception.
   Stage 3 point 2 is accepted for a local focused-gate commit without a push.
 - Committed point 2 as
-  `4ba35ef1bd260254cc49d985f97e4e5c4d44b2d5` (`Add native audio rendering to
+  `9dfd6d85be45072f85441d378db38858b1aba1a6` (`Add native audio rendering to
   Logger viewer`), then pushed `develop` at the user's explicit request. Local
   `develop`, `origin/develop`, and the remote `refs/heads/develop` were each
   verified at that exact SHA. Point 3 begins from this clean published state.
@@ -3085,3 +3118,86 @@ behavior, persistence, rendering, or external-open behavior.
 - The user confirmed both cached-Blob restored-row presentations now work and
   authorized a local checkpoint commit before Gate 3.2. Gate 3.1 is accepted;
   no post-change trace was necessary.
+- Committed the accepted Gate 3.1 checkpoint locally as
+  `3478423f4f9de98a864578cf0fbb126f10b19b1e` (`Render cached documents in
+  restored rows`). Nothing was pushed; `develop` is one commit ahead of
+  `origin/develop` at this boundary.
+- The user also authorized the final release metadata after Gate 3.2 is done:
+  bump the plugin version and replace the stale built-in changelog with a
+  concise summary of all user-facing work since the last `main` release,
+  including Logger-view TXT/PDF, before the full gate, final live smoke, and
+  requested `main` merge/push. Update `docs/settings.md` and `docs/tests.md` at
+  the same boundary so the documented cache/render policy, display-toggle
+  ownership, supported renderers, placeholder behavior, and attachment-opening
+  policy match the accepted implementation.
+
+### 2026-08-18 - Gate 3.2 Logger-view document build ready for live gate
+
+- The v1.0.7 detached full-`MessageAccessories` probe failed because the plain
+  synthetic object omitted native message-model fields consumed by
+  `renderCodedLinks`. The v1.0.8 retry constructed a fresh detached native
+  Discord message record with one attachment and safe empty accessory fields.
+  It rendered the local TXT preview and PDF generic row without a boundary
+  error. The probe's blue frame was disposable UI only and is not in production.
+- Production resolves a semantic native message class through supplied/store
+  records first, then guarded Webpack discovery. When needed it calls
+  `BdApi.Utils.loadEntry(MessageAccessories)` only if available, and rejects
+  stale generations or failed discovery without mutating canonical records.
+- Logger viewer creates one detached native document message and one React root
+  per exact TXT/PDF attachment. Every host carries its saved message and
+  attachment IDs, omits Discord's context-menu interception callback so the
+  Logger owner can receive right-clicks, and has isolated root cleanup and
+  placeholder fallback. The viewer path does not consult the live-mount toggle.
+- Batch coverage uses two independent document hosts and a six-attachment live
+  record. It proves each image/video/audio/TXT/PDF/generic target resolves its
+  own descriptor and **Open Attachment** action, never the first sibling, while
+  ambiguous subtrees fail closed. The Logger viewer's exact marked descendants
+  also remain authoritative when message content repeats a URL or label.
+- Parent validation passes `node --check`, focused media plus source contracts
+  at `246/246`, focused clipboard/context coverage at `18/18`, and
+  `git diff --check`. The full suite remains paused until live acceptance.
+
+### 2026-08-18 - Gate 3.2 Logger-view document live gate accepted
+
+- Synced only `MessageLoggerV2.plugin.js`; repository and installed plugin
+  SHA-256 both equal
+  `4ab847d2b0153b96ec3862af7ebaf0d6ede6eeca721f37737db8671217fefa96`,
+  and `cmp` confirmed byte-for-byte parity.
+- The fresh reload boundary removed and reapplied the plugin cleanly. No new
+  MessageLoggerV2 error appeared during the subsequent smoke; later log entries
+  showed the expected separate TXT/PDF and mixed JPEG/MP4/MOV/TXT promotions.
+- The user accepted Logger-view TXT/PDF rendering with local-only both Off and
+  On, Logger-view independence when live restored-message mounting is disabled,
+  each item's exact **Open Attachment** route, multiple documents in one batch,
+  and a mixed batch of different file types without duplicates or sibling
+  misrouting.
+- Removed the exact trace-helper symlink and moved the ignored helper, saved
+  HTML dump, and 12 generated trace reports recoverably to
+  `$HOME/.Trash/MessageLoggerV2-Gate3.2-trace.o2kbqF`. No runtime helper or
+  report remains in the BetterDiscord plugins folder or repository `tmp/`.
+- Gate 3.2 is ready for its five-file local checkpoint commit. The full suite
+  remains paused until the requested documentation/version/changelog release
+  slice is assembled.
+
+### 2026-08-18 - Handoff path privacy rewrite completed
+
+- Converted every expanded home path in this checklist to `$HOME` and added a
+  local repository privacy rule to the ignored `AGENTS.md` so future persistent
+  docs, handoffs, examples, commit content, and release artifacts cannot record
+  a literal username/home directory.
+- Audited `main`, `develop`, `fix/attachment-gate`, the attachment-gate handoff,
+  both Networking checklist locations, and the archive branch. The other
+  handoffs were already `$HOME`-based; only this checklist on `develop` needed
+  rewriting.
+- Rebased all 12 `develop` commits after `main`, preserving the current tracked
+  file hashes, and force-updated only the previously published remote boundary
+  with an exact lease. Rewritten `origin/develop` is
+  `9dfd6d85be45072f85441d378db38858b1aba1a6`; rewritten local Gate 3.1 is
+  `3478423f4f9de98a864578cf0fbb126f10b19b1e` and remains unpushed.
+- Reachable-tree scans, commit subjects/bodies, Git notes, tag messages, and
+  remote refs contain no expanded home path. Existing author identity metadata
+  is normal Git authorship, separate from handoff/commit-note content, and was
+  not rewritten.
+- At the final paused Stage 5 boundary, merge the accepted release from
+  `develop` to `main`, then merge that resulting `main` into
+  `fix/attachment-gate`; verify and publish each intended ref separately.

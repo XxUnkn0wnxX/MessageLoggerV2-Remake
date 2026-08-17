@@ -8,6 +8,7 @@ const {
   captureConsoleEvent,
   createPlugin,
   Patcher,
+  React,
   ReactDOM,
   loggerEvents,
   resetHarness,
@@ -3732,6 +3733,70 @@ test('saved MessageAccessories render exposes projected video-free props only du
   assert.strictEqual(lockedInstance.props, originalProps);
 });
 
+test('logger native document message isolates one TXT or PDF attachment with safe Discord defaults', () => {
+  class NativeDocumentMessage {
+    constructor(payload) {
+      Object.assign(this, payload);
+    }
+    isPoll() { return false; }
+    hasFlag() { return false; }
+  }
+
+  const canonical = {
+    id: 'document-message',
+    channel_id: 'document-channel',
+    content: 'canonical content must stay untouched',
+    flags: 64,
+    attachments: [
+      { id: 'txt', filename: 'notes.txt', url: 'https://cdn.example/notes.txt' },
+      { id: 'pdf', filename: 'manual.pdf', url: 'https://cdn.example/manual.pdf' }
+    ],
+    codedLinks: [{ type: 'invite' }],
+    giftCodes: ['gift'],
+    embeds: [{ type: 'rich' }],
+    components: [{ type: 1 }],
+    messageSnapshots: [{ message: 'snapshot' }],
+    reactions: [{ emoji: { name: 'x' } }]
+  };
+  const nativeSource = new NativeDocumentMessage(canonical);
+  const canonicalBefore = structuredClone(canonical);
+  const sourceAttachmentsBefore = structuredClone(nativeSource.attachments);
+  const plugin = createPlugin();
+  plugin.shouldPresentSavedMessage = () => assert.fail('Logger document rendering must not use live-mount policy');
+
+  for (const projected of [
+    { ...canonical.attachments[0], url: 'https://cdn.example/notes.txt', proxy_url: 'https://cdn.example/notes.txt' },
+    { ...canonical.attachments[1], url: 'blob:https://discord.com/manual.pdf', proxy_url: 'blob:https://discord.com/manual.pdf' }
+  ]) {
+    const native = plugin.createLoggerNativeDocumentMessage(canonical, projected, nativeSource);
+    assert.ok(native instanceof NativeDocumentMessage);
+    assert.equal(native.attachments.length, 1);
+    assert.notStrictEqual(native.attachments[0], projected);
+    assert.equal(native.attachments[0].id, projected.id);
+    assert.equal(native.attachments[0].url, projected.url);
+    assert.equal(native.attachments[0].proxy_url, projected.proxy_url);
+    assert.equal(native.content, '');
+    assert.equal(native.flags, 64);
+    assert.deepEqual(native.codedLinks, []);
+    assert.deepEqual(native.giftCodes, []);
+    assert.deepEqual(native.embeds, []);
+    assert.deepEqual(native.components, []);
+    assert.deepEqual(native.messageSnapshots, []);
+    assert.deepEqual(native.reactions, []);
+    assert.deepEqual(native.stickers, []);
+    assert.deepEqual(native.stickerItems, []);
+    assert.equal(native.activity, null);
+    assert.equal(native.sharedClientTheme, null);
+    assert.equal(native.edited_timestamp, null);
+    assert.equal(native.editedTimestamp, null);
+    assert.equal(native.isPoll(), false);
+    assert.equal(native.hasFlag(1), false);
+  }
+
+  assert.deepEqual(canonical, canonicalBefore);
+  assert.deepEqual(nativeSource.attachments, sourceAttachmentsBefore);
+});
+
 test('native attachment media error listener lifecycle installs once, forwards once, and removes safely', async () => {
   const dispatches = [];
   const invalidations = [];
@@ -4195,6 +4260,89 @@ test('logger native audio discovery retries one guarded lazy entry without stick
   assert.equal(await createPlugin().ensureLoggerNativeAudioPlayer(), null);
 });
 
+test('logger native document message discovery guarded-loads semantic classes without stale misses', async () => {
+  class MessageAccessories {
+    renderEmbeds() {}
+    renderAttachments() {}
+  }
+  class NativeDocumentMessage {
+    isPoll() { return false; }
+    hasFlag() { return false; }
+  }
+  class PartialDocumentMessage {
+    isPoll() { return false; }
+  }
+
+  let nativeAvailable = false;
+  Webpack.Filters.byPrototypeKeys = (...keys) => candidate => keys.every(
+    key => typeof candidate?.prototype?.[key] === 'function'
+  );
+  Webpack.getModule = filter => [
+    MessageAccessories,
+    ...(nativeAvailable ? [NativeDocumentMessage] : [])
+  ].find(candidate => {
+    try {
+      return filter(candidate);
+    } catch {
+      return false;
+    }
+  }) || null;
+
+  const plugin = createPlugin();
+  assert.equal(plugin.isLoggerNativeDocumentMessageClass(PartialDocumentMessage), false);
+  assert.equal(plugin.resolveLoggerNativeDocumentMessageClass(), null);
+
+  let releaseFirstLoad;
+  let loadCalls = 0;
+  Utils.loadEntry = () => {
+    loadCalls += 1;
+    return new Promise(resolve => {
+      releaseFirstLoad = () => {
+        nativeAvailable = true;
+        resolve([]);
+      };
+    });
+  };
+  const firstLookup = plugin.ensureLoggerNativeDocumentMessageClass();
+  const sharedLookup = plugin.ensureLoggerNativeDocumentMessageClass();
+  assert.equal(loadCalls, 1);
+  releaseFirstLoad();
+  assert.deepEqual(
+    await Promise.all([firstLookup, sharedLookup]),
+    [NativeDocumentMessage, NativeDocumentMessage]
+  );
+
+  nativeAvailable = false;
+  const emptyPlugin = createPlugin();
+  Utils.loadEntry = async () => [];
+  assert.equal(await emptyPlugin.ensureLoggerNativeDocumentMessageClass(), null);
+
+  const rejectedPlugin = createPlugin();
+  Utils.loadEntry = async () => {
+    throw new Error('lazy entry unavailable');
+  };
+  assert.equal(await rejectedPlugin.ensureLoggerNativeDocumentMessageClass(), null);
+  assert.ok(
+    loggerEvents.some(event => event[0] === 'warn'
+      && String(event[1]).includes('Could not load the Discord native document message entry.'))
+  );
+
+  const stalePlugin = createPlugin();
+  let releaseStaleLoad;
+  Utils.loadEntry = () => new Promise(resolve => {
+    releaseStaleLoad = resolve;
+  });
+  const staleLookup = stalePlugin.ensureLoggerNativeDocumentMessageClass();
+  stalePlugin.stop();
+  nativeAvailable = true;
+  releaseStaleLoad([]);
+  assert.equal(await staleLookup, null);
+
+  nativeAvailable = false;
+  delete Utils.loadEntry;
+  assert.equal(await createPlugin().ensureLoggerNativeDocumentMessageClass(), null);
+});
+
 test('logger native audio props, root ownership, error forwarding, and browser fallback match the traced contract', () => {
   class NativeAudioPlayer {
     renderAudio() {}
@@ -4321,6 +4469,120 @@ test('logger native audio props, root ownership, error forwarding, and browser f
   } finally {
     if (originalDocument === undefined) delete global.document;
     else global.document = originalDocument;
+  }
+});
+
+test('logger native documents mount one marked TXT/PDF message per host and clean up independently', () => {
+  class MessageAccessories {
+    renderEmbeds() {}
+    renderAttachments() {}
+  }
+  class NativeDocumentMessage {
+    constructor(payload) {
+      Object.assign(this, payload);
+    }
+    isPoll() { return false; }
+    hasFlag() { return false; }
+  }
+
+  const originalReactComponent = React.Component;
+  React.Component = class {};
+  try {
+    Webpack.Filters.byPrototypeKeys = (...keys) => candidate => keys.every(
+      key => typeof candidate?.prototype?.[key] === 'function'
+    );
+    Webpack.getModule = filter => [MessageAccessories, NativeDocumentMessage].find(candidate => {
+      try {
+        return filter(candidate);
+      } catch {
+        return false;
+      }
+    }) || null;
+
+    const rendered = new Map();
+    const unmounts = new Map();
+    ReactDOM.createRoot = host => ({
+      render(element) {
+        rendered.set(host, element);
+      },
+      unmount() {
+        unmounts.set(host, (unmounts.get(host) || 0) + 1);
+      }
+    });
+
+    const sourceMessage = new NativeDocumentMessage({
+      id: 'document-message',
+      channel_id: 'document-channel',
+      content: 'repeated [attachment:document] content',
+      attachments: [
+        { id: 'doc-txt', filename: 'notes.txt', url: 'https://cdn.example/notes.txt' },
+        { id: 'doc-pdf', filename: 'manual.pdf', url: 'https://cdn.example/manual.pdf' }
+      ]
+    });
+    const renderMessage = structuredClone(sourceMessage);
+    const sourceBefore = {
+      ...sourceMessage,
+      attachments: structuredClone(sourceMessage.attachments)
+    };
+    const channel = { id: 'document-channel', type: 0, guild_id: 'guild' };
+    const plugin = createPlugin({
+      tools: { getChannel: id => id === 'document-channel' ? channel : null }
+    });
+    const txtHost = createLoggerAudioHost();
+    const pdfHost = createLoggerAudioHost();
+    const txtMount = plugin.mountLoggerNativeDocument(
+      txtHost,
+      renderMessage,
+      { ...renderMessage.attachments[0], url: 'blob:https://discord.com/notes.txt' },
+      sourceMessage
+    );
+    const pdfMount = plugin.mountLoggerNativeDocument(
+      pdfHost,
+      { ...renderMessage, attachments: [...renderMessage.attachments].reverse() },
+      { ...renderMessage.attachments[1], url: 'https://cdn.example/manual.pdf' },
+      sourceMessage
+    );
+
+    assert.equal(txtMount?.native, true);
+    assert.equal(pdfMount?.native, true);
+    assert.equal(plugin._loggerNativeDocumentRoots.size, 2);
+    assert.deepEqual(
+      [txtHost.dataset, pdfHost.dataset],
+      [
+        {
+          ml2AttachmentMessageId: 'document-message',
+          ml2AttachmentId: 'doc-txt',
+          ml2AttachmentDocumentHost: 'true'
+        },
+        {
+          ml2AttachmentMessageId: 'document-message',
+          ml2AttachmentId: 'doc-pdf',
+          ml2AttachmentDocumentHost: 'true'
+        }
+      ]
+    );
+
+    for (const [host, attachmentId] of [[txtHost, 'doc-txt'], [pdfHost, 'doc-pdf']]) {
+      const boundary = rendered.get(host);
+      const accessories = boundary.props.children[0];
+      assert.equal(typeof accessories.type?.prototype?.renderAttachments, 'function');
+      assert.equal(accessories.props.message.attachments.length, 1);
+      assert.equal(accessories.props.message.attachments[0].id, attachmentId);
+      assert.equal(accessories.props.onMediaItemContextMenu, undefined);
+      assert.strictEqual(accessories.props.channel, channel);
+    }
+    assert.deepEqual({ ...sourceMessage, attachments: structuredClone(sourceMessage.attachments) }, sourceBefore);
+
+    plugin.cleanupLoggerNativeDocumentRoots(txtHost);
+    assert.equal(unmounts.get(txtHost), 1);
+    assert.equal(unmounts.get(pdfHost) || 0, 0);
+    assert.equal(plugin._loggerNativeDocumentRoots.size, 1);
+    plugin.cleanupLoggerNativeDocumentRoots(pdfHost);
+    assert.equal(unmounts.get(pdfHost), 1);
+    assert.equal(plugin._loggerNativeDocumentRoots.size, 0);
+  } finally {
+    if (originalReactComponent === undefined) delete React.Component;
+    else React.Component = originalReactComponent;
   }
 });
 
@@ -5994,64 +6256,93 @@ test('saved attachment open descriptor resolves a local-only cached TXT anchor f
   assert.deepEqual(target, targetBefore);
 });
 
-test('saved attachment open descriptor keeps logger-marked generic target authoritative when content contains matching source/label', () => {
-  const attachment = {
-    id: '501',
-    filename: 'shared.png',
-    url: 'https://cdn.example/shared.png'
-  };
+test('saved attachment open descriptor keeps each marked TXT/PDF document host authoritative with repeated content', () => {
+  const attachments = [
+    {
+      id: '501',
+      filename: 'shared.txt',
+      content_type: 'text/plain',
+      url: 'https://cdn.example/shared.txt',
+      proxy_url: 'https://media.example/shared.txt'
+    },
+    {
+      id: '502',
+      filename: 'shared.pdf',
+      content_type: 'application/pdf',
+      url: 'https://cdn.example/shared.pdf',
+      proxy_url: 'https://media.example/shared.pdf'
+    }
+  ];
   const record = {
     delete_data: {},
     message: {
       id: 'marked-message',
       channel_id: 'marked-channel',
-      content: 'Here is [https://cdn.example/shared.png] and [attachment:shared.png]',
-      attachments: [attachment]
+      content: '[attachment:shared.txt] [attachment:shared.pdf] https://cdn.example/shared.txt https://cdn.example/shared.pdf [attachment:shared.txt] [attachment:shared.pdf]',
+      attachments
     }
   };
-  const plugin = createPlugin();
-  const markedUrlTarget = {
-    tagName: 'A',
-    href: attachment.url,
-    dataset: {
-      ml2AttachmentMessageId: 'marked-message',
-      ml2AttachmentId: '501'
-    },
-    getAttribute(name) {
-      if (name === 'data-ml2-attachment-message-id') return this.dataset.ml2AttachmentMessageId;
-      if (name === 'data-ml2-attachment-id') return this.dataset.ml2AttachmentId;
-      return null;
-    },
-    closest(selector) {
-      if (selector.includes('data-ml2-attachment-message-id')
-        || selector.includes('data-ml2-attachment-id')
-        || selector.includes('[data-ml2-attachment-id]')) return this;
-      if (selector.includes('a[href]')) return this;
-      return null;
+  const plugin = createPlugin({
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: true },
+    imageCacheServerSimulator: {
+      _resolveImagePath: (attachmentId, extension) => (
+        attachmentId === '501' && extension === '.txt' ? '/trusted/cache/shared.txt'
+          : attachmentId === '502' && extension === '.pdf' ? '/trusted/cache/shared.pdf'
+            : null
+      )
     }
+  });
+  const createMarkedDocumentTarget = (attachment, href) => {
+    const host = {
+      dataset: {
+        ml2AttachmentMessageId: 'marked-message',
+        ml2AttachmentId: attachment.id,
+        ml2AttachmentDocumentHost: 'true'
+      },
+      getAttribute(name) {
+        if (name === 'data-ml2-attachment-message-id') return this.dataset.ml2AttachmentMessageId;
+        if (name === 'data-ml2-attachment-id') return this.dataset.ml2AttachmentId;
+        return null;
+      }
+    };
+    return {
+      tagName: 'A',
+      href,
+      textContent: '[attachment:shared]',
+      dataset: {},
+      closest(selector) {
+        if (selector.includes('data-ml2-attachment-message-id')
+          || selector.includes('data-ml2-attachment-id')
+          || selector.includes('[data-ml2-attachment-id]')) return host;
+        if (selector.includes('a[href]')) return this;
+        return null;
+      }
+    };
   };
-  const markedLabelTarget = {
-    tagName: 'DIV',
-    textContent: '[attachment:shared.png]',
-    dataset: {
-      ml2AttachmentMessageId: 'marked-message',
-      ml2AttachmentId: '501'
-    },
-    getAttribute(name) {
-      if (name === 'data-ml2-attachment-message-id') return this.dataset.ml2AttachmentMessageId;
-      if (name === 'data-ml2-attachment-id') return this.dataset.ml2AttachmentId;
-      return null;
-    },
-    closest(selector) {
-      if (selector.includes('data-ml2-attachment-message-id')
-        || selector.includes('data-ml2-attachment-id')
-        || selector.includes('[data-ml2-attachment-id]')) return this;
-      return null;
-    }
-  };
+  const targets = [
+    createMarkedDocumentTarget(attachments[0], 'blob://local/cached/shared.txt'),
+    createMarkedDocumentTarget(attachments[1], 'blob://local/cached/shared.pdf')
+  ];
 
-  assert.equal(plugin.getSavedAttachmentOpenDescriptor(markedUrlTarget, record)?.attachment_id, '501');
-  assert.equal(plugin.getSavedAttachmentOpenDescriptor(markedLabelTarget, record)?.attachment_id, '501');
+  const descriptors = targets.map(target => plugin.getSavedAttachmentOpenDescriptor(target, record));
+  assert.deepEqual(descriptors.map(descriptor => descriptor?.attachment_id), ['501', '502']);
+  assert.deepEqual(descriptors.map(descriptor => descriptor?.display_url), [null, null]);
+  assert.deepEqual(descriptors.map(descriptor => descriptor?.blob_url), [null, null]);
+  assert.deepEqual(descriptors.map(descriptor => descriptor?.local_path), [
+    '/trusted/cache/shared.txt',
+    '/trusted/cache/shared.pdf'
+  ]);
+  assert.deepEqual(descriptors.map(descriptor => descriptor?.remote_urls), [
+    [attachments[0].url, attachments[0].proxy_url],
+    [attachments[1].url, attachments[1].proxy_url]
+  ]);
+
+  for (const target of targets) {
+    const menuItems = [];
+    assert.equal(plugin.addLoggerViewerSavedAttachmentOpenItem(menuItems, target, record), true);
+    assert.equal(menuItems.length, 1);
+    assert.equal(menuItems[0].label, 'Open Attachment');
+  }
 });
 
 test('saved attachment open descriptor rejects unmarked attachment links when message content mirrors those URLs', () => {

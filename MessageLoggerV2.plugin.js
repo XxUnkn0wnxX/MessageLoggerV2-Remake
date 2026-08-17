@@ -478,6 +478,10 @@ module.exports = class MessageLoggerV2 {
     this._loggerNativeAudioPlayer = null;
     this._loggerNativeAudioLoadPromise = null;
     this._loggerNativeAudioLoadGeneration = 0;
+    this._loggerNativeDocumentMessageClass = null;
+    this._loggerNativeDocumentMessageLoadPromise = null;
+    this._loggerNativeDocumentMessageLoadGeneration = 0;
+    this._loggerNativeDocumentRoots = new Map();
     this._loggerNativeAudioRoots = new Map();
   }
   getName() {
@@ -524,7 +528,11 @@ module.exports = class MessageLoggerV2 {
     this._loggerNativeAudioLoadGeneration = (this._loggerNativeAudioLoadGeneration || 0) + 1;
     this._loggerNativeAudioLoadPromise = null;
     this._loggerNativeAudioPlayer = null;
+    this._loggerNativeDocumentMessageLoadGeneration = (this._loggerNativeDocumentMessageLoadGeneration || 0) + 1;
+    this._loggerNativeDocumentMessageLoadPromise = null;
+    this._loggerNativeDocumentMessageClass = null;
     this.cleanupLoggerNativeAudioRoots?.(null, true);
+    this.cleanupLoggerNativeDocumentRoots?.(null, true);
     this._startupPending = false;
     this.cancelSavedMediaExternalOpenProbes?.();
     this.stopMediaCacheTrimmer?.();
@@ -10198,6 +10206,361 @@ module.exports = class MessageLoggerV2 {
     }
     return 'unknown file';
   }
+  isLoggerNativeDocumentMessage(candidate) {
+    try {
+      return !!candidate
+        && typeof candidate === 'object'
+        && typeof candidate.isPoll === 'function'
+        && typeof candidate.hasFlag === 'function';
+    } catch {
+      return false;
+    }
+  }
+  isLoggerNativeDocumentMessageClass(candidate) {
+    try {
+      return typeof candidate === 'function'
+        && candidate !== Object
+        && typeof candidate.prototype?.isPoll === 'function'
+        && typeof candidate.prototype?.hasFlag === 'function';
+    } catch {
+      return false;
+    }
+  }
+  resolveLoggerNativeDocumentMessageClass(suppliedMessage = null) {
+    const candidates = [suppliedMessage];
+    const channelId = suppliedMessage?.channel_id ?? suppliedMessage?.channelId;
+    const messageId = suppliedMessage?.id;
+    try {
+      const store = DiscordModules.MessageStore;
+      const stored = store?.getMessage?.(channelId, messageId)
+        || store?.getMessage?.(messageId)
+        || null;
+      if (stored) candidates.push(stored);
+    } catch {}
+
+    for (const candidate of candidates) {
+      if (!this.isLoggerNativeDocumentMessage(candidate)) continue;
+      const constructor = candidate.constructor;
+      if (this.isLoggerNativeDocumentMessageClass(constructor)) {
+        this._loggerNativeDocumentMessageClass = constructor;
+        return constructor;
+      }
+    }
+
+    if (this.isLoggerNativeDocumentMessageClass(this._loggerNativeDocumentMessageClass)) {
+      return this._loggerNativeDocumentMessageClass;
+    }
+    this._loggerNativeDocumentMessageClass = null;
+
+    try {
+      const constructor = Webpack.getModule(
+        moduleExport => this.isLoggerNativeDocumentMessageClass(moduleExport),
+        { searchExports: true }
+      );
+      if (this.isLoggerNativeDocumentMessageClass(constructor)) {
+        this._loggerNativeDocumentMessageClass = constructor;
+        return constructor;
+      }
+    } catch (error) {
+      Logger.warn('Could not resolve Discord native document message class.', error);
+    }
+    return null;
+  }
+  createLoggerNativeDocumentMessage(message, attachment, suppliedMessage = null) {
+    if (!message || typeof message !== 'object' || !attachment || typeof attachment !== 'object') return null;
+    let source = message;
+    try {
+      if (typeof structuredClone === 'function') source = structuredClone(message);
+      else source = JSON.parse(JSON.stringify(message));
+    } catch {
+      source = { ...message };
+    }
+    const normalizedPayload = {
+      ...source,
+      content: '',
+      flags: typeof source.flags === 'number' ? source.flags : 0,
+      edited_timestamp: null,
+      editedTimestamp: null,
+      activity: null,
+      sharedClientTheme: null,
+      attachments: [{ ...attachment }],
+      codedLinks: [],
+      giftCodes: [],
+      embeds: [],
+      components: [],
+      messageSnapshots: [],
+      reactions: [],
+      stickers: [],
+      stickerItems: []
+    };
+    const constructor = this.resolveLoggerNativeDocumentMessageClass(suppliedMessage || message);
+    if (!constructor) return null;
+    try {
+      const nativeMessage = new constructor(normalizedPayload);
+      return this.isLoggerNativeDocumentMessage(nativeMessage) ? nativeMessage : null;
+    } catch (error) {
+      Logger.warn('Could not construct a detached Discord document message.', error);
+      return null;
+    }
+  }
+  async ensureLoggerNativeDocumentMessageClass(suppliedMessage = null) {
+    const immediate = this.resolveLoggerNativeDocumentMessageClass(suppliedMessage);
+    if (immediate) return immediate;
+    if (this._loggerNativeDocumentMessageLoadPromise) return this._loggerNativeDocumentMessageLoadPromise;
+
+    const generation = this._loggerNativeDocumentMessageLoadGeneration;
+    const loadPromise = (async () => {
+      try {
+        const messageAccessories = DiscordModules.MessageAccessories;
+        if (typeof Utils?.loadEntry === 'function' && messageAccessories) {
+          try {
+            await Utils.loadEntry(messageAccessories);
+          } catch (error) {
+            Logger.warn('Could not load the Discord native document message entry.', error);
+          }
+          if (this._loggerNativeDocumentMessageLoadGeneration !== generation) return null;
+          const afterLoad = this.resolveLoggerNativeDocumentMessageClass(suppliedMessage);
+          if (afterLoad) return afterLoad;
+        }
+        if (this._loggerNativeDocumentMessageLoadGeneration !== generation) return null;
+        const final = this.resolveLoggerNativeDocumentMessageClass(suppliedMessage);
+        if (!final) Logger.warn('Discord native document message class remains unavailable.');
+        return final;
+      } catch (error) {
+        Logger.warn('Could not prepare the Discord native document message lookup.', error);
+        return null;
+      }
+    })();
+
+    this._loggerNativeDocumentMessageLoadPromise = loadPromise;
+    loadPromise.then(
+      () => {
+        if (this._loggerNativeDocumentMessageLoadPromise === loadPromise) {
+          this._loggerNativeDocumentMessageLoadPromise = null;
+        }
+      },
+      () => {
+        if (this._loggerNativeDocumentMessageLoadPromise === loadPromise) {
+          this._loggerNativeDocumentMessageLoadPromise = null;
+        }
+      }
+    );
+    return loadPromise;
+  }
+  createLoggerNativeDocumentProps(message, channel) {
+    const inertRender = () => null;
+    return {
+      message,
+      channel,
+      compact: false,
+      canSuppressEmbeds: false,
+      canDeleteAttachments: false,
+      disableReactionCreates: true,
+      disableReactionReads: true,
+      disableReactionUpdates: true,
+      disableComponentInteractivity: true,
+      disableMediaOptions: true,
+      inlineAttachmentMedia: true,
+      inlineEmbedMedia: false,
+      renderEmbeds: false,
+      renderReactions: inertRender,
+      renderThreadAccessory: false,
+      renderSuppressEmbeds: inertRender,
+      renderAccessories: inertRender,
+      renderPublishAction: inertRender,
+      renderPublishButton: inertRender,
+      renderPublishAccessory: inertRender,
+      showEmbeds: false,
+      showReactions: false,
+      showThreadAccessory: false,
+      showPublishAction: false,
+      canPublish: false,
+      canReply: false,
+      canReact: false,
+      canEdit: false,
+      canDelete: false,
+      isInteraction: false,
+      interaction: false,
+      isSpoiler: false,
+      spoiler: false,
+      isSnapshot: false,
+      isMessageSnapshot: true,
+      snapshot: false,
+      isLurking: false,
+      lurking: false,
+      isPending: false,
+      pending: false,
+      isCurrentUser: false,
+      currentUser: null,
+      mediaOptions: null,
+      guild: null,
+      user: null,
+      referencedMessage: null
+    };
+  }
+  createLoggerNativeDocumentErrorBoundary(onError) {
+    if (!React?.Component) return null;
+    return class LoggerNativeDocumentErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { error: null };
+      }
+      componentDidCatch(error) {
+        this.setState({ error });
+        const report = () => {
+          try { onError?.(error); } catch {}
+        };
+        try {
+          if (typeof queueMicrotask === 'function') queueMicrotask(report);
+          else setTimeout(report, 0);
+        } catch {
+          setTimeout(report, 0);
+        }
+      }
+      render() {
+        return this.state.error ? null : this.props.children;
+      }
+    };
+  }
+  mountLoggerNativeDocument(host, renderMessage, attachment, sourceMessage, onUnavailable = null, options = {}) {
+    if (!host || typeof host.appendChild !== 'function') {
+      onUnavailable?.('documentHostUnavailable');
+      return null;
+    }
+    this.cleanupLoggerNativeDocumentRoots(host);
+    try { host.replaceChildren?.(); } catch {}
+
+    const messageId = String(sourceMessage?.id || renderMessage?.id || '');
+    const attachmentId = String(attachment?.id || '');
+    if (host.dataset) {
+      host.dataset.ml2AttachmentMessageId = messageId;
+      host.dataset.ml2AttachmentId = attachmentId;
+      host.dataset.ml2AttachmentDocumentHost = 'true';
+    }
+
+    let unavailableCalled = false;
+    const notifyUnavailable = reason => {
+      if (unavailableCalled) return;
+      unavailableCalled = true;
+      this.cleanupLoggerNativeDocumentRoots(host);
+      try { host.replaceChildren?.(); } catch {}
+      try { onUnavailable?.(reason); } catch {}
+    };
+    const generation = this._loggerNativeDocumentMessageLoadGeneration;
+    const registerPending = () => {
+      const entry = {
+        host,
+        root: null,
+        cleanup: null,
+        pending: true,
+        generation
+      };
+      this._loggerNativeDocumentRoots.set(host, entry);
+      void Promise.resolve(
+        this.ensureLoggerNativeDocumentMessageClass(sourceMessage || renderMessage)
+      ).then(messageClass => {
+        const owned = this._loggerNativeDocumentRoots.get(host);
+        if (!owned || owned !== entry || host.isConnected === false
+          || generation !== this._loggerNativeDocumentMessageLoadGeneration) return;
+        if (!messageClass) {
+          notifyUnavailable('nativeDocumentMessageClassUnavailable');
+          return;
+        }
+        this.cleanupLoggerNativeDocumentRoots(host);
+        if (host.isConnected === false) return;
+        this.mountLoggerNativeDocument(
+          host,
+          renderMessage,
+          attachment,
+          sourceMessage,
+          onUnavailable,
+          { ...options, retryNative: false }
+        );
+      }).catch(error => {
+        const owned = this._loggerNativeDocumentRoots.get(host);
+        if (owned === entry && generation === this._loggerNativeDocumentMessageLoadGeneration) {
+          notifyUnavailable(error);
+        }
+      });
+      return { ...entry, native: false };
+    };
+
+    const channelId = renderMessage?.channel_id
+      ?? renderMessage?.channelId
+      ?? sourceMessage?.channel_id
+      ?? sourceMessage?.channelId;
+    let channel = null;
+    try { channel = this.tools?.getChannel?.(channelId) || null; } catch {}
+    if (!channel) {
+      notifyUnavailable('channelUnavailable');
+      return null;
+    }
+
+    const messageClass = this.resolveLoggerNativeDocumentMessageClass(sourceMessage || renderMessage);
+    if (!messageClass) {
+      if (options.retryNative === false) {
+        notifyUnavailable('nativeDocumentMessageClassUnavailable');
+        return null;
+      }
+      return registerPending();
+    }
+
+    const nativeMessage = this.createLoggerNativeDocumentMessage(
+      renderMessage,
+      attachment,
+      sourceMessage || renderMessage
+    );
+    if (!nativeMessage) {
+      notifyUnavailable('nativeDocumentMessageConstructionFailed');
+      return null;
+    }
+    const messageAccessories = DiscordModules.MessageAccessories;
+    if (!messageAccessories) {
+      notifyUnavailable('messageAccessoriesUnavailable');
+      return null;
+    }
+    if (typeof ReactDOM?.createRoot !== 'function') {
+      notifyUnavailable('reactCreateRootUnavailable');
+      return null;
+    }
+    let root = null;
+    const entry = {
+      host,
+      root: null,
+      cleanup: null,
+      pending: false,
+      generation
+    };
+    const reportBoundaryFailure = error => {
+      const owned = this._loggerNativeDocumentRoots.get(host);
+      if (owned !== entry || generation !== this._loggerNativeDocumentMessageLoadGeneration) return;
+      notifyUnavailable(error);
+    };
+    const ErrorBoundary = this.createLoggerNativeDocumentErrorBoundary(reportBoundaryFailure);
+    if (!ErrorBoundary) {
+      notifyUnavailable('reactErrorBoundaryUnavailable');
+      return null;
+    }
+    try {
+      root = ReactDOM.createRoot(host);
+      entry.root = root;
+      this._loggerNativeDocumentRoots.set(host, entry);
+      root.render(React.createElement(
+        ErrorBoundary,
+        null,
+        React.createElement(
+          messageAccessories,
+          this.createLoggerNativeDocumentProps(nativeMessage, channel)
+        )
+      ));
+      return { ...entry, native: true };
+    } catch (error) {
+      try { root?.unmount?.(); } catch {}
+      this._loggerNativeDocumentRoots.delete(host);
+      notifyUnavailable(error);
+      return null;
+    }
+  }
   isLoggerNativeAudioPlayer(candidate) {
     try {
       const prototype = candidate?.prototype;
@@ -17996,6 +18359,27 @@ module.exports = class MessageLoggerV2 {
       this._loggerNativeAudioRoots.delete(key);
     }
   }
+  cleanupLoggerNativeDocumentRoots(rootNode = null, force = false) {
+    for (const [key, entry] of this._loggerNativeDocumentRoots || []) {
+      const ownedNode = entry?.host || key;
+      const root = entry?.root || (typeof key?.unmount === 'function' ? key : null);
+      const belongsToRoot = rootNode && (
+        rootNode === key
+        || rootNode === ownedNode
+        || rootNode.contains?.(key)
+        || rootNode.contains?.(ownedNode)
+      );
+      if (!force) {
+        if (rootNode && !belongsToRoot) continue;
+        if (!rootNode && ownedNode?.isConnected) continue;
+      }
+      try { entry?.cleanup?.(); } catch {}
+      try { root?.unmount?.(); } catch (error) {
+        Logger.warn('Could not unmount a Logger native document root.', error);
+      }
+      this._loggerNativeDocumentRoots.delete(key);
+    }
+  }
   refreshCopiedNativeDeleteControls() {
     if (typeof document === 'undefined') return;
     const hosts = Array.from(document.querySelectorAll('[data-ml2-native-delete-host="true"]'));
@@ -20630,6 +21014,7 @@ module.exports = class MessageLoggerV2 {
           for (const node of m.removedNodes) {
             if (node.nodeType === 1) this.cleanupCopiedNativeDeleteControls(node);
             this.cleanupLoggerNativeAudioRoots(node);
+            this.cleanupLoggerNativeDocumentRoots(node);
           }
           const targetMessageNode = getMessageNodeFromAnyNode(m.target);
           if (targetMessageNode) tintMessageNode(targetMessageNode);
@@ -20693,6 +21078,7 @@ module.exports = class MessageLoggerV2 {
       try { tintObserver.disconnect(); } catch {}
       this.cleanupCopiedNativeDeleteControls(null, true);
       this.cleanupLoggerNativeAudioRoots(null, true);
+      this.cleanupLoggerNativeDocumentRoots(null, true);
       this._nativeDeleteButtonPresentation = null;
       this._nativeDeleteButtonPresentationSignature = '';
       this._nativeDeleteTemplateWarningShown = false;
@@ -22388,7 +22774,7 @@ module.exports = class MessageLoggerV2 {
           if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)) return;
           const plan = entry.plan || {};
           const filename = attachment.filename || 'unknown file';
-          const attachmentIsMedia = ['image', 'video', 'audio'].includes(plan.mediaType)
+          const attachmentIsMedia = ['image', 'video', 'audio', 'text', 'pdf'].includes(plan.mediaType)
             || this.isImage(currentCachedAttachmentFilename(attachment))
             || this.isVideo(currentCachedAttachmentFilename(attachment))
             || this.isAudio(currentCachedAttachmentFilename(attachment));
@@ -22737,6 +23123,33 @@ module.exports = class MessageLoggerV2 {
             ];
             const isAudioFile = attachment?._ml2PresentationMediaType === 'audio'
               || attachmentSources.some(source => this.isAudio(source));
+            const isDocumentFile = attachment?._ml2PresentationMediaType === 'text'
+              || attachment?._ml2PresentationMediaType === 'pdf';
+            if (isDocumentFile) {
+              const loggerAttachmentEntry = getLoggerAttachmentEntry(attachment);
+              const sourceAttachment = loggerAttachmentEntry?.attachment || null;
+              const documentHost = document.createElement('div');
+              markLoggerAttachmentTarget(documentHost, sourceAttachment || attachment);
+              contentDiv.appendChild(documentHost);
+              let unavailableHandled = false;
+              const onDocumentUnavailable = () => {
+                if (unavailableHandled || documentHost.parentElement !== contentDiv) return;
+                unavailableHandled = true;
+                this.cleanupLoggerNativeDocumentRoots(documentHost);
+                documentHost.replaceWith(createUnavailableAttachmentPlaceholder(
+                  presentationLabel || attachment.filename,
+                  sourceAttachment || attachment
+                ));
+              };
+              this.mountLoggerNativeDocument(
+                documentHost,
+                message,
+                attachment,
+                sourceMessage,
+                onDocumentUnavailable
+              );
+              return;
+            }
             if (isAudioFile) {
               const loggerAttachmentEntry = getLoggerAttachmentEntry(attachment);
               const sourceAttachment = loggerAttachmentEntry?.attachment || null;
@@ -23190,6 +23603,7 @@ module.exports = class MessageLoggerV2 {
     const messagesDIV = document.getElementById(this.style.menuMessages);
     const original = messagesDIV.style.display;
     this.cleanupLoggerNativeAudioRoots(messagesDIV);
+    this.cleanupLoggerNativeDocumentRoots(messagesDIV);
     messagesDIV.style.display = 'none';
     while (messagesDIV.firstChild) messagesDIV.firstChild.remove();
     this.menu.messages = this.getFilteredMessages();

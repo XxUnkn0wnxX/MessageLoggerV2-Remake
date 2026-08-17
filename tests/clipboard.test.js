@@ -5,7 +5,8 @@ const {
   ContextMenu,
   createPlugin,
   loggerEvents,
-  resetHarness
+  resetHarness,
+  Utils
 } = require('./helpers/plugin-harness');
 
 const MESSAGE_ID = '100000000000000001';
@@ -99,6 +100,107 @@ function createImageTarget({
     href: source,
     closest: () => null,
     ...overrides
+  };
+}
+
+function createRestoredAttachmentTarget({
+  attachmentId = ATTACHMENT_ID,
+  messageId = MESSAGE_ID,
+  channelId = CHANNEL_ID,
+  source,
+  tagName = 'A',
+  children = []
+} = {}) {
+  const row = { id: `chat-messages-${channelId}-${messageId}` };
+  const target = {
+    tagName,
+    id: attachmentId,
+    dataset: {
+      ...(attachmentId ? { ml2AttachmentId: attachmentId } : {}),
+      ...(source ? { safeSrc: source } : {})
+    },
+    currentSrc: source,
+    src: source,
+    href: source,
+    getAttribute(name) {
+      if (name === 'data-ml2-attachment-id') return attachmentId || null;
+      if (name === 'data-safe-src') return source || null;
+      if (name === 'href' || name === 'src') return source || null;
+      return null;
+    },
+    closest(selector) {
+      if (selector === '[id^="chat-messages-"]') return row;
+      if (selector === 'a[href]') return tagName === 'A' ? target : null;
+      return null;
+    },
+    querySelectorAll: selector => (
+      selector === 'img, video, audio, a[href], [data-ml2-attachment-id]'
+        ? children
+        : []
+    )
+  };
+  return target;
+}
+
+function createStage4AttachmentBatch() {
+  const attachments = [
+    ['200000000000000101', 'stage4-image.png', 'image', 'blob:stage4-image'],
+    ['200000000000000102', 'stage4-video.mp4', 'video', 'blob:stage4-video'],
+    ['200000000000000103', 'stage4-audio.mp3', 'audio', 'blob:stage4-audio'],
+    ['200000000000000104', 'stage4-notes.txt', 'text', 'blob:stage4-text'],
+    ['200000000000000105', 'stage4-guide.pdf', 'pdf', 'blob:stage4-pdf'],
+    ['200000000000000106', 'stage4-archive.bin', 'generic', null]
+  ].map(([id, filename, kind, blobUrl]) => {
+    const extension = filename.slice(filename.lastIndexOf('.'));
+    const url = `https://cdn.discordapp.com/attachments/${CHANNEL_ID}/${id}/${filename}`;
+    return {
+      id,
+      filename,
+      kind,
+      blobUrl,
+      extension,
+      url,
+      proxy_url: url,
+      localPath: `/tmp/cache/${filename}`
+    };
+  });
+  const record = {
+    message: {
+      id: MESSAGE_ID,
+      channel_id: CHANNEL_ID,
+      attachments,
+      embeds: [],
+      components: [],
+      sticker_items: []
+    },
+    delete_data: { time: Date.now() }
+  };
+  const blobUrls = new Map(attachments
+    .filter(attachment => attachment.blobUrl)
+    .map(attachment => [
+      `http://localhost:7474/${attachment.id}${attachment.extension}#${CHANNEL_ID},${attachment.id},${MESSAGE_ID}`,
+      attachment.blobUrl
+    ]));
+  return {
+    attachments,
+    record,
+    install(plugin) {
+      plugin.imageCacheServerSimulator = {
+        get: cacheUrl => blobUrls.get(cacheUrl) || null
+      };
+      installCachedFiles(plugin, attachments.map(attachment => ({
+        cacheId: attachment.id,
+        extension: attachment.extension,
+        path: attachment.localPath
+      })));
+    },
+    targetFor(attachment, tagName = attachment.kind === 'image' ? 'IMG' : 'A') {
+      return createRestoredAttachmentTarget({
+        attachmentId: attachment.id,
+        source: attachment.blobUrl || attachment.url,
+        tagName
+      });
+    }
   };
 }
 
@@ -1120,6 +1222,136 @@ test('image-context menu keeps copy action and adds a Message Logger submenu for
   assert.equal(opened.length, 2);
   assert.equal(opened[0].display_url, record.message.attachments[0].url);
   assert.equal(opened[1].display_url, record.message.attachments[0].url);
+});
+
+test('batch restored attachments resolve each exact id and local-only blob source', () => {
+  const batch = createStage4AttachmentBatch();
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    }
+  });
+  batch.install(plugin);
+
+  for (const [index, attachment] of batch.attachments.entries()) {
+    const descriptor = plugin.getSavedAttachmentOpenDescriptor(
+      batch.targetFor(attachment),
+      batch.record
+    );
+    assert.notEqual(descriptor, null, attachment.filename);
+    assert.equal(descriptor.attachment_id, attachment.id, attachment.filename);
+    assert.equal(descriptor.filename, attachment.filename, attachment.filename);
+    assert.equal(descriptor.local_path, attachment.localPath, attachment.filename);
+    assert.equal(descriptor.display_url, attachment.blobUrl || attachment.url, attachment.filename);
+    assert.equal(descriptor.blob_url, attachment.blobUrl, attachment.filename);
+    if (index > 0) {
+      assert.notEqual(descriptor.attachment_id, batch.attachments[0].id, attachment.filename);
+    }
+  }
+});
+
+test('batch restored attachment context menus route only the selected sibling and fail closed when ambiguous', () => {
+  const patchedMenus = installContextMenuPatchCapture();
+  const batch = createStage4AttachmentBatch();
+  const opened = [];
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true,
+      restoreDeletedMessages: true,
+      showDeletedMessages: true,
+      showPurgedMessages: false
+    },
+    unpatches: [],
+    messageRecord: { [MESSAGE_ID]: batch.record },
+    deletedMessageSet: new Map([[CHANNEL_ID, new Set([MESSAGE_ID])]]),
+    purgedMessageSet: new Map(),
+    openSavedAttachmentDescriptor(descriptor) {
+      opened.push(descriptor);
+      return Promise.resolve(true);
+    }
+  });
+  batch.install(plugin);
+  Utils.findInTree = (node, predicate) => predicate(node) ? node : null;
+  installContextMenuBuilder();
+  plugin.patchContextMenus();
+  const imageContextPatch = patchedMenus['regex:^image-context$'];
+  const messageContextPatch = patchedMenus.message;
+  const messageRegexPatch = patchedMenus['regex:^message$'];
+  assert.equal(typeof imageContextPatch, 'function');
+  assert.equal(typeof messageContextPatch, 'function');
+  assert.equal(typeof messageRegexPatch, 'function');
+
+  const getLoggerSubmenus = (tree, id) => flattenMenuItems(tree)
+    .filter(item => item.id === id && item.label === 'Message Logger');
+  const getOpenItems = submenu => (submenu.items || [])
+    .filter(item => item.id === 'mlv2-open-saved-attachment');
+  const image = batch.attachments.find(attachment => attachment.kind === 'image');
+  const imageNativeAction = () => {};
+  const imageMenu = [createNativeOpenItem({ action: imageNativeAction })];
+  imageContextPatch(
+    { navId: 'image-context', props: { children: imageMenu } },
+    { target: batch.targetFor(image) }
+  );
+  const imageSubmenus = getLoggerSubmenus(imageMenu, 'mlv2-image-logger');
+  assert.equal(imageSubmenus.length, 1);
+  const [imageOpen] = getOpenItems(imageSubmenus[0]);
+  assert.equal(getOpenItems(imageSubmenus[0]).length, 1);
+  imageOpen.action();
+  assert.equal(opened.at(-1).attachment_id, image.id);
+  assert.equal(opened.at(-1).display_url, image.blobUrl);
+
+  for (const kind of ['audio', 'text', 'pdf', 'generic']) {
+    const attachment = batch.attachments.find(candidate => candidate.kind === kind);
+    const target = batch.targetFor(attachment);
+    const nativeAction = () => {};
+    const menu = [createNativeOpenItem({ action: nativeAction })];
+    const tree = { navId: 'message', children: menu, props: { children: menu } };
+    const props = {
+      message: { id: MESSAGE_ID },
+      channel: { id: CHANNEL_ID },
+      target
+    };
+
+    messageContextPatch(tree, props);
+    const submenus = getLoggerSubmenus(tree, 'mlv2-message-logger');
+    assert.equal(submenus.length, 1, kind);
+    const openItems = getOpenItems(submenus[0]);
+    assert.equal(openItems.length, 1, kind);
+    openItems[0].action();
+    assert.equal(opened.at(-1).attachment_id, attachment.id, kind);
+
+    messageRegexPatch(tree, props);
+    messageRegexPatch(tree, props);
+    assert.equal(getLoggerSubmenus(tree, 'mlv2-message-logger').length, 1, kind);
+    assert.equal(getOpenItems(getLoggerSubmenus(tree, 'mlv2-message-logger')[0]).length, 1, kind);
+    const routedNativeItem = flattenMenuItems(tree)
+      .find(item => item.id === 'open-native-link');
+    assert.notEqual(routedNativeItem.action, nativeAction, kind);
+    routedNativeItem.action();
+    assert.equal(opened.at(-1).attachment_id, attachment.id, kind);
+  }
+
+  const ambiguousTarget = createRestoredAttachmentTarget({
+    attachmentId: '',
+    source: '',
+    children: batch.attachments.slice(0, 2).map(attachment => batch.targetFor(attachment))
+  });
+  assert.equal(plugin.getSavedAttachmentOpenDescriptor(ambiguousTarget, batch.record), null);
+  const ambiguousNativeAction = () => {};
+  const ambiguousMenu = [createNativeOpenItem({ action: ambiguousNativeAction })];
+  imageContextPatch(
+    { navId: 'image-context', props: { children: ambiguousMenu } },
+    { target: ambiguousTarget }
+  );
+  assert.equal(getLoggerSubmenus(ambiguousMenu, 'mlv2-image-logger').length, 0);
+  assert.equal(ambiguousMenu[0].props.action, ambiguousNativeAction);
+  messageRegexPatch(
+    { navId: 'message', props: { children: ambiguousMenu } },
+    { message: { id: MESSAGE_ID }, channel: { id: CHANNEL_ID }, target: ambiguousTarget }
+  );
+  assert.equal(ambiguousMenu[0].props.action, ambiguousNativeAction);
 });
 
 test('image-context menu ignores unsupported rows and exact match failures', () => {
