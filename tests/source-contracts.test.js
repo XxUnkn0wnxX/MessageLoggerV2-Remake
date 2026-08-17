@@ -901,6 +901,47 @@ test('saved restored video ownership projects MessageAccessories.render before a
   );
 });
 
+test('document Blob plans stay bounded while native MessageAccessories projection remains video-only', () => {
+  const cacheBlobSlice = source.slice(
+    source.indexOf('"get": (path) => {'),
+    source.indexOf('"getSettings":', source.indexOf('"get": (path) => {'))
+  );
+  assert.match(
+    cacheBlobSlice,
+    /new Blob\(\[arrayBuffer\],\s*\{\s*type:\s*this\.getCachedAttachmentMimeType\(parsedFile\.ext\)\s*\}\)/
+  );
+  assert.doesNotMatch(cacheBlobSlice, /type:\s*['"]image\/['"]\s*\+/);
+
+  const planSlice = source.slice(
+    source.indexOf('  getSavedAttachmentPresentationPlan(attachment, message, options = {}) {'),
+    source.indexOf('  getSavedAttachmentPresentationPlans(message, options = {}) {')
+  );
+  assert.match(planSlice, /attachment\?\.contentType/);
+  assert.match(planSlice, /attachment\?\.originalContentType/);
+  assert.match(planSlice, /isPlainTextAttachment\(source\)/);
+  assert.match(planSlice, /isPdfAttachment\(source\)/);
+  assert.match(planSlice, /mediaType[\s\S]*['"]text['"][\s\S]*['"]pdf['"][\s\S]*['"]attachment['"]/);
+  assert.match(planSlice, /!isImage && !isVideo && !isAudio && !isText && !isPdf/);
+  assert.match(planSlice, /if \(!allowBlob[\s\S]*!isImage && !isVideo && !isAudio && !isText && !isPdf/);
+
+  const refreshSlice = source.slice(
+    source.indexOf('  scheduleSavedAttachmentPresentationRefresh(messageId, attachmentId) {'),
+    source.indexOf('  remountSavedAttachmentPresentationRecords(records) {')
+  );
+  assert.match(refreshSlice, /plan\.mediaType !== 'image'/);
+  assert.match(refreshSlice, /plan\.mediaType !== 'video'/);
+  assert.match(refreshSlice, /plan\.mediaType !== 'audio'/);
+  assert.match(refreshSlice, /plan\.mediaType !== 'text'/);
+  assert.match(refreshSlice, /plan\.mediaType !== 'pdf'/);
+
+  const projection = source.slice(
+    source.indexOf('  getSavedAttachmentMessageContentPresentationMessage(message) {'),
+    source.indexOf('  renderSavedAttachmentMessageAccessories(thisObject, args, original) {')
+  );
+  assert.match(projection, /message\.attachments\.filter\(\(_, index\) => displayedPlans\[index\]\?\.mediaType !== 'video'\)/);
+  assert.doesNotMatch(projection, /displayedPlans\[index\].*mediaType === '(?:text|pdf)'/);
+});
+
 test('native preferred system languages are normalized before date defaults initialize', async () => {
   const originalDiscordNative = globalThis.DiscordNative;
   globalThis.DiscordNative = {

@@ -1256,7 +1256,7 @@ module.exports = class MessageLoggerV2 {
               image.byteOffset,
               image.byteOffset + image.byteLength
             );
-            const blob = new Blob([arrayBuffer], { type: 'image/' + parsedFile.ext.split(".")[1] });
+            const blob = new Blob([arrayBuffer], { type: this.getCachedAttachmentMimeType(parsedFile.ext) });
             const dataUri = URL.createObjectURL(blob);
             this.imageCacheServerSimulator.cached[path] = dataUri;
           }
@@ -10467,7 +10467,9 @@ module.exports = class MessageLoggerV2 {
       descriptor.filename,
       attachment?.filename,
       attachment?.content_type,
+      attachment?.contentType,
       attachment?.original_content_type,
+      attachment?.originalContentType,
       attachment?.url,
       attachment?.proxy_url,
       attachment?.proxyUrl,
@@ -10477,9 +10479,23 @@ module.exports = class MessageLoggerV2 {
     const isImage = classifierSources.some(source => this.isImage(source));
     const isVideo = !isImage && classifierSources.some(source => this.isVideo(source));
     const isAudio = !isImage && !isVideo && classifierSources.some(source => this.isAudio(source));
+    const isText = !isImage && !isVideo && !isAudio
+      && classifierSources.some(source => this.isPlainTextAttachment(source));
+    const isPdf = !isImage && !isVideo && !isAudio && !isText
+      && classifierSources.some(source => this.isPdfAttachment(source));
     const labelType = isImage ? 'image' : 'attachment';
     const label = `[${labelType}:${sourceText}]`;
-    const mediaType = isImage ? 'image' : isVideo ? 'video' : isAudio ? 'audio' : 'attachment';
+    const mediaType = isImage
+      ? 'image'
+      : isVideo
+        ? 'video'
+        : isAudio
+          ? 'audio'
+          : isText
+            ? 'text'
+            : isPdf
+              ? 'pdf'
+              : 'attachment';
 
     if (!cacheAllImages || (!allowRemote && !allowBlob)) {
       return {
@@ -10493,7 +10509,7 @@ module.exports = class MessageLoggerV2 {
     }
     const getCachedBlobUrl = () => {
       if (!descriptor.attachment_id || !descriptor.message_id || !descriptor.channel_id
-        || !descriptor.local_path || (!isImage && !isVideo && !isAudio)
+        || !descriptor.local_path || (!isImage && !isVideo && !isAudio && !isText && !isPdf)
       ) return null;
       const cacheUrl = `http://localhost:7474/${descriptor.attachment_id}${descriptor.extension || ''}#${descriptor.channel_id},${descriptor.attachment_id},${descriptor.message_id}`;
       const blobUrl = this.imageCacheServerSimulator?.get?.(cacheUrl);
@@ -10591,7 +10607,7 @@ module.exports = class MessageLoggerV2 {
         fallbackUrl: nextAvailableFallback ? nextAvailableFallback.candidate : null
       };
     }
-    if (!allowBlob || !descriptor.local_path || (!isImage && !isVideo && !isAudio)) {
+    if (!allowBlob || !descriptor.local_path || (!isImage && !isVideo && !isAudio && !isText && !isPdf)) {
       return {
         attachment_id: descriptor.attachment_id,
         mediaType,
@@ -11092,6 +11108,8 @@ module.exports = class MessageLoggerV2 {
         plan.mediaType !== 'image'
         && plan.mediaType !== 'video'
         && plan.mediaType !== 'audio'
+        && plan.mediaType !== 'text'
+        && plan.mediaType !== 'pdf'
       )) return;
       this.remountSavedAttachmentPresentationRecords(record);
       this.dispatcher?.dispatch?.({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' });
@@ -14441,6 +14459,44 @@ module.exports = class MessageLoggerV2 {
   isAudio(url) {
     if (typeof url === 'string' && /^audio\//i.test(url.trim())) return true;
     return this._testUrlPattern(url, /\.(mp3|ogg|oga|opus)$/i);
+  }
+  isPlainTextAttachment(value) {
+    if (typeof value === 'string' && /^text\/plain(?:\s*;|$)/i.test(value.trim())) return true;
+    return this._testUrlPattern(value, /\.txt$/i);
+  }
+  isPdfAttachment(value) {
+    if (typeof value === 'string' && /^application\/pdf(?:\s*;|$)/i.test(value.trim())) return true;
+    return this._testUrlPattern(value, /\.pdf$/i);
+  }
+  getCachedAttachmentMimeType(extension) {
+    const normalizedExtension = String(extension || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^\./, '')
+      .split(/[?#]/)[0];
+    const extensionMimeTypes = {
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      gif: 'image/gif',
+      bmp: 'image/bmp',
+      webp: 'image/webp',
+      avif: 'image/avif',
+      tif: 'image/tiff',
+      tiff: 'image/tiff',
+      mp4: 'video/mp4',
+      webm: 'video/webm',
+      mov: 'video/quicktime',
+      avi: 'video/x-msvideo',
+      mkv: 'video/x-matroska',
+      mp3: 'audio/mpeg',
+      ogg: 'audio/ogg',
+      oga: 'audio/ogg',
+      opus: 'audio/opus',
+      txt: 'text/plain',
+      pdf: 'application/pdf'
+    };
+    return extensionMimeTypes[normalizedExtension] || 'application/octet-stream';
   }
   toSerializableArray(value) {
     if (!value) return [];

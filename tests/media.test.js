@@ -2959,6 +2959,113 @@ test('cache-only audio attachments classify as media and keep CDN then proxy ord
   assert.deepEqual(message, canonicalBefore);
 });
 
+test('cache-only TXT and PDF attachments classify by exact extension or MIME and keep remote ordering', () => {
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: 'body',
+    attachments: [
+      {
+        id: 'txt-ext',
+        filename: 'notes.txt',
+        url: 'https://cdn.discordapp.com/attachments/channel/txt-ext/notes.txt',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/txt-ext/notes.txt'
+      },
+      {
+        id: 'txt-mime',
+        filename: 'extensionless-text',
+        content_type: 'text/plain; charset=utf-8',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/txt-mime/extensionless-text'
+      },
+      {
+        id: 'pdf-ext',
+        filename: 'manual.pdf',
+        url: 'https://cdn.discordapp.com/attachments/channel/pdf-ext/manual.pdf',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/pdf-ext/manual.pdf'
+      },
+      {
+        id: 'pdf-mime',
+        filename: 'extensionless-pdf',
+        contentType: 'application/pdf; version=1.7',
+        proxyURL: 'https://media.discordapp.net/attachments/channel/pdf-mime/extensionless-pdf'
+      }
+    ]
+  };
+  const canonicalBefore = structuredClone(message);
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: { exists: () => false }
+  });
+
+  const plans = message.attachments.map(attachment => (
+    plugin.getSavedAttachmentPresentationPlan(attachment, message, { allowRemote: true })
+  ));
+  const rendered = plugin.getCacheOnlyMessage(message);
+
+  assert.deepEqual(plans.map(plan => plan.mediaType), ['text', 'text', 'pdf', 'pdf']);
+  assert.deepEqual(plans.map(plan => plan.action), ['remote', 'remote', 'remote', 'remote']);
+  assert.equal(plans[0].url, message.attachments[0].url);
+  assert.equal(plans[0].fallbackUrl, message.attachments[0].proxy_url);
+  assert.equal(
+    plans[1].url,
+    'https://cdn.discordapp.com/attachments/channel/txt-mime/extensionless-text'
+  );
+  assert.equal(plans[1].fallbackUrl, message.attachments[1].proxy_url);
+  assert.equal(plans[2].url, message.attachments[2].url);
+  assert.equal(plans[2].fallbackUrl, message.attachments[2].proxy_url);
+  assert.equal(
+    plans[3].url,
+    'https://cdn.discordapp.com/attachments/channel/pdf-mime/extensionless-pdf'
+  );
+  assert.equal(plans[3].fallbackUrl, message.attachments[3].proxyURL);
+  assert.deepEqual(plans.map(plan => plan.label), [
+    '[attachment:notes.txt]',
+    '[attachment:extensionless-text]',
+    '[attachment:manual.pdf]',
+    '[attachment:extensionless-pdf]'
+  ]);
+  assert.deepEqual(rendered.attachments.map(attachment => attachment.id), [
+    'txt-ext', 'txt-mime', 'pdf-ext', 'pdf-mime'
+  ]);
+  assert.deepEqual(message, canonicalBefore);
+});
+
+test('cached attachment Blob MIME mapping is bounded to supported extensions', () => {
+  const plugin = createPlugin();
+  const expected = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.bmp': 'image/bmp',
+    '.webp': 'image/webp',
+    '.avif': 'image/avif',
+    '.tif': 'image/tiff',
+    '.tiff': 'image/tiff',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.mov': 'video/quicktime',
+    '.avi': 'video/x-msvideo',
+    '.mkv': 'video/x-matroska',
+    '.mp3': 'audio/mpeg',
+    '.ogg': 'audio/ogg',
+    '.oga': 'audio/ogg',
+    '.opus': 'audio/opus',
+    '.txt': 'text/plain',
+    '.pdf': 'application/pdf'
+  };
+  for (const [extension, mimeType] of Object.entries(expected)) {
+    assert.equal(plugin.getCachedAttachmentMimeType(extension), mimeType, extension);
+  }
+  assert.equal(plugin.getCachedAttachmentMimeType('.TXT'), 'text/plain');
+  assert.equal(plugin.getCachedAttachmentMimeType('.PDF?ignored'), 'application/pdf');
+  assert.equal(plugin.getCachedAttachmentMimeType('.doc'), 'application/octet-stream');
+  assert.equal(plugin.getCachedAttachmentMimeType(''), 'application/octet-stream');
+});
+
 test('cache master defaults to enabled when cacheAllImages is undefined', () => {
   const plugin = createPlugin({
     settings: { onlyRenderCachedAttachments: false },
@@ -3006,10 +3113,13 @@ test('cache-only plan indices remain aligned when malformed attachments are pres
   assert.equal(rendered.attachments[1].id, 'img-id-3');
 });
 
-test('cache-only rendering uses cached blob URLs only for supported local-only media', () => {
+test('cache-only rendering uses cached Blob URLs only for supported local-only media and documents', () => {
   const blobMap = new Map([
     ['100', 'blob://local/cached/image-100'],
-    ['101', 'blob://local/cached/video-101']
+    ['101', 'blob://local/cached/video-101'],
+    ['102', 'blob://local/cached/text-102'],
+    ['104', 'blob://local/cached/pdf-104'],
+    ['105', 'blob://local/cached/doc-105']
   ]);
   const plugin = createPlugin({
     settings: {
@@ -3023,6 +3133,9 @@ test('cache-only rendering uses cached blob URLs only for supported local-only m
         assert.equal(messageId, 'message');
         if (ext === '.png' && attachmentId === '100') return '/cache/100.png';
         if (ext === '.mp4' && attachmentId === '101') return '/cache/101.mp4';
+        if (ext === '.txt' && attachmentId === '102') return '/cache/102.txt';
+        if (ext === '.pdf' && attachmentId === '104') return '/cache/104.pdf';
+        if (ext === '.doc' && attachmentId === '105') return '/cache/105.doc';
         return null;
       },
       get: cacheUrl => {
@@ -3040,8 +3153,20 @@ test('cache-only rendering uses cached blob URLs only for supported local-only m
     attachments: [
       { id: '100', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/channel/111/photo.png' },
       { id: '101', filename: 'clip.mp4', url: 'https://cdn.discordapp.com/attachments/channel/111/clip.mp4' },
-      { id: '102', filename: 'notes.txt', url: 'https://cdn.discordapp.com/attachments/channel/111/notes.txt' },
-      { id: '103', filename: 'missing.png', url: 'https://cdn.discordapp.com/attachments/channel/111/missing.png' }
+      {
+        id: '102',
+        filename: 'notes.txt',
+        content_type: 'text/plain; charset=utf-8',
+        url: 'https://cdn.discordapp.com/attachments/channel/111/notes.txt'
+      },
+      { id: '103', filename: 'missing.png', url: 'https://cdn.discordapp.com/attachments/channel/111/missing.png' },
+      {
+        id: '104',
+        filename: 'manual.pdf',
+        content_type: 'application/pdf',
+        url: 'https://cdn.discordapp.com/attachments/channel/111/manual.pdf'
+      },
+      { id: '105', filename: 'unsupported.doc', url: 'https://cdn.discordapp.com/attachments/channel/111/unsupported.doc' }
     ]
   };
   const canonicalBefore = structuredClone(message);
@@ -3051,23 +3176,36 @@ test('cache-only rendering uses cached blob URLs only for supported local-only m
   const secondPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[1], message, { allowBlob: true });
   const thirdPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[2], message, { allowBlob: true });
   const fourthPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[3], message, { allowBlob: true });
+  const fifthPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[4], message, { allowBlob: true });
+  const sixthPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[5], message, { allowBlob: true });
 
   assert.equal(firstPlan.action, 'blob');
   assert.equal(firstPlan.url, 'blob://local/cached/image-100');
   assert.equal(secondPlan.action, 'blob');
   assert.equal(secondPlan.url, 'blob://local/cached/video-101');
-  assert.equal(thirdPlan.action, 'omit');
+  assert.equal(thirdPlan.action, 'blob');
+  assert.equal(thirdPlan.mediaType, 'text');
+  assert.equal(thirdPlan.url, 'blob://local/cached/text-102');
   assert.equal(fourthPlan.action, 'omit');
-  assert.equal(rendered.attachments.length, 2);
+  assert.equal(fifthPlan.action, 'blob');
+  assert.equal(fifthPlan.mediaType, 'pdf');
+  assert.equal(fifthPlan.url, 'blob://local/cached/pdf-104');
+  assert.equal(sixthPlan.action, 'omit');
+  assert.equal(sixthPlan.mediaType, 'attachment');
+  assert.equal(rendered.attachments.length, 4);
   assert.equal(rendered.attachments[0].url, 'blob://local/cached/image-100');
   assert.equal(rendered.attachments[1].url, 'blob://local/cached/video-101');
+  assert.equal(rendered.attachments[2].url, 'blob://local/cached/text-102');
+  assert.equal(rendered.attachments[3].url, 'blob://local/cached/pdf-104');
   assert.equal(rendered.attachments[0].proxy_url, 'blob://local/cached/image-100');
   assert.equal(rendered.attachments[1].proxy_url, 'blob://local/cached/video-101');
+  assert.equal(rendered.attachments[2].proxy_url, 'blob://local/cached/text-102');
+  assert.equal(rendered.attachments[3].proxy_url, 'blob://local/cached/pdf-104');
   assert.equal(rendered.content, 'body');
   assert.deepEqual(message, canonicalBefore);
 });
 
-test('cache-only local rendering includes cached audio blobs and omits missing audio and generic files', () => {
+test('cache-only local rendering includes cached audio blobs and omits missing audio and plaintext files', () => {
   const blobMap = new Map([
     ['100.mp3', 'blob://local/cached/audio-100'],
     ['101.ogg', 'blob://local/cached/audio-101']
@@ -3125,7 +3263,7 @@ test('cache-only local rendering includes cached audio blobs and omits missing a
   assert.equal(thirdPlan.action, 'omit');
   assert.equal(thirdPlan.mediaType, 'audio');
   assert.equal(fourthPlan.action, 'omit');
-  assert.equal(fourthPlan.mediaType, 'attachment');
+  assert.equal(fourthPlan.mediaType, 'text');
   assert.equal(rendered.attachments.length, 2);
   assert.equal(rendered.attachments[0].url, 'blob://local/cached/audio-100');
   assert.equal(rendered.attachments[1].url, 'blob://local/cached/audio-101');
@@ -4480,6 +4618,109 @@ test('scheduleSavedAttachmentPresentationRefresh accepts cached audio blobs for 
   assert.equal(remountCalls, 1);
 });
 
+test('scheduleSavedAttachmentPresentationRefresh accepts cached TXT and PDF blobs for remount scheduling', async () => {
+  let remountCalls = 0;
+  const resolveCalls = [];
+  const blobMap = new Map([
+    ['901.txt', 'blob://local/cached/text-901'],
+    ['902.pdf', 'blob://local/cached/pdf-902']
+  ]);
+  const messageRecord = {
+    '901': {
+      delete_data: { time: 1 },
+      message: {
+        id: '901',
+        channel_id: '901',
+        content: '',
+        attachments: [{
+          id: '901',
+          filename: 'notes.txt',
+          content_type: 'text/plain; charset=utf-8',
+          url: 'https://cdn.discordapp.com/attachments/901/notes.txt'
+        }]
+      }
+    },
+    '902': {
+      delete_data: { time: 1 },
+      message: {
+        id: '902',
+        channel_id: '902',
+        content: '',
+        attachments: [{
+          id: '902',
+          filename: 'manual.pdf',
+          content_type: 'application/pdf',
+          url: 'https://cdn.discordapp.com/attachments/902/manual.pdf'
+        }]
+      }
+    }
+  };
+  const canonicalBefore = structuredClone(messageRecord);
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    dispatcher: {
+      dispatch() {}
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: (attachmentId, extension, channelId, messageId) => {
+        resolveCalls.push({ attachmentId, extension, channelId, messageId });
+        if (attachmentId === '901' && extension === '.txt' && channelId === '901' && messageId === '901') {
+          return '/trusted/cache/901.txt';
+        }
+        if (attachmentId === '902' && extension === '.pdf' && channelId === '902' && messageId === '902') {
+          return '/trusted/cache/902.pdf';
+        }
+        return null;
+      },
+      get: cacheUrl => {
+        const matched = /^http:\/\/localhost:7474\/([^#]+)#/.exec(cacheUrl);
+        return matched ? blobMap.get(matched[1]) || null : null;
+      }
+    },
+    messageRecord
+  });
+  plugin.remountSavedAttachmentPresentationRecords = () => {
+    remountCalls += 1;
+  };
+
+  const textPlan = plugin.getSavedAttachmentPresentationPlan(
+    messageRecord['901'].message.attachments[0],
+    messageRecord['901'].message,
+    { allowBlob: true }
+  );
+  const pdfPlan = plugin.getSavedAttachmentPresentationPlan(
+    messageRecord['902'].message.attachments[0],
+    messageRecord['902'].message,
+    { allowBlob: true }
+  );
+  assert.equal(textPlan.action, 'blob');
+  assert.equal(textPlan.mediaType, 'text');
+  assert.equal(pdfPlan.action, 'blob');
+  assert.equal(pdfPlan.mediaType, 'pdf');
+
+  plugin.scheduleSavedAttachmentPresentationRefresh('901', '901');
+  plugin.scheduleSavedAttachmentPresentationRefresh('902', '902');
+  await setImmediatePromise();
+
+  assert.equal(remountCalls, 2);
+  assert.ok(resolveCalls.length >= 4);
+  assert.ok(resolveCalls.every(call => (
+    (call.attachmentId === '901'
+      && call.extension === '.txt'
+      && call.channelId === '901'
+      && call.messageId === '901')
+    || (call.attachmentId === '902'
+      && call.extension === '.pdf'
+      && call.channelId === '902'
+      && call.messageId === '902')
+  )));
+  assert.deepEqual(messageRecord, canonicalBefore);
+});
+
 test('protected attachment remount transitions through a hidden sentinel until the exact placeholder disappears', () => {
   const dispatches = [];
   const originalDocument = global.document;
@@ -5667,6 +5908,90 @@ test('saved attachment open descriptor resolves exact canonical image, video, au
   assert.equal(descriptors[2].display_url, attachments[2].url);
   assert.equal(descriptors[3].display_url, attachments[3].url);
   assert.equal(descriptors[4].display_url, null);
+});
+
+test('saved attachment open descriptor resolves a local-only cached TXT anchor from its Blob href', () => {
+  const attachment = {
+    id: '903',
+    filename: 'notes.txt',
+    content_type: 'text/plain; charset=utf-8',
+    url: 'https://cdn.discordapp.com/attachments/903/notes.txt',
+    proxy_url: 'https://media.discordapp.net/attachments/903/notes.txt'
+  };
+  const record = {
+    delete_data: {},
+    message: {
+      id: '903',
+      channel_id: '903',
+      content: '',
+      attachments: [attachment]
+    }
+  };
+  const blobUrl = 'blob://local/cached/text-903';
+  const resolveCalls = [];
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    imageCacheServerSimulator: {
+      _resolveImagePath: (attachmentId, extension, channelId, messageId) => {
+        resolveCalls.push({ attachmentId, extension, channelId, messageId });
+        return attachmentId === '903'
+          && extension === '.txt'
+          && channelId === '903'
+          && messageId === '903'
+          ? '/trusted/cache/903.txt'
+          : null;
+      },
+      get: cacheUrl => cacheUrl.includes('/903.txt#') ? blobUrl : null
+    }
+  });
+  const canonicalBefore = structuredClone(record);
+  const target = {
+    tagName: 'A',
+    href: blobUrl,
+    download: 'notes.txt',
+    dataset: {},
+    closest: () => null
+  };
+  const targetBefore = {
+    tagName: target.tagName,
+    href: target.href,
+    download: target.download,
+    dataset: structuredClone(target.dataset),
+    closest: target.closest
+  };
+
+  const descriptor = plugin.getSavedAttachmentOpenDescriptor(target, record);
+
+  assert.equal(descriptor?.attachment_id, '903');
+  assert.equal(descriptor?.filename, 'notes.txt');
+  assert.equal(descriptor?.extension, '.txt');
+  assert.equal(descriptor?.direct_url, attachment.url);
+  assert.equal(descriptor?.proxy_url, attachment.proxy_url);
+  assert.deepEqual(descriptor?.remote_urls, [attachment.url, attachment.proxy_url]);
+  assert.equal(descriptor?.display_url, blobUrl);
+  assert.equal(descriptor?.blob_url, blobUrl);
+  assert.equal(descriptor?.local_path, '/trusted/cache/903.txt');
+  assert.ok(resolveCalls.length > 0);
+  assert.ok(resolveCalls.every(call => (
+    call.attachmentId === '903'
+    && call.extension === '.txt'
+    && call.channelId === '903'
+    && call.messageId === '903'
+  )));
+  assert.equal(
+    plugin.getSavedAttachmentOpenDescriptor({
+      tagName: 'A',
+      href: 'blob://local/cached/unrelated',
+      dataset: {},
+      closest: () => null
+    }, record),
+    null
+  );
+  assert.deepEqual(record, canonicalBefore);
+  assert.deepEqual(target, targetBefore);
 });
 
 test('saved attachment open descriptor keeps logger-marked generic target authoritative when content contains matching source/label', () => {

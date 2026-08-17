@@ -34,18 +34,18 @@ This file is both the implementation checklist and the handoff record.
 - **Predecessor rollout record:**
   `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T11-07-23-01a00d42-4986-7971-94de-11f09f6630d1.jsonl`
 - **Working branch:** `develop`
-- **Verified HEAD:** accepted reopened Stage 3 local commit
-  `b9a1ebc41f0b8ca7324fb9e14b900b6a7fecd55e`; local `develop` is two commits
-  ahead of `origin/develop`. A read-only `git ls-remote` confirmed the actual
-  remote `develop` remains at
-  `89d51f7a59f3ff7be79ebeb551a4f17c3a8cab69`; nothing was pushed.
-- **Verified worktree:** the accepted reopened Stage 3 correction is committed.
-  The separate Logger-view audio follow-up currently modifies this checklist,
-  `MessageLoggerV2.plugin.js`, `tests/helpers/plugin-harness.js`,
-  `tests/media.test.js`, and `tests/source-contracts.test.js`. The ignored
-  v1.0.5 trace helper, `tmp/1.html`, and runtime reports remain outside commit
-  scope. The helper's exact symlink is installed in the BetterDiscord plugins
-  folder. None of those ignored/runtime artifacts may be committed.
+- **Verified HEAD:** accepted Stage 3 point 2 audio commit
+  `4ba35ef1bd260254cc49d985f97e4e5c4d44b2d5`. Local `develop`,
+  `origin/develop`, and a fresh `git ls-remote` of the actual remote
+  `refs/heads/develop` all match that SHA; the branch is clean and no commits
+  are ahead or behind.
+- **Verified worktree:** the accepted Stage 3 point 2 audio implementation and
+  tests are committed and pushed. Gate 3.1 currently modifies this checklist,
+  `MessageLoggerV2.plugin.js`, `tests/media.test.js`, and
+  `tests/source-contracts.test.js`. The ignored v1.0.6 trace helper,
+  `tmp/1.html`, and runtime reports remain outside commit scope. The helper's
+  exact symlink is installed in the BetterDiscord plugins folder. None of those
+  ignored/runtime artifacts may be committed.
 - **Baseline:** `npm test` passed `471/471` before this checklist was created.
 - **Current Stage 4 verification:** the parent has rerun `npm run check`,
   `tests/clipboard.test.js` at `16/16`, `tests/media.test.js` at `156/156`,
@@ -54,9 +54,9 @@ This file is both the implementation checklist and the handoff record.
   build. After the escaping-native-action correction, the parent reran
   `npm run check`, clipboard `16/16`, media `156/156`, source contracts
   `68/68`, full `npm test` at `561/561`, and `git diff --check` successfully.
-- **Live parity:** the current Stage 3 point 2 Logger-view audio build and
+- **Live parity:** the focused-tested Gate 3.1 TXT/PDF restored-row build and
   installed BetterDiscord plugin are byte-identical at SHA-256
-  `f4dc7aa4bdc225c7b80094e9aa0d6438cce3fafb4b88c38c894ebd876d033b62`.
+  `375fdbb28cd9620914f9ca3f38d28dff6601eb9410ddbffe0cc908af4d808f12`.
   The temporary unmodified `main` control is no longer installed.
 - **Implementation state:** Stages 1-3 are complete, accepted, committed, and
   pushed. Stage 4 is implemented, parent-verified, live-synced, and accepted,
@@ -79,18 +79,15 @@ This file is both the implementation checklist and the handoff record.
   occurred on either escaping path. The user then verified both corrected
   controls and ordinary-viewer isolation; the helper, symlink, and report are
   now in Trash.
-- **Current gate:** Stage 4 and the reopened Stage 3 video correction are
-  accepted and locally committed without a push. Stage 3 point 2 Logger-view
-  audio is now live-accepted. Production has guarded lazy discovery, the traced
-  native player prop contract, one Logger audio host with browser fallback,
-  remote/proxy/Blob/placeholder policy routing, Stage 4 ownership markers, and
-  scoped cleanup. A read-only review caught and the parent fixed double error
-  ownership by excluding Logger audio hosts from the global restored-message
-  listener. Parent syntax, `236/236` focused media/source-contract tests, and
-  `git diff --check` pass. The user confirmed remote-first/local-only audio and
-  open-policy behavior work, and the live log contains no MessageLogger error
-  through those toggles. The next active work is Stage 3 point 3 TXT/PDF Blob
-  and Logger-view parity; Stage 9 warning detail remains deferred.
+- **Current gate:** Stage 4, the reopened Stage 3 video correction, and Stage 3
+  point 2 Logger-view audio are accepted and published on `develop`. Gate 3.1
+  is now live-accepted: exact TXT/PDF attachments receive correctly typed
+  cached Blobs and render through Discord's native restored-row components,
+  while the Stage 4 local-open descriptor path remains intact. Parent syntax,
+  the combined focused media/source-contract gate at `241/241`, and
+  `git diff --check` pass. The full suite remains paused. Commit this accepted
+  gate without pushing, then begin Gate 3.2 Logger-view rendering. Stage 9
+  warning detail remains deferred.
 - **Worker state:** the user reported Spark at 24%, but Spark returned an
   explicit `Selected model is at capacity` failure. Per the session routing
   rule, bounded work moved to Luna Extra High for the rest of this session;
@@ -100,20 +97,22 @@ This file is both the implementation checklist and the handoff record.
 - **Checklist state:** include this file in every user-confirmed stage commit
   and keep it in the repository root after the current release. Do not archive
   it unless the user explicitly requests that in a later session.
-- **Change-control state:** The accepted Stage 4 commit `4433a61` and reopened
-  Stage 3 correction commit `b9a1ebc` are both local only. Do not push, merge,
-  switch branches, tag, release, bump the version, or edit the changelog. For
-  Logger-view audio, run only focused tests until its live runtime gate passes;
-  restore the full gate only before its requested commit.
+- **Change-control state:** The accepted Stage 4, reopened Stage 3 video, and
+  Stage 3 point 2 audio commits are now published on `develop` through
+  `4ba35ef1bd260254cc49d985f97e4e5c4d44b2d5`. Do not merge, switch branches,
+  tag, release, bump the version, or edit the changelog during point 3. Keep
+  focused tests only until point 3 is accepted; the full gate and final live
+  smoke test belong immediately before the later release step.
 
 ### Exact next action
 
-Commit the accepted Stage 3 point 2 audio checkpoint locally without pushing,
-then begin point 3 with a trace of the already-working remote TXT/PDF
-presentation versus the failing local Blob/restored path and missing Logger-view
-renderer. Keep the full suite paused until point 3 is complete; then run it
-before the user's final release smoke test. Do not push, merge, switch branches,
-tag, release, bump the version, or edit the changelog yet.
+Commit the accepted Gate 3.1 TXT/PDF restored-row checkpoint locally without
+pushing. Then implement Gate 3.2 by porting the trace-proven Discord native
+TXT/PDF presentation into Logger viewer while reusing the shared source and
+Stage 4 open policy independently of the live-mount toggle. Keep the full suite
+paused until point 3 is complete; then run it before the user's final release
+smoke test. Do not merge, switch branches, tag, release, bump the version, or
+edit the changelog yet.
 
 ### Resume procedure
 
@@ -373,10 +372,14 @@ be recorded before implementation continues.
 ### Cache Off to On rehydration
 
 - [ ] On an actual Off to On transition, enumerate canonical records containing
-      `delete_data` and de-duplicate eligible ordinary image attachments by
-      cache key.
+      `delete_data` and de-duplicate every ordinary attachment that is eligible
+      under Logger's existing cache-support settings and predicates by cache
+      key. This is not image-only.
 - [ ] Skip attachments whose resolved local cache file already exists.
 - [ ] Try the preserved direct URL first, then a distinct preserved proxy URL.
+- [ ] Attempt hydration only when the canonical record actually retains an
+      accepted HTTP(S) CDN/direct or proxy candidate. Do not synthesize a
+      missing remote URL or persist a Blob/file URL in the record.
 - [ ] Reuse existing eligibility, size limits, request de-duplication, abort
       handling, media-write epoch, no-save queueing, and atomic promotion.
 - [ ] Refresh mounted/Logger presentation once after the batch settles, not once
@@ -391,6 +394,10 @@ be recorded before implementation continues.
       unavailable tombstone or schema field; a later real Off to On transition
       may retry, while the attachment remains a placeholder whenever no usable
       remote source or local file exists.
+- [ ] Freeze eligibility to the file types and the **Cache all attachment
+      types** behavior Logger already supports when Stage 5 begins. Hydrating
+      those supported types must not be confused with, or silently expand into,
+      the separate deferred gate for arbitrary/all file-type support.
 
 ## Behavior that must remain unchanged
 
@@ -398,7 +405,8 @@ be recorded before implementation continues.
       attachment URL preservation, image/attachment presentation, Logger-owned
       media viewing/opening, setting-driven presentation refresh, and source
       liveness/lifecycle behavior required by those paths, plus the explicit
-      bounded Off-to-On deleted-image hydration pass.
+      bounded Off-to-On hydration pass for currently supported saved attachment
+      types.
 - [x] Do not require the user to manually retest already-confirmed general
       plugin behavior. The complete automated suite guards unrelated logging,
       persistence, notification, shortcut, forum, Anti-Nuke, settings, and
@@ -804,6 +812,13 @@ This ordered follow-up supersedes the earlier no-new-renderer boundary only for
 the trace-proven Discord formats named below. It does not authorize an arbitrary
 file renderer or a cache-eligibility expansion.
 
+Across every supported image, video, audio, text, and PDF presentation, live
+mounts and Logger views share the same source policy but remain separate
+consumers: local-only Off uses CDN -> proxy -> cached local Blob -> placeholder;
+local-only On uses cached local Blob -> placeholder with zero remote
+presentation. Disabling the live restored-message mount affects only live chat
+rows and must never disable or degrade the Logger viewer.
+
 1. [x] **Video live/restored rendering:** accepted and committed locally as
        `b9a1ebc41f0b8ca7324fb9e14b900b6a7fecd55e`. Discord-native duplicate
        ownership is suppressed and the working Logger video presentation keeps
@@ -820,12 +835,37 @@ file renderer or a cache-eligibility expansion.
        no inline renderer. Preserve the working remote presentation and trace
        the exact native ownership/component contract before changing either
        missing path.
-   - [ ] Cover extension and MIME discovery for `.txt` / `text/plain` and
+   - [x] **Trace baseline:** v1.0.6 / `mount-trace-v6` captured C01/C02 in
+         remote-first and local-only states. Both remote rows are owned by
+         Discord `MessageAccessories`; its mosaic selects the plaintext preview
+         for C01 and generic file component for C02. Both local Blob plans are
+         `omit` despite verified cache files and become exact attachment labels.
+   - [x] **Gate 3.1 — restored live rows first:** make the cached-Blob-only
+         TXT/PDF path render through the trace-proven Discord live mount, run
+         focused checks, live-sync it, and obtain the user's live acceptance.
+         Do not implement the Logger-view port before this gate passes.
+     - [x] The bounded source slice and deterministic gate are complete:
+           correct TXT/PDF MIME Blobs, exact extension/MIME classification,
+           local-only document plans, remount scheduling, canonical
+           immutability, bounded generic-file exclusion, Stage 4 Blob-anchor
+           ownership, and native video-only projection pass `241/241` focused
+           media/source-contract tests under the parent.
+     - [x] Live-sync and confirm C01 TXT and C02 PDF render through Discord's
+           native restored-row components from cached Blobs.
+   - [ ] **Gate 3.2 — Logger viewer second:** after Gate 3.1 is accepted, port
+         the proven TXT/PDF native presentation into Logger's viewer using the
+         same guarded/native-first pattern established for audio. The Logger
+         viewer owns this path independently of the live restored-message mount
+         toggle: disabling live mounting must not disable or degrade Logger-view
+         attachment rendering.
+   - [x] Cover extension and MIME discovery for `.txt` / `text/plain` and
          `.pdf` / `application/pdf` without minified export names or keys.
    - [ ] With local-only Off, preserve CDN -> proxy -> cached Blob -> exact
          placeholder order. With local-only On, begin from the verified cache
          only and make zero remote presentation requests. Cache-master Off
-         remains the exact attachment placeholder.
+         remains the exact attachment placeholder. Apply this source order to
+         both live mounts and Logger views; only the live-mount toggle may skip
+         the former, while Logger-view rendering continues through its own path.
    - [ ] Reuse Discord's trace-proven native text/PDF presentation in restored
          live Blob mounts and the Logger viewer where available. Do not use an
          unsandboxed custom iframe, execute attachment text, or route either
@@ -1014,19 +1054,29 @@ exercised in Discord.
       retries saved live URLs; Off shows placeholders and keeps child values;
       retain the existing **Disable saving data** queue warning.
 - [ ] Trigger only on a real Off to On transition.
-- [ ] Scan only deleted records' eligible normal image attachments.
-- [ ] De-duplicate work and skip existing files/non-images/out-of-scope media.
+- [ ] Scan only deleted records' ordinary attachments that are eligible under
+      Logger's existing cache-support settings and predicates. Include every
+      currently supported type rather than restricting the pass to images.
+- [ ] De-duplicate work and skip existing files, unsupported types, and all
+      other out-of-scope media.
 - [ ] Try the exact preserved direct URL, then a distinct proxy URL.
+- [ ] Skip cleanly when neither accepted stored HTTP(S) candidate exists; do
+      not reconstruct a URL, persist a Blob/file URL, or mutate the canonical
+      attachment merely to make it fetchable.
 - [ ] Respect existing size, cancellation, no-save, epoch, request-sharing, and
       atomic-write contracts.
 - [ ] Refresh presentation once after immediate/deferred completion as
       appropriate.
 - [ ] Confirm Off during the batch cancels without retry or late write.
 - [ ] Add no persisted unavailable marker or schema field.
+- [ ] Do not broaden file-type eligibility in this stage. A later explicit
+      all-file-types support/acceptance gate remains separate work.
 
 ### Stage 5 focused checks
 
-- [ ] Recent saved URL is re-cached and appears after Off to On.
+- [ ] Each file type Logger supports when Stage 5 begins is represented in the
+      hydration matrix: a recent stored URL is re-cached and appears after Off
+      to On, subject to the existing eligibility setting for that type.
 - [ ] Expired direct URL falls back to a distinct live proxy when available.
 - [ ] Both URLs unavailable and no existing local file leaves exact classified
       placeholder text in native and Logger-owned views.
@@ -1053,8 +1103,10 @@ exercised in Discord.
       generation cancellation, cross-platform `shell.openExternal()` versus
       `shell.openPath()` routing, nonempty open-path errors, and missing-file
       failure with a warning toast and without opening a Blob externally.
-- [ ] Prove Off to On hydrates only eligible missing deleted-image files through
-      the preserved URL order and existing safe write pipeline.
+- [ ] Prove Off to On hydrates only eligible missing files for every currently
+      supported saved attachment type through the preserved URL order and
+      existing safe write pipeline, with an unsupported-type control that is
+      not broadened into eligibility.
 - [x] Lock `newSaveAllFileTypes` eligibility/cache behavior and prove no new
       arbitrary-file renderer, player, or cache route was introduced.
 - [x] Run `npm run check`.
@@ -1085,39 +1137,42 @@ CDN image for the full behavior matrix. Then perform only a mount/unmount smoke
 check in a DM and one open forum-post chat; deterministic tests cover group DMs
 and ordinary channel threads that share the same native row path.
 
-- [ ] **Local-only On:** mounted restored row, Logger window, and deleted
+- [x] **Local-only On:** mounted restored row, Logger window, and deleted
       forum/thread log modal render a fresh Blob only; **Open Attachment** opens
       the resolved cache file in the operating system's default app; no CDN
       presentation/probe occurs.
-- [ ] **Local-only Off, live CDN:** the same surfaces render the CDN first and
+- [x] **Local-only Off, live CDN:** the same surfaces render the CDN first and
       **Open Attachment** opens the preserved `https://cdn.discordapp.com/` URL.
-- [ ] **Local-only Off, expired CDN:** image load falls back to the cached Blob
+- [x] **Local-only Off, expired CDN:** image load falls back to the cached Blob
       and **Open Attachment** falls back to the default app for the resolved
       local cache path.
-- [ ] **Live child-toggle round trip:** with the cache master remaining On and
+- [x] **Live child-toggle round trip:** with the cache master remaining On and
       the same saved image still mounted, switch local-only Off -> On without a
       reload and confirm CDN presentation changes immediately to Blob-only plus
       direct default-app local opening. Switch On -> Off and confirm it immediately
       returns to CDN-first rendering/opening when the URL is live, or to the
       Blob/default-app local fallback when that URL is expired.
-- [ ] **Cache Off:** every currently visible native mounted saved-attachment node
+- [x] **Cache Off:** every currently visible native mounted saved-attachment node
       is removed immediately; native saved-message rows, Logger/main, and
       deleted forum/thread log views show `[image:filename.ext]` for a current
       image and `[attachment:filename.ext]` for a representative non-image
       direct attachment; any Logger-owned media viewer closes; cache files
       remain; deleting a new image creates no cache file.
-- [ ] **Cache back On:** a prior local image follows the selected child policy;
-      a recent uncached deletion is retried and cached from its stored direct or
-      distinct proxy URL; an expired no-local image shows its placeholder in
-      native and Logger-owned views.
-- [ ] **Mount coverage smoke:** repeat the master Off/On presentation refresh in
+- [x] **Cache back On presentation:** a prior local image follows the selected
+      child policy and an expired no-local image shows its placeholder in native
+      and Logger-owned views.
+- [ ] **Cache back On hydration:** a recent uncached deletion is retried and
+      cached from its stored direct or distinct proxy URL. This remains the
+      separate Stage 5 implementation/live gate and is not inferred from the
+      repeatedly accepted presentation matrix.
+- [x] **Mount coverage smoke:** repeat the master Off/On presentation refresh in
       one DM and one open forum-post chat. Confirm the forum list/sidebar/browser
       text-only entries remain present.
-- [ ] **Hot reload/Cmd+R:** local images receive valid regenerated Blob URLs and
+- [x] **Hot reload/Cmd+R:** local images receive valid regenerated Blob URLs and
       no stale/revoked Blob remains clickable.
-- [ ] **Unavailable external open:** expired CDN plus no existing local file
+- [x] **Unavailable external open:** expired CDN plus no existing local file
       opens nothing and shows the concise unavailable warning toast.
-- [ ] Check `debug.log` and optional `console.log` for new Logger errors.
+- [x] Check `debug.log` and optional `console.log` for new Logger errors.
 
 Relevant matrix coverage: focused portions of `RT-09`, `RT-11`, `RT-13`, and
 `RT-26`. Shared deterministic coverage plus the DM/forum-post smoke replaces a
@@ -1125,19 +1180,21 @@ full setting matrix in every channel type.
 
 ### Stage 7 result
 
-- **Live plugin hash:** Repository and installed plugin both equal
-  `3694cf0fb27c27c42f336fc92116ba1e209143745e9bc7752f8a8c29b2acdc89`.
-- **Runtime results:** Partial failure. Every visible **Open Attachment** action
-  follows the policy successfully. Logger-owned mount points that retain native
-  **Open Link** or **Open in Browser** wording still bypass it and require an
-  exact live identity/control trace before correction.
-- **Logs:** The 13:33:16 hot reload removed old patches, completed cleanup,
-  initialized, applied current patches, completed both UI refreshes, and
-  scheduled the cache trimmer without a MessageLogger error. The simultaneous
-  `PersonalPins` dispatch error belongs to that separate plugin. The optional
-  console exporter emitted one empty `WINDOW:ERROR`; it has no corresponding
-  `debug.log` entry and is one of 10,275 identical pre-existing empty exporter
-  events, so it is not attributed to MessageLogger.
+- **Accepted repeated coverage:** the user has now exercised the presentation,
+  child/master toggle, mount-coverage, hot-reload, unavailable-open, and global
+  Stage 4 routing paths repeatedly across the later Stage 3/4 live gates and
+  explicitly accepted this historical matrix as complete. The earlier native
+  **Open Link** / **Open in Browser** partial failure was subsequently traced,
+  corrected through the global attachment policy, and accepted.
+- **Last accepted pre-point-3 checkpoint:** commit
+  `4ba35ef1bd260254cc49d985f97e4e5c4d44b2d5`; repository/live plugin hashes
+  matched at
+  `f4dc7aa4bdc225c7b80094e9aa0d6438cce3fafb4b88c38c894ebd876d033b62`
+  before the current unsynced TXT/PDF Gate 3.1 work began.
+- **Remaining distinct live gates:** only behavior newly introduced after that
+  acceptance must be smoke-tested: Stage 3 point 3 TXT/PDF live Blob and Logger
+  viewer paths, plus the future Stage 5 Off-to-On hydration behavior. Those are
+  not grounds to repeat the completed image/video/audio matrix.
 
 ## Stage 8 - Final gate and handoff
 
@@ -2939,3 +2996,92 @@ behavior, persistence, rendering, or external-open behavior.
   local-only On at 16:41:20, cache-master Off at 16:41:41, and cache-master On
   again at 16:41:57 with the expected refreshes and no MessageLogger exception.
   Stage 3 point 2 is accepted for a local focused-gate commit without a push.
+- Committed point 2 as
+  `4ba35ef1bd260254cc49d985f97e4e5c4d44b2d5` (`Add native audio rendering to
+  Logger viewer`), then pushed `develop` at the user's explicit request. Local
+  `develop`, `origin/develop`, and the remote `refs/heads/develop` were each
+  verified at that exact SHA. Point 3 begins from this clean published state.
+
+### 2026-08-18 - Stage 5 hydration scope expanded to current supported types
+
+- The user clarified that the real **Render & Cache media** Off-to-On pass must
+  attempt recovery for every file type Logger supports at the time Stage 5
+  begins, rather than only images, whenever an accepted stored CDN/direct or
+  proxy URL is available.
+- The pass still reuses current eligibility settings and predicates, direct
+  then distinct proxy ordering, de-duplication, existing-file checks, size and
+  cancellation rules, no-save/epoch handling, request sharing, and atomic
+  writes. It must not invent missing URLs or persist Blob/file URLs.
+- This does not authorize broader arbitrary-file support. The separate gate for
+  adding or accepting all file types remains deferred to a later user-directed
+  session. Stage 5 itself also remains paused until the current point-3 release
+  boundary is complete.
+
+### 2026-08-18 - TXT/PDF native-owner and local-omit trace completed
+
+- Hot-reloaded the ignored helper at version `1.0.6` /
+  `mount-trace-v6`. The user captured
+  `MessageLoggerAttachmentMountTrace-report-txt-pdf-remote-2026-08-17T16-56-37-382Z.json`
+  with local-only Off and
+  `MessageLoggerAttachmentMountTrace-report-txt-pdf-local-before-2026-08-17T16-57-04-113Z.json`
+  with local-only On.
+- C01 TXT (`1538949288774602875`) and C02 PDF (`1538949305178529903`)
+  both have verified physical cache files with the expected `text/plain` and
+  `application/pdf` types. Their remote plans preserve CDN then proxy order.
+- Both working remote endpoints traverse Discord's resolved
+  `MessageAccessories.renderAttachments` owner and reach the message row. The
+  native mosaic selects its plaintext-preview callback for C01 and generic-file
+  callback for C02; obfuscated component names and export keys remain evidence
+  only and are not production selectors.
+- In local-only mode, both `{allowBlob:true}` plans return `omit` and the rows
+  contain exact `[attachment:filename]` labels with no native endpoint. Source
+  review identified the two pre-native blockers: Blob eligibility is restricted
+  to image/video/audio, and the cache Blob factory hard-codes `image/<ext>`.
+- No additional pre-change trace is required. Gate 3.1 will make only exact
+  TXT/PDF attachments Blob-eligible, assign correct MIME types, preserve the
+  detached canonical metadata contract, and let Discord choose the same native
+  renderers. Logger-view work remains blocked on the user's post-change live
+  acceptance.
+
+### 2026-08-18 - Stage 7 repeated smoke matrix accepted
+
+- The user confirmed that the image/video/audio presentation, setting-toggle,
+  mount-coverage, hot-reload, unavailable-open, and Stage 4 routing checks have
+  already been exercised repeatedly and may be treated as accepted Stage 7
+  coverage rather than rerun for point 3.
+- Only behavior introduced after that accepted checkpoint remains live-gated:
+  TXT/PDF cached-Blob rendering in restored rows, its later Logger-view port,
+  and the separately deferred Stage 5 Off-to-On hydration pass.
+
+### 2026-08-18 - Gate 3.1 TXT/PDF Blob build ready for live gate
+
+- Cached attachment Blob construction now uses a bounded MIME map instead of
+  treating every cached file as an image. Existing supported image, video, and
+  audio extensions keep explicit types; TXT uses `text/plain`, PDF uses
+  `application/pdf`, and an unknown extension fails to
+  `application/octet-stream` without becoming Blob-presentation eligible.
+- The detached presentation plan recognizes exact `.txt` / `text/plain` and
+  `.pdf` / `application/pdf` metadata, including current camelCase aliases.
+  Local-only permits cached document Blobs while unsupported generic files stay
+  omitted; Discord's restored-row projection still removes only Logger-owned
+  videos, leaving TXT/PDF on its trace-proven native path.
+- Cache completion may now schedule restored-row refreshes for text and PDF.
+  The existing exact attachment descriptor resolves a native document Blob
+  anchor back to the trusted physical cache path, so Stage 4 opens the local
+  file through the operating system rather than sending the Blob externally.
+- Parent validation passes plugin/test syntax, the combined focused
+  `tests/media.test.js` plus `tests/source-contracts.test.js` gate at `241/241`,
+  and `git diff --check`. One initial test run was `167/168`: the sole failure
+  was a new immutability snapshot that omitted its unchanged `closest` function;
+  the parent corrected that test-only defect and the rerun passed `168/168`.
+  The full suite remains deliberately paused until point 3 is complete.
+- Live-synced only `MessageLoggerV2.plugin.js`; repository and installed hashes
+  match at
+  `375fdbb28cd9620914f9ca3f38d28dff6601eb9410ddbffe0cc908af4d808f12`.
+  The hot reload removed the previous patches, completed its clearing refresh,
+  initialized the updated plugin, applied all patches, completed the new UI
+  refresh, and scheduled the shared cache timer without a MessageLogger error.
+  A simultaneous `PersonalPins` dispatch exception is unrelated.
+- The user confirmed both cached-Blob restored-row presentations now work and
+  authorized a local checkpoint commit before Gate 3.2. Gate 3.1 is accepted;
+  no post-change trace was necessary.
