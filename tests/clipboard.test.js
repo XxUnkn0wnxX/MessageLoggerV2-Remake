@@ -141,6 +141,17 @@ function createNativeCopyItem(overrides = {}) {
   };
 }
 
+function createNativeOpenItem(overrides = {}) {
+  return {
+    props: {
+      id: 'open-native-link',
+      label: 'Open Link',
+      action() {},
+      ...overrides
+    }
+  };
+}
+
 function flattenMenuItems(value, result = [], seen = new Set()) {
   if (value == null || typeof value === 'boolean') return result;
   if (Array.isArray(value)) {
@@ -514,6 +525,214 @@ test('clipboard failures produce one error report and never a success toast', as
   }
 });
 
+test('saved-image external open reconciliation preserves labels while rerouting exact native and ImageUtilities actions', () => {
+  const descriptor = {
+    remote_urls: ['https://cdn.discordapp.com/attachments/channel/attachment/media.png'],
+    local_path: '/tmp/cache/media.png',
+    display_url: 'blob:logger-image'
+  };
+  const opened = [];
+  let closed = 0;
+  ContextMenu.close = () => { closed++; };
+  const plugin = createPlugin({
+    openSavedAttachmentDescriptor(value) {
+      opened.push(value);
+      return Promise.resolve(true);
+    }
+  });
+
+  const originalNativeAction = () => {};
+  const originalNativeBrowserAction = () => {};
+  const originalImageUtilitiesAction = () => {};
+  const unrelatedAction = () => {};
+  const menu = [
+    {
+      props: {
+        id: 'mlv2-open-saved-media-externally',
+        label: 'Open attachment externally',
+        action() {}
+      }
+    },
+    createNativeOpenItem({ action: originalNativeAction }),
+    createNativeOpenItem({
+      id: 'open-in-browser',
+      action: originalNativeBrowserAction
+    }),
+    createNativeOpenItem({
+      id: 'imageutilities-open-link',
+      action: originalImageUtilitiesAction
+    }),
+    createNativeOpenItem({
+      id: 'another-plugin-open-link',
+      action: unrelatedAction
+    }),
+    {
+      props: {
+        id: 'mlv2-open-saved-media-externally',
+        label: 'Open attachment externally',
+        action() {}
+      }
+    }
+  ];
+  const tree = { props: { children: menu } };
+
+  assert.equal(plugin.reconcileSavedAttachmentOpenActions(tree, descriptor), true);
+  const items = flattenMenuItems(tree);
+  assert.equal(items.filter(item => item.id === 'mlv2-open-saved-media-externally').length, 0);
+  const nativeItems = items.filter(item => plugin.isDiscordNativeSavedAttachmentOpenAction({ props: item }));
+  assert.equal(nativeItems.length, 2);
+  assert.equal(nativeItems[0].label, 'Open Link');
+  assert.equal(nativeItems[1].label, 'Open Link');
+  assert.notEqual(nativeItems[0].action, originalNativeAction);
+  assert.notEqual(nativeItems[1].action, originalNativeBrowserAction);
+  assert.equal(items.filter(item => plugin.isImageUtilitiesSavedAttachmentOpenAction({ props: item })).length, 1);
+  const imageUtilitiesItem = items.find(item => plugin.isImageUtilitiesSavedAttachmentOpenAction({ props: item }));
+  assert.equal(imageUtilitiesItem.label, 'Open Link');
+  assert.notEqual(imageUtilitiesItem.action, originalImageUtilitiesAction);
+  assert.equal(items.find(item => item.id === 'another-plugin-open-link').action, unrelatedAction);
+  nativeItems[0].action();
+  imageUtilitiesItem.action();
+  assert.equal(closed, 2);
+  assert.deepEqual(
+    opened,
+    [descriptor, descriptor],
+    'each routed action must pass the trusted descriptor, not its Blob display URL'
+  );
+  assert.equal(menu.length, 4);
+
+  const imageUtilitiesMenu = [createNativeOpenItem({
+    id: 'imageutilities-open-link',
+    action: originalImageUtilitiesAction
+  })];
+  imageUtilitiesMenu.push({
+    props: {
+      id: 'open-in-browser',
+      label: 'Open in Browser',
+      action: originalNativeAction
+    }
+  });
+  assert.equal(plugin.reconcileSavedAttachmentOpenActions(
+    { props: { children: imageUtilitiesMenu } },
+    descriptor
+  ), true);
+  assert.equal(imageUtilitiesMenu[0].props.label, 'Open Link');
+  assert.notEqual(imageUtilitiesMenu[0].props.action, originalImageUtilitiesAction);
+  assert.equal(imageUtilitiesMenu[1].props.label, 'Open in Browser');
+  assert.notEqual(imageUtilitiesMenu[1].props.action, originalNativeAction);
+
+  assert.equal(plugin.isDiscordNativeSavedAttachmentOpenAction({
+    props: { label: 'Open in Browser', id: 'open-in-browser', action() {} }
+  }), true);
+  assert.equal(plugin.isImageUtilitiesSavedAttachmentOpenAction({
+    props: { id: 'another-plugin-open-link', label: 'Open Link', action() {} }
+  }), false);
+});
+
+test('saved-image external open reconciliation does not inject fallback and handles frozen native menus safely', () => {
+  const descriptor = { remote_urls: ['https://cdn.example/media.png'] };
+  const plugin = createPlugin({
+    openSavedAttachmentDescriptor() {
+      return Promise.resolve(true);
+    }
+  });
+  const unrelated = createNativeOpenItem({
+    id: 'another-plugin-open-link',
+    label: 'Other action'
+  });
+  const fallbackMenu = [
+    {
+      props: {
+        id: 'mlv2-open-saved-media-externally',
+        label: 'Open attachment externally',
+        action() {}
+      }
+    },
+    unrelated
+  ];
+  const fallbackTree = { props: { children: fallbackMenu } };
+
+  assert.equal(plugin.reconcileSavedAttachmentOpenActions(fallbackTree, descriptor), true);
+  assert.equal(plugin.reconcileSavedAttachmentOpenActions(fallbackTree, descriptor), false);
+  let fallbackItems = flattenMenuItems(fallbackTree)
+    .filter(item => item.id === 'mlv2-open-saved-attachment');
+  assert.equal(fallbackItems.length, 0);
+  assert.equal(plugin.reconcileSavedAttachmentOpenActions(fallbackTree, null), false);
+  fallbackItems = flattenMenuItems(fallbackTree)
+    .filter(item => item.id === 'mlv2-open-saved-attachment');
+  assert.equal(fallbackItems.length, 0, 'a reused ordinary menu must not retain Logger-owned fallback state');
+  assert.equal(fallbackMenu[fallbackMenu.length - 1], unrelated);
+
+  const originalFrozenAction = () => {};
+  const frozenNode = {
+    props: Object.freeze({
+      id: 'open-native-link',
+      label: 'Open Link',
+      action: originalFrozenAction
+    })
+  };
+  const mutableParent = [frozenNode];
+  assert.equal(plugin.reconcileSavedAttachmentOpenActions(
+    { props: { children: mutableParent } },
+    descriptor,
+    mutableParent
+  ), true);
+  assert.equal(mutableParent.length, 1);
+  assert.equal(mutableParent[0].props.label, 'Open Link');
+  assert.notEqual(mutableParent[0].props.action, originalFrozenAction);
+
+  const fullyFrozenNode = {
+    props: Object.freeze({
+      id: 'open-native-link',
+      label: 'Open Link',
+      action: originalFrozenAction
+    })
+  };
+  const fullyFrozenMenu = Object.freeze([fullyFrozenNode]);
+  const fullyFrozenTree = { props: { children: fullyFrozenMenu } };
+  assert.equal(plugin.reconcileSavedAttachmentOpenActions(
+    fullyFrozenTree,
+    descriptor,
+    fullyFrozenMenu
+  ), true);
+  assert.equal(fullyFrozenMenu[0], fullyFrozenNode);
+  assert.equal(fullyFrozenMenu[0].props.action, originalFrozenAction);
+  assert.notEqual(fullyFrozenTree.props.children, fullyFrozenMenu);
+  assert.equal(fullyFrozenTree.props.children.length, 1);
+  assert.equal(fullyFrozenTree.props.children[0].props.label, 'Open Link');
+  assert.notEqual(fullyFrozenTree.props.children[0].props.action, originalFrozenAction);
+
+  const originalFrozenImageUtilitiesAction = () => {};
+  const frozenImageUtilitiesNode = {
+    props: Object.freeze({
+      id: 'imageutilities-open-link',
+      label: 'Open Link',
+      action: originalFrozenImageUtilitiesAction
+    })
+  };
+  const frozenNestedGroup = {
+    props: Object.freeze({
+      children: Object.freeze([frozenImageUtilitiesNode])
+    })
+  };
+  const frozenNestedMenu = Object.freeze([frozenNestedGroup]);
+  const frozenNestedTree = { props: { children: frozenNestedMenu } };
+  assert.equal(plugin.reconcileSavedAttachmentOpenActions(frozenNestedTree, descriptor), true);
+  const frozenNestedItems = flattenMenuItems(frozenNestedTree);
+  const routedImageUtilitiesItem = frozenNestedItems.find(item => (
+    plugin.isImageUtilitiesSavedAttachmentOpenAction({ props: item })
+  ));
+  assert.equal(routedImageUtilitiesItem.label, 'Open Link');
+  assert.notEqual(routedImageUtilitiesItem.action, originalFrozenImageUtilitiesAction);
+  assert.equal(frozenImageUtilitiesNode.props.label, 'Open Link');
+  assert.equal(frozenImageUtilitiesNode.props.action, originalFrozenImageUtilitiesAction);
+
+  const irreducibleTree = Object.freeze({
+    props: Object.freeze({ children: Object.freeze([fullyFrozenNode]) })
+  });
+  assert.equal(plugin.reconcileSavedAttachmentOpenActions(irreducibleTree, descriptor), false);
+  assert.equal(irreducibleTree.props.children[0].props.action, originalFrozenAction);
+});
+
 test('restored live media replaces one native action without touching ordinary messages or avatars', () => {
   const plugin = createPlugin({ settings: { cacheAllImages: true } });
   installCachedFiles(plugin, [{
@@ -750,8 +969,13 @@ test('dedicated message regex callback updates mounted logger rows only', () => 
   }]);
 
   const copied = [];
+  const opened = [];
   plugin.copyMediaToClipboard = source => {
     copied.push(source);
+    return Promise.resolve(true);
+  };
+  plugin.openSavedAttachmentDescriptor = descriptor => {
+    opened.push(descriptor);
     return Promise.resolve(true);
   };
   plugin.patchContextMenus();
@@ -759,6 +983,7 @@ test('dedicated message regex callback updates mounted logger rows only', () => 
   assert.equal(typeof messageRegexPatch, 'function');
 
   const nativeAction = () => {};
+  const nativeOpenAction = () => {};
   const thirdPartyAction = () => {};
   const mountedTarget = createImage({
     closest: selector => selector === '[id^="chat-messages-"]'
@@ -767,6 +992,7 @@ test('dedicated message regex callback updates mounted logger rows only', () => 
   });
   const mountedMenu = [
     createNativeCopyItem({ action: nativeAction }),
+    createNativeOpenItem({ action: nativeOpenAction }),
     {
       props: {
         id: 'third-party-copy-file',
@@ -775,7 +1001,9 @@ test('dedicated message regex callback updates mounted logger rows only', () => 
       }
     }
   ];
-  const mountedTree = { props: { children: mountedMenu } };
+  // Current Discord nests the actual menu array beneath a React navigation node rather than
+  // exposing it directly as ret.props.children.
+  const mountedTree = { props: { children: { props: { children: mountedMenu } } } };
   messageRegexPatch(mountedTree, {
     message: { id: MESSAGE_ID },
     channel: { id: CHANNEL_ID },
@@ -789,6 +1017,13 @@ test('dedicated message regex callback updates mounted logger rows only', () => 
   assert.notEqual(mountedActions[0].action, thirdPartyAction);
   mountedActions[0].action();
   assert.equal(copied.length, 1);
+  const mountedOpenAction = flattenMenuItems(mountedTree)
+    .find(item => item.id === 'open-native-link');
+  assert.equal(mountedOpenAction.label, 'Open Link');
+  assert.notEqual(mountedOpenAction.action, nativeOpenAction);
+  mountedOpenAction.action();
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].blob_url, 'blob:logger-image');
 
   const unmountedMenu = [{
     props: {
@@ -807,7 +1042,7 @@ test('dedicated message regex callback updates mounted logger rows only', () => 
   assert.equal(copied.length, 1);
 });
 
-test('image-context menu replaces copy media for restored logger media rows only', () => {
+test('image-context menu keeps copy action and adds a Message Logger submenu for restored logger images only', () => {
   const patchedMenus = installContextMenuPatchCapture();
   const record = createRecord();
   const plugin = createPlugin({
@@ -832,27 +1067,59 @@ test('image-context menu replaces copy media for restored logger media rows only
     copied.push(source);
     return Promise.resolve(true);
   };
+  const opened = [];
+  plugin.openSavedAttachmentDescriptor = descriptor => {
+    opened.push(descriptor);
+    return Promise.resolve(true);
+  };
   plugin.patchContextMenus();
+  installContextMenuBuilder();
   const onOpenImageContext = patchedMenus['regex:^image-context$'];
   assert.equal(typeof onOpenImageContext, 'function');
 
   const loggerMessageNode = {
     id: `chat-messages-${CHANNEL_ID}-${MESSAGE_ID}`
   };
-  const nativeAction = () => {};
-  const menu = [createNativeCopyItem({ action: nativeAction })];
+  const nativeCopyAction = () => {};
+  const nativeOpenAction = () => {};
+  const menu = [
+    createNativeCopyItem({ action: nativeCopyAction }),
+    createNativeOpenItem({ action: nativeOpenAction })
+  ];
   onOpenImageContext(
     { navId: 'image-context', props: { children: menu } },
     {
       target: createImage({
+        source: record.message.attachments[0].url,
         closest: selector => selector === '[id^="chat-messages-"]' ? loggerMessageNode : null
       })
     }
   );
-  assert.equal(menu.length, 1);
-  assert.notEqual(menu[0].props.action, nativeAction);
-  menu[0].props.action();
+  assert.equal(menu.length, 3);
+  const copyItem = menu.find(item => plugin.isNativeClipboardMediaAction(item));
+  assert.notEqual(copyItem.props.action, nativeCopyAction);
+  copyItem.props.action();
+  const nativeOpenItem = menu.find(item => plugin.isDiscordNativeSavedAttachmentOpenAction(item));
+  assert.equal(nativeOpenItem.props.label, 'Open Link');
+  assert.notEqual(nativeOpenItem.props.action, nativeOpenAction);
+  const loggerSubmenuNode = flattenMenuItems(menu).find(item => ['mlv2-message-logger', 'mlv2-image-logger'].includes(item.id));
+  assert.notEqual(loggerSubmenuNode, undefined);
+  assert.equal(loggerSubmenuNode.label, 'Message Logger');
+  const loggerOpenNode = (loggerSubmenuNode?.props?.items || loggerSubmenuNode?.items || []).find(item => {
+    const itemProps = item?.props || item || {};
+    return itemProps.id === 'mlv2-open-saved-attachment';
+  });
+  assert.notEqual(loggerOpenNode, undefined);
+  const loggerOpenAction = loggerOpenNode?.props?.action || loggerOpenNode?.action;
+  assert.equal(typeof loggerOpenAction, 'function');
+  assert.notEqual(loggerOpenAction, nativeOpenAction);
+  assert.equal(loggerOpenNode.props?.label || loggerOpenNode.label, 'Open Attachment');
+  loggerOpenAction();
+  nativeOpenItem.props.action();
   assert.equal(copied.length, 1);
+  assert.equal(opened.length, 2);
+  assert.equal(opened[0].display_url, record.message.attachments[0].url);
+  assert.equal(opened[1].display_url, record.message.attachments[0].url);
 });
 
 test('image-context menu ignores unsupported rows and exact match failures', () => {
@@ -911,6 +1178,91 @@ test('image-context menu ignores unsupported rows and exact match failures', () 
   );
   assert.equal(disabledMenu.length, 1);
   assert.equal(disabledMenu[0].props.action, disabledAction);
+});
+
+test('image-context uses the separately guarded Logger-owned native-viewer descriptor only', () => {
+  const patchedMenus = installContextMenuPatchCapture();
+  const descriptor = {
+    remote_urls: ['https://cdn.example/viewer.png'],
+    display_url: 'https://cdn.example/viewer.png',
+    local_path: '/tmp/cache/viewer.png'
+  };
+  const opened = [];
+  const plugin = createPlugin({
+    unpatches: [],
+    messageRecord: {},
+    deletedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    getLoggerOwnedNativeSavedAttachmentViewerDescriptor: () => descriptor,
+    getLoggerOwnedNativeSavedImageViewerDescriptor: () => descriptor,
+    openSavedAttachmentDescriptor(value) {
+      opened.push(value);
+      return Promise.resolve(true);
+    }
+  });
+  plugin.patchContextMenus();
+  installContextMenuBuilder();
+  const imageContextPatch = patchedMenus['regex:^image-context$'];
+  const messageContextPatch = patchedMenus['regex:^message$'];
+  const matchingDialog = {
+    querySelectorAll: selector => selector === 'img, video'
+      ? [{ tagName: 'IMG', currentSrc: descriptor.remote_urls[0] }]
+      : []
+  };
+  const matchingTarget = createImage({
+    source: 'https://cdn.example/matched-target.png',
+    closest: selector => selector === '[role=\"dialog\"]' ? matchingDialog : null
+  });
+  const originalOpenAction = () => {};
+  const viewerMenu = [createNativeOpenItem({ action: originalOpenAction })];
+
+  imageContextPatch(
+    { navId: 'image-context', props: { children: viewerMenu } },
+    { target: matchingTarget }
+  );
+  const viewerLoggerSubmenuNode = flattenMenuItems(viewerMenu).find(item => ['mlv2-message-logger', 'mlv2-image-logger'].includes(item.id));
+  assert.notEqual(viewerLoggerSubmenuNode, undefined);
+  assert.equal(viewerLoggerSubmenuNode.label, 'Message Logger');
+  const viewerOpenNode = (viewerLoggerSubmenuNode?.props?.items || viewerLoggerSubmenuNode?.items || []).find(item => {
+    const itemProps = item?.props || item || {};
+    return itemProps.id === 'mlv2-open-saved-attachment';
+  });
+  assert.notEqual(viewerOpenNode, undefined);
+  const viewerOpenAction = viewerOpenNode?.props?.action || viewerOpenNode?.action;
+  assert.equal(typeof viewerOpenAction, 'function');
+  assert.notEqual(viewerOpenAction, originalOpenAction);
+  viewerOpenAction();
+  assert.deepEqual(opened, [descriptor]);
+
+  plugin.getLoggerOwnedNativeSavedAttachmentViewerDescriptor = () => descriptor;
+  plugin.getLoggerOwnedNativeSavedImageViewerDescriptor = () => descriptor;
+  const ordinaryOpenAction = () => {};
+  const ordinaryTarget = createImage({
+    source: 'https://cdn.example/ordinary.png',
+    closest: () => null
+  });
+  const ordinaryMenu = [createNativeOpenItem({ action: ordinaryOpenAction })];
+  imageContextPatch(
+    { navId: 'image-context', props: { children: ordinaryMenu } },
+    { target: ordinaryTarget }
+  );
+  assert.equal(ordinaryMenu[0].props.action, ordinaryOpenAction);
+  const ordinaryLoggerSubmenu = flattenMenuItems(ordinaryMenu).find(item => ['mlv2-message-logger', 'mlv2-image-logger'].includes(item.id));
+  assert.equal(ordinaryLoggerSubmenu, undefined);
+
+  plugin.getLoggerOwnedNativeSavedAttachmentViewerDescriptor = () => descriptor;
+  plugin.getLoggerOwnedNativeSavedImageViewerDescriptor = () => descriptor;
+  const ordinaryMessageAction = () => {};
+  const ordinaryMessageMenu = [createNativeOpenItem({ action: ordinaryMessageAction })];
+  messageContextPatch(
+    { navId: 'message', props: { children: ordinaryMessageMenu } },
+    { target: matchingTarget, message: { id: MESSAGE_ID }, channel: { id: CHANNEL_ID } }
+  );
+  assert.equal(
+    ordinaryMessageMenu[0].props.action,
+    ordinaryMessageAction,
+    'the message menu must never fall back to native-viewer ownership'
+  );
 });
 
 test('Logger viewer adds one raw Copy media config only for an eligible cached image', () => {
@@ -978,4 +1330,53 @@ test('Logger viewer adds one raw Copy media config only for an eligible cached i
     createImage({ source: videoRecord.message.attachments[0].url }),
     videoRecord
   ), false);
+});
+
+test('Logger viewer adds one raw external-open config only for an exact saved attachment', () => {
+  const opened = [];
+  let closed = 0;
+  ContextMenu.close = () => { closed++; };
+  const plugin = createPlugin({
+    openSavedAttachmentDescriptor(descriptor) {
+      opened.push(descriptor);
+      return Promise.resolve(true);
+    }
+  });
+  installCachedFiles(plugin, [{
+    cacheId: ATTACHMENT_ID,
+    extension: '.png',
+    path: '/tmp/cache/media.png'
+  }]);
+  const record = createRecord();
+  const items = [{
+    id: 'mlv2-open-saved-media-externally',
+    label: 'Open attachment externally',
+    type: 'item',
+    action() {}
+  }];
+
+  assert.equal(plugin.addLoggerViewerSavedAttachmentOpenItem(items, createImage(), record), true);
+  assert.equal(plugin.addLoggerViewerSavedAttachmentOpenItem(items, createImage(), record), true);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].id, 'mlv2-open-saved-attachment');
+  assert.equal(items[0].label, 'Open Attachment');
+  assert.equal(items[0].props, undefined, 'Logger buildMenu must receive a raw menu config');
+  items[0].action();
+  assert.equal(closed, 1);
+  assert.equal(opened.length, 1);
+  assert.deepEqual(opened[0].remote_urls, [record.message.attachments[0].url]);
+  assert.equal(opened[0].display_url, 'blob:logger-image');
+  assert.equal(opened[0].local_path, '/tmp/cache/media.png');
+
+  assert.equal(plugin.addLoggerViewerSavedAttachmentOpenItem(
+    [],
+    createImage(),
+    createRecord({ deleted: false })
+  ), false);
+  const videoRecord = createRecord({ extension: 'mp4' });
+  assert.equal(plugin.addLoggerViewerSavedAttachmentOpenItem(
+    [],
+    createImage({ source: videoRecord.message.attachments[0].url }),
+    videoRecord
+  ), true);
 });

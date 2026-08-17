@@ -1715,8 +1715,10 @@ test('populateParent sources logger media rows from saved attachment presentatio
   assert.match(viewer, /const getLoggerAttachmentEntry = \(mediaAttachment\) =>/);
   assert.match(viewer, /this\.markSavedAttachmentMediaCandidateFailure\([\s\S]*mediaAttachment.url\)/);
   assert.match(viewer, /const fallbackToNextLoggerRemotePlan = \(mediaElement,\s*hostElement,\s*mediaAttachment,\s*useCachedRenderer,\s*width,\s*height\)\s*=>/);
-  assert.match(viewer, /if \(\(plan\.action === 'placeholder' \|\| plan\.action === 'omit'\) && safePlanLabel\) \{\s*appendUnavailableAttachmentPlaceholder\(safePlanLabel\);/);
-  assert.match(viewer, /createUnavailableAttachmentPlaceholder\(presentationLabel \|\| attachment\.filename\)/);
+  assert.match(viewer, /const appendUnavailableAttachmentPlaceholder = \(label, attachment = null\) =>/);
+  assert.match(viewer, /markLoggerAttachmentTarget\(placeholder, attachment\);/);
+  assert.match(viewer, /if \(\(plan\.action === 'placeholder' \|\| plan\.action === 'omit'\) && safePlanLabel\) \{\s*appendUnavailableAttachmentPlaceholder\(safePlanLabel, attachment\);/);
+  assert.match(viewer, /createUnavailableAttachmentPlaceholder\(\s*presentationLabel \|\| attachment\.filename,\s*getLoggerAttachmentEntry\(attachment\)\?\.attachment \|\| attachment\s*\)/);
   assert.match(viewer, /attemptToUseCachedImage\([\s\S]*presentationLabel[\s\S]*\);/);
   assert.match(viewer, /attemptToUseCachedVideo\([\s\S]*presentationLabel[\s\S]*\);/);
   assert.match(viewer, /fallbackToNextLoggerRemotePlan\(video,\s*container,\s*attachment,\s*attemptToUseCachedVideo/);

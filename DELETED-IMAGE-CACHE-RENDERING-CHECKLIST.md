@@ -21,81 +21,87 @@ This file is both the implementation checklist and the handoff record.
 
 ## Living handoff snapshot
 
-- **Last updated:** 2026-08-17
+- **Last updated:** 2026-08-18
 - **Repository:**
   `$HOME/Apps/Dev/BD/BD-Plugins/MessageLoggerV2-Remake`
-- **Root Codex session ID:**
+- **Current root Codex session ID:**
+  `01a00f41-b9c3-7841-b0e0-175368f05084`
+- **Current root rollout record:**
+  `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T20-26-00-01a00f41-b9c3-7841-b0e0-175368f05084.jsonl`
+- **Predecessor root session ID:**
   `01a00d42-4986-7971-94de-11f09f6630d1`
-- **Root rollout record:**
+- **Predecessor rollout record:**
   `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T11-07-23-01a00d42-4986-7971-94de-11f09f6630d1.jsonl`
 - **Working branch:** `develop`
-- **Verified HEAD:** accepted forum deletion-timing commit
-  `2a719ea00d7019c20b1f6c5b65fe616a7eae0990`; `develop` is six commits ahead
-  of `origin/develop` and nothing has been pushed.
+- **Verified HEAD:** accepted Stage 3 note-styling commit
+  `89d51f7a59f3ff7be79ebeb551a4f17c3a8cab69`; local `develop` and
+  `origin/develop` match.
 - **Verified worktree:** only `MessageLoggerV2.plugin.js`,
-  `tests/media.test.js`, `tests/source-contracts.test.js`, and this checklist
-  are tracked modifications for the final Stage 3 master-toggle correction.
-  The ignored `tmp/MessageLoggerForumMediaTransitionTrace.plugin.js` helper is
-  currently symlinked into BetterDiscord, and its latest generated report is
-  still present at
-  `$HOME/Library/Application Support/BetterDiscord/plugins/MessageLoggerForumMediaTransitionTrace-report.json`.
+  `tests/media.test.js`, `tests/clipboard.test.js`,
+  `tests/source-contracts.test.js`, and this checklist are tracked Stage 4
+  modifications. After live acceptance, the ignored open-mount helper, its
+  exact live symlink, and its 12-event report were moved to the recoverable
+  Trash folder
+  `$HOME/.Trash/MessageLoggerOpenMountTrace-2026-08-18-stage4-accepted`;
+  no Stage 4 trace artifact remains installed.
 - **Baseline:** `npm test` passed `471/471` before this checklist was created.
-- **Checklist verification:** parent verification for the final Stage 3
-  correction passes `npm run check`; the focused media, live-mount-setting, and
-  source-contract suites at `197/197`; bounded `npm test` at `516/516`; and
-  `git diff --check`.
-- **Live parity:** the locally verified repository plugin SHA-256 is
-  `563d6ba2ca1dc97e0ded11c2b86d49c9365f98f3f77ee22cd9b7fc6b246ec97a`.
-  The installed plugin remains the preceding wrapper build at
-  `1dbd3e8043d10e50b8779a8476ea5b1ca2fc28dfa9dd12ca5164171853428605`;
-  live sync is the next gate.
-- **Implementation state:** Stages 1 and 2 are complete. The final Stage 3
-  correction is implemented locally: protected Discord-owned forum/thread
-  attachment mounts now use a tokenized, per-message `MutationObserver` only
-  when the live Store and exact mounted content still contain the generated
-  placeholder while a Blob-only presentation is ready. It sends a hidden
-  truthy sentinel with no attachments, waits for the exact placeholder to be
-  absent, then recomputes and dispatches the Blob presentation. Unmounted rows
-  update immediately. Canonical records, ordinary rows, direct-CDN/proxy/Blob/
-  placeholder ordering, text mounting, forum/thread promotion, embeds/stickers,
-  persistence, settings, and Stage 4 external opening remain unchanged.
-- **Runtime-trace state:** The latest compact trace targets forum message
-  `1538840760789504031` in channel `1538832876395569233`. It proves the
-  wrapper callback is registered and invoked (`registryCallbackCount: 1`), the
-  presentation helper returns empty content with the cached Blob, but Discord's
-  Store and DOM retain `[image:Synology_AUX.png]` until a later broad recache.
-  The remaining defect is Discord's deferred empty-string merge/commit, not a
-  dead Blob, missing callback, wrong source, or forum-root promotion failure.
-  The trace is console-only; the user does not want trace toasts.
-- **Current gate:** Local implementation, parent review, syntax, focused,
-  bounded-full-suite, and whitespace gates pass. Sync only the plugin, verify
-  hash parity and hot-reload logs, then repeat the one same-forum master
-  Off-to-On transition before any commit or push.
-- **Worker-capacity state:** Fresh-session capacity was restored. The first
-  Spark attempt returned a model-capacity error after a partial edit, so the
-  approved Luna fallback completed the bounded slice. After the user explicitly
-  requested a later Spark retry, Spark corrected the live-Store/row-observer
-  integration and added the final coverage. Parent review caught and corrected
-  only isolated source-test slicing assertions before the passing gates above.
+- **Current Stage 4 verification:** the parent has rerun `npm run check`,
+  `tests/clipboard.test.js` at `16/16`, `tests/media.test.js` at `156/156`,
+  `tests/source-contracts.test.js` at `68/68`, full `npm test` at `560/560`,
+  plugin/test syntax, and `git diff --check` after the first generalized live
+  build. After the escaping-native-action correction, the parent reran
+  `npm run check`, clipboard `16/16`, media `156/156`, source contracts
+  `68/68`, full `npm test` at `561/561`, and `git diff --check` successfully.
+- **Live parity:** the corrected repository SHA-256 is
+  `9cf2fad325fe7d4ea4f234bfbf1fc1c632692ff487d5f273f1fdfcd054f365f1`;
+  the installed plugin matches that exact hash after the controlled live sync.
+- **Implementation state:** Stages 1-3 are complete, accepted, committed, and
+  pushed. Stage 4 is implemented, parent-verified, live-synced, and accepted,
+  with one operating-system-neutral open policy for
+  canonical current/removed image, video, audio, and generic attachments across
+  Logger raw views, restored native message/image menus, exact ImageUtilities
+  actions, and Logger-owned native image viewers. Local-only uses only a
+  trusted existing physical cache file; remote-first keeps direct, distinct
+  proxy, then local order; cache-master Off uses only the first remote
+  candidate. Blob stays display-only. Exact target/viewer ownership and
+  user-authored URL/label collision guards are parent-verified. Viewer-tooltip
+  ownership is limited to the exact control's `aria-describedby` tooltip, and
+  frozen descendant menus use an immutable replacement path while an
+  irreducibly frozen root fails closed.
+- **Runtime-trace state:** the completed 12-event report had no drops. It
+  proved the restored-message menu retained mutable action
+  `open-native-link` under a nested React tree, while the native Media Viewer
+  button labelled **Open in Browser** called `window.open()` with the exact
+  saved Blob URL. No Electron `shell.openExternal()` or `shell.openPath()` call
+  occurred on either escaping path. The user then verified both corrected
+  controls and ordinary-viewer isolation; the helper, symlink, and report are
+  now in Trash.
+- **Current gate:** Stage 4 is accepted. Commit its five tracked files locally
+  without pushing, then prepare the Downloads media fixture matrix and resume
+  the reopened Stage 3 deleted-MP4/native-media mount investigation. Stage 9
+  warning-detail cleanup remains deferred until the rendering work is done.
+- **Worker state:** the user reported Spark at 47%; no quota/rate-limit fallback
+  trigger occurred. Spark completed the target-scoped native-viewer and
+  authored-content resolver slices. The parent reran every focused and full
+  suite. A final independent reviewer could not start because the runtime
+  continued to report stale thread capacity even though only the root thread
+  was visible; the Sol parent therefore completed the final read-only review.
 - **Checklist state:** include this file in every user-confirmed stage commit;
   archive it only after implementation, validation, and user acceptance are
   complete.
-- **Change-control state:** Commit the four listed files only after the focused
-  live gate passes. The user then authorized pushing `develop` only. Do not
-  merge, switch branches, tag, release, bump the version, or edit the changelog.
+- **Change-control state:** The user accepted Stage 4 and authorized its local
+  commit, explicitly without a push. Do not push, merge, switch branches, tag,
+  release, bump the version, or edit the changelog.
 
 ### Exact next action
 
-Sync only `MessageLoggerV2.plugin.js` to the BetterDiscord plugins folder,
-compare repository/live SHA-256, and inspect the fresh hot-reload log boundary.
-Then ask the user to stay in the same affected forum/thread with local-only On,
-toggle **Render & Cache media** Off then On once, and confirm the placeholder is
-removed before the cached Blob mounts with no visible lag or overlap. Keep the
-console-only trace helper, symlink, and report until that live gate passes so
-the exact transition can still be inspected if needed. After it passes, remove
-those three trace artifacts, update this checklist, commit only the four tracked
-files, and push `develop` only. Do not merge, switch branches, tag, release,
-bump the version, or edit the changelog.
+Commit the accepted Stage 4 five-file change locally without pushing. Verify
+that local `develop` advances while `origin/develop` remains at
+`89d51f7a59f3ff7be79ebeb551a4f17c3a8cab69`. Then create the requested
+copyright-free image/video/audio fixture matrix in a new Downloads subfolder,
+record each container and codec, and resume the trace-first Stage 3 deleted-MP4
+native-mount investigation. Do not merge, switch branches, tag, release, bump
+the version, or edit the changelog.
 
 ### Resume procedure
 
@@ -109,9 +115,12 @@ bump the version, or edit the changelog.
 
 ### Session reconstruction references
 
-- The root session ID is
-  `01a00d42-4986-7971-94de-11f09f6630d1`.
+- The current root session ID is
+  `01a00f41-b9c3-7841-b0e0-175368f05084`.
 - Its exact rollout is
+  `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T20-26-00-01a00f41-b9c3-7841-b0e0-175368f05084.jsonl`.
+- The predecessor root session is
+  `01a00d42-4986-7971-94de-11f09f6630d1`, recorded at
   `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T11-07-23-01a00d42-4986-7971-94de-11f09f6630d1.jsonl`.
 - This checklist is the self-contained authority for continuation. Read it
   first; consult the rollout only when the reasoning behind an already-recorded
@@ -144,11 +153,11 @@ be recorded before implementation continues.
 - [x] Every current Logger-owned saved-attachment mount surface mapped.
 - [x] Setting-dependent remote-first versus local-only contract recorded.
 - [x] Native viewer field/action behavior traced in the live runtime.
-- [ ] Plugin implementation completed.
-- [ ] Deterministic regression coverage completed.
-- [ ] Full automated gate completed.
-- [ ] Focused live gate completed.
-- [ ] User acceptance received.
+- [x] Plugin implementation completed.
+- [x] Deterministic regression coverage completed.
+- [x] Full automated gate completed.
+- [x] Focused live gate completed.
+- [x] User acceptance received.
 
 ## Confirmed current behavior and defects
 
@@ -285,42 +294,51 @@ be recorded before implementation continues.
 | On | Off | CDN first, then distinct proxy, then an already-cached Blob on display failure; otherwise placeholder | Probe CDN first, then a distinct proxy; open the live HTTPS candidate in the default browser, otherwise open an existing resolved cache path in the default file app; warn if none exists |
 | On | On | Existing cached Blob only; otherwise placeholder | Bypass CDN and open the existing resolved cache path directly in the default file app; warn if absent |
 
-- [ ] Keep display source and external-open destination separate: Blob is an
+- [x] Keep display source and external-open destination separate: Blob is an
       in-Discord display source, never the browser destination.
-- [ ] In remote-first mode, test the exact preserved or presentation-derived
-      direct CDN URL when the user invokes **Open in Browser**, then test a
+- [x] In remote-first mode, test the exact preserved or presentation-derived
+      direct CDN URL when the user invokes **Open Attachment**, then test a
       distinct saved proxy before falling back to an existing local file.
-- [ ] Use a bounded native-network one-byte range probe, share only identical
+- [x] Use a bounded native-network one-byte range probe, share only identical
       in-flight probes, and abort stale probes on stop, cache Off, or a
       local-only policy transition.
-- [ ] Do not retain a long-lived liveness result: availability and signed URL
+- [x] Do not retain a long-lived liveness result: availability and signed URL
       expiry can change between clicks.
-- [ ] Open an accepted live HTTP(S) CDN URL with
+- [x] Open an accepted live HTTP(S) CDN URL with
       `require('electron').shell.openExternal(url)` so the operating system uses
       its configured default browser.
-- [ ] If remote liveness fails and the resolved cache file exists, pass the
+- [x] If remote liveness fails and the resolved cache file exists, pass the
       platform-native absolute path to
       `require('electron').shell.openPath(resolvedPath)` so macOS, Windows, and
       Linux use the file type's configured default application.
-- [ ] In local-only mode, do not probe or open the CDN; re-resolve the physical
+- [x] Keep this routing completely operating-system neutral. Electron receives
+      the validated HTTP(S) URL or platform-native absolute file path and the
+      operating system chooses its registered default browser or file-type
+      application. Do not branch on `process.platform`, discover an executable,
+      invoke `open`/`start`/`xdg-open`, convert a local path to `file:`, or name a
+      particular browser/viewer.
+- [x] In local-only mode, do not probe or open the CDN; re-resolve the physical
       file and open its platform-native absolute path with `shell.openPath()`.
-- [ ] If the required local file is absent and no permitted live remote exists,
+- [x] If the required local file is absent and no permitted live remote exists,
       show a concise warning toast such as **Attachment is no longer
       available.** and open nothing.
-- [ ] Treat a nonempty `shell.openPath()` result as an error and report a concise
+- [x] Treat a nonempty `shell.openPath()` result as an error and report a concise
       unavailable/open-failed notice; also handle a rejected or missing shell
       API without throwing from the UI action.
-- [ ] Obtain the local path only from the existing cache resolver, require an
+- [x] Obtain the local path only from the existing cache resolver, require an
       existing physical file, and never construct it from an
       attachment-controlled filename or URL.
-- [ ] Do not discover or launch a browser executable for local files. Remote
+- [x] Do not discover or launch a browser executable for local files. Remote
       HTTP(S) uses the default browser; local cache files use the default file
       application consistently across supported desktop platforms.
-- [ ] Never ask the external browser to open a `blob:` URL.
-- [ ] Keep any native viewer/action patch limited to Logger-owned restored
+- [x] Never ask the external browser to open a `blob:` URL.
+- [x] Keep any native viewer/action patch limited to Logger-owned restored
       media; do not globally replace Discord's media actions.
-- [ ] Do not add or change an external-open action for non-image attachment rows
-      as part of this work; retain their current master-On behavior.
+- [x] Route every existing Logger-owned direct-attachment open point through
+      this same policy, including image, video, audio, and generic file rows.
+      This later user instruction supersedes the earlier image-only action
+      boundary without adding a new renderer, preview, player, MIME map, or
+      cache-eligibility path for any file type.
 
 ### Cache Off to On rehydration
 
@@ -573,7 +591,7 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
 - [x] Blob URLs and derived local-open paths never appear in serialized records.
 - [x] Resolved local paths containing spaces, `%`, `#`, and Unicode remain exact
       through the descriptor; Windows paths retain native separators.
-- [ ] Stage 4 proves the descriptor's exact resolved path is passed unchanged to
+- [x] Stage 4 proves the descriptor's exact resolved path is passed unchanged to
       `shell.openPath()`.
 
 ### Stage 2 result
@@ -693,6 +711,49 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
 - [x] Existing remote-only text/PDF/other cards do not gain a new Blob renderer.
 - [x] Object URL cleanup remains bounded across refresh/hot reload.
 
+### Stage 3 deleted-MP4 native-mount follow-up (reopened)
+
+The user reported this after Stage 4 foundation work began, then explicitly
+set the final ordering: finish, validate, and live-sync the complete Stage 4
+image implementation first. After that image gate, return here for the Stage 3
+native-video trace; the requested media fixture pack is preparation for that
+later matrix and must not pull video/audio fixes into Stage 4.
+
+- [ ] Reproduce one newly uploaded then deleted MP4 with **Render & Cache
+      media** On and the local-only child Off, then repeat with the child On.
+- [ ] Confirm the exact classified placeholder, native Store attachment state,
+      presentation plan, mounted DOM node/classes, remote candidate state, and
+      physical cache/Blob availability. Compare the same canonical record in
+      the Logger view, which the user reports renders correctly.
+- [ ] Determine from runtime evidence whether the native row loses video
+      attachment data, misses the placeholder-to-media transition, rejects the
+      detached video shape, or remains pinned to stale Store/DOM content. Do not
+      infer the image fix applies without this trace.
+- [ ] Before the final live gate, publish a complete current-runtime format
+      matrix and test every format Discord's native direct-attachment renderer
+      actually supports. Keep four results distinct: Discord native live row,
+      restored Logger-owned native row, Logger custom view, and local Blob.
+- [ ] Start the audit from the plugin's current extension claims—images:
+      JPG/JPEG, PNG, GIF, BMP, WebP, AVIF, TIF/TIFF; videos: MP4, WebM, MOV,
+      AVI, MKV—but do not describe those extensions as Discord-supported until
+      the current live renderer proves them. Audit native audio rendering
+      separately because MessageLogger currently has no dedicated audio
+      classifier.
+- [ ] Record container and codec together for audiovisual samples. Upload
+      acceptance, a recognized filename extension, caching, and actual inline
+      decoding/rendering are separate results; one valid MP4 result must not be
+      generalized to every MP4 codec combination.
+- [ ] Correct only the proved native saved-direct-video mount/refresh path.
+      Preserve direct/proxy/Blob ordering, local-only remote bypass, image
+      behavior, Logger rendering, ordinary Discord media, arbitrary-file scope,
+      cache eligibility, persistence, and the accepted Stage 4 foundation.
+- [ ] Add deterministic coverage for remote-first and local-only deleted-MP4
+      mounts, transition completion, ordinary-row isolation, and the traced
+      failure mode; run the affected suites, `npm run check`, `npm test`, and
+      `git diff --check` before live sync.
+- [ ] Sync only the plugin, compare hashes, and repeat the two-setting MP4 live
+      gate before requesting acceptance of the reopened Stage 3 correction.
+
 ### Stage 3 result
 
 - **Checkpoint implementation:** Added one detached saved-attachment
@@ -787,39 +848,72 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
   dispatch error is from that separate plugin. The exact leftover disposable
   fallback-trace report was removed; no trace helper remains installed.
 
-## Stage 4 - Viewer and Open in Browser
+## Stage 4 - Viewer and Open Attachment
 
-- [ ] Apply the field contract proved in Stage 1.
-- [ ] Keep the native modal `url` on the actual remote/Blob render source and
+- [x] Apply the field contract proved in Stage 1.
+- [x] Keep the native modal `url` on the actual remote/Blob render source and
       keep canonical remote/local open data in a separate Logger-owned action;
       do not attempt the failed `url=file`, `proxyUrl=blob` field split.
-- [ ] In remote-first mode, probe the preserved direct CDN only when resolving
+- [x] In remote-first mode, probe the preserved direct CDN only when resolving
       the external-open action; share the in-flight probe for duplicate clicks.
-- [ ] In remote-first mode, open the live CDN with `shell.openExternal()` or the
+- [x] In remote-first mode, open the live CDN with `shell.openExternal()` or the
       resolved local cache path with `shell.openPath()` when liveness fails.
-- [ ] In local-only mode, bypass the probe/CDN and open the resolved local cache
+- [x] In local-only mode, bypass the probe/CDN and open the resolved local cache
       path directly with `shell.openPath()`.
-- [ ] Recheck the cache master, local-only generation, and physical file after
+- [x] Recheck the cache master, local-only generation, and physical file after
       every awaited probe so stale completions cannot open anything.
-- [ ] Use classified text in both native saved-message mounts and Logger-owned
+- [x] Use classified text in both native saved-message mounts and Logger-owned
       views when neither remote nor local media works.
-- [ ] Confirm no Logger-owned action leaks onto ordinary Discord media.
+- [x] Confirm no Logger-owned action leaks onto ordinary Discord media.
 
 ### Stage 4 focused checks
 
-- [ ] Remote-first, live CDN plus local cache: display CDN; external open uses
+- [x] Remote-first, live CDN plus local cache: display CDN; external open uses
       CDN.
-- [ ] Remote-first, expired CDN plus local cache: display falls back to Blob;
+- [x] Remote-first, expired CDN plus local cache: display falls back to Blob;
       external open uses the operating system's default file app.
-- [ ] Live CDN without local cache: remote display/open works and caching starts.
-- [ ] No usable CDN and no local cache: native mounts and Logger-owned views show
+- [x] Live CDN without local cache: remote display/open works and caching starts.
+- [x] No usable CDN and no local cache: native mounts and Logger-owned views show
       their placeholder/classified text; no broken modal; external open warns
       and launches nothing.
-- [ ] Local-only plus local cache: display Blob; external open uses the resolved
+- [x] Local-only plus local cache: display Blob; external open uses the resolved
       local path through the default file app without a CDN request.
-- [ ] Local-only without local cache: native mounts and Logger-owned views show
+- [x] Local-only without local cache: native mounts and Logger-owned views show
       their placeholder/classified text; no CDN display/probe/open; external
       open warns and launches nothing.
+
+The Stage 4 focused checks above are complete in deterministic coverage. The
+separate Stage 7 runtime checklist remains open until the live-synced build is
+exercised in Discord.
+
+### Stage 4 local result
+
+- **Implementation:** Added strict HTTP(S) and physical-file Electron launch
+  helpers, a bounded native-only range probe, remote/master/local-only policy,
+  exact canonical current/removed attachment descriptor resolution, and one
+  Logger-owned menu/viewer route labelled **Open Attachment**. Existing image,
+  video, audio, and generic attachment open points use the same policy without
+  gaining a new renderer. Exact ImageUtilities and Discord native open actions
+  are rerouted only for the owned saved attachment; embeds, stickers,
+  components, authored links/text, avatars, and ordinary Discord actions are
+  left untouched. Blob/file URLs never reach Electron.
+- **Lifecycle:** Exact concurrent probes share only their active request; no
+  settled liveness result persists. Stop and media-policy transitions abort or
+  invalidate probes. Native-viewer descriptors bind only to the matching active
+  Logger-owned modal key or the exact asynchronously mounted dialog/media
+  source and clear on close, source mismatch, timeout, teardown, or stop.
+- **Validation:** `npm run check` passed; `tests/media.test.js` passed
+  `156/156`; `tests/clipboard.test.js` passed `16/16`; source contracts passed
+  `68/68`; full `npm test` passed `561/561`; plugin/test syntax and
+  `git diff --check` passed. The
+  repository plugin SHA-256 is
+  `9cf2fad325fe7d4ea4f234bfbf1fc1c632692ff487d5f273f1fdfcd054f365f1`.
+- **Accepted gate:** the user verified the two previously escaping native
+  controls and ordinary Discord isolation. The disposable trace artifacts are
+  removed from the live/repository locations and retained recoverably in
+  Trash. Final Sol-parent review found no correctness, security, ownership, or
+  platform-specific routing issue; the requested independent reviewer could
+  not start because the runtime reported stale thread capacity.
 
 ## Stage 5 - Off to On rehydration
 
@@ -852,42 +946,46 @@ custom Logger-owned open action. Do not apply a global Discord action patch.
 
 ## Stage 6 - Automated verification
 
-- [ ] Cover the master/local-only display matrix for detached render clones and
+- [x] Cover the master/local-only display matrix for detached render clones and
       prove canonical records retain their direct/proxy URLs.
-- [ ] Cover immediate master/child refresh of selected native rows, the main
+- [x] Cover immediate master/child refresh of selected native rows, the main
       Logger, every registered deleted thread modal, and edit-history wrappers.
-- [ ] Cover remote display failure to Blob, local-only remote bypass, Blob
+- [x] Cover remote display failure to Blob, local-only remote bypass, Blob
       cleanup, and exact no-source `[image:filename.ext]` versus
       `[attachment:filename.ext]` classification in native and Logger views.
-- [ ] Prove the label classifier reuses the existing image predicate: current
+- [x] Prove the label classifier reuses the existing image predicate: current
       JPG/JPEG, PNG, GIF, BMP, WebP, AVIF, TIF/TIFF cases use `[image:...]`,
       while TXT, PDF, video, audio, and other direct files use `[attachment:...]`.
-- [ ] Cover missing/unsafe filenames with a safe basename or `unknown file`
+- [x] Cover missing/unsafe filenames with a safe basename or `unknown file`
       without allowing markup/HTML interpretation.
-- [ ] Cover liveness success/failure/timeout, duplicate-click sharing,
+- [x] Cover liveness success/failure/timeout, duplicate-click sharing,
       generation cancellation, cross-platform `shell.openExternal()` versus
       `shell.openPath()` routing, nonempty open-path errors, and missing-file
       failure with a warning toast and without opening a Blob externally.
 - [ ] Prove Off to On hydrates only eligible missing deleted-image files through
       the preserved URL order and existing safe write pipeline.
-- [ ] Lock `newSaveAllFileTypes` eligibility/cache behavior and prove no new
+- [x] Lock `newSaveAllFileTypes` eligibility/cache behavior and prove no new
       arbitrary-file renderer, player, or cache route was introduced.
-- [ ] Run `npm run check`.
-- [ ] Run the directly affected test files during implementation.
-- [ ] Add regression tests for every deterministic behavior changed above.
-- [ ] Confirm `package.json` still limits full-suite test entry discovery to
+- [x] Run `npm run check`.
+- [x] Run the directly affected test files during implementation.
+- [x] Add regression tests for every deterministic behavior changed above.
+- [x] Confirm `package.json` still limits full-suite test entry discovery to
       `tests/*.test.js`, with no test entries selected from any other folder.
-- [ ] Run `npm test` after the complete implementation and record the exact
+- [x] Run `npm test` after the complete implementation and record the exact
       passed/failed/total counts.
-- [ ] Run `git diff --check`.
-- [ ] Review the final diff for unrelated edits, release metadata, persisted
+- [x] Run `git diff --check`.
+- [x] Review the final diff for unrelated edits, release metadata, persisted
       Blob/file URLs, and accidental host-specific assumptions.
 
 ### Stage 6 result
 
-- **Focused commands/results:** Pending.
-- **Full suite:** Pending.
-- **Diff check:** Pending.
+- **Focused commands/results:** `tests/media.test.js` `155/155`,
+  `tests/clipboard.test.js` `16/16`, `tests/source-contracts.test.js` `68/68`,
+  and `npm run check` all pass under the parent.
+- **Full suite:** `npm test` passes `560/560` with zero failures.
+- **Diff check:** `git diff --check` passes. Final Sol-parent review found no
+  unrelated edit, release metadata change, persisted Blob/file URL, or
+  platform-specific launch branch.
 
 ## Stage 7 - Focused live verification
 
@@ -897,13 +995,13 @@ check in a DM and one open forum-post chat; deterministic tests cover group DMs
 and ordinary channel threads that share the same native row path.
 
 - [ ] **Local-only On:** mounted restored row, Logger window, and deleted
-      forum/thread log modal render a fresh Blob only; **Open in Browser** opens
+      forum/thread log modal render a fresh Blob only; **Open Attachment** opens
       the resolved cache file in the operating system's default app; no CDN
       presentation/probe occurs.
 - [ ] **Local-only Off, live CDN:** the same surfaces render the CDN first and
-      **Open in Browser** opens the preserved `https://cdn.discordapp.com/` URL.
+      **Open Attachment** opens the preserved `https://cdn.discordapp.com/` URL.
 - [ ] **Local-only Off, expired CDN:** image load falls back to the cached Blob
-      and **Open in Browser** falls back to the default app for the resolved
+      and **Open Attachment** falls back to the default app for the resolved
       local cache path.
 - [ ] **Live child-toggle round trip:** with the cache master remaining On and
       the same saved image still mounted, switch local-only Off -> On without a
@@ -936,22 +1034,65 @@ full setting matrix in every channel type.
 
 ### Stage 7 result
 
-- **Live plugin hash:** Pending.
-- **Runtime results:** Pending.
-- **Logs:** Pending.
+- **Live plugin hash:** Repository and installed plugin both equal
+  `3694cf0fb27c27c42f336fc92116ba1e209143745e9bc7752f8a8c29b2acdc89`.
+- **Runtime results:** Partial failure. Every visible **Open Attachment** action
+  follows the policy successfully. Logger-owned mount points that retain native
+  **Open Link** or **Open in Browser** wording still bypass it and require an
+  exact live identity/control trace before correction.
+- **Logs:** The 13:33:16 hot reload removed old patches, completed cleanup,
+  initialized, applied current patches, completed both UI refreshes, and
+  scheduled the cache trimmer without a MessageLogger error. The simultaneous
+  `PersonalPins` dispatch error belongs to that separate plugin. The optional
+  console exporter emitted one empty `WINDOW:ERROR`; it has no corresponding
+  `debug.log` entry and is one of 10,275 identical pre-existing empty exporter
+  events, so it is not attributed to MessageLogger.
 
 ## Stage 8 - Final gate and handoff
 
-- [ ] Re-run `npm test` after any live-found correction.
-- [ ] Re-run `git diff --check`.
-- [ ] Sync only `MessageLoggerV2.plugin.js` to the live plugins folder.
-- [ ] Compare repository/live hashes.
-- [ ] Remove all disposable trace helpers, symlinks, and generated reports.
+- [x] Re-run `npm test` after any live-found correction.
+- [x] Re-run `git diff --check`.
+- [x] Sync only `MessageLoggerV2.plugin.js` to the live plugins folder.
+- [x] Compare repository/live hashes.
+- [x] Remove all disposable trace helpers, symlinks, and generated reports.
 - [ ] Present the exact changed files, automated results, live results, and any
       remaining limitation to the user.
-- [ ] Wait for user acceptance before any separately requested commit/push or
+- [x] Wait for user acceptance before any separately requested commit/push or
       release work.
-- [ ] After acceptance, move this checklist from the repository root to
+- [ ] After acceptance, continue only into the explicitly deferred final
+      post-cleanup warning pass below; do not archive this checklist first.
+
+## Stage 9 - Final post-cleanup media-cache warning identity
+
+This is a deliberately deferred diagnostic-polish pass. It starts only after
+Stages 4-8 are accepted and must not change caching eligibility, request order,
+retry behavior, persistence, rendering, or external-open behavior.
+
+- [ ] Replace unhelpful warnings such as
+      `Image null unavailable (403), skipping cache` with a concise identity for
+      the actual failed media request.
+- [ ] Prefer a known attachment/sticker/component filename or label. When none
+      exists, derive a safe decoded basename from the URL path; when that is
+      also absent, identify the sanitized hostname and media kind/index instead
+      of printing `null`.
+- [ ] Retain the HTTP status and terminal action/reason so the warning still
+      explains why caching stopped.
+- [ ] Never include URL query parameters, fragments, signatures, tokens, or
+      credentials in the normal warning. Any hostname/path hint must be parsed
+      from an accepted HTTP(S) URL, strip control characters, and be bounded in
+      length so console markup/log injection cannot obscure the message.
+- [ ] Apply the same identity helper to related terminal cache warnings where
+      they currently interpolate only a nullable attachment id, without
+      increasing retry-log noise or changing warning levels.
+- [ ] Cover ordinary attachments, stickers, embeds, Components V2 media, null
+      source ids, malformed URLs, Unicode/spaces, query redaction, control
+      characters, and a hostname-only fallback in deterministic tests.
+- [ ] Confirm ordinary successful caching and request/retry/cancellation paths
+      are byte-for-byte behaviorally unchanged apart from diagnostic text.
+- [ ] Run the focused media-cache warning tests, `npm run check`, `npm test`, and
+      `git diff --check`; sync only the plugin, compare hashes, and inspect the
+      hot-reload log before user acceptance.
+- [ ] After final acceptance, move this checklist from the repository root to
       `docs/archive/checklists/` and include that tracked move in the final
       accepted-stage commit.
 
@@ -1870,3 +2011,349 @@ full setting matrix in every channel type.
   `ceaa39c043c00cda0d872afa58265f727e81a9addedeab7e1b92348e3bc074a7`;
   the 11:30 hot reload completed patch removal, initialization, and UI refresh
   without a new MessageLogger error. Stage 4 implementation remains untouched.
+
+### 2026-08-17 - Stage 4 system-default opening contract reaffirmed
+
+- The user explicitly requires Stage 4 to remain operating-system neutral. A
+  validated remote HTTP(S) URL must be passed to Electron
+  `shell.openExternal()` so the operating system chooses its configured default
+  browser. A trusted resolved cache path must be passed unchanged to Electron
+  `shell.openPath()` so the operating system chooses the application registered
+  for that file type.
+- The official Electron shell contract confirms `openExternal()` opens an
+  external protocol URL in the desktop's default manner and `openPath()` opens
+  a filesystem path in the desktop's default manner. `openPath()` resolves to
+  an empty string on success and a nonempty error string on failure.
+- Read-only BetterDiscord comparison confirmed that fork `develop`
+  `e5657da0f049ec1ad0b7565118699eab04c76c35` and both local upstream development
+  refs at `49e7f14222b8bcc00c144e8d760b6751e3f0ba8d` expose the same Electron shell
+  bridge to plugins through `require('electron')`. The plugin already stores
+  that supported bridge in `this.nodeModules.electron`; no fork-only API is
+  needed.
+- Stage 4 must not branch on the platform, launch a shell command, discover a
+  browser/viewer executable, use BetterDiscord's internal Windows-specialized
+  IPC path, convert a cache path to a `file:` URL, or hand a `blob:` URL to an
+  external application. Missing APIs, rejected calls, and nonempty
+  `openPath()` results warn and launch nothing.
+- Parent-owned implementation order is: first add the isolated resolver,
+  one-byte native liveness probe, cancellation, and guarded Electron launch;
+  then add exact saved-direct-image action sourcing; finally wire only the
+  Logger-owned mounted/viewer context-menu seams. Each slice receives focused
+  tests and parent verification before the next begins.
+
+### 2026-08-17 - Final post-cleanup cache-warning identity deferred
+
+- The user's console screenshot shows repeated MessageLogger warnings in the
+  current form `Image null unavailable (403), skipping cache`. The adjacent
+  `AnalyticsTrackingStore` failures belong to Discord and are outside this
+  plugin cleanup.
+- Source inspection traced the MessageLogger text to the terminal 403/404 path
+  in `cacheImage()`: it interpolates only `attachmentId`, while indexed embed
+  and component media may legitimately lack a derived source id. That makes
+  `null` a diagnostic-identity defect, not proof that the cache request itself
+  lacked a URL.
+- The user explicitly deferred this polish until the final post-cleanup stage.
+  Stage 9 will prefer a known safe filename/label, otherwise use a sanitized
+  URL-path basename or hostname plus media kind/index. Normal warnings must
+  redact queries, fragments, credentials, signatures, and tokens, retain the
+  status/reason, and make no network, caching, rendering, or retry change.
+
+### 2026-08-17 - Stage 4 shell and liveness foundation parent-verified
+
+- Added guarded, operating-system-neutral launch helpers only. HTTP(S) values
+  pass unchanged to Electron `shell.openExternal()`; existing physical files
+  pass unchanged to Electron `shell.openPath()`. Blob/file/other URL protocols,
+  missing APIs, non-files, rejections, synchronous throws, and every nonempty or
+  unexpected `openPath()` result fail closed and log one concise diagnostic.
+- Added a separate native-network liveness probe with a ten-second default
+  bound, `GET` plus `Range: bytes=0-0`, exact-URL in-flight sharing, no settled
+  result cache, response-body release, and late-response cleanup when
+  `AbortController` is absent. Stop, master transitions, and either local-only
+  transition increment its generation, clear the map, and abort where possible.
+- No helper is called from a menu or viewer yet. No toast, source selection,
+  descriptor policy, display behavior, cache write, persistence, or native
+  viewer field changed in these foundation slices.
+- Parent verification passes plugin/test syntax, the exact saved-media shell and
+  probe selection at `14/14`, `npm run check`, and `git diff --check`.
+
+### 2026-08-17 - Stage 3 reopened for deleted MP4 native mounts
+
+- While the Stage 4 policy slice was already isolated and active, the user
+  reported that a newly uploaded then deleted MP4 remains stuck as its
+  attachment placeholder on the restored live Discord mount with local-only
+  either Off or On. The same saved MP4 renders correctly in Logger views.
+- This narrows the defect to the native saved-message video mount/refresh path;
+  it does not yet identify whether the failing boundary is Store attachment
+  state, detached video shape, source selection, transition timing, or mounted
+  DOM behavior.
+- The user later superseded the initial pause point: complete, validate, and
+  live-sync Stage 4 for images before returning to the MP4 trace. Do not copy
+  the image fix by analogy or alter the accepted Stage 4 behavior during the
+  later video correction.
+
+### 2026-08-17 - Static media-format boundary mapped for the live matrix
+
+- MessageLogger's current extension/path classifier claims JPG/JPEG, PNG, GIF,
+  BMP, WebP, AVIF, TIF/TIFF as images and MP4, WebM, MOV, AVI, MKV as videos.
+  Its Logger view uses dedicated `img`/`video` elements for those classes.
+- Direct saved-attachment presentation classification does not currently use
+  attachment MIME as a fallback. MIME is used only for a smaller extensionless
+  cache-write map; `video/mpeg` and `audio/mpeg` there do not establish a
+  dedicated native or Logger renderer.
+- Audio has no MessageLogger `isAudio` classifier or custom audio element.
+  Discord may still render audio through its native generic-attachment path, so
+  native audio support must be discovered and reported separately.
+- Restored live rows pass detached attachment objects to Discord's own renderer,
+  whereas Logger views construct their own DOM. This matches the user's MP4
+  observation: a successful Logger video does not prove the native restored row
+  accepted the same detached attachment/container/codec.
+- The complete live matrix will exercise every claimed extension in both
+  remote-first and local-only modes, record video container plus codec, include
+  discovered native audio formats, and use PDF/TXT as non-media controls.
+  Existing RT-09 covers only a representative deleted-video/fallback case, not
+  this full format matrix.
+- Discord's current first-party File Attachments FAQ gives examples rather than
+  an exhaustive renderer list. It specifically identifies MOV and MP4, and for
+  MP4 names H.264/AVC, HEVC/H.265, and AV1. Its separate current Windows codec
+  guidance confirms attachment playback can depend on operating-system codec
+  availability, so one desktop result cannot be generalized blindly.
+- Discord's developer message schema identifies attachment MIME plus image/video
+  dimensions, and documents current voice messages as Opus in an OGG container.
+  The first-party File Preview article separately documents small plain-text
+  previews. Add MP4 codec variants, OGG/Opus voice/audio, MP3, MOV, and TXT to
+  the discovery matrix while retaining an explicit “documented example” versus
+  “live native render verified” distinction.
+
+### 2026-08-17 - Stage 4 saved-image external opening completed locally
+
+- Implemented the complete image-only action path. Exact saved direct or
+  removed attachment targets resolve a detached descriptor carrying preserved
+  direct/proxy HTTP(S) candidates and the existing cache resolver's exact local
+  path. Blob remains display-only.
+- Master Off probes/opens only the retained direct candidate. Master On plus
+  remote-first tries direct then distinct proxy and falls back to the existing
+  local file only after liveness failure. Local-only performs no probe and
+  opens only the freshly verified physical file.
+- Remote URLs use Electron `shell.openExternal()` and local paths use
+  `shell.openPath()` unchanged, leaving browser/application choice to the host
+  operating system. No platform branch, executable discovery, shell command,
+  `file:` conversion, or Blob launch exists.
+- Added exact mounted-row, Logger custom-view, edit-history, and Logger-opened
+  native-viewer descriptor seams. The native/ImageUtilities action is rerouted
+  only for a Logger-owned saved image; a stable Logger fallback is inserted
+  when no recognized open action exists. Ordinary Discord, videos, audio,
+  embeds, stickers, components, avatars, errors, mismatches, and ambiguous
+  targets remain outside the action.
+- Kept native-only probing inside the existing network-call boundary with an
+  explicit native-only mode that never selects renderer fetch, mutates cache
+  transport compatibility, or emits cache-routing diagnostics.
+- Parent validation passed `npm run check`, probe selection `7/7`, clipboard
+  `16/16`, source contracts `68/68`, full `npm test` `554/554`, syntax checks,
+  and `git diff --check`. Repository/live sync and focused runtime acceptance
+  are the remaining Stage 4 gates.
+
+### 2026-08-17 - Stage 4 image build synced for the live gate
+
+- Synced only `MessageLoggerV2.plugin.js`. Repository and installed SHA-256
+  both equal
+  `de5d22687f3c5b5449f9bf8bc24a1b9ad13f9a31c959a4868f27db9fc15439fa`.
+- BetterDiscord hot reload logged MessageLogger patch removal, initialization,
+  patch application, and both UI force-update completions without a new
+  MessageLogger error. The concurrent `PersonalPins` dispatch error is from
+  that separate plugin.
+- No Discord relaunch, trace helper, commit, push, merge, version/changelog
+  edit, tag, or release occurred. The four focused image checks and user
+  acceptance remain before the Stage 4 commit gate.
+
+### 2026-08-17 - Stage 4 generalized global attachment policy ready for live sync
+
+- Generalized the already-proved image opener into one `Open Attachment`
+  policy for every existing Logger-owned canonical current/removed attachment
+  target: raw Logger views, restored native message/image menus, the exact
+  ImageUtilities action when present, and the Logger-owned native media viewer.
+  The descriptor and policy accept image, video, audio, and generic files while
+  leaving renderer support to the existing Discord/Logger paths.
+- Remote-first mode probes and opens the preserved/derived direct HTTP(S)
+  candidate, then a distinct proxy, then an existing trusted cache path.
+  Local-only mode performs zero remote probe/open work and uses only an existing
+  physical resolver path through Electron `shell.openPath()`. Cache-master Off
+  permits only its first canonical remote candidate. Electron and the operating
+  system choose the default browser or registered file-type application; there
+  is no platform branch, executable lookup, shell command, `file:` conversion,
+  or external Blob launch.
+- Hardened target ownership so authored URLs, masked links, filename text,
+  embeds, stickers, Components V2 media, avatars, mismatched rows, ambiguous
+  attachment ids/sources, and ordinary Discord media cannot borrow a Logger
+  attachment descriptor. Explicit Logger attachment markers remain the
+  authoritative exact-identity path.
+- Kept the Logger action inside its own submenu and rerouted only the exact
+  native Discord or ImageUtilities open action for an owned target. Mutable
+  menu trees update in place; frozen descendant arrays/nodes are cloned through
+  a mutable ancestor; an irreducibly frozen root fails closed because the local
+  BetterDiscord context-menu callback is mutation-only.
+- Bound native-viewer routing and the neutral label to the exact active
+  Logger-owned modal key plus its display/Blob source. Tooltip rewriting follows
+  only the owned open control's `aria-describedby` relation and restores every
+  touched node on close/teardown; unrelated page tooltips and controls remain
+  unchanged.
+- Two sequential stale source-contract regexes were updated only after the
+  user's explicit approvals. They now require attachment identity to flow into
+  unavailable placeholders and preserve the tracked marker contract; no plugin
+  behavior was changed by those test-only corrections.
+- Parent validation passes `npm run check`; `tests/media.test.js` at `155/155`;
+  `tests/clipboard.test.js` at `16/16`; `tests/source-contracts.test.js` at
+  `68/68`; full `npm test` at `560/560`; plugin/test syntax; and
+  `git diff --check`. Final Sol-parent review found no remaining correctness,
+  security, ownership, or platform-specific routing issue. The requested
+  independent reviewer could not start because the runtime reported stale
+  thread capacity while only the root thread was visible.
+- Repository plugin SHA-256 is
+  `3694cf0fb27c27c42f336fc92116ba1e209143745e9bc7752f8a8c29b2acdc89`;
+  installed SHA-256 remains the earlier image-only build at
+  `de5d22687f3c5b5449f9bf8bc24a1b9ad13f9a31c959a4868f27db9fc15439fa`.
+  Current root session ID is
+  `01a00f41-b9c3-7841-b0e0-175368f05084`.
+- Repeated the complete parent gate after the final handoff correction with the
+  same passing counts. Then moved the unused saved-image helper, its verified
+  exact live symlink, and the old 2.1 MB forum-transition report to Trash. No
+  trace helper or generated report remains active; all three artifacts are
+  recoverable from Trash.
+- Controlled live sync, reload-log inspection, and user runtime acceptance
+  remain. Nothing is committed or pushed.
+
+### 2026-08-17 - Stage 4 generalized build synced for cross-surface gate
+
+- Synced only `MessageLoggerV2.plugin.js`; Discord was not relaunched.
+  Repository and installed SHA-256 match at
+  `3694cf0fb27c27c42f336fc92116ba1e209143745e9bc7752f8a8c29b2acdc89`.
+- The 13:33:16 BetterDiscord hot reload removed the preceding patches, finished
+  the cleanup UI update, initialized the generalized build, applied all current
+  patches, finished both post-initialization UI updates, and scheduled the
+  shared cache trimmer. No MessageLogger error or exception appeared in the
+  authoritative `debug.log` boundary.
+- One simultaneous `PersonalPins` dispatch exception belongs to that separate
+  plugin. The optional console exporter added one empty `WINDOW:ERROR` with no
+  message, filename, line, or column; 10,275 identical empty exporter events
+  already exist and this one has no `debug.log` counterpart, so it is not
+  attributed to MessageLogger.
+- The remaining Stage 4 gate is user-visible behavior: cached local-only open,
+  remote-first open, restored Logger submenu, exact ImageUtilities action,
+  Logger-owned native-viewer label/action, ordinary Discord isolation, and one
+  non-image/MP4 placeholder open smoke test. Do not judge the known deleted-MP4
+  native rendering defect here; that remains the reopened Stage 3 follow-up.
+- Nothing is committed or pushed. After the user accepts this live build,
+  commit and push Stage 4, then prepare the requested Downloads media fixtures
+  before tracing the reopened Stage 3 format/rendering matrix.
+
+### 2026-08-17 - Surviving native open controls isolated for live trace
+
+- The live gate proved the policy implementation itself: every mount already
+  labelled **Open Attachment** works. The remaining failure is limited to
+  Logger-owned mount points that still expose Discord-native **Open Link** or
+  **Open in Browser** controls, which therefore escaped the Stage 4 ownership
+  replacement and continue using their original Blob-unaware path.
+- Installed one ignored opt-in helper at
+  `tmp/MessageLoggerOpenMountTrace.plugin.js` through the exact BetterDiscord
+  symlink `MessageLoggerOpenMountTrace.plugin.js`. It starts disabled/unarmed,
+  makes no network request, suppresses no action, and emits no toast.
+- When explicitly armed, the helper records the pre-menu DOM target, the final
+  `image-context`/`message` React tree including ids/labels/callback shapes and
+  frozen state, relevant native-viewer clicks, and observed `window.open`,
+  Electron `shell.openExternal`, or `shell.openPath` calls/outcomes. HTTP(S)
+  query strings and fragments are redacted from the local JSON report.
+- Parent validation passes `node --check` plus a mocked start/arm/menu-capture/
+  finish/stop smoke test. The Spark worker could not start because the runtime
+  still reported stale thread capacity while only the root thread was visible;
+  this is not a Spark quota trigger, so the parent implemented only the
+  disposable helper and Luna fallback was not activated.
+- The helper report will be written to
+  `$HOME/Library/Application Support/BetterDiscord/plugins/MessageLoggerOpenMountTrace-report.json`.
+  No tracked production/test behavior changed in this trace step, and nothing
+  was committed or pushed.
+- The first operator pass did not arm the helper: the runtime log records start
+  at 13:42:21 and `finish()` at 13:42:50 with no intervening **Trace armed**
+  entry. Its valid report consequently has `eventCount: 0`. Repeat the same
+  reproduction only after `MessageLoggerOpenMountTrace.arm()` returns the
+  report path and the console logs **Trace armed**; do not infer any menu or
+  viewer identity from the empty pass.
+
+### 2026-08-17 - Native Open Link and async viewer escapes corrected locally
+
+- The successful second trace contains 12 events with no drops. The exact
+  restored target was saved message `1538829870644199445` in channel
+  `361510651807531009`; its display source was the session Blob
+  `blob:https://discord.com/d48b5a03-9342-4e08-91c4-c26db41b0934`.
+- The final message menu retained mutable native action `open-native-link`
+  labelled **Open Link** at nested path
+  `root.children.children[7].children[1].children[1]`. The Logger message patch
+  skipped it solely because it incorrectly required `ret.props.children` itself
+  to be an array, even though the reconciliation walker already supports the
+  traced nested React tree.
+- The native Media Viewer button labelled **Open in Browser** called
+  `window.open()` with that same Blob. The viewer remained unowned because its
+  lazy mount happened after the click capture's synchronous/0 ms modal context;
+  therefore no Logger descriptor was available to the existing window-open
+  router. Neither failure reached Electron `shell.openExternal()` or
+  `shell.openPath()`.
+- Corrected the message/image menu path by running reconciliation on any exact
+  resolved descriptor regardless of root nesting. Native Discord and exact
+  ImageUtilities entries keep their existing label, id, and placement; only
+  their callback is replaced with the shared Logger attachment policy. Legacy
+  Logger external-open duplicates are still removed, and unrelated actions are
+  unchanged.
+- Corrected the viewer path by retaining a short pending descriptor only long
+  enough to observe the lazy mount, then binding persistent ownership only when
+  the exact Blob/display source is present in the actual Media Viewer dialog.
+  Later browser-open and viewer-context actions use that binding even when the
+  native modal key cannot be resolved. Source mismatch, disconnect, timeout,
+  close, routing teardown, tracking teardown, and plugin stop clear the state.
+- Added deterministic coverage for the traced nested message-menu shape,
+  preserved native labels, frozen descendant replacement, asynchronous viewer
+  mount after the 0 ms context clears, repeated exact Blob routing, and
+  mismatched/ordinary viewer refusal.
+- Parent validation passes: `npm run check`; clipboard `16/16`; media
+  `156/156`; source contracts `68/68`; full `npm test` `561/561`; plugin/test
+  syntax; and `git diff --check`. Corrected repository SHA-256 is
+  `9cf2fad325fe7d4ea4f234bfbf1fc1c632692ff487d5f273f1fdfcd054f365f1`;
+  the live plugin remains on the prior hash until the controlled sync.
+- Spark and a supporting explorer both remained unavailable because the runtime
+  reported the stale thread-capacity limit while only `/root` was visible. No
+  quota or rate-limit signal occurred, so Luna fallback was not activated; the
+  parent implemented and verified these two small trace-proved slices.
+
+### 2026-08-17 - Corrected Stage 4 native routes synced for focused acceptance
+
+- Copied only `MessageLoggerV2.plugin.js` into the BetterDiscord plugins folder;
+  Discord was not relaunched. Repository and live SHA-256 both equal
+  `9cf2fad325fe7d4ea4f234bfbf1fc1c632692ff487d5f273f1fdfcd054f365f1`.
+- The 13:57:28 hot reload removed the prior MessageLogger patches, completed
+  the cleanup UI update, initialized the corrected build, applied all current
+  patches, completed the final UI refresh, and scheduled the shared cache
+  trimmer. No MessageLogger error or exception appeared in the new
+  authoritative `debug.log` boundary.
+- The simultaneous `PersonalPins` dispatch exception again belongs to that
+  separate plugin and is not attributed to MessageLogger.
+- The disposable open-mount trace helper stays installed but unarmed, and its
+  successful report remains available until the user confirms the restored
+  **Open Link**, native-viewer **Open in Browser**, and ordinary-viewer isolation
+  checks. Nothing is committed or pushed.
+
+### 2026-08-18 - Stage 4 live gate accepted and trace retired
+
+- The user confirmed the corrected Stage 4 controls are all working, including
+  the formerly escaping restored-message **Open Link** and native-viewer
+  **Open in Browser** routes, and authorized a local commit without a push.
+- Moved the ignored helper source, its verified exact BetterDiscord symlink,
+  and the successful 12-event JSON report to the recoverable Trash folder
+  `$HOME/.Trash/MessageLoggerOpenMountTrace-2026-08-18-stage4-accepted`.
+  Their original repository/live paths are absent, so no Stage 4 helper remains
+  installed.
+- Stage 4 closes with parent-owned `npm run check`, clipboard `16/16`, media
+  `156/156`, source contracts `68/68`, full `npm test` `561/561`,
+  `git diff --check`, clean live reload, and exact repository/live plugin hash
+  parity at
+  `9cf2fad325fe7d4ea4f234bfbf1fc1c632692ff487d5f273f1fdfcd054f365f1`.
+- Commit only the plugin, the three regression files, and this checklist. Do
+  not push. Then prepare the requested Downloads media fixtures and resume the
+  trace-first Stage 3 deleted-MP4/native-media renderer investigation; keep the
+  accepted Stage 4 routing policy unchanged.

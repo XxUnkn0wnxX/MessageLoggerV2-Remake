@@ -4491,6 +4491,1501 @@ test('saved attachment descriptors skip local path without trusted extension or 
   assert.equal(missingIdentity.local_path, null);
 });
 
+test('saved image attachment open descriptor resolves direct cached attachment targets', () => {
+  const plugin = createPlugin({
+    imageCacheServerSimulator: {
+      _resolveImagePath: (attachmentId, extension) => {
+        if (attachmentId === '201' && extension === '.png') return '/tmp/direct/photo.png';
+        return null;
+      }
+    }
+  });
+  plugin.style = { imageError: 'ml2-image-error' };
+  const attachment = {
+    id: '201',
+    filename: 'photo.png',
+    url: 'https://cdn.example.com/photos/photo.png',
+    proxy_url: 'https://media.example.com/photos/photo.png'
+  };
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: '',
+    attachments: [attachment]
+  };
+  const record = { delete_data: {}, message };
+  const target = {
+    tagName: 'IMG',
+    id: '201',
+    src: 'https://cdn.example.com/photos/photo.png',
+    classList: { contains: () => false },
+    dataset: {},
+  };
+  const descriptor = plugin.getSavedImageAttachmentOpenDescriptor(target, record);
+  assert.equal(descriptor?.attachment_id, '201');
+  assert.equal(descriptor?.display_url, 'https://cdn.example.com/photos/photo.png');
+  assert.equal(descriptor?.blob_url, null);
+  assert.equal(descriptor?.local_path, '/tmp/direct/photo.png');
+});
+
+test('saved image attachment open descriptor resolves removed direct attachment targets', () => {
+  const plugin = createPlugin({
+    imageCacheServerSimulator: {
+      _resolveImagePath: (attachmentId, extension) => {
+        if (attachmentId === '202' && extension === '.png') return '/tmp/removed/photo.png';
+        return null;
+      }
+    }
+  });
+  plugin.style = { imageError: 'ml2-image-error' };
+  const removed = {
+    id: '202',
+    filename: 'gone.png',
+    url: 'https://cdn.example.com/photos/gone.png',
+    proxy_url: 'https://media.example.com/photos/gone.png'
+  };
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: '',
+    attachments: []
+  };
+  const record = { delete_data: {}, message, removed_attachments: [removed] };
+  const target = {
+    tagName: 'IMG',
+    id: '202',
+    src: 'https://media.example.com/photos/gone.png',
+    classList: { contains: () => false },
+    dataset: {},
+  };
+  const descriptor = plugin.getSavedImageAttachmentOpenDescriptor(target, record);
+  assert.equal(descriptor?.attachment_id, '202');
+  assert.equal(descriptor?.display_url, 'https://media.example.com/photos/gone.png');
+  assert.equal(descriptor?.local_path, '/tmp/removed/photo.png');
+});
+
+test('saved image attachment open descriptor preserves blob display source and trusted local path', () => {
+  const blobSource = 'blob:https://discord.com/render-only/abc';
+  const plugin = createPlugin({
+    imageCacheServerSimulator: {
+      _resolveImagePath: (attachmentId, extension) => {
+        if (attachmentId === '203' && extension === '.png') return '/tmp/blob/photo.png';
+        return null;
+      }
+    }
+  });
+  plugin.style = { imageError: 'ml2-image-error' };
+  const attachment = {
+    id: '203',
+    filename: 'photo.png',
+    url: 'https://cdn.example.com/photos/photo.png',
+    proxy_url: 'https://media.example.com/photos/photo.png'
+  };
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: '',
+    attachments: [attachment]
+  };
+  const record = { delete_data: {}, message };
+  const target = {
+    tagName: 'IMG',
+    id: '203',
+    src: blobSource,
+    classList: { contains: () => false },
+    dataset: {},
+  };
+  const descriptor = plugin.getSavedImageAttachmentOpenDescriptor(target, record);
+  assert.equal(descriptor?.attachment_id, '203');
+  assert.equal(descriptor?.display_url, blobSource);
+  assert.equal(descriptor?.blob_url, blobSource);
+  assert.equal(descriptor?.local_path, '/tmp/blob/photo.png');
+});
+
+test('saved image attachment open descriptor returns null for blocked, ambiguous, wrong-message, and non-image targets', () => {
+  const attachment = {
+    id: '204',
+    filename: 'photo.png',
+    url: 'https://cdn.example.com/photos/photo.png',
+    proxy_url: 'https://media.example.com/photos/photo.png'
+  };
+  const attachmentTwo = {
+    id: '205',
+    filename: 'photo-two.png',
+    url: 'https://cdn.example.com/photos/photo-two.png',
+    proxy_url: 'https://media.example.com/photos/photo-two.png'
+  };
+  const message = {
+    id: 'message',
+    channel_id: 'channel',
+    content: '',
+    attachments: [attachment, attachmentTwo]
+  };
+  const messageWithText = {
+    id: 'message',
+    channel_id: 'channel',
+    content: '',
+    attachments: [{
+      id: '206',
+      filename: 'document.txt',
+      url: 'https://cdn.example.com/files/document.txt',
+      proxy_url: 'https://media.example.com/files/document.txt'
+    }]
+  };
+  const plugin = createPlugin();
+  plugin.style = { imageError: 'ml2-image-error' };
+
+  const blockedTarget = {
+    tagName: 'IMG',
+    id: '204',
+    src: 'https://cdn.example.com/photos/photo.png',
+    classList: { contains: () => true },
+    dataset: {},
+  };
+  assert.equal(plugin.getSavedImageAttachmentOpenDescriptor(blockedTarget, {
+    delete_data: {},
+    message
+  }), null);
+
+  const wrongMessageTarget = {
+    tagName: 'IMG',
+    messageId: 'other-message',
+    id: '204',
+    src: 'https://cdn.example.com/photos/photo.png',
+    classList: { contains: () => false },
+    dataset: {},
+  };
+  assert.equal(plugin.getSavedImageAttachmentOpenDescriptor(wrongMessageTarget, {
+    delete_data: {},
+    message
+  }), null);
+
+  const nonImageTarget = {
+    tagName: 'IMG',
+    id: '206',
+    src: 'https://cdn.example.com/files/document.txt',
+    classList: { contains: () => false },
+    dataset: {},
+  };
+  assert.equal(plugin.getSavedImageAttachmentOpenDescriptor(nonImageTarget, {
+    delete_data: {},
+    message: messageWithText
+  }), null);
+
+  const ambiguousTarget = {
+    tagName: 'DIV',
+    querySelectorAll: () => [
+      {
+        tagName: 'IMG',
+        id: '204',
+        src: 'https://cdn.example.com/photos/photo.png',
+        classList: { contains: () => false },
+      },
+      {
+        tagName: 'IMG',
+        id: '205',
+        src: 'https://cdn.example.com/photos/photo-two.png',
+        classList: { contains: () => false },
+      }
+    ],
+    parentElement: null,
+    closest: () => null,
+  };
+  assert.equal(plugin.getSavedImageAttachmentOpenDescriptor(ambiguousTarget, {
+    delete_data: {},
+    message
+  }), null);
+});
+
+test('saved image attachment open descriptor rejects embed, sticker, and component targets', () => {
+  const plugin = createPlugin();
+  plugin.style = { imageError: 'ml2-image-error' };
+  const embedRecord = {
+    delete_data: {},
+    removed_attachments: [{
+      id: 'removed-source-collision',
+      filename: 'embed.png',
+      url: 'https://cdn.example.com/embed.png',
+      proxy_url: 'https://cdn.example.com/embed.png'
+    }],
+    message: {
+      id: 'embed-message',
+      channel_id: 'channel',
+      content: '',
+      embeds: [{ image: { url: 'https://cdn.example.com/embed.png' } }],
+      attachments: []
+    }
+  };
+  const stickerRecord = {
+    delete_data: {},
+    message: {
+      id: 'sticker-message',
+      channel_id: 'channel',
+      content: '',
+      sticker_items: [{ id: 's1', name: 'spark', format_type: 4, url: 'https://media.example.com/sticker.png' }],
+      attachments: []
+    }
+  };
+  const componentRecord = {
+    delete_data: {},
+    message: {
+      id: 'component-message',
+      channel_id: 'channel',
+      content: '',
+      components: [{ type: 11, media: { proxy_url: 'https://media.discordapp.net/components/example.png' } }],
+      attachments: []
+    }
+  };
+  const embedTarget = {
+    tagName: 'IMG',
+    src: 'https://cdn.example.com/embed.png',
+    classList: { contains: () => false },
+    dataset: {},
+  };
+  const stickerTarget = {
+    tagName: 'IMG',
+    src: 'https://media.example.com/sticker.png',
+    classList: { contains: () => false },
+    dataset: {},
+  };
+  const componentTarget = {
+    tagName: 'IMG',
+    src: 'https://media.discordapp.net/components/example.png',
+    classList: { contains: () => false },
+    dataset: {},
+  };
+  assert.equal(plugin.getSavedImageAttachmentOpenDescriptor(embedTarget, embedRecord), null);
+  assert.equal(plugin.getSavedImageAttachmentOpenDescriptor(stickerTarget, stickerRecord), null);
+  assert.equal(plugin.getSavedImageAttachmentOpenDescriptor(componentTarget, componentRecord), null);
+});
+
+test('saved image attachment open descriptor does not mutate source, target, or record', () => {
+  const attachment = {
+    id: '301',
+    filename: 'immutable.png',
+    url: 'https://cdn.example.com/immutable.png',
+    proxy_url: 'https://media.example.com/immutable.png'
+  };
+  const message = {
+    id: 'immutable-message',
+    channel_id: 'channel',
+    content: '',
+    attachments: [attachment]
+  };
+  const record = { delete_data: {}, message };
+  const target = {
+    tagName: 'IMG',
+    id: '301',
+    src: 'https://cdn.example.com/immutable.png',
+    classList: { contains: () => false },
+    dataset: {},
+  };
+  const plugin = createPlugin();
+  plugin.style = { imageError: 'ml2-image-error' };
+  const attachmentBefore = structuredClone(attachment);
+  const messageBefore = structuredClone(message);
+  const recordBefore = structuredClone(record);
+  const targetBefore = {
+    tagName: target.tagName,
+    id: target.id,
+    src: target.src,
+    dataset: structuredClone(target.dataset),
+    classList: target.classList
+  };
+  plugin.getSavedImageAttachmentOpenDescriptor(target, record);
+  assert.deepEqual(message, messageBefore);
+  assert.deepEqual(record, recordBefore);
+  assert.deepEqual(target, targetBefore);
+  assert.deepEqual(attachment, attachmentBefore);
+});
+
+test('saved attachment open descriptor resolves exact canonical image, video, audio, generic, and removed targets', () => {
+  const attachments = [
+    { id: '401', filename: 'image.png', url: 'https://cdn.example/image.png' },
+    { id: '402', filename: 'video.mp4', url: 'https://cdn.example/video.mp4' },
+    { id: '403', filename: 'audio.mp3', url: 'https://cdn.example/audio.mp3' },
+    { id: '404', filename: 'document.pdf', url: 'https://cdn.example/document.pdf' }
+  ];
+  const removed = {
+    id: '405',
+    filename: 'archive.zip',
+    url: 'https://cdn.example/archive.zip'
+  };
+  const record = {
+    delete_data: {},
+    message: {
+      id: 'saved-message',
+      channel_id: 'saved-channel',
+      content: '',
+      attachments
+    },
+    removed_attachments: [removed]
+  };
+  const plugin = createPlugin({
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    imageCacheServerSimulator: {
+      _resolveImagePath: (id, extension) => `/cache/${id}${extension}`
+    }
+  });
+  const directTarget = (tagName, attachment) => ({
+    tagName,
+    id: attachment.id,
+    src: attachment.url,
+    currentSrc: attachment.url,
+    dataset: {},
+    closest: () => null
+  });
+  const anchorTarget = attachment => ({
+    tagName: 'A',
+    href: attachment.url,
+    dataset: {},
+    closest: () => null
+  });
+  const removedPlaceholder = {
+    tagName: 'DIV',
+    textContent: '[attachment:archive.zip]',
+    dataset: {
+      ml2AttachmentMessageId: 'saved-message',
+      ml2AttachmentId: '405'
+    },
+    getAttribute(name) {
+      if (name === 'data-ml2-attachment-message-id') return this.dataset.ml2AttachmentMessageId;
+      if (name === 'data-ml2-attachment-id') return this.dataset.ml2AttachmentId;
+      return null;
+    },
+    closest(selector) {
+      if (selector.includes('data-ml2-attachment-message-id')
+        || selector.includes('data-ml2-attachment-id')) return this;
+      return null;
+    }
+  };
+
+  const descriptors = [
+    plugin.getSavedAttachmentOpenDescriptor(directTarget('IMG', attachments[0]), record),
+    plugin.getSavedAttachmentOpenDescriptor(directTarget('VIDEO', attachments[1]), record),
+    plugin.getSavedAttachmentOpenDescriptor(directTarget('AUDIO', attachments[2]), record),
+    plugin.getSavedAttachmentOpenDescriptor(anchorTarget(attachments[3]), record),
+    plugin.getSavedAttachmentOpenDescriptor(removedPlaceholder, record)
+  ];
+  assert.deepEqual(descriptors.map(descriptor => descriptor?.attachment_id), [
+    '401', '402', '403', '404', '405'
+  ]);
+  assert.deepEqual(descriptors.map(descriptor => descriptor?.extension), [
+    '.png', '.mp4', '.mp3', '.pdf', '.zip'
+  ]);
+  assert.deepEqual(descriptors.map(descriptor => descriptor?.local_path), [
+    '/cache/401.png',
+    '/cache/402.mp4',
+    '/cache/403.mp3',
+    '/cache/404.pdf',
+    '/cache/405.zip'
+  ]);
+  assert.equal(descriptors[0].display_url, attachments[0].url);
+  assert.equal(descriptors[1].display_url, attachments[1].url);
+  assert.equal(descriptors[2].display_url, attachments[2].url);
+  assert.equal(descriptors[3].display_url, attachments[3].url);
+  assert.equal(descriptors[4].display_url, null);
+});
+
+test('saved attachment open descriptor keeps logger-marked generic target authoritative when content contains matching source/label', () => {
+  const attachment = {
+    id: '501',
+    filename: 'shared.png',
+    url: 'https://cdn.example/shared.png'
+  };
+  const record = {
+    delete_data: {},
+    message: {
+      id: 'marked-message',
+      channel_id: 'marked-channel',
+      content: 'Here is [https://cdn.example/shared.png] and [attachment:shared.png]',
+      attachments: [attachment]
+    }
+  };
+  const plugin = createPlugin();
+  const markedUrlTarget = {
+    tagName: 'A',
+    href: attachment.url,
+    dataset: {
+      ml2AttachmentMessageId: 'marked-message',
+      ml2AttachmentId: '501'
+    },
+    getAttribute(name) {
+      if (name === 'data-ml2-attachment-message-id') return this.dataset.ml2AttachmentMessageId;
+      if (name === 'data-ml2-attachment-id') return this.dataset.ml2AttachmentId;
+      return null;
+    },
+    closest(selector) {
+      if (selector.includes('data-ml2-attachment-message-id')
+        || selector.includes('data-ml2-attachment-id')
+        || selector.includes('[data-ml2-attachment-id]')) return this;
+      if (selector.includes('a[href]')) return this;
+      return null;
+    }
+  };
+  const markedLabelTarget = {
+    tagName: 'DIV',
+    textContent: '[attachment:shared.png]',
+    dataset: {
+      ml2AttachmentMessageId: 'marked-message',
+      ml2AttachmentId: '501'
+    },
+    getAttribute(name) {
+      if (name === 'data-ml2-attachment-message-id') return this.dataset.ml2AttachmentMessageId;
+      if (name === 'data-ml2-attachment-id') return this.dataset.ml2AttachmentId;
+      return null;
+    },
+    closest(selector) {
+      if (selector.includes('data-ml2-attachment-message-id')
+        || selector.includes('data-ml2-attachment-id')
+        || selector.includes('[data-ml2-attachment-id]')) return this;
+      return null;
+    }
+  };
+
+  assert.equal(plugin.getSavedAttachmentOpenDescriptor(markedUrlTarget, record)?.attachment_id, '501');
+  assert.equal(plugin.getSavedAttachmentOpenDescriptor(markedLabelTarget, record)?.attachment_id, '501');
+});
+
+test('saved attachment open descriptor rejects unmarked attachment links when message content mirrors those URLs', () => {
+  const attachment = {
+    id: '502',
+    filename: 'plain.png',
+    url: 'https://cdn.example/plain.png'
+  };
+  const maskedAttachment = {
+    id: '503',
+    filename: 'masked.png',
+    url: 'https://cdn.example/masked.png'
+  };
+  const record = {
+    delete_data: {},
+    message: {
+      id: 'message',
+      channel_id: 'channel',
+      content: 'https://cdn.example/plain.png and [download](https://cdn.example/masked.png)',
+      attachments: [attachment, maskedAttachment]
+    }
+  };
+  const plugin = createPlugin();
+  const plainAnchorTarget = {
+    tagName: 'A',
+    href: attachment.url,
+    dataset: {},
+    closest: () => null
+  };
+  const maskedLinkTarget = {
+    tagName: 'A',
+    href: maskedAttachment.url,
+    dataset: {},
+    closest: () => null
+  };
+
+  assert.equal(plugin.getSavedAttachmentOpenDescriptor(plainAnchorTarget, record), null);
+  assert.equal(plugin.getSavedAttachmentOpenDescriptor(maskedLinkTarget, record), null);
+});
+
+test('saved attachment open descriptor rejects unmarked generic label-only targets when message contains that label', () => {
+  const attachment = {
+    id: '504',
+    filename: 'manual.txt',
+    url: 'https://cdn.example/manual.txt'
+  };
+  const record = {
+    delete_data: {},
+    message: {
+      id: 'label-message',
+      channel_id: 'channel',
+      content: '[attachment:manual.txt]',
+      attachments: [attachment]
+    }
+  };
+  const plugin = createPlugin();
+  const labelTarget = {
+    tagName: 'SPAN',
+    textContent: '[attachment:manual.txt]',
+    dataset: {},
+    closest: () => null
+  };
+
+  assert.equal(plugin.getSavedAttachmentOpenDescriptor(labelTarget, record), null);
+});
+
+test('saved attachment open descriptor rejects wrong owners, hidden or ambiguous targets, and non-attachment payloads', () => {
+  const attachmentOne = {
+    id: '501',
+    filename: 'one.png',
+    url: 'https://cdn.example/one.png'
+  };
+  const attachmentTwo = {
+    id: '502',
+    filename: 'two.mp4',
+    url: 'https://cdn.example/two.mp4'
+  };
+  const hiddenAttachment = {
+    id: '503',
+    filename: 'hidden.png',
+    url: 'https://cdn.example/hidden.png',
+    hidden: true
+  };
+  const record = {
+    delete_data: {},
+    message: {
+      id: 'message',
+      channel_id: 'channel',
+      content: '',
+      attachments: [attachmentOne, attachmentTwo, hiddenAttachment],
+      embeds: [{ image: { url: attachmentOne.url } }],
+      sticker_items: [{ id: 'sticker', name: 'Sticker', format_type: 1 }],
+      components: [{ type: 11, media: { url: 'https://cdn.example/component.png' } }]
+    }
+  };
+  const plugin = createPlugin({
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false }
+  });
+  const collisionEmbed = {
+    tagName: 'IMG',
+    id: 'embed-image',
+    src: attachmentOne.url,
+    dataset: {},
+    closest: () => null
+  };
+  assert.equal(plugin.getSavedAttachmentOpenDescriptor(collisionEmbed, record), null);
+
+  const hiddenTarget = {
+    tagName: 'IMG',
+    id: hiddenAttachment.id,
+    src: hiddenAttachment.url,
+    dataset: {},
+    closest: () => null
+  };
+  assert.equal(plugin.getSavedAttachmentOpenDescriptor(hiddenTarget, record), null);
+
+  const wrongOwner = {
+    tagName: 'DIV',
+    dataset: { ml2AttachmentMessageId: 'other-message', ml2AttachmentId: '502' },
+    getAttribute(name) {
+      if (name === 'data-ml2-attachment-message-id') return this.dataset.ml2AttachmentMessageId;
+      if (name === 'data-ml2-attachment-id') return this.dataset.ml2AttachmentId;
+      return null;
+    },
+    closest(selector) {
+      if (selector.includes('data-ml2-attachment')) return this;
+      return null;
+    }
+  };
+  assert.equal(plugin.getSavedAttachmentOpenDescriptor(wrongOwner, record), null);
+
+  const ancestor = {
+    textContent: '',
+    parentElement: null,
+    querySelectorAll: () => [
+      { tagName: 'IMG', id: '501', src: attachmentOne.url, dataset: {} },
+      { tagName: 'VIDEO', id: '502', src: attachmentTwo.url, dataset: {} }
+    ]
+  };
+  const ambiguousTarget = {
+    tagName: 'SPAN',
+    textContent: '',
+    dataset: {},
+    parentElement: ancestor,
+    closest: () => null
+  };
+  assert.equal(plugin.getSavedAttachmentOpenDescriptor(ambiguousTarget, record), null);
+
+  const externalAnchor = {
+    tagName: 'A',
+    href: 'https://example.com/unrelated.txt',
+    dataset: {},
+    closest: () => null
+  };
+  assert.equal(plugin.getSavedAttachmentOpenDescriptor(externalAnchor, record), null);
+});
+
+test('saved attachment external open helper accepts only valid http and https URLs', async () => {
+  const opened = [];
+  const shell = {
+    async openExternal(url) {
+      assert.equal(this, shell);
+      opened.push(url);
+    }
+  };
+  const plugin = createPlugin({
+    nodeModules: {
+      fs,
+      path,
+      electron: { shell }
+    }
+  });
+  assert.equal(await plugin.openSavedMediaExternalUrl('http://example.com/media/test.png'), true);
+  assert.equal(await plugin.openSavedMediaExternalUrl('https://example.com/media/test.png'), true);
+  assert.deepEqual(opened, [
+    'http://example.com/media/test.png',
+    'https://example.com/media/test.png'
+  ]);
+});
+
+test('saved attachment external open helper rejects blob/file/other protocols and invalid URLs', async () => {
+  const opened = [];
+  const plugin = createPlugin({
+    nodeModules: {
+      fs,
+      path,
+      electron: {
+        shell: {
+          openExternal: async (url) => {
+            opened.push(url);
+          }
+        }
+      }
+    }
+  });
+  assert.equal(await plugin.openSavedMediaExternalUrl('blob:https://discord.com/render-only'), false);
+  assert.equal(await plugin.openSavedMediaExternalUrl('file:///tmp/cached.png'), false);
+  assert.equal(await plugin.openSavedMediaExternalUrl('ftp://example.com/resource'), false);
+  assert.equal(await plugin.openSavedMediaExternalUrl('not-a-url'), false);
+  assert.deepEqual(opened, []);
+});
+
+test('saved attachment external open helper handles missing shell API and openExternal failures', async () => {
+  const pluginWithoutShell = createPlugin({
+    nodeModules: {
+      fs,
+      path,
+      electron: { shell: {} }
+    }
+  });
+  assert.equal(await pluginWithoutShell.openSavedMediaExternalUrl('https://example.com/media/test.png'), false);
+  assert.equal(loggerEvents.length, 1);
+
+  loggerEvents.length = 0;
+  const pluginReject = createPlugin({
+    nodeModules: {
+      fs,
+      path,
+      electron: {
+        shell: {
+          openExternal: async () => {
+            throw new Error('network blocked');
+          }
+        }
+      }
+    }
+  });
+  assert.equal(await pluginReject.openSavedMediaExternalUrl('https://example.com/media/test.png'), false);
+  assert.equal(loggerEvents.length, 1);
+
+  loggerEvents.length = 0;
+  const pluginThrow = createPlugin({
+    nodeModules: {
+      fs,
+      path,
+      electron: {
+        shell: {
+          openExternal: () => {
+            throw new Error('sync fail');
+          }
+        }
+      }
+    }
+  });
+  assert.equal(await pluginThrow.openSavedMediaExternalUrl('https://example.com/media/test.png'), false);
+  assert.equal(loggerEvents.length, 1);
+});
+
+test('saved attachment local open helper opens trusted POSIX, Windows, and unicode paths without transformation', async () => {
+  const opened = [];
+  const localPaths = [
+    '/tmp/space cache/space file name #1.PNG',
+    'C:\\cache\\windows path\\unicode 频道 #4.png',
+    '/tmp/unicode/测试 #文件.png'
+  ];
+  const shell = {
+    async openPath(value) {
+      assert.equal(this, shell);
+      opened.push(value);
+      return '';
+    }
+  };
+  const plugin = createPlugin({
+    nodeModules: {
+      fs: {
+        existsSync: value => localPaths.includes(value),
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path,
+      electron: { shell }
+    }
+  });
+
+  for (const localPath of localPaths) {
+    assert.equal(await plugin.openSavedMediaLocalPath(localPath), true);
+  }
+  assert.deepEqual(opened, localPaths);
+});
+
+test('saved attachment local open helper returns false for missing/non-file paths', async () => {
+  const opened = [];
+  const plugin = createPlugin({
+    nodeModules: {
+      fs: {
+        existsSync: value => value === '/tmp/existing.png',
+        lstatSync: () => ({ isFile: () => false })
+      },
+      path,
+      electron: {
+        shell: {
+          openPath: async (value) => {
+            opened.push(value);
+            return '';
+          }
+        }
+      }
+    }
+  });
+  assert.equal(await plugin.openSavedMediaLocalPath('/tmp/missing.png'), false);
+  assert.equal(await plugin.openSavedMediaLocalPath('/tmp/existing.png'), false);
+  assert.deepEqual(opened, []);
+});
+
+test('saved attachment local open helper handles missing APIs and openPath result states', async () => {
+  const pluginWithoutOpenPath = createPlugin({
+    nodeModules: {
+      fs,
+      path,
+      electron: {}
+    }
+  });
+  assert.equal(await pluginWithoutOpenPath.openSavedMediaLocalPath('/tmp/existing.png'), false);
+
+  const pluginMissingPathInfo = createPlugin({
+    nodeModules: {
+      fs: {
+        existsSync: () => false
+      },
+      path,
+      electron: {
+        shell: {
+          openPath: async () => ''
+        }
+      }
+    }
+  });
+  assert.equal(await pluginMissingPathInfo.openSavedMediaLocalPath('/tmp/existing.png'), false);
+
+  const pluginEmptyOpenResult = createPlugin({
+    nodeModules: {
+      fs: {
+        existsSync: () => true,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path,
+      electron: {
+        shell: {
+          openPath: async () => ''
+        }
+      }
+    }
+  });
+  assert.equal(await pluginEmptyOpenResult.openSavedMediaLocalPath('/tmp/existing.png'), true);
+
+  const pluginNonEmptyOpenResult = createPlugin({
+    nodeModules: {
+      fs: {
+        existsSync: () => true,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path,
+      electron: {
+        shell: {
+          openPath: async () => 'ERROR: ACCESS_DENIED'
+        }
+      }
+    }
+  });
+  assert.equal(await pluginNonEmptyOpenResult.openSavedMediaLocalPath('/tmp/existing.png'), false);
+
+  const pluginUnexpectedOpenResult = createPlugin({
+    nodeModules: {
+      fs: {
+        existsSync: () => true,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path,
+      electron: {
+        shell: {
+          openPath: async () => undefined
+        }
+      }
+    }
+  });
+  assert.equal(await pluginUnexpectedOpenResult.openSavedMediaLocalPath('/tmp/existing.png'), false);
+});
+
+test('saved attachment local open helper returns false for openPath rejection or sync throw', async () => {
+  const pluginReject = createPlugin({
+    nodeModules: {
+      fs: {
+        existsSync: () => true,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path,
+      electron: {
+        shell: {
+          openPath: async () => {
+            throw new Error('openPath reject');
+          }
+        }
+      }
+    }
+  });
+  assert.equal(await pluginReject.openSavedMediaLocalPath('/tmp/existing.png'), false);
+
+  const pluginThrow = createPlugin({
+    nodeModules: {
+      fs: {
+        existsSync: () => true,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path,
+      electron: {
+        shell: {
+          openPath: () => {
+            throw new Error('openPath throw');
+          }
+        }
+      }
+    }
+  });
+  assert.equal(await pluginThrow.openSavedMediaLocalPath('/tmp/existing.png'), false);
+});
+
+test('saved attachment open policy local-only opens unchanged local path with zero remote probes', async () => {
+  const descriptor = {
+    remote_urls: [
+      'blob:https://discord.com/render-only',
+      'ftp://cdn.example/no-touch',
+      'https://cdn.example/should-not-probe.png'
+    ],
+    local_path: '/tmp/space cache/space file name #1.png'
+  };
+  const descriptorBefore = structuredClone(descriptor);
+  const calls = {
+    probe: 0,
+    openExternal: 0,
+    local: []
+  };
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    nodeModules: {
+      fs: {
+        existsSync: value => value === descriptor.local_path,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path
+    }
+  });
+  plugin.probeSavedMediaExternalUrl = async () => {
+    calls.probe += 1;
+    return false;
+  };
+  plugin.openSavedMediaExternalUrl = async () => {
+    calls.openExternal += 1;
+    return true;
+  };
+  plugin.openSavedMediaLocalPath = async localPath => {
+    calls.local.push(localPath);
+    return true;
+  };
+  assert.equal(await plugin.openSavedAttachmentDescriptor(descriptor), true);
+  assert.equal(calls.probe, 0);
+  assert.equal(calls.openExternal, 0);
+  assert.deepEqual(calls.local, [descriptor.local_path]);
+  assert.deepEqual(descriptor, descriptorBefore);
+});
+
+test('saved attachment open policy remote-first opens first live remote candidate in order', async () => {
+  const descriptor = {
+    remote_urls: [
+      'https://cdn.example/direct.png',
+      'https://cdn.example/proxy.png'
+    ],
+    local_path: '/tmp/fallback.png'
+  };
+  const calls = {
+    probe: [],
+    openExternal: [],
+    local: 0
+  };
+  const plugin = createPlugin({
+    nodeModules: {
+      fs: {
+        existsSync: () => true,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path
+    }
+  });
+  plugin.probeSavedMediaExternalUrl = async url => {
+    calls.probe.push(url);
+    return url === descriptor.remote_urls[0];
+  };
+  plugin.openSavedMediaExternalUrl = async url => {
+    calls.openExternal.push(url);
+    return true;
+  };
+  plugin.openSavedMediaLocalPath = async () => {
+    calls.local += 1;
+    return true;
+  };
+  assert.equal(await plugin.openSavedAttachmentDescriptor(descriptor), true);
+  assert.deepEqual(calls.probe, [descriptor.remote_urls[0]]);
+  assert.deepEqual(calls.openExternal, [descriptor.remote_urls[0]]);
+  assert.equal(calls.local, 0);
+});
+
+test('saved attachment open policy remote-first skips failed direct and opens live proxy candidate', async () => {
+  const descriptor = {
+    remote_urls: [
+      'https://cdn.example/direct.png',
+      'https://cdn.example/proxy.png'
+    ],
+    local_path: '/tmp/fallback.png'
+  };
+  const calls = {
+    probe: [],
+    openExternal: []
+  };
+  const plugin = createPlugin({
+    nodeModules: {
+      fs: {
+        existsSync: () => true,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path
+    }
+  });
+  plugin.probeSavedMediaExternalUrl = async url => {
+    calls.probe.push(url);
+    return url === descriptor.remote_urls[1];
+  };
+  plugin.openSavedMediaExternalUrl = async url => {
+    calls.openExternal.push(url);
+    return true;
+  };
+  assert.equal(await plugin.openSavedAttachmentDescriptor(descriptor), true);
+  assert.deepEqual(calls.probe, descriptor.remote_urls);
+  assert.deepEqual(calls.openExternal, [descriptor.remote_urls[1]]);
+});
+
+test('saved attachment open policy remote-first falls back to local only after remote probe failures', async () => {
+  const descriptor = {
+    remote_urls: [
+      'https://cdn.example/direct.png',
+      'https://cdn.example/proxy.png'
+    ],
+    local_path: '/tmp/fallback.png'
+  };
+  const calls = {
+    probe: [],
+    openExternal: 0,
+    local: []
+  };
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    nodeModules: {
+      fs: {
+        existsSync: value => value === descriptor.local_path,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path
+    }
+  });
+  plugin.probeSavedMediaExternalUrl = async url => {
+    calls.probe.push(url);
+    return false;
+  };
+  plugin.openSavedMediaExternalUrl = async () => {
+    calls.openExternal += 1;
+    return true;
+  };
+  plugin.openSavedMediaLocalPath = async localPath => {
+    calls.local.push(localPath);
+    return true;
+  };
+  assert.equal(await plugin.openSavedAttachmentDescriptor(descriptor), true);
+  assert.deepEqual(calls.probe, descriptor.remote_urls);
+  assert.equal(calls.openExternal, 0);
+  assert.deepEqual(calls.local, [descriptor.local_path]);
+});
+
+test('master-off open policy uses only the first valid remote candidate and no local fallback', async () => {
+  const descriptor = {
+    remote_urls: [
+      'https://cdn.example/direct.png',
+      'https://cdn.example/proxy.png'
+    ],
+    local_path: '/tmp/fallback-disabled.png'
+  };
+  const calls = {
+    probe: [],
+    openExternal: [],
+    local: 0,
+    notifications: []
+  };
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: false,
+      onlyRenderCachedAttachments: true
+    },
+    nodeModules: {
+      fs: {
+        existsSync: () => true,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path
+    }
+  });
+  plugin.probeSavedMediaExternalUrl = async url => {
+    calls.probe.push(url);
+    return false;
+  };
+  plugin.openSavedMediaExternalUrl = async url => {
+    calls.openExternal.push(url);
+    return true;
+  };
+  plugin.openSavedMediaLocalPath = async () => {
+    calls.local += 1;
+    return true;
+  };
+  plugin.notifyUser = (content, options) => calls.notifications.push([content, options]);
+  assert.equal(await plugin.openSavedAttachmentDescriptor(descriptor), false);
+  assert.deepEqual(calls.probe, [descriptor.remote_urls[0]]);
+  assert.deepEqual(calls.openExternal, []);
+  assert.equal(calls.local, 0);
+  assert.equal(calls.notifications.length, 1);
+  assert.equal(calls.notifications[0][0], 'Attachment is no longer available.');
+});
+
+test('saved attachment open policy notifies once when no permitted attachment target exists', async () => {
+  const descriptor = {
+    remote_urls: [
+      'https://cdn.example/direct.png',
+      'https://cdn.example/proxy.png'
+    ]
+  };
+  const notifications = [];
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    }
+  });
+  plugin.probeSavedMediaExternalUrl = async () => false;
+  plugin.openSavedMediaExternalUrl = async () => true;
+  plugin.notifyUser = (content, options) => notifications.push([content, options]);
+  assert.equal(await plugin.openSavedAttachmentDescriptor(descriptor), false);
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0][0], 'Attachment is no longer available.');
+});
+
+test('saved attachment open policy reports open failures and avoids local substitutions', async () => {
+  const descriptor = {
+    remote_urls: ['https://cdn.example/direct.png'],
+    local_path: '/tmp/fallback.png'
+  };
+  const calls = {
+    local: 0,
+    notifications: []
+  };
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    nodeModules: {
+      fs: {
+        existsSync: value => value === descriptor.local_path,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path
+    }
+  });
+  plugin.probeSavedMediaExternalUrl = async () => true;
+  plugin.openSavedMediaExternalUrl = async () => false;
+  plugin.openSavedMediaLocalPath = async () => {
+    calls.local += 1;
+    return true;
+  };
+  plugin.notifyUser = (content, options) => calls.notifications.push([content, options]);
+  assert.equal(await plugin.openSavedAttachmentDescriptor(descriptor), false);
+  assert.equal(calls.local, 0);
+  assert.equal(calls.notifications.length, 1);
+  assert.equal(calls.notifications[0][0], 'Attachment could not be opened.');
+});
+
+test('saved attachment open policy reports a local shell failure without probing or substituting remote media', async () => {
+  const descriptor = {
+    remote_urls: ['https://cdn.example/should-not-probe.png'],
+    local_path: '/tmp/local-open-failure.png'
+  };
+  const calls = {
+    probe: 0,
+    openExternal: 0,
+    local: [],
+    notifications: []
+  };
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    nodeModules: {
+      fs: {
+        existsSync: value => value === descriptor.local_path,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path
+    }
+  });
+  plugin.probeSavedMediaExternalUrl = async () => {
+    calls.probe += 1;
+    return true;
+  };
+  plugin.openSavedMediaExternalUrl = async () => {
+    calls.openExternal += 1;
+    return true;
+  };
+  plugin.openSavedMediaLocalPath = async localPath => {
+    calls.local.push(localPath);
+    return false;
+  };
+  plugin.notifyUser = (content, options) => calls.notifications.push([content, options]);
+
+  assert.equal(await plugin.openSavedAttachmentDescriptor(descriptor), false);
+  assert.equal(calls.probe, 0);
+  assert.equal(calls.openExternal, 0);
+  assert.deepEqual(calls.local, [descriptor.local_path]);
+  assert.equal(calls.notifications.length, 1);
+  assert.equal(calls.notifications[0][0], 'Attachment could not be opened.');
+});
+
+test('saved attachment open policy ignores non-http candidates and dedupes remote candidates', async () => {
+  const descriptor = {
+    remote_urls: [
+      'ftp://cdn.example/ignored-protocol',
+      'blob:https://discord.com/render-only',
+      'https://cdn.example/allowed.png',
+      'https://cdn.example/allowed.png',
+      'file:///tmp/cached.png'
+    ]
+  };
+  const calls = {
+    probe: [],
+    openExternal: []
+  };
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: false,
+      onlyRenderCachedAttachments: false
+    }
+  });
+  plugin.probeSavedMediaExternalUrl = async url => {
+    calls.probe.push(url);
+    return true;
+  };
+  plugin.openSavedMediaExternalUrl = async url => {
+    calls.openExternal.push(url);
+    return true;
+  };
+  assert.equal(await plugin.openSavedAttachmentDescriptor(descriptor), true);
+  assert.deepEqual(calls.probe, ['https://cdn.example/allowed.png']);
+  assert.deepEqual(calls.openExternal, ['https://cdn.example/allowed.png']);
+});
+
+test('saved attachment open policy returns false for stale calls after probe-generation changes', async () => {
+  const descriptor = {
+    remote_urls: ['https://cdn.example/stale.png'],
+    local_path: '/tmp/fallback.png'
+  };
+  let resolveProbe;
+  const calls = {
+    local: 0,
+    notifications: []
+  };
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    nodeModules: {
+      fs: {
+        existsSync: () => true,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path
+    }
+  });
+  plugin.probeSavedMediaExternalUrl = () => new Promise(resolve => {
+    resolveProbe = resolve;
+  });
+  plugin.openSavedMediaLocalPath = async () => {
+    calls.local += 1;
+    return true;
+  };
+  plugin.openSavedMediaExternalUrl = async () => {
+    calls.openExternal = (calls.openExternal || 0) + 1;
+    return true;
+  };
+  plugin.notifyUser = (content, options) => calls.notifications.push([content, options]);
+  const action = plugin.openSavedAttachmentDescriptor(descriptor);
+  await delay(10);
+  plugin.cancelSavedMediaExternalOpenProbes();
+  resolveProbe(true);
+  assert.equal(await action, false);
+  assert.equal(calls.local, 0);
+  assert.equal(calls.notifications.length, 0);
+  assert.equal(calls.openExternal || 0, 0);
+});
+
+test('saved attachment open policy suppresses launch and notice when settings change during an awaited probe', async () => {
+  const descriptor = {
+    remote_urls: ['https://cdn.example/settings-changed.png'],
+    local_path: '/tmp/settings-changed.png'
+  };
+  let resolveProbe;
+  const calls = {
+    openExternal: 0,
+    local: 0,
+    notifications: []
+  };
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false
+    },
+    nodeModules: {
+      fs: {
+        existsSync: () => true,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path
+    }
+  });
+  plugin.probeSavedMediaExternalUrl = () => new Promise(resolve => {
+    resolveProbe = resolve;
+  });
+  plugin.openSavedMediaExternalUrl = async () => {
+    calls.openExternal += 1;
+    return true;
+  };
+  plugin.openSavedMediaLocalPath = async () => {
+    calls.local += 1;
+    return true;
+  };
+  plugin.notifyUser = (content, options) => calls.notifications.push([content, options]);
+
+  const action = plugin.openSavedAttachmentDescriptor(descriptor);
+  await delay(10);
+  plugin.settings.onlyRenderCachedAttachments = true;
+  resolveProbe(true);
+
+  assert.equal(await action, false);
+  assert.equal(calls.openExternal, 0);
+  assert.equal(calls.local, 0);
+  assert.equal(calls.notifications.length, 0);
+});
+
+test('saved attachment external probe validates native request contract and returns true for reachable URL', async () => {
+  const seen = [];
+  let releaseCount = 0;
+  const plugin = createPlugin();
+  const netApi = {
+    async fetch(url, request) {
+      seen.push({ url, request });
+      assert.equal(this, netApi);
+      assert.equal(request.method, 'GET');
+      assert.equal(request.headers?.Range, 'bytes=0-0');
+      assert.equal(request.timeout, 0);
+      assert.equal(typeof request.signal?.addEventListener, 'function');
+      return {
+        ok: true,
+        release() {
+          releaseCount += 1;
+        }
+      };
+    }
+  };
+  plugin._savedMediaExternalProbeTimeoutMs = 25;
+  plugin._getMediaCacheNetApi = () => netApi;
+  assert.equal(await plugin.probeSavedMediaExternalUrl('https://cdn.example/probe-a'), true);
+  assert.equal(await plugin.probeSavedMediaExternalUrl('http://cdn.example/probe-b'), true);
+  assert.deepEqual(seen.map(item => item.url), [
+    'https://cdn.example/probe-a',
+    'http://cdn.example/probe-b'
+  ]);
+  assert.equal(releaseCount, 2);
+});
+
+test('saved attachment external probe returns false for non-2xx responses and releases the response body', async () => {
+  let releaseBodyCount = 0;
+  const plugin = createPlugin();
+  plugin._savedMediaExternalProbeTimeoutMs = 25;
+  plugin._getMediaCacheNetApi = () => ({
+    fetch: () => ({
+      ok: false,
+      status: 404,
+      releaseBody: () => {
+        releaseBodyCount += 1;
+      }
+    })
+  });
+  assert.equal(await plugin.probeSavedMediaExternalUrl('https://cdn.example/probe-status'), false);
+  assert.equal(releaseBodyCount, 1);
+});
+
+test('saved attachment external probe returns false on fetch rejection, sync throw, and missing native fetch', async () => {
+  const pluginReject = createPlugin();
+  pluginReject._savedMediaExternalProbeTimeoutMs = 25;
+  pluginReject._getMediaCacheNetApi = () => ({
+    fetch: async () => {
+      throw new Error('rejection');
+    }
+  });
+  assert.equal(await pluginReject.probeSavedMediaExternalUrl('https://cdn.example/reject'), false);
+
+  const pluginThrow = createPlugin();
+  pluginThrow._savedMediaExternalProbeTimeoutMs = 25;
+  pluginThrow._getMediaCacheNetApi = () => ({
+    fetch() {
+      throw new Error('sync');
+    }
+  });
+  assert.equal(await pluginThrow.probeSavedMediaExternalUrl('https://cdn.example/throw'), false);
+
+  const pluginMissing = createPlugin();
+  pluginMissing._savedMediaExternalProbeTimeoutMs = 25;
+  pluginMissing._getMediaCacheNetApi = () => ({});
+  assert.equal(await pluginMissing.probeSavedMediaExternalUrl('https://cdn.example/missing'), false);
+});
+
+test('saved attachment external probe deduplicates exact URL concurrency and does not reuse settled in-flight results', async () => {
+  let releaseCalls = 0;
+  const responses = [
+    {
+      ok: true,
+      release() {
+        releaseCalls += 1;
+      }
+    },
+    {
+      ok: true,
+      release() {
+        releaseCalls += 1;
+      }
+    }
+  ];
+  let fetchCalls = 0;
+  const netApi = {
+    fetch: () => {
+      fetchCalls += 1;
+      return Promise.resolve(responses.shift());
+    }
+  };
+  const plugin = createPlugin();
+  plugin._savedMediaExternalProbeTimeoutMs = 25;
+  plugin._getMediaCacheNetApi = () => netApi;
+  const first = plugin.probeSavedMediaExternalUrl('https://cdn.example/shared');
+  const second = plugin.probeSavedMediaExternalUrl('https://cdn.example/shared');
+  assert.equal(await first, true);
+  assert.equal(await second, true);
+  assert.equal(fetchCalls, 1);
+  const third = plugin.probeSavedMediaExternalUrl('https://cdn.example/shared');
+  assert.equal(await third, true);
+  assert.equal(fetchCalls, 2);
+  assert.equal(releaseCalls, 2);
+});
+
+test('saved attachment external probe enforces timeout without AbortController and releases late response', async () => {
+  const originalAbortController = globalThis.AbortController;
+  const releaseValues = [];
+  const plugin = createPlugin();
+  plugin._savedMediaExternalProbeTimeoutMs = 10;
+  plugin._getMediaCacheNetApi = () => ({
+    fetch: async () => {
+      await delay(25);
+      return {
+        ok: true,
+        body: {
+          cancel: () => {
+            releaseValues.push('cancel');
+          }
+        }
+      };
+    }
+  });
+  globalThis.AbortController = undefined;
+  try {
+    const reachable = await plugin.probeSavedMediaExternalUrl('https://cdn.example/timeout');
+    assert.equal(reachable, false);
+    await delay(40);
+    assert.equal(releaseValues.length, 1);
+  } finally {
+    globalThis.AbortController = originalAbortController;
+  }
+});
+
+test('saved attachment external probe cancellation prevents stale true completion', async () => {
+  const originalAbortController = globalThis.AbortController;
+  let releaseCount = 0;
+  let resolveFetch;
+  const pending = new Promise(resolve => {
+    resolveFetch = resolve;
+  });
+  const plugin = createPlugin();
+  plugin._savedMediaExternalProbeTimeoutMs = 100;
+  plugin._getMediaCacheNetApi = () => ({
+    fetch: () => pending
+  });
+  globalThis.AbortController = undefined;
+  try {
+    const probe = plugin.probeSavedMediaExternalUrl('https://cdn.example/stale');
+    await delay(10);
+    plugin.cancelSavedMediaExternalOpenProbes();
+    resolveFetch({
+      ok: true,
+      releaseBody() {
+        releaseCount += 1;
+      }
+    });
+    assert.equal(await probe, false);
+    await delay(10);
+    assert.equal(releaseCount, 1);
+  } finally {
+    globalThis.AbortController = originalAbortController;
+  }
+});
+
+test('saved attachment external probe lifecycle cancellation is invoked on stop and media/render setting transitions', () => {
+  const plugin = createPlugin();
+  let cancelCalls = 0;
+  const originalCancel = plugin.cancelSavedMediaExternalOpenProbes;
+  plugin.cancelSavedMediaExternalOpenProbes = () => {
+    cancelCalls += 1;
+    return originalCancel.call(plugin);
+  };
+  plugin.stop();
+  plugin.handleMediaCachingSetting(false);
+  plugin.handleLocalOnlyCachedAttachmentRenderingSetting(false);
+  assert.equal(cancelCalls, 3);
+});
+
 test('media.discordapp.net media attachment URLs normalize to CDN while preserving signature query and fragment', () => {
   const plugin = createPlugin({
     settings: {
@@ -5863,6 +7358,245 @@ test('removing a folded thread root deletes media cached under its original star
   assert.equal(fs.existsSync(path.join(cacheDir, 'unrelated (999).png')), true);
 });
 
+test('native saved-attachment viewer relabels only its linked tooltip and restores owned labels', () => {
+  const originalDocument = global.document;
+  const OriginalMutationObserver = global.MutationObserver;
+  const originalRequestAnimationFrame = global.requestAnimationFrame;
+  const originalCancelAnimationFrame = global.cancelAnimationFrame;
+  const createAttributeNode = (attributes = {}, options = {}) => {
+    const values = new Map(Object.entries(attributes));
+    return {
+      childElementCount: options.childElementCount ?? 0,
+      textContent: options.textContent ?? '',
+      hasAttribute(name) {
+        return values.has(name);
+      },
+      getAttribute(name) {
+        return values.get(name) ?? null;
+      },
+      setAttribute(name, value) {
+        values.set(name, String(value));
+      },
+      removeAttribute(name) {
+        values.delete(name);
+      },
+      ...options
+    };
+  };
+  const displayUrl = 'blob:https://discord.com/logger-viewer';
+  const openControl = createAttributeNode({
+    'aria-label': 'Open Link',
+    title: 'Open in Browser'
+  });
+  const ownedTooltip = createAttributeNode({ role: 'tooltip' }, {
+    textContent: 'Open in Browser'
+  });
+  const unrelatedTooltip = createAttributeNode({ role: 'tooltip' }, {
+    textContent: 'Open Link'
+  });
+  const media = { currentSrc: displayUrl };
+  const viewerRoot = createAttributeNode({}, {
+    querySelectorAll(selector) {
+      if (selector === 'img, video') return [media];
+      if (selector === '[aria-label], [title]') return [openControl];
+      return [];
+    }
+  });
+  let observerOptions = null;
+  let cancelledFrame = null;
+  global.document = {
+    body: {},
+    querySelectorAll(selector) {
+      assert.equal(selector, '[role="dialog"], [aria-modal="true"]');
+      return [viewerRoot];
+    },
+    getElementById(id) {
+      if (id === 'owned-open-tooltip') return ownedTooltip;
+      if (id === 'unrelated-tooltip') return unrelatedTooltip;
+      return null;
+    }
+  };
+  global.MutationObserver = class {
+    constructor(callback) {
+      this.callback = callback;
+    }
+    observe(target, options) {
+      assert.equal(target, global.document.body);
+      observerOptions = options;
+    }
+    disconnect() {}
+  };
+  global.requestAnimationFrame = () => 73;
+  global.cancelAnimationFrame = frame => {
+    cancelledFrame = frame;
+  };
+  try {
+    const descriptor = { display_url: displayUrl, blob_url: displayUrl };
+    const plugin = createMediaCachePlugin('', {
+      getLoggerOwnedNativeSavedAttachmentViewerDescriptor: () => descriptor,
+      _savedAttachmentViewerLabelChanges: new Map()
+    });
+
+    assert.equal(plugin.syncSavedAttachmentViewerLabels(), true);
+    assert.equal(openControl.getAttribute('aria-label'), 'Open Attachment');
+    assert.equal(openControl.getAttribute('title'), 'Open Attachment');
+    assert.equal(ownedTooltip.textContent, 'Open in Browser');
+    assert.equal(unrelatedTooltip.textContent, 'Open Link');
+
+    // Discord adds aria-describedby only after the hover tooltip mounts. A second sync must use
+    // the already-recorded original open label to retain exact ownership of that portal node.
+    openControl.setAttribute('aria-describedby', 'owned-open-tooltip');
+    assert.equal(plugin.syncSavedAttachmentViewerLabels(), true);
+    assert.equal(ownedTooltip.textContent, 'Open Attachment');
+    assert.equal(unrelatedTooltip.textContent, 'Open Link');
+
+    plugin.restoreSavedAttachmentViewerLabels();
+    assert.equal(openControl.getAttribute('aria-label'), 'Open Link');
+    assert.equal(openControl.getAttribute('title'), 'Open in Browser');
+    assert.equal(ownedTooltip.textContent, 'Open in Browser');
+    assert.equal(unrelatedTooltip.textContent, 'Open Link');
+
+    assert.equal(plugin.startSavedAttachmentViewerLabelSync(), true);
+    assert.deepEqual(observerOptions.attributeFilter, [
+      'aria-label',
+      'title',
+      'aria-describedby',
+      'src'
+    ]);
+    plugin.stopSavedAttachmentViewerLabelSync();
+    assert.equal(cancelledFrame, 73);
+  } finally {
+    if (originalDocument === undefined) delete global.document;
+    else global.document = originalDocument;
+    if (OriginalMutationObserver === undefined) delete global.MutationObserver;
+    else global.MutationObserver = OriginalMutationObserver;
+    if (originalRequestAnimationFrame === undefined) delete global.requestAnimationFrame;
+    else global.requestAnimationFrame = originalRequestAnimationFrame;
+    if (originalCancelAnimationFrame === undefined) delete global.cancelAnimationFrame;
+    else global.cancelAnimationFrame = originalCancelAnimationFrame;
+  }
+});
+
+test('mounted saved-attachment viewer binds after the click context clears and routes only its exact display source', async () => {
+  const originalDocument = global.document;
+  const OriginalMutationObserver = global.MutationObserver;
+  const originalRequestAnimationFrame = global.requestAnimationFrame;
+  const originalCancelAnimationFrame = global.cancelAnimationFrame;
+  let observerCallback = null;
+  let frameCallback = null;
+  let viewerRoots = [];
+  const blobUrl = 'blob:https://discord.com/logger-async-viewer';
+  const descriptor = {
+    display_url: blobUrl,
+    blob_url: blobUrl,
+    remote_urls: ['https://cdn.example/attachment.png'],
+    local_path: '/cache/attachment.png'
+  };
+  const media = { currentSrc: blobUrl };
+  const viewerRoot = {
+    isConnected: true,
+    querySelectorAll(selector) {
+      if (selector === 'img, video') return [media];
+      if (selector === '[aria-label], [title]') return [];
+      return [];
+    },
+    getAttribute() {
+      return null;
+    }
+  };
+  global.document = {
+    body: {},
+    querySelectorAll(selector) {
+      assert.equal(selector, '[role="dialog"], [aria-modal="true"]');
+      return viewerRoots;
+    },
+    contains(node) {
+      return viewerRoots.includes(node) && node.isConnected !== false;
+    },
+    getElementById() {
+      return null;
+    }
+  };
+  global.MutationObserver = class {
+    constructor(callback) {
+      observerCallback = callback;
+    }
+    observe() {}
+    disconnect() {}
+  };
+  global.requestAnimationFrame = callback => {
+    frameCallback = callback;
+    return 91;
+  };
+  global.cancelAnimationFrame = () => {};
+
+  const opened = [];
+  let originalCalls = 0;
+  const plugin = createMediaCachePlugin('', {
+    getMountedLoggerRecordFromTarget: () => ({ delete_data: {}, message: {} }),
+    getSavedAttachmentOpenDescriptor: () => descriptor,
+    installNativeAttachmentMediaViewerOwnershipTracking: () => true,
+    openSavedAttachmentDescriptor(value) {
+      opened.push(value);
+      return Promise.resolve(true);
+    }
+  });
+  plugin.tools = { getNativeMediaModal: () => ({ modalKey: 'native-viewer-modal' }) };
+  plugin.ModalStack = { hasModalOpen: () => false };
+
+  try {
+    assert.equal(plugin.captureMountedSavedAttachmentViewerOpen({ button: 0, target: {} }), true);
+    assert.equal(typeof observerCallback, 'function');
+    assert.equal(typeof frameCallback, 'function');
+    assert.equal(plugin._pendingMountedSavedAttachmentViewerDescriptor, descriptor);
+
+    await delay(0);
+    assert.equal(plugin._nativeMediaViewerOpenContextDepth, 0);
+    assert.equal(plugin._pendingNativeSavedImageOpenDescriptor, null);
+    assert.equal(plugin._pendingMountedSavedAttachmentViewerDescriptor, descriptor);
+
+    viewerRoots = [viewerRoot];
+    observerCallback();
+    assert.equal(plugin._pendingMountedSavedAttachmentViewerDescriptor, null);
+    assert.equal(plugin.getLoggerOwnedNativeSavedAttachmentViewerDescriptor(), descriptor);
+
+    const invokeOriginal = () => {
+      originalCalls += 1;
+      return 'original-window-open';
+    };
+    assert.equal(plugin.routeSavedAttachmentViewerWindowOpen([blobUrl], invokeOriginal), null);
+    assert.equal(plugin.routeSavedAttachmentViewerWindowOpen([blobUrl], invokeOriginal), null);
+    assert.deepEqual(opened, [descriptor, descriptor]);
+    assert.equal(originalCalls, 0);
+
+    assert.equal(
+      plugin.routeSavedAttachmentViewerWindowOpen(['blob:https://discord.com/ordinary'], invokeOriginal),
+      'original-window-open'
+    );
+    assert.equal(originalCalls, 1);
+
+    media.currentSrc = 'blob:https://discord.com/ordinary';
+    assert.equal(
+      plugin.routeSavedAttachmentViewerWindowOpen([blobUrl], invokeOriginal),
+      'original-window-open'
+    );
+    assert.equal(originalCalls, 2);
+    assert.equal(plugin._mountedSavedAttachmentViewerBinding, null);
+    assert.deepEqual(opened, [descriptor, descriptor]);
+  } finally {
+    plugin.clearMountedSavedAttachmentViewerState();
+    plugin.stopSavedAttachmentViewerLabelSync();
+    if (originalDocument === undefined) delete global.document;
+    else global.document = originalDocument;
+    if (OriginalMutationObserver === undefined) delete global.MutationObserver;
+    else global.MutationObserver = OriginalMutationObserver;
+    if (originalRequestAnimationFrame === undefined) delete global.requestAnimationFrame;
+    else global.requestAnimationFrame = originalRequestAnimationFrame;
+    if (originalCancelAnimationFrame === undefined) delete global.cancelAnimationFrame;
+    else global.cancelAnimationFrame = originalCancelAnimationFrame;
+  }
+});
+
 test('native and custom attachment-media viewer ownership helpers enforce scoped close behavior', () => {
   const closeCalls = [];
   const openKeys = new Set();
@@ -6007,6 +7741,56 @@ test('native and custom attachment-media viewer ownership helpers enforce scoped
   assert.equal(plugin._loggerOwnedAttachmentMediaModalKeys.has('ml2-attachment-media-2'), false);
 });
 
+test('native saved-image descriptors bind only to the active Logger-owned viewer key', () => {
+  const openKeys = new Set(['native-viewer-modal']);
+  const plugin = createMediaCachePlugin('');
+  const descriptor = {
+    remote_urls: ['https://cdn.example/image.png'],
+    local_path: '/cache/image.png'
+  };
+  plugin.ModalStack = {
+    hasModalOpen: key => openKeys.has(key),
+    closeModal: key => openKeys.delete(key)
+  };
+  plugin.tools = { getNativeMediaModal: () => ({ modalKey: 'native-viewer-modal' }) };
+
+  plugin._nativeMediaViewerOpenContextDepth = 1;
+  plugin._pendingNativeSavedImageOpenDescriptor = descriptor;
+  assert.equal(plugin.recordNativeAttachmentMediaViewerOpen('native-viewer-modal'), true);
+  assert.deepEqual(plugin._nativeAttachmentMediaViewerOwnership, {
+    key: 'native-viewer-modal',
+    owner: 'logger'
+  });
+  assert.deepEqual(plugin._nativeSavedImageViewerDescriptor, {
+    key: 'native-viewer-modal',
+    descriptor
+  });
+  assert.equal(plugin.getLoggerOwnedNativeSavedImageViewerDescriptor(), descriptor);
+
+  plugin._nativeMediaViewerOpenContextDepth = 0;
+  plugin._pendingNativeSavedImageOpenDescriptor = descriptor;
+  assert.equal(plugin.recordNativeAttachmentMediaViewerOpen('native-viewer-modal'), true);
+  assert.equal(plugin._nativeAttachmentMediaViewerOwnership.owner, 'discord');
+  assert.equal(plugin._nativeSavedImageViewerDescriptor, null);
+  assert.equal(plugin.getLoggerOwnedNativeSavedImageViewerDescriptor(), null);
+
+  plugin._nativeMediaViewerOpenContextDepth = 1;
+  plugin._pendingNativeSavedImageOpenDescriptor = descriptor;
+  assert.equal(plugin.recordNativeAttachmentMediaViewerOpen('native-viewer-modal'), true);
+  assert.equal(plugin.recordNativeAttachmentMediaViewerClose('different-modal'), false);
+  assert.equal(plugin.getLoggerOwnedNativeSavedImageViewerDescriptor(), descriptor);
+  assert.equal(plugin.recordNativeAttachmentMediaViewerClose('native-viewer-modal'), true);
+  assert.equal(plugin._nativeAttachmentMediaViewerOwnership, null);
+  assert.equal(plugin._pendingNativeSavedImageOpenDescriptor, null);
+  assert.equal(plugin._nativeSavedImageViewerDescriptor, null);
+
+  plugin._nativeAttachmentMediaViewerOwnership = { key: 'stale-viewer-modal', owner: 'logger' };
+  plugin._nativeSavedImageViewerDescriptor = { key: 'stale-viewer-modal', descriptor };
+  assert.equal(plugin.closeLoggerOwnedAttachmentMediaViewers().nativeClosed, false);
+  assert.equal(plugin._nativeAttachmentMediaViewerOwnership, null);
+  assert.equal(plugin._nativeSavedImageViewerDescriptor, null);
+});
+
 test('installNativeAttachmentMediaViewerOwnershipTracking is duplicate-safe and fail-safe', () => {
   const plugin = createMediaCachePlugin('');
   const originalAfter = Patcher.after;
@@ -6068,11 +7852,18 @@ test('installNativeAttachmentMediaViewerOwnershipTracking is duplicate-safe and 
     hookCallbacks.closeModal(null, ['native-viewer-modal']);
     assert.equal(plugin._nativeAttachmentMediaViewerOwnership, null);
 
+    plugin._pendingNativeSavedImageOpenDescriptor = { remote_urls: ['https://cdn.example/pending.png'] };
+    plugin._nativeSavedImageViewerDescriptor = {
+      key: 'native-viewer-modal',
+      descriptor: { remote_urls: ['https://cdn.example/bound.png'] }
+    };
     const teardown = plugin.unpatches.pop();
     assert.equal(typeof teardown, 'function');
     assert.equal(teardown(), undefined);
     assert.equal(plugin._nativeAttachmentMediaViewerOwnershipTrackingInstalled, false);
     assert.equal(plugin._nativeAttachmentMediaViewerOwnership, null);
+    assert.equal(plugin._pendingNativeSavedImageOpenDescriptor, null);
+    assert.equal(plugin._nativeSavedImageViewerDescriptor, null);
     assert.equal(removedHooks.every(hook => hook.removed), true);
     assert.equal(teardown(), undefined);
     assert.equal(plugin._nativeAttachmentMediaViewerOwnershipTrackingInstalled, false);
@@ -6114,12 +7905,16 @@ test('installNativeAttachmentMediaViewerOwnershipTracking is duplicate-safe and 
   }
 });
 
-test('createModal native IMAGE path restores depth and installs ownership tracking before open', () => {
+test('createModal native IMAGE path scopes viewer ownership and the saved-image descriptor before open', () => {
   const calls = [];
   const plugin = createMediaCachePlugin('');
   plugin.ModalStack = {};
   plugin._nativeMediaViewerOpenContextDepth = 2;
   const depthSamples = [];
+  const pendingDescriptorSamples = [];
+  const previousPendingDescriptor = { remote_urls: ['https://cdn.example/previous.png'] };
+  const requestedDescriptor = { remote_urls: ['https://cdn.example/image.png'] };
+  plugin._pendingNativeSavedImageOpenDescriptor = previousPendingDescriptor;
   let installCount = 0;
 
   plugin.installNativeAttachmentMediaViewerOwnershipTracking = () => {
@@ -6131,16 +7926,23 @@ test('createModal native IMAGE path restores depth and installs ownership tracki
       openMediaModal: () => {
         calls.push('open');
         depthSamples.push(plugin._nativeMediaViewerOpenContextDepth);
+        pendingDescriptorSamples.push(plugin._pendingNativeSavedImageOpenDescriptor);
       }
     })
   };
 
-  plugin.createModal({ type: 'IMAGE', url: 'https://cdn.example/image.png' }, true, 'native-image-ok');
+  plugin.createModal({
+    type: 'IMAGE',
+    url: 'https://cdn.example/image.png',
+    ml2SavedImageOpenDescriptor: requestedDescriptor
+  }, true, 'native-image-ok');
 
   assert.deepEqual(calls, ['install', 'open']);
   assert.equal(installCount, 1);
   assert.equal(depthSamples[0], 3);
+  assert.equal(pendingDescriptorSamples[0], requestedDescriptor);
   assert.equal(plugin._nativeMediaViewerOpenContextDepth, 2);
+  assert.equal(plugin._pendingNativeSavedImageOpenDescriptor, previousPendingDescriptor);
 
   plugin._nativeMediaViewerOpenContextDepth = 2;
   calls.length = 0;
@@ -6149,17 +7951,24 @@ test('createModal native IMAGE path restores depth and installs ownership tracki
       openMediaModal: () => {
         calls.push('open-throw');
         depthSamples.push(plugin._nativeMediaViewerOpenContextDepth);
+        pendingDescriptorSamples.push(plugin._pendingNativeSavedImageOpenDescriptor);
         throw new Error('openMediaModal failed');
       }
     })
   };
 
   assert.throws(() => {
-    plugin.createModal({ type: 'IMAGE', url: 'https://cdn.example/image.png' }, true, 'native-image-error');
+    plugin.createModal({
+      type: 'IMAGE',
+      url: 'https://cdn.example/image.png',
+      ml2SavedImageOpenDescriptor: requestedDescriptor
+    }, true, 'native-image-error');
   }, /openMediaModal failed/);
   assert.deepEqual(calls, ['install', 'open-throw']);
   assert.equal(depthSamples[depthSamples.length - 1], 3);
+  assert.equal(pendingDescriptorSamples[pendingDescriptorSamples.length - 1], requestedDescriptor);
   assert.equal(plugin._nativeMediaViewerOpenContextDepth, 2);
+  assert.equal(plugin._pendingNativeSavedImageOpenDescriptor, previousPendingDescriptor);
 });
 
 test('createModal tracks video and fallback-image modal keys in both modal trackers', () => {
