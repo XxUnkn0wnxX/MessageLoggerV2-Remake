@@ -29,81 +29,73 @@ This file is both the implementation checklist and the handoff record.
 - **Root rollout record:**
   `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T11-07-23-01a00d42-4986-7971-94de-11f09f6630d1.jsonl`
 - **Working branch:** `develop`
-- **Verified HEAD:** Stage 3 cache-completion commit
-  `ca1c127ddda93824c63c8da129c3f1d29d003a03`; `develop` is five commits ahead
+- **Verified HEAD:** accepted forum deletion-timing commit
+  `2a719ea00d7019c20b1f6c5b65fe616a7eae0990`; `develop` is six commits ahead
   of `origin/develop` and nothing has been pushed.
-- **Verified worktree:** clean immediately after `ca1c127`; this checklist is
-  now modified to track the forum transition-flicker follow-up. Disposable trace
-  work remains ignored under `tmp/`.
+- **Verified worktree:** only `MessageLoggerV2.plugin.js`,
+  `tests/media.test.js`, `tests/source-contracts.test.js`, and this checklist
+  are tracked modifications for the final Stage 3 master-toggle correction.
+  The ignored `tmp/MessageLoggerForumMediaTransitionTrace.plugin.js` helper is
+  currently symlinked into BetterDiscord, and its latest generated report is
+  still present at
+  `$HOME/Library/Application Support/BetterDiscord/plugins/MessageLoggerForumMediaTransitionTrace-report.json`.
 - **Baseline:** `npm test` passed `471/471` before this checklist was created.
-- **Checklist verification:** the Stage 2 parent rerun of `npm test` passes
-  `476/476`; the checklist new-file whitespace check is clean.
-- **Live parity:** verified for the forum timing correction. Repository and
-  installed plugin SHA-256 both equal
-  `32a611291cb964268f79f0cb813f0ba3529f914ca81236b00e928edc6704aba0`.
-- **Implementation state:** Stage 1 runtime tracing and Stage 2 persistence are
-  complete. Stage 3 now has full-message remount refresh plus one shared
-  attachment-presentation order across native mounts, Logger rows, deleted
-  thread/forum logs, and inline history: direct CDN, distinct media proxy, then
-  existing cached Blob, otherwise the classified placeholder. The archive is
-  unchanged. The visible master is now **Render & Cache media** with every Media
-  child linked to it. The reopened Stage 3 timing correction now schedules one
-  exact, coalesced local-only remount after a confirmed cache promotion or
-  write. Its live gate is accepted; forum mounts can show the classified
-  placeholder for a moment during an initial image/attachment deletion or a
-  **Render & Cache media** Off-to-On transition before the cached Blob replaces
-  it. The user accepted the functional result but requested one final
-  trace-first Stage 3 follow-up. `refreshCacheOnlyMessage` now resolves its
-  detached presentation inside the already scheduled callback, so a same-turn
-  pre-cache promotion is observed before the one update is dispatched. Stage 4
-  still separately owns external opening. The user confirmed the initial forum
-  deletion no longer flickers. A separate master Off-to-On transition lag or
-  flicker remains and must be traced after this accepted correction is committed.
-- **Runtime-trace state:** The forum-media timing trace captured both requested
-  transitions and its live symlink has been removed. Its valid evidence is
-  recorded below. The helper itself contained a repeated `idSource` reference
-  error and over-captured data URLs into a 229 MB report, so that trace-induced
-  settings stall is not attributed to MessageLogger. After the compact evidence
-  was integrated, the ignored helper source and generated report were removed.
-- **Current gate:** Parent syntax/check passes. The current combined media,
-  live-mount-setting, and source-contract suites pass `193/193`. `npm test`
-  resolves exactly to `node --check MessageLoggerV2.plugin.js && node --test
-  tests/*.test.js` and passes `512/512`; `git diff --check` is clean. Runtime
-  evidence proved the target direct CDN URL is live while its media proxy is
-  dead, and the saved legacy record contains that proxy in both canonical URL
-  fields. The implementation therefore derives the equivalent CDN URL only in
-  detached presentation state, fails one candidate at a time, and remounts the
-  exact saved message. The committed build passes those gates, but fresh live
-  uploads exposed a missing cache-completion refresh in local-only mode. The
-  correction now supplies that exact remount after `PROMOTE` or a confirmed
-  write. The timing trace proved initial forum deletion computes a placeholder
-  clone before pre-cache promotion, dispatches it at `09:08:59.069`, and then
-  dispatches the cached Blob at `09:08:59.077`. The Off-to-On handler instead
-  completed normally and dispatched the Blob directly. No new MessageLogger
-  exception accompanies the accepted build; the repeated runtime exception was
-  isolated to the disposable helper. The narrow timing correction and its
-  deterministic late-Blob regression now pass every local gate; live sync and
-  the focused forum deletion retest passed. The master-toggle transition still
-  visibly lags/flickers, but it is not part of the now-accepted stale deletion
-  clone correction.
+- **Checklist verification:** parent verification for the final Stage 3
+  correction passes `npm run check`; the focused media, live-mount-setting, and
+  source-contract suites at `197/197`; bounded `npm test` at `516/516`; and
+  `git diff --check`.
+- **Live parity:** the locally verified repository plugin SHA-256 is
+  `563d6ba2ca1dc97e0ded11c2b86d49c9365f98f3f77ee22cd9b7fc6b246ec97a`.
+  The installed plugin remains the preceding wrapper build at
+  `1dbd3e8043d10e50b8779a8476ea5b1ca2fc28dfa9dd12ca5164171853428605`;
+  live sync is the next gate.
+- **Implementation state:** Stages 1 and 2 are complete. The final Stage 3
+  correction is implemented locally: protected Discord-owned forum/thread
+  attachment mounts now use a tokenized, per-message `MutationObserver` only
+  when the live Store and exact mounted content still contain the generated
+  placeholder while a Blob-only presentation is ready. It sends a hidden
+  truthy sentinel with no attachments, waits for the exact placeholder to be
+  absent, then recomputes and dispatches the Blob presentation. Unmounted rows
+  update immediately. Canonical records, ordinary rows, direct-CDN/proxy/Blob/
+  placeholder ordering, text mounting, forum/thread promotion, embeds/stickers,
+  persistence, settings, and Stage 4 external opening remain unchanged.
+- **Runtime-trace state:** The latest compact trace targets forum message
+  `1538840760789504031` in channel `1538832876395569233`. It proves the
+  wrapper callback is registered and invoked (`registryCallbackCount: 1`), the
+  presentation helper returns empty content with the cached Blob, but Discord's
+  Store and DOM retain `[image:Synology_AUX.png]` until a later broad recache.
+  The remaining defect is Discord's deferred empty-string merge/commit, not a
+  dead Blob, missing callback, wrong source, or forum-root promotion failure.
+  The trace is console-only; the user does not want trace toasts.
+- **Current gate:** Local implementation, parent review, syntax, focused,
+  bounded-full-suite, and whitespace gates pass. Sync only the plugin, verify
+  hash parity and hot-reload logs, then repeat the one same-forum master
+  Off-to-On transition before any commit or push.
+- **Worker-capacity state:** Fresh-session capacity was restored. The first
+  Spark attempt returned a model-capacity error after a partial edit, so the
+  approved Luna fallback completed the bounded slice. After the user explicitly
+  requested a later Spark retry, Spark corrected the live-Store/row-observer
+  integration and added the final coverage. Parent review caught and corrected
+  only isolated source-test slicing assertions before the passing gates above.
 - **Checklist state:** include this file in every user-confirmed stage commit;
   archive it only after implementation, validation, and user acceptance are
   complete.
-- **Change-control state:** `ed59642` is the accepted Stage 3 checkpoint. The
-  narrow local-cache-completion correction passed its parent and live gates,
-  and its follow-up is committed as `ca1c127`. The user requested tracing and a
-  final forum-flicker fix before Stage 4; commit that correction only after its
-  automated and live gates pass. Version bumps, changelog edits, pushes,
-  merges, and releases remain unauthorized.
+- **Change-control state:** Commit the four listed files only after the focused
+  live gate passes. The user then authorized pushing `develop` only. Do not
+  merge, switch branches, tag, release, bump the version, or edit the changelog.
 
 ### Exact next action
 
-Commit the accepted deletion-timing correction (`MessageLoggerV2.plugin.js`,
-`tests/media.test.js`, and this checklist) without pushing. Only after that
-checkpoint, prepare a new minimal master-toggle trace that does not patch the
-high-frequency presentation planner or serialize DOM data URLs. Determine
-whether the residual Off-to-On lag is Blob revocation/recreation, image decode,
-or the broad cache/UI refresh before changing tracked source again.
+Sync only `MessageLoggerV2.plugin.js` to the BetterDiscord plugins folder,
+compare repository/live SHA-256, and inspect the fresh hot-reload log boundary.
+Then ask the user to stay in the same affected forum/thread with local-only On,
+toggle **Render & Cache media** Off then On once, and confirm the placeholder is
+removed before the cached Blob mounts with no visible lag or overlap. Keep the
+console-only trace helper, symlink, and report until that live gate passes so
+the exact transition can still be inspected if needed. After it passes, remove
+those three trace artifacts, update this checklist, commit only the four tracked
+files, and push `develop` only. Do not merge, switch branches, tag, release,
+bump the version, or edit the changelog.
 
 ### Resume procedure
 
@@ -1602,3 +1594,262 @@ full setting matrix in every channel type.
 - The user explicitly requested committing this confirmed correction before a
   new master-toggle trace is prepared. Commit only the plugin, its one media
   regression file, and this checklist; do not push and do not begin Stage 4.
+
+### 2026-08-17 - Master Off-to-On stale placeholder correction ready for live gate
+
+- The earlier runtime trace already proved the master On transition dispatches
+  the correct Blob attachment with empty content. The remaining visible defect
+  is that Discord temporarily retains the preceding classified placeholder in
+  its live message content while mounting the new attachment; no additional
+  Blob-performance trace is needed unless this targeted correction fails live.
+- Saved attachment rows now provide the current presentation content through a
+  detached `MessageContent` render input. This removes the stale placeholder in
+  the same render that mounts available media without mutating MessageStore or
+  canonical Logger data and without sending a protected forum/thread root a
+  synthetic `MESSAGE_DELETE`.
+- The correction is content-only, requires an actively presented saved
+  deletion with canonical attachments, and skips Discord reply-preview content.
+  Ordinary text mounting, forum/thread root promotion, source ordering,
+  persistence, settings, embeds/stickers, and Stage 4 external opening remain
+  unchanged.
+- BetterDiscord `develop` and `upstream-development` use the same supported
+  before-patch argument mutation contract required by this render-only input.
+- Parent validation passes `npm run check`; the affected media,
+  live-mount-setting, and source-contract suites at `194/194`; the bounded full
+  `tests/*.test.js` suite at `513/513`; and `git diff --check`. Sync only the
+  plugin next, then test master Off-to-On on the existing cached forum image.
+
+### 2026-08-17 - Master Off-to-On missing content callback corrected locally
+
+- A compact follow-up trace captured 123 events for forum message
+  `1538840760789504031` in channel `1538832876395569233`. At `09:55:12.691`,
+  Discord received the expected empty-content update with one Blob attachment;
+  at `09:55:12.692`, MessageLogger dispatched its content refresh. The saved row
+  reported `registryCallbackCount: 0`, and delayed DOM samples still contained
+  the placeholder until Discord performed a later broad rerender.
+- This proves the residual delay was neither a dead Blob nor incorrect source
+  selection. The presentation helper already returned empty content for the
+  Blob state; the mounted deletion-only row simply had no content callback to
+  consume that transition.
+- Saved attachment message content now stays inside a lightweight mounted React
+  boundary. It registers the same per-message callback set already used by
+  content refresh events, recomputes only a detached render message, and
+  unregisters on unmount. A re-entry marker prevents recursive wrapping while
+  still allowing the existing edit-history and deleted-tooltip branches to run.
+- The functional regression covers placeholder-to-Blob and Blob-to-placeholder
+  detached content without mutating the live or canonical message. Source
+  contracts pin callback registration/cleanup, reply-preview exclusion,
+  re-entry ordering, and null-safe existing wrappers.
+- Parent validation passes `npm run check`; the focused media,
+  live-mount-setting, and source-contract suites at `194/194`; full `npm test`
+  at `513/513`; and `git diff --check`. No test outside `tests/*.test.js` ran.
+- The trace helper, live symlink, and report are removed. Only the plugin was
+  synced live; repository/live SHA-256 is
+  `1dbd3e8043d10e50b8779a8476ea5b1ca2fc28dfa9dd12ca5164171853428605`,
+  and BetterDiscord hot-reloaded without a new MessageLogger exception. The one
+  same-forum master Off-to-On live gate is ready; do not commit or push until
+  the user confirms it.
+
+### 2026-08-17 - Latest master-toggle trace supersedes callback diagnosis
+
+- The user confirmed the mounted wrapper build still leaves the exact
+  placeholder visible for a variable period during master Off-to-On. A second
+  console-only trace produced 147 events for the same forum message
+  `1538840760789504031` and attachment `Synology_AUX.png`.
+- This newer trace supersedes the preceding zero-callback diagnosis. The saved
+  row contains `SavedAttachmentPresentationContent`, reports
+  `registryCallbackCount: 1`, and invokes the presentation helper. With the
+  master enabled, that helper correctly converts the retained
+  `[image:Synology_AUX.png]` input to empty content while the presentation has
+  the valid cached Blob attachment.
+- Discord nevertheless retains the placeholder in MessageStore and the DOM
+  after the empty-content Blob `MESSAGE_UPDATE`; only a later broad recache
+  clears it. The duration observed by the trace is runtime-dependent and must
+  not become a delay constant.
+- The bounded correction is event-driven and applies only to protected
+  Discord-owned forum/thread attachment mounts whose desired final content is
+  empty and whose currently mounted content exactly matches the generated
+  attachment placeholder. Arm a per-message `MutationObserver`, send a truthy
+  internal sentinel with no attachments to make Discord accept placeholder
+  removal, and send the recomputed Blob presentation only after that exact
+  placeholder node is absent. If the row is not mounted, proceed immediately.
+- Pending transitions must be tokenized and cancelled on a newer transition,
+  setting change, presentation reset, or plugin stop. Before the final dispatch,
+  recheck the current record and settings. The existing render wrapper must
+  prevent the sentinel from appearing to the user. Do not use `setTimeout`, a
+  hardcoded millisecond delay, a fixed number of animation frames, or a
+  synthetic `MESSAGE_DELETE`.
+- Current trace artifacts intentionally remain available for handoff:
+  `tmp/MessageLoggerForumMediaTransitionTrace.plugin.js`, its exact live
+  BetterDiscord symlink, and
+  `MessageLoggerForumMediaTransitionTrace-report.json`. Remove all three after
+  the correction no longer needs runtime evidence.
+- No implementation for this final correction has been made. The resumed
+  session could not spawn the configured Spark worker because the runtime
+  reported the agent-thread limit reached. Continue with a fresh session and a
+  micro-sliced worker assignment, unless the user explicitly authorizes the
+  parent to implement. The current four tracked modifications remain
+  uncommitted, and `develop` remains six commits ahead of `origin/develop`.
+
+### 2026-08-17 - Event-driven master-toggle transition passes local gates
+
+- Reconstructed the handoff from this complete checklist and the referenced
+  session's final trace/decision window, then reverified `develop`, HEAD
+  `2a719ea00d7019c20b1f6c5b65fe616a7eae0990`, the four-file tracked scope,
+  trace artifacts, and the preceding repo/live plugin hash parity.
+- Implemented one protected forum/thread-only two-phase transition. Eligibility
+  requires the live MessageStore content and exact mounted message-content node
+  to equal the generated attachment placeholder while the detached canonical
+  presentation is naturally empty-content and Blob-only. Store attachments may
+  already contain the Blob, matching the runtime trace.
+- The transition observes the exact message row before sending a truthy internal
+  content sentinel with zero attachments. The mounted presentation wrapper
+  hides the sentinel. Observer callbacks re-query the exact row/content node;
+  only after the placeholder is absent do they validate the current token,
+  record, settings, and presentation and dispatch a freshly recomputed Blob.
+  An unmounted row or unavailable observer uses the existing immediate final
+  update.
+- A newer same-message transition, presentation reset, either media-setting
+  change through reset, and plugin stop disconnect and invalidate pending
+  observers. The implementation adds no timeout, polling loop, fixed animation
+  frame count, synthetic `MESSAGE_DELETE`, persisted marker, schema field,
+  version, changelog, or source-order change.
+- Deterministic coverage models canonical content separately from the live Store
+  placeholder-plus-Blob state, real content-node replacement under a row
+  observer, fresh Blob recomputation, unmounted/observer-unavailable fallback,
+  newer-transition/reset/stop cancellation, stale callbacks, sentinel hiding,
+  canonical/Store immutability, and structural no-timer/no-delete contracts.
+- Parent verification passes `npm run check`; the focused
+  `tests/media.test.js`, `tests/live-mount-settings.test.js`, and
+  `tests/source-contracts.test.js` run at `197/197`; bounded `npm test` at
+  `516/516`; and `git diff --check`. Parent review also corrected three isolated
+  source-contract slicing/assertion defects before these final results.
+- The verified repository plugin SHA-256 is
+  `563d6ba2ca1dc97e0ded11c2b86d49c9365f98f3f77ee22cd9b7fc6b246ec97a`;
+  the installed plugin remains the prior wrapper build at
+  `1dbd3e8043d10e50b8779a8476ea5b1ca2fc28dfa9dd12ca5164171853428605`.
+  Live sync and the one same-forum Off-to-On test are next. Nothing is committed
+  or pushed.
+
+### 2026-08-17 - Pending-transition cancellation race closed locally
+
+- An independent final review found that a saved-message display or Hidden
+  state change could invalidate a pending observer after the sentinel reached
+  MessageStore. The old callback removed its transition state before checking
+  visibility, which could strand or expose the literal sentinel instead of
+  restoring the pre-transition placeholder presentation.
+- Protected two-phase arming now requires
+  `shouldPresentSavedMessage(channelId, messageId) === true`. A disabled or
+  hidden saved record receives neither the sentinel nor a final Blob update.
+  The pending state retains a detached rollback payload containing the exact
+  pre-sentinel Store placeholder and attachments.
+- Cancellation marks the state stale, disconnects its observer, and dispatches
+  that rollback only while the exact current Store content is still the plugin
+  sentinel. The state remains available to the render wrapper during the
+  synchronous rollback dispatch, and guarded deletion cannot remove a newer
+  state armed reentrantly for the same message.
+- Saved-message display-setting cache refreshes cancel all transitions before
+  invalidation. Hide/Unhide cancels the exact record before changing Hidden
+  flags. Final observer callbacks now validate current ownership, record
+  identity, visibility, media settings, and a freshly recomputed Blob-only
+  presentation before removing state; every invalid outcome uses the rollback
+  cancellation path.
+- The Spark retry left the bounded correction and tests in the shared checkout
+  but stalled before reporting. Per the user's direction, the parent integrated
+  the small remaining fixes: corrected the interrupted test contracts, kept
+  MessageStore mutation simulated rather than performed by plugin code, and
+  added the reentrant state-deletion guard. A fresh read-only review found no
+  remaining correctness issue.
+- Parent validation passes `npm run check`; the focused
+  `tests/media.test.js`, `tests/live-mount-settings.test.js`, and
+  `tests/source-contracts.test.js` run at `199/199`; full `npm test` at
+  `518/518`; and `git diff --check`. Version `2.8.2.18`, changelog, schema,
+  source ordering, ordinary-row `MESSAGE_DELETE`, and Stage 4 remain unchanged.
+- The repository plugin SHA-256 is now
+  `669013ace2db662de0d811dbc1e20b7462fa167c319179b9d4558c045fff0320`;
+  the installed plugin is still
+  `1dbd3e8043d10e50b8779a8476ea5b1ca2fc28dfa9dd12ca5164171853428605`.
+  Sync only the plugin next, inspect the hot reload, then run the one same-forum
+  local-only master Off-to-On live gate. Keep all trace artifacts until that
+  gate passes; do not commit or push beforehand.
+
+### 2026-08-17 - Stage 3 final hanging-fruit build synced for live gate
+
+- Synced only `MessageLoggerV2.plugin.js`; repository and installed SHA-256 now
+  match at
+  `669013ace2db662de0d811dbc1e20b7462fa167c319179b9d4558c045fff0320`.
+  Discord was not relaunched.
+- The 11:16 hot reload removed the old MessageLogger patches, completed its UI
+  cleanup, reapplied the current patches, refreshed exact target channel
+  `1538832876395569233`, and reattached
+  `MessageLoggerForumMediaTransitionTrace`. No new MessageLogger error or
+  exception appeared after initialization.
+- One simultaneous `PersonalPins` dispatch error remains unrelated to this
+  plugin and predates the MessageLogger initialization sequence.
+- This is the final Stage 3 hanging-fruit live gate: remain in the same cached
+  forum/thread with local-only rendering On, turn **Render & Cache media** Off,
+  verify the exact classified placeholder, then turn it On. The placeholder
+  must disappear before the cached Blob mounts, with no literal internal
+  sentinel, overlap, or variable lag.
+- Keep the trace helper, live symlink, and report until the user confirms this
+  gate. After confirmation, remove those three artifacts, record the result,
+  commit only the four tracked Stage 3 files, and push `develop` only. Do not
+  start Stage 4, change release metadata, merge, tag, or publish a release.
+
+### 2026-08-17 - Visible internal transition marker removed locally
+
+- The live gate materially improved the transition and mounted the cached image,
+  but briefly exposed text beginning with `_mlv2Saved` before that image
+  appeared. The user considered the result acceptable and left this final polish
+  decision to the implementation review.
+- The retained trace is decisive: for exact message
+  `1538840760789504031`, the Store accepted the internal sentinel; about 21 ms
+  later `SavedAttachmentPresentationContent` returned empty rendered content,
+  yet Discord's native message-content path committed the literal raw Store
+  value roughly 120 ms later. The row observer then saw the classified
+  placeholder was gone and dispatched the final empty-content Blob
+  presentation. This proves the helper and observer ordering work, while one
+  native render path can bypass the helper for the intermediate Store update.
+- Kept the required truthy Store transition but replaced the readable internal
+  marker with the single intrinsically invisible U+2063 INVISIBLE SEPARATOR
+  (`'\u2063'`). The existing render wrapper still maps that exact value to an
+  empty string, and a bypassing native surface can no longer expose plugin
+  implementation text. No timer, polling, fixed-frame wait, schema field,
+  version, changelog, Stage 4 behavior, or ordinary-row path changed.
+- Added deterministic contracts proving the sentinel is one truthy zero-width
+  character, is not trimmed away as whitespace, contains no readable ASCII
+  identifier, and remains the exact source assignment expected by the wrapper.
+- Parent validation passes `npm run check`; the focused
+  `tests/media.test.js`, `tests/live-mount-settings.test.js`, and
+  `tests/source-contracts.test.js` run at `199/199`; full `npm test` at
+  `518/518`; and `git diff --check`.
+- The repository plugin SHA-256 is
+  `c9c093b7248c2377d56f17b85c4d9758404556de573f854284f714dadd7db56e`;
+  the installed plugin now matches that hash. Discord was not relaunched.
+- The 21:23 local hot reload removed the previous patches, completed its UI
+  cleanup, reapplied the current patches, refreshed target channel
+  `1538832876395569233`, and reattached the transition trace helper. No new
+  MessageLogger error or exception appeared. The simultaneous `PersonalPins`
+  dispatch error is the same unrelated external-plugin failure seen at the
+  preceding sync.
+- Repeat the same one-message Off-to-On live gate before cleaning trace
+  artifacts, committing, or pushing. The classified placeholder may become a
+  momentary blank state while the Blob mounts, but no readable `_mlv2Saved...`
+  marker may appear.
+
+### 2026-08-17 - Stage 3 final live gate passed
+
+- The user repeated the exact same-forum local-only **Render & Cache media**
+  Off-to-On gate with the zero-width transition build and confirmed the visible
+  `_mlv2Saved...` marker is gone. The cached image still mounts after the
+  placeholder transition, closing the remaining Stage 3 hanging-fruit defect.
+- Removed the now-unneeded disposable trace source
+  `tmp/MessageLoggerForumMediaTransitionTrace.plugin.js`, its exact BetterDiscord
+  plugins-folder symlink, and
+  `MessageLoggerForumMediaTransitionTrace-report.json`. These artifacts were
+  local-only runtime evidence and remain untracked.
+- Repository and installed plugin SHA-256 remain identical at
+  `c9c093b7248c2377d56f17b85c4d9758404556de573f854284f714dadd7db56e`.
+  Stage 3 is accepted for its four-file commit and `develop` push. Do not merge,
+  tag, publish a release, change version/changelog metadata, or begin Stage 4
+  implementation inside the Stage 3 commit.

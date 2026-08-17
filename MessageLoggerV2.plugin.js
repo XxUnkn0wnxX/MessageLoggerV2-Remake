@@ -440,7 +440,13 @@ module.exports = class MessageLoggerV2 {
     this._savedAttachmentMediaErrorListenerTarget = null;
     this._savedAttachmentPresentationRecacheChannels = new Set();
     this._pendingSavedAttachmentPresentationRefreshes = new Set();
+    this._savedAttachmentPresentationTransitions = new Map();
+    this._savedAttachmentPresentationTransitionTokens = new Map();
     this._failedNativeAttachmentMediaCandidateKeys = new Set();
+    // The Store update must remain truthy so Discord replaces an existing placeholder. Keep the
+    // transition intrinsically invisible as a fallback for native surfaces that bypass the
+    // MessageContent render guard.
+    this._savedAttachmentPresentationTransitionSentinel = '\u2063';
     this._nativeMediaViewerOpenContextDepth = 0;
     this._nativeAttachmentMediaViewerOwnership = null;
     this._loggerOwnedAttachmentMediaModalKeys = new Set();
@@ -516,6 +522,7 @@ module.exports = class MessageLoggerV2 {
     this._forumUploadAsReplySendPatchInstalled = false;
     this._forumUploadAsReplyBypassGeneration += 1;
     this._forumUploadAsReplyBypassTokens?.clear?.();
+    this._cancelAllSavedAttachmentPresentationTransitions?.();
     if (this._forumUploadAsReplyAbortController?.abort) {
       this._forumUploadAsReplyAbortController.abort();
     }
@@ -5313,6 +5320,7 @@ module.exports = class MessageLoggerV2 {
     ];
     const actions = {
       refreshCache: () => {
+        this._cancelAllSavedAttachmentPresentationTransitions?.();
         this.invalidateAllChannelCache();
         if (this.selectedChannel) this.cacheChannelMessages(this.selectedChannel.id);
         // Message-cache invalidation handles ordinary chat rows. Forum cards, compact thread
@@ -8889,6 +8897,7 @@ module.exports = class MessageLoggerV2 {
   }
   resetSavedAttachmentPresentationState() {
     this.closeLoggerOwnedAttachmentMediaViewers?.();
+    this._cancelAllSavedAttachmentPresentationTransitions?.();
     this._failedNativeAttachmentMediaKeys?.clear?.();
     this._pendingSavedAttachmentPresentationRefreshes?.clear?.();
     this._failedNativeAttachmentMediaCandidateKeys?.clear?.();
@@ -9916,6 +9925,166 @@ module.exports = class MessageLoggerV2 {
       : labels.join('\n');
     return renderMessage;
   }
+  getNativeDeletedAttachmentPresentationMessageForMessageContent(message) {
+    if (!message || typeof message !== 'object') return message;
+    const sentinelMessageId = String(message.id || '');
+    const sentinelChannelId = String(message.channel_id || '');
+    const transitionKey = sentinelMessageId && sentinelChannelId
+      ? this._getSavedAttachmentPresentationTransitionKey(sentinelChannelId, sentinelMessageId)
+      : null;
+    // Discord can merge a saved attachment update while retaining the previous placeholder
+    // when the replacement content is empty. Correct only the detached render input so the
+    // canonical record, live Store message, and protected forum/thread mount stay untouched.
+    const isProtectedTransitionSentinel = String(message.content || '') === this._savedAttachmentPresentationTransitionSentinel
+      && transitionKey
+      && this._savedAttachmentPresentationTransitions?.get(transitionKey);
+    if (isProtectedTransitionSentinel) {
+      try {
+        if (typeof message.set === 'function') {
+          const updatedMessage = message.set('content', '');
+          if (updatedMessage && typeof updatedMessage === 'object') return updatedMessage;
+        }
+      } catch {}
+      return { ...message, content: '' };
+    }
+    const messageId = String(message?.id || '');
+    if (!messageId) return message;
+    const record = this.messageRecord?.[messageId];
+    const sourceMessage = record?.message;
+    if (!record?.delete_data || !sourceMessage || typeof sourceMessage !== 'object') return message;
+    if (String(sourceMessage.id || '') !== messageId) return message;
+    if (String(sourceMessage.channel_id || '') !== String(message.channel_id || '')) return message;
+    if (!Array.isArray(sourceMessage.attachments) || sourceMessage.attachments.length === 0) return message;
+    if (!this.shouldPresentSavedMessage?.(sourceMessage.channel_id, messageId)) return message;
+    const renderedMessage = this.getNativeDeletedAttachmentPresentationMessage(sourceMessage);
+    const desiredContent = isProtectedTransitionSentinel
+      ? ''
+      : (typeof renderedMessage?.content === 'string' ? renderedMessage.content : '');
+    if (String(message.content || '') === desiredContent) return message;
+    try {
+      if (typeof message.set === 'function') {
+        const updatedMessage = message.set('content', desiredContent);
+        if (updatedMessage && typeof updatedMessage === 'object') return updatedMessage;
+      }
+    } catch {}
+    return {
+      ...message,
+      content: desiredContent
+    };
+  }
+  _cancelAllSavedAttachmentPresentationTransitions() {
+    for (const state of this._savedAttachmentPresentationTransitions?.values?.() || []) {
+      this._cancelSavedAttachmentPresentationTransition(state.channelId, state.messageId);
+    }
+  }
+  _getSavedAttachmentPresentationTransitionKey(channelId, messageId) {
+    return `${String(channelId || '')}:${String(messageId || '')}`;
+  }
+  _cancelSavedAttachmentPresentationTransition(channelId, messageId) {
+    const key = messageId === undefined
+      ? String(channelId || '')
+      : this._getSavedAttachmentPresentationTransitionKey(channelId, messageId);
+    const state = this._savedAttachmentPresentationTransitions?.get(key);
+    if (!state) return;
+    if (state.cancelled) return;
+    state.cancelled = true;
+    if (state.observer?.disconnect) {
+      try {
+        state.observer.disconnect();
+      } catch (error) {
+        Logger.warn(`Failed to disconnect saved attachment presentation observer for message ${state.messageId}.`, error);
+      }
+    }
+    const rollbackMessage = state.rollbackMessage;
+    const shouldRollback = state.sentinelDispatched
+      && rollbackMessage;
+    try {
+      if (shouldRollback) {
+        const liveMessage = this.messageStore?.getMessage?.(state.channelId, state.messageId);
+        if (typeof liveMessage?.content === 'string' && liveMessage.content === this._savedAttachmentPresentationTransitionSentinel) {
+          this.dispatcher?.dispatch?.({
+            type: 'MESSAGE_UPDATE',
+            message: rollbackMessage,
+            ML2: true
+          });
+        }
+      }
+    } catch (error) {
+      Logger.warn(`Failed to rollback saved attachment presentation transition for message ${state.messageId}.`, error);
+    } finally {
+      // A synchronous rollback dispatch may re-enter this path and arm a newer state. Never let
+      // the older cancellation delete that replacement transition.
+      if (this._savedAttachmentPresentationTransitions?.get(key) === state) {
+        this._savedAttachmentPresentationTransitions.delete(key);
+      }
+    }
+  }
+  _startSavedAttachmentPresentationTransition(channelId, messageId, rollbackMessage = null) {
+    const safeChannelId = String(channelId || '');
+    const safeMessageId = String(messageId || '');
+    if (!safeChannelId || !safeMessageId) return null;
+    this._cancelSavedAttachmentPresentationTransition(safeChannelId, safeMessageId);
+    const key = this._getSavedAttachmentPresentationTransitionKey(safeChannelId, safeMessageId);
+    const nextToken = (this._savedAttachmentPresentationTransitionTokens.get(key) || 0) + 1;
+    this._savedAttachmentPresentationTransitionTokens.set(key, nextToken);
+    const nextState = {
+      channelId: safeChannelId,
+      messageId: safeMessageId,
+      token: nextToken,
+      observer: null,
+      rollbackMessage: rollbackMessage && typeof rollbackMessage === 'object' ? {
+        ...rollbackMessage,
+        attachments: Array.isArray(rollbackMessage.attachments)
+          ? [...rollbackMessage.attachments]
+          : []
+      } : null,
+      sentinelDispatched: false,
+      cancelled: false
+    };
+    this._savedAttachmentPresentationTransitions.set(key, nextState);
+    return nextState;
+  }
+  _getSavedAttachmentPresentationPlaceholderContent(message) {
+    const sourceMessage = message && typeof message === 'object' ? message : null;
+    if (!sourceMessage || !Array.isArray(sourceMessage.attachments) || !sourceMessage.attachments.length) return '';
+    const plans = this.getSavedAttachmentPresentationPlans(sourceMessage, {});
+    const labels = plans
+      .filter(plan => plan?.action === 'placeholder' || plan?.action === 'omit')
+      .map(plan => plan?.label)
+      .filter(label => typeof label === 'string');
+    return labels.join('\n');
+  }
+  _findSavedAttachmentPresentationTransitionTarget(channelId, messageId) {
+    const safeChannelId = String(channelId || '');
+    const safeMessageId = String(messageId || '');
+    if (!safeChannelId || !safeMessageId) return null;
+    const rowId = `chat-messages-${safeChannelId}-${safeMessageId}`;
+    const contentId = `message-content-${safeMessageId}`;
+    const document = globalThis.document;
+    if (typeof document?.getElementById !== 'function') return null;
+    const row = document.getElementById(rowId);
+    const messageContent = document.getElementById(contentId);
+    if (!row || row.id !== rowId || !messageContent || messageContent.id !== contentId) return null;
+    if (typeof row.contains === 'function') {
+      if (!row.contains(messageContent)) return null;
+    } else {
+      const scopedContent = row.querySelector?.(`[id="${contentId}"]`)
+        || row.querySelector?.(`#${contentId}`);
+      if (scopedContent !== messageContent) return null;
+    }
+    return {
+      row,
+      content: messageContent,
+      rowId,
+      contentId
+    };
+  }
+  _transitionTargetMatchesPlaceholder(target, placeholderContent) {
+    return !!target
+      && typeof target.textContent === 'string'
+      && typeof placeholderContent === 'string'
+      && target.textContent === placeholderContent;
+  }
   getSavedAttachmentMediaFailureKey(channelId, messageId, attachmentId) {
     return `${String(channelId ?? '')}:${String(messageId ?? '')}:${String(attachmentId ?? '')}`;
   }
@@ -10074,12 +10243,179 @@ module.exports = class MessageLoggerV2 {
           || String(message.id) === channelId
         );
       if (keepsDiscordOwnedThreadMount) {
-        this.dispatcher?.dispatch?.({
-          type: 'MESSAGE_UPDATE',
-          message: this.getNativeDeletedAttachmentPresentationMessage(message),
-          ML2: true
-        });
+        const messageId = String(message.id);
+        const getFinalPresentation = sourceMessage => {
+          const presentationOptions = this.settings?.cacheAllImages !== false
+            ? this.settings?.onlyRenderCachedAttachments
+              ? { allowBlob: true }
+              : { allowRemote: true }
+            : {};
+          const finalPlans = this.getSavedAttachmentPresentationPlans(sourceMessage, presentationOptions);
+          const finalMessage = this.getNativeDeletedAttachmentPresentationMessage(sourceMessage);
+          const placeholderContent = this._getSavedAttachmentPresentationPlaceholderContent(sourceMessage);
+          const blobOnlyFinalAttachments = Array.isArray(finalMessage?.attachments)
+            && finalMessage.attachments.length > 0
+            && finalMessage.attachments.every(attachment => (
+              typeof attachment?.url === 'string'
+              && attachment.url.startsWith('blob:')
+            ));
+          const hasBlobOnlyPresentation = (
+            Array.isArray(finalPlans)
+            && finalPlans.length > 0
+            && finalPlans.every(plan => plan?.action === 'blob')
+            && blobOnlyFinalAttachments
+          );
+          return {
+            finalMessage,
+            finalPlans,
+            placeholderContent,
+            hasBlobOnlyPresentation
+          };
+        };
+        const initialPresentation = getFinalPresentation(message);
+        const liveMessage = this.messageStore?.getMessage?.(channelId, messageId);
+        const storeContentMatchesPlaceholder = typeof liveMessage?.content === 'string'
+          && liveMessage.content === initialPresentation.placeholderContent;
+        const shouldPresent = this.shouldPresentSavedMessage?.(channelId, messageId);
+        const transitionTarget = this._findSavedAttachmentPresentationTransitionTarget(
+          channelId,
+          messageId
+        );
+        const shouldUseTwoPhaseTransition =
+          shouldPresent === true
+          && initialPresentation.finalMessage
+          && initialPresentation.finalMessage.content === ''
+          && Array.isArray(initialPresentation.finalMessage.attachments)
+          && initialPresentation.finalMessage.attachments.length > 0
+          && initialPresentation.hasBlobOnlyPresentation
+          && initialPresentation.placeholderContent
+          && storeContentMatchesPlaceholder
+          && liveMessage
+          && transitionTarget
+          && this._transitionTargetMatchesPlaceholder(
+            transitionTarget?.content,
+            initialPresentation.placeholderContent
+          );
+        let transitionArmed = false;
+
+        if (shouldUseTwoPhaseTransition) {
+          const transitionRollbackMessage = {
+            ...message,
+            content: liveMessage.content,
+            attachments: Array.isArray(liveMessage.attachments)
+              ? [...liveMessage.attachments]
+              : []
+          };
+          const transitionState = this._startSavedAttachmentPresentationTransition(
+            channelId,
+            messageId,
+            transitionRollbackMessage
+          );
+          if (transitionState && typeof globalThis.MutationObserver === 'function') {
+            const transitionKey = this._getSavedAttachmentPresentationTransitionKey(channelId, messageId);
+            const transitionToken = transitionState.token;
+            const finalizeTransition = () => {
+              if (this._savedAttachmentPresentationTransitions?.get(transitionKey) !== transitionState
+                || transitionState.token !== transitionToken
+                || transitionState.cancelled) return;
+              const currentTransitionTarget = this._findSavedAttachmentPresentationTransitionTarget(
+                channelId,
+                messageId
+              );
+              if (currentTransitionTarget
+                && this._transitionTargetMatchesPlaceholder(
+                  currentTransitionTarget.content,
+                  initialPresentation.placeholderContent
+                )) {
+                return;
+              }
+              const currentRecord = this.messageRecord?.[messageId];
+              if (!currentRecord?.message || !currentRecord.delete_data) {
+                this._cancelSavedAttachmentPresentationTransition(channelId, messageId);
+                return;
+              }
+              if (
+                String(currentRecord.message.id || '') !== messageId
+                || String(currentRecord.message.channel_id || '') !== channelId
+                || currentRecord.delete_data.hidden
+                || this.settings?.cacheAllImages === false
+                || this.shouldPresentSavedMessage?.(channelId, messageId) !== true
+              ) {
+                this._cancelSavedAttachmentPresentationTransition(channelId, messageId);
+                return;
+              }
+              const freshPresentation = getFinalPresentation(currentRecord.message);
+              if (!freshPresentation.finalMessage
+                || freshPresentation.finalMessage.content !== ''
+                || !Array.isArray(freshPresentation.finalMessage.attachments)
+                || !freshPresentation.finalMessage.attachments.length
+                || !freshPresentation.hasBlobOnlyPresentation
+              ) {
+                this._cancelSavedAttachmentPresentationTransition(channelId, messageId);
+                return;
+              }
+              try {
+                transitionState.observer?.disconnect();
+              } catch (error) {
+                Logger.warn(`Failed to disconnect saved attachment presentation observer for message ${messageId}.`, error);
+              }
+              if (this._savedAttachmentPresentationTransitions?.get(transitionKey) === transitionState) {
+                this._savedAttachmentPresentationTransitions.delete(transitionKey);
+              }
+              this.dispatcher?.dispatch?.({
+                type: 'MESSAGE_UPDATE',
+                message: freshPresentation.finalMessage,
+                ML2: true
+              });
+            };
+            try {
+              const transitionObserver = new globalThis.MutationObserver(finalizeTransition);
+              transitionState.observer = transitionObserver;
+              // Arm the observer before the sentinel update so a synchronous Store/DOM
+              // refresh cannot race ahead of transition tracking.
+              transitionObserver.observe(transitionTarget.row, {
+                childList: true,
+                characterData: true,
+                subtree: true
+              });
+              transitionState.sentinelDispatched = true;
+              this.dispatcher?.dispatch?.({
+                type: 'MESSAGE_UPDATE',
+                message: {
+                  ...message,
+                  content: this._savedAttachmentPresentationTransitionSentinel,
+                  attachments: [],
+                },
+                ML2: true
+              });
+              transitionArmed = true;
+              // MutationObserver callbacks are asynchronous, so explicitly recheck the
+              // target after dispatch for a synchronous render replacement.
+              finalizeTransition();
+            } catch (error) {
+              Logger.warn(`Could not arm saved attachment presentation transition for message ${messageId}.`, error);
+            }
+          }
+          if (!transitionArmed) {
+            this._cancelSavedAttachmentPresentationTransition(channelId, messageId);
+            this.dispatcher?.dispatch?.({
+              type: 'MESSAGE_UPDATE',
+              message: initialPresentation.finalMessage,
+              ML2: true
+            });
+          }
+        } else {
+          this._cancelSavedAttachmentPresentationTransition(channelId, messageId);
+          if (shouldPresent === true) {
+            this.dispatcher?.dispatch?.({
+              type: 'MESSAGE_UPDATE',
+              message: initialPresentation.finalMessage,
+              ML2: true
+            });
+          }
+        }
       } else {
+        this._cancelSavedAttachmentPresentationTransition(channelId, String(message.id));
         this.dispatcher?.dispatch?.({
           type: 'MESSAGE_DELETE',
           id: message.id,
@@ -11116,6 +11452,7 @@ module.exports = class MessageLoggerV2 {
   }
   setSavedRecordHiddenState(record, hidden) {
     if (!record?.message) return false;
+    this._cancelSavedAttachmentPresentationTransition(record.message.channel_id, record.message.id);
     if (record.delete_data) record.delete_data.hidden = hidden;
     if (record.edit_history?.length) record.edits_hidden = hidden;
     return true;
@@ -17389,6 +17726,28 @@ module.exports = class MessageLoggerV2 {
           : React.createElement('span', tooltipProps, children)
     );
     DeletedContentTooltip.displayName = 'DeletedContentTooltip';
+    const SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER = '__mlv2SavedAttachmentPresentationContent';
+    const SavedAttachmentPresentationContent = ({ plugin, contentModule, contentProps }) => {
+      const [, forceUpdate] = Hooks.useForceUpdate();
+      const sourceProps = contentProps || {};
+      const displayedMessage = plugin.getNativeDeletedAttachmentPresentationMessageForMessageContent(sourceProps.message);
+      const messageId = String(displayedMessage?.id || '');
+      React.useEffect(() => {
+        if (!messageId) return;
+        if (!plugin._messageUpdateRegistry.has(messageId)) {
+          plugin._messageUpdateRegistry.set(messageId, new Set());
+        }
+        const callbacks = plugin._messageUpdateRegistry.get(messageId);
+        if (callbacks) callbacks.add(forceUpdate);
+        return plugin._unregisterMessageCallback.bind(plugin, messageId, forceUpdate);
+      }, [messageId]);
+      return React.createElement(contentModule.type, {
+        ...sourceProps,
+        message: displayedMessage,
+        [SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER]: true
+      });
+    };
+    SavedAttachmentPresentationContent.displayName = 'SavedAttachmentPresentationContent';
     const EditHistoryContent = ({ plugin, messageId, originalElement, compact }) => {
       const [, forceUpdate] = Hooks.useForceUpdate();
       React.useEffect(() => {
@@ -17672,14 +18031,40 @@ module.exports = class MessageLoggerV2 {
       mcc = mcc || DiscordModules.MessageContentComponent;
       if (!mcc) return false;
       this.unpatches.push(
+        Patcher.before(mcc, 'type', (_, args) => {
+          const props = args?.[0];
+          if (typeof props?.className === 'string' && props.className.includes('repliedTextContent')) return;
+          const message = args?.[0]?.message;
+          if (!message) return;
+          const contentMessage = this.getNativeDeletedAttachmentPresentationMessageForMessageContent(message);
+          if (contentMessage === message) return;
+          args[0] = { ...args[0], message: contentMessage };
+        }),
         Patcher.after(mcc, 'type', (_, [props], ret) => {
           if (typeof props.className === 'string' && props.className.includes('repliedTextContent')) return;
           if (!this.messageRecordIds.has(props.message.id)) return;
           const record = this.messageRecord[props.message.id];
+          const isSavedAttachmentPresentationReentry = Boolean(props?.[SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER]);
+          const recordMessage = record?.message;
+          const hasAttachments = Array.isArray(recordMessage?.attachments)
+            && recordMessage.attachments.length > 0;
+          if (
+            !isSavedAttachmentPresentationReentry
+            && recordMessage
+            && hasAttachments
+            && record?.delete_data
+            && this.shouldPresentSavedMessage?.(recordMessage.channel_id, recordMessage.id) !== false
+          ) {
+            return React.createElement(SavedAttachmentPresentationContent, {
+              plugin: this,
+              contentModule: mcc,
+              contentProps: props
+            });
+          }
           // Keep one lightweight gate mounted for every edit-history record. Its registry
           // callback can then hide or restore history immediately in either direction without
           // waiting for Discord to rerender the message or reloading the channel.
-          if (record?.edit_history && Array.isArray(ret.props.children)) {
+          if (record?.edit_history && Array.isArray(ret?.props?.children)) {
             return React.createElement(EditHistoryContent, {
               plugin: this,
               messageId: props.message.id,
@@ -17687,7 +18072,7 @@ module.exports = class MessageLoggerV2 {
               compact: props.compact
             });
           }
-          if (record?.delete_data?.time) {
+          if (record?.delete_data?.time && ret) {
             return React.createElement(DeletedContentTooltip, {
               plugin: this,
               deletedAt: record.delete_data.time

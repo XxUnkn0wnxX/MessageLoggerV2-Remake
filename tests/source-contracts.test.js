@@ -672,6 +672,111 @@ test('date order applies to optional timestamps and forced logger dates', () => 
   assert.doesNotMatch(deletedTooltip, /display:\s*['"]contents['"]/);
   assert.match(source, /text: 'Edited: ' \+ plugin\.createTimeStamp\(edit\.time\)[\s\S]*const currentContent = currentRecord\.delete_data\?\.time[\s\S]*deletedAt: currentRecord\.delete_data\.time,[\s\S]*block: true/);
   assert.doesNotMatch(source, /text: record\.delete_data \? null : 'Edited: '/);
+  const savedAttachmentPresentationContent = source.slice(
+    source.indexOf('const SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER'),
+    source.indexOf("SavedAttachmentPresentationContent.displayName = 'SavedAttachmentPresentationContent'")
+  );
+  assert.match(savedAttachmentPresentationContent, /const SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER = '__mlv2SavedAttachmentPresentationContent'/);
+  assert.match(savedAttachmentPresentationContent, /const SavedAttachmentPresentationContent = \(\{ plugin, contentModule, contentProps \}\) => \{[\s\S]*const \[,\s*forceUpdate\] = Hooks\.useForceUpdate\(\);[\s\S]*getNativeDeletedAttachmentPresentationMessageForMessageContent\(sourceProps\.message\)[\s\S]*const messageId = String\(displayedMessage\?\.id \|\| ''\);[\s\S]*React\.useEffect\(/);
+  assert.match(savedAttachmentPresentationContent, /if \(!messageId\) return;[\s\S]*if \(callbacks\) callbacks\.add\(forceUpdate\);[\s\S]*plugin\._unregisterMessageCallback\.bind\(plugin, messageId, forceUpdate\)/);
+  assert.match(savedAttachmentPresentationContent, /return React\.createElement\(contentModule\.type, \{[\s\S]*\[\s*SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER\s*\]\s*:\s*true/);
+  const savedAttachmentTransitionState = source.slice(
+    source.indexOf('  constructor(meta) {'),
+    source.indexOf('  getName() {')
+  );
+  assert.match(savedAttachmentTransitionState, /this\._savedAttachmentPresentationTransitions = new Map\(\);/);
+  assert.match(savedAttachmentTransitionState, /this\._savedAttachmentPresentationTransitionTokens = new Map\(\);/);
+  assert.equal(
+    savedAttachmentTransitionState.includes("this._savedAttachmentPresentationTransitionSentinel = '\\u2063';"),
+    true
+  );
+  assert.doesNotMatch(savedAttachmentTransitionState, /__mlv2SavedAttachmentPresentationContentTransition/);
+  const stopStart = source.indexOf('  stop() {');
+  const stopEnd = source.indexOf('  checkVersionNewer(current, remote) {', stopStart);
+  const stopAndResetTransitionCleanup = source.slice(
+    stopStart,
+    stopEnd
+  );
+  assert.ok(stopStart >= 0 && stopEnd > stopStart);
+  assert.match(stopAndResetTransitionCleanup, /this\._cancelAllSavedAttachmentPresentationTransitions\?\.\(\);/);
+  const resetAttachmentPresentationState = source.slice(
+    source.indexOf('  resetSavedAttachmentPresentationState() {'),
+    source.indexOf('  handleLocalOnlyCachedAttachmentRenderingSetting(')
+  );
+  assert.match(resetAttachmentPresentationState, /this\._cancelAllSavedAttachmentPresentationTransitions\?\.\(\);/);
+  const transitionTargetLocator = source.slice(
+    source.indexOf('_findSavedAttachmentPresentationTransitionTarget(channelId, messageId) {'),
+    source.indexOf('_transitionTargetMatchesPlaceholder(target, placeholderContent) {')
+  );
+  assert.match(transitionTargetLocator, /const rowId = `chat-messages-\$\{safeChannelId\}-\$\{safeMessageId\}`;/);
+  assert.match(transitionTargetLocator, /const contentId = `message-content-\$\{safeMessageId\}`;/);
+  assert.match(transitionTargetLocator, /if \(!row\.contains\(messageContent\)\) return null;/);
+  assert.match(transitionTargetLocator, /return \{[\s\S]*row,[\s\S]*content: messageContent,[\s\S]*rowId,[\s\S]*contentId[\s\S]*\};/);
+  const remountSavedAttachmentPresentation = source.slice(
+    source.indexOf('  remountSavedAttachmentPresentationRecords(records) {'),
+    source.indexOf('  _installSavedAttachmentMediaErrorListener() {')
+  );
+  assert.match(remountSavedAttachmentPresentation, /const liveMessage = this\.messageStore\?\.getMessage\?\.\(channelId, messageId\);/);
+  assert.match(remountSavedAttachmentPresentation, /const storeContentMatchesPlaceholder = typeof liveMessage\?\.content === 'string'[\s\S]*liveMessage\.content === initialPresentation\.placeholderContent;/);
+  assert.match(remountSavedAttachmentPresentation, /const shouldPresent = this\.shouldPresentSavedMessage\?\.\(channelId, messageId\);/);
+  assert.match(remountSavedAttachmentPresentation, /const hasBlobOnlyPresentation = \([\s\S]*finalPlans\.every\(plan => plan\?\.action === 'blob'\)[\s\S]*blobOnlyFinalAttachments/);
+  const transitionBranchStart = remountSavedAttachmentPresentation.indexOf('if (keepsDiscordOwnedThreadMount) {');
+  const transitionBranchEnd = remountSavedAttachmentPresentation.indexOf(
+    "      } else {\n        this._cancelSavedAttachmentPresentationTransition",
+    transitionBranchStart
+  );
+  const threadTransitionBranch = remountSavedAttachmentPresentation.slice(transitionBranchStart, transitionBranchEnd);
+  assert.ok(transitionBranchStart >= 0 && transitionBranchEnd > transitionBranchStart);
+  assert.match(threadTransitionBranch, /this\._startSavedAttachmentPresentationTransition\(\s*channelId,\s*messageId,\s*transitionRollbackMessage\s*\);/);
+  assert.match(threadTransitionBranch, /const transitionKey = this\._getSavedAttachmentPresentationTransitionKey\(channelId, messageId\);/);
+  assert.match(threadTransitionBranch, /const transitionToken = transitionState\.token;/);
+  assert.match(threadTransitionBranch, /if \(this\._savedAttachmentPresentationTransitions\?\.get\(transitionKey\) !== transitionState[\s\S]*transitionState\.token !== transitionToken[\s\S]*transitionState\.cancelled\) return;/);
+  assert.match(threadTransitionBranch, /const shouldUseTwoPhaseTransition =[\s\S]*shouldPresent === true[\s\S]*_transitionTargetMatchesPlaceholder/);
+  const observerIndex = threadTransitionBranch.indexOf('transitionObserver.observe(transitionTarget.row');
+  const sentinelDispatchIndex = threadTransitionBranch.indexOf('content: this._savedAttachmentPresentationTransitionSentinel');
+  assert.ok(observerIndex >= 0 && sentinelDispatchIndex >= 0 && observerIndex < sentinelDispatchIndex);
+  assert.equal(threadTransitionBranch.includes("type: 'MESSAGE_UPDATE',"), true);
+  assert.equal(threadTransitionBranch.includes('content: this._savedAttachmentPresentationTransitionSentinel,'), true);
+  assert.equal(threadTransitionBranch.includes('attachments: [],'), true);
+  assert.doesNotMatch(threadTransitionBranch, /\[\s*this\._savedAttachmentPresentationTransitionSentinel\s*\]\s*:/);
+  assert.equal(
+    threadTransitionBranch.includes('const currentTransitionTarget = this._findSavedAttachmentPresentationTransitionTarget('),
+    true
+  );
+  assert.match(threadTransitionBranch, /if \(!currentRecord\?\.message \|\| !currentRecord\.delete_data\) \{[\s\S]*this\._cancelSavedAttachmentPresentationTransition\(channelId, messageId\);[\s\S]*return;[\s\S]*\}/);
+  assert.match(threadTransitionBranch, /this\.shouldPresentSavedMessage\?\.\(channelId, messageId\) !== true[\s\S]*this\._cancelSavedAttachmentPresentationTransition\(channelId, messageId\);[\s\S]*return;/);
+  assert.match(threadTransitionBranch, /const freshPresentation = getFinalPresentation\(currentRecord\.message\);/);
+  assert.match(threadTransitionBranch, /if \(!freshPresentation\.finalMessage[\s\S]*!freshPresentation\.hasBlobOnlyPresentation\s*\)[\s\S]*this\._cancelSavedAttachmentPresentationTransition\(channelId, messageId\);/);
+  assert.equal(threadTransitionBranch.includes('this.dispatcher?.dispatch?.({\n                type: \'MESSAGE_UPDATE\','), true);
+  assert.equal(threadTransitionBranch.includes('message: freshPresentation.finalMessage,'), true);
+  assert.match(threadTransitionBranch, /this\._savedAttachmentPresentationTransitions\.delete\(transitionKey\);/);
+  assert.doesNotMatch(threadTransitionBranch, /type: 'MESSAGE_DELETE'/);
+  assert.doesNotMatch(threadTransitionBranch, /setTimeout\(|requestAnimationFrame\(|setImmediate\(/);
+  const cancelSavedAttachmentPresentationTransition = source.slice(
+    source.indexOf('  _cancelSavedAttachmentPresentationTransition(channelId, messageId) {'),
+    source.indexOf('  _startSavedAttachmentPresentationTransition(channelId, messageId')
+  );
+  assert.match(cancelSavedAttachmentPresentationTransition, /state\.cancelled = true;/);
+  assert.match(cancelSavedAttachmentPresentationTransition, /const shouldRollback = state\.sentinelDispatched[\s\S]*rollbackMessage;/);
+  assert.match(cancelSavedAttachmentPresentationTransition, /const liveMessage = this\.messageStore\?\.getMessage\?\.\(state\.channelId, state\.messageId\);/);
+  assert.match(cancelSavedAttachmentPresentationTransition, /liveMessage\.content === this\._savedAttachmentPresentationTransitionSentinel/);
+  assert.match(cancelSavedAttachmentPresentationTransition, /this\.dispatcher\?\.dispatch\?\.\(\{\s*type: 'MESSAGE_UPDATE',[\s\S]*message: rollbackMessage,[\s\S]*ML2: true\s*\}\);/);
+  const rollbackDispatchIndex = cancelSavedAttachmentPresentationTransition.indexOf('message: rollbackMessage');
+  const guardedDeleteIndex = cancelSavedAttachmentPresentationTransition.indexOf(
+    'if (this._savedAttachmentPresentationTransitions?.get(key) === state)'
+  );
+  assert.ok(rollbackDispatchIndex >= 0 && guardedDeleteIndex > rollbackDispatchIndex);
+  const setSavedRecordHiddenState = source.slice(
+    source.indexOf('  setSavedRecordHiddenState(record, hidden) {'),
+    source.indexOf('  setSavedThreadHidden(record, hidden) {')
+  );
+  assert.match(setSavedRecordHiddenState, /this\._cancelSavedAttachmentPresentationTransition\(record\.message\.channel_id, record\.message\.id\);/);
+  const actions = source.slice(
+    source.indexOf('refreshCache: () => {'),
+    source.indexOf('refreshDateFormatting: () => {')
+  );
+  assert.match(actions, /this\._cancelAllSavedAttachmentPresentationTransitions\?\.\(\);/);
+
   const editHistoryGate = source.slice(
     source.indexOf('const EditHistoryContent ='),
     source.indexOf("EditHistoryContent.displayName = 'EditHistoryContent'")
@@ -697,7 +802,11 @@ test('date order applies to optional timestamps and forced logger dates', () => 
   assert.doesNotMatch(editHistoryGate, /Hooks\.useState/);
   assert.doesNotMatch(editHistoryGate, /isAttachmentLocallyCached\(/);
   assert.doesNotMatch(editHistoryGate, /currentRecord\.message\.(attachments|embeds|components)\s*=/);
-  assert.match(source, /if \(record\?\.edit_history && Array\.isArray\(ret\.props\.children\)\)[\s\S]*return React\.createElement\(EditHistoryContent,[\s\S]*originalElement: ret/);
+  assert.match(source, /Patcher\.before\(mcc, 'type',[\s\S]*repliedTextContent[\s\S]*getNativeDeletedAttachmentPresentationMessageForMessageContent\(message\)/);
+  assert.match(source, /const isSavedAttachmentPresentationReentry = Boolean\(props\?\.?\[SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER\]\);/);
+  assert.match(source, /if \(\s*!isSavedAttachmentPresentationReentry[\s\S]*return React\.createElement\(SavedAttachmentPresentationContent,/);
+  assert.match(source, /if \(record\?\.edit_history && Array\.isArray\(ret\?\.props\?\.children\)\)[\s\S]*return React\.createElement\(EditHistoryContent,/);
+  assert.match(source, /if \(record\?\.delete_data\?\.time && ret\)[\s\S]*return React\.createElement\(DeletedContentTooltip,[\s\S]*deletedAt: record\.delete_data\.time/);
   assert.doesNotMatch(source, /if \(showEditHistory\)/);
   assert.doesNotMatch(source, /const deletedChildren = ret\.props\.children\.slice\(\)/);
 });

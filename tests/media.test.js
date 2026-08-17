@@ -1867,6 +1867,137 @@ function setImmediatePromise() {
   return new Promise(resolve => setImmediate(resolve));
 }
 
+function createSavedAttachmentTransitionDom(channelId, messageId, placeholderContent) {
+  let content = {
+    id: `message-content-${messageId}`,
+    textContent: placeholderContent
+  };
+  const row = {
+    id: `chat-messages-${channelId}-${messageId}`,
+    contains(node) { return node === content; },
+    querySelector(selector) {
+      return selector === `#${content.id}` || selector === `[id="${content.id}"]`
+        ? content
+        : null;
+    }
+  };
+  const nodes = new Map([
+    [row.id, row],
+    [content.id, content]
+  ]);
+  return {
+    get content() {
+      return content;
+    },
+    replaceContentNode(text) {
+      content = {
+        ...content,
+        textContent: text
+      };
+      nodes.set(content.id, content);
+      return content;
+    },
+    document: {
+      getElementById(id) {
+        return nodes.get(id) || null;
+      }
+    },
+    row
+  };
+}
+
+function createSavedAttachmentTransitionObserverHarness() {
+  const observers = [];
+  class FakeMutationObserver {
+    constructor(callback) {
+      this.callback = callback;
+      this.disconnectCalls = 0;
+      this.disconnected = false;
+      this.observed = null;
+      observers.push(this);
+    }
+    observe(target, options) {
+      this.observed = { target, options };
+    }
+    disconnect() {
+      this.disconnectCalls += 1;
+      this.disconnected = true;
+    }
+    trigger() {
+      this.callback([]);
+    }
+  }
+  return { FakeMutationObserver, observers };
+}
+
+function createSavedAttachmentTransitionFixture(dispatches) {
+  let blobUrl = 'blob://cached/Synology_AUX.png';
+  const message = {
+    id: '710',
+    channel_id: '710',
+    content: '',
+    attachments: [{
+      id: '710',
+      filename: 'Synology_AUX.png',
+      url: 'https://cdn.discordapp.com/attachments/710/710/Synology_AUX.png'
+    }]
+  };
+  const messageStoreMessage = {
+    id: '710',
+    channel_id: '710',
+    content: '[image:Synology_AUX.png]',
+    attachments: [{
+      id: '710',
+      filename: 'Synology_AUX.png',
+      url: 'blob://store-existing/Synology_AUX.png'
+    }]
+  };
+  const record = {
+    delete_data: { time: 1, forum_thread_message_delete: true },
+    message
+  };
+  const plugin = createPlugin({
+    messageRecord: { '710': record },
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    messageStore: {
+      getMessage(channelId, messageId) {
+        if (String(channelId) === String(message.channel_id) && String(messageId) === String(message.id)) {
+          return messageStoreMessage;
+        }
+        return null;
+      }
+    },
+    tools: {
+      getChannel: () => ({ id: '710', type: 11 })
+    },
+    dispatcher: {
+      dispatch(action) {
+        dispatches.push(action);
+      }
+    },
+    invalidateChannelCache() {},
+    cacheChannelMessages() {},
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => '/cache/710.png',
+      get: () => blobUrl,
+      cleanUp() {}
+    }
+  });
+  plugin.shouldPresentSavedMessage = () => true;
+  return {
+    message,
+    messageStoreMessage,
+    plugin,
+    record,
+    setBlobUrl(nextBlobUrl) {
+      blobUrl = nextBlobUrl;
+    }
+  };
+}
+
 function waitForQueuedMediaTasks() {
   return new Promise(resolve => setTimeout(resolve, 10));
 }
@@ -3475,6 +3606,7 @@ test('attachment presentation remount coalesces channels and protects Discord-ow
     cacheChannelMessages: id => cacheRefreshes.push(id),
     imageCacheServerSimulator: { get: () => null }
   });
+  plugin.shouldPresentSavedMessage = () => true;
 
   const affectedChannels = plugin.remountSavedAttachmentPresentationRecords([
     ordinaryOne,
@@ -3575,6 +3707,323 @@ test('refreshCacheOnlyMessage dispatches latest blob presentation if cache state
   assert.equal(dispatches[0].message.content, '');
   assert.notStrictEqual(dispatches[0].message, message);
   assert.deepEqual(message, canonicalBefore);
+});
+
+test('protected attachment remount transitions through a hidden sentinel until the exact placeholder disappears', () => {
+  const dispatches = [];
+  const originalDocument = global.document;
+  const OriginalMutationObserver = global.MutationObserver;
+  const dom = createSavedAttachmentTransitionDom('710', '710', '[image:Synology_AUX.png]');
+  const observerHarness = createSavedAttachmentTransitionObserverHarness();
+  const fixture = createSavedAttachmentTransitionFixture(dispatches);
+  const canonicalBefore = structuredClone(fixture.message);
+  const storeBefore = structuredClone(fixture.messageStoreMessage);
+
+  try {
+    global.document = dom.document;
+    global.MutationObserver = observerHarness.FakeMutationObserver;
+    fixture.plugin.remountSavedAttachmentPresentationRecords(fixture.record);
+
+    assert.equal(dispatches.length, 1);
+    assert.equal(dispatches[0].type, 'MESSAGE_UPDATE');
+    assert.equal(dispatches[0].ML2, true);
+    assert.equal(dispatches[0].message.content, fixture.plugin._savedAttachmentPresentationTransitionSentinel);
+    assert.equal(fixture.plugin._savedAttachmentPresentationTransitionSentinel, '\u2063');
+    assert.equal(fixture.plugin._savedAttachmentPresentationTransitionSentinel.length, 1);
+    assert.equal(
+      fixture.plugin._savedAttachmentPresentationTransitionSentinel.trim(),
+      fixture.plugin._savedAttachmentPresentationTransitionSentinel
+    );
+    assert.doesNotMatch(fixture.plugin._savedAttachmentPresentationTransitionSentinel, /[A-Za-z0-9_]/);
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(dispatches[0].message, fixture.plugin._savedAttachmentPresentationTransitionSentinel),
+      false
+    );
+    assert.deepEqual(dispatches[0].message.attachments, []);
+    assert.equal(observerHarness.observers.length, 1);
+    assert.equal(fixture.plugin._savedAttachmentPresentationTransitions.size, 1);
+    assert.equal(dom.content.textContent, '[image:Synology_AUX.png]');
+
+    const hiddenSentinel = fixture.plugin.getNativeDeletedAttachmentPresentationMessageForMessageContent(
+      dispatches[0].message
+    );
+    assert.equal(hiddenSentinel.content, '');
+
+    fixture.setBlobUrl('blob://fresh/Synology_AUX.png');
+    const replacedContent = dom.content;
+    dom.replaceContentNode('[image:Synology_AUX.png]');
+    assert.notStrictEqual(dom.content, replacedContent);
+    dom.replaceContentNode('');
+    observerHarness.observers[0].trigger();
+
+    assert.equal(dispatches.length, 2);
+    assert.equal(dispatches[1].type, 'MESSAGE_UPDATE');
+    assert.equal(dispatches.some(action => action.type === 'MESSAGE_DELETE'), false);
+    assert.equal(dispatches[1].message.content, '');
+    assert.equal(dispatches[1].message.attachments.length, 1);
+    assert.equal(dispatches[1].message.attachments[0].url, 'blob://fresh/Synology_AUX.png');
+    assert.equal(fixture.plugin._savedAttachmentPresentationTransitions.size, 0);
+    assert.deepEqual(fixture.message, canonicalBefore);
+    assert.deepEqual(fixture.messageStoreMessage, storeBefore);
+  } finally {
+    global.document = originalDocument;
+    global.MutationObserver = OriginalMutationObserver;
+  }
+});
+
+test('protected attachment remount rolls back to store placeholder state when presentation stops being valid', () => {
+  const dispatches = [];
+  const originalDocument = global.document;
+  const OriginalMutationObserver = global.MutationObserver;
+  const dom = createSavedAttachmentTransitionDom('710', '710', '[image:Synology_AUX.png]');
+  const observerHarness = createSavedAttachmentTransitionObserverHarness();
+  const fixture = createSavedAttachmentTransitionFixture(dispatches);
+  const canonicalBefore = structuredClone(fixture.message);
+  const storeBefore = structuredClone(fixture.messageStoreMessage);
+
+  try {
+    global.document = dom.document;
+    global.MutationObserver = observerHarness.FakeMutationObserver;
+    fixture.plugin.remountSavedAttachmentPresentationRecords(fixture.record);
+    assert.equal(dispatches.length, 1);
+    const sentinelDispatch = dispatches[0];
+    assert.equal(sentinelDispatch.type, 'MESSAGE_UPDATE');
+    assert.equal(sentinelDispatch.message.content, fixture.plugin._savedAttachmentPresentationTransitionSentinel);
+    assert.equal(Object.prototype.hasOwnProperty.call(sentinelDispatch.message, fixture.plugin._savedAttachmentPresentationTransitionSentinel), false);
+    assert.equal(observerHarness.observers.length, 1);
+    assert.equal(fixture.plugin._savedAttachmentPresentationTransitions.size, 1);
+
+    fixture.plugin.shouldPresentSavedMessage = () => false;
+    fixture.messageStoreMessage.content = fixture.plugin._savedAttachmentPresentationTransitionSentinel;
+    dom.content.textContent = '';
+    observerHarness.observers[0].trigger();
+
+    assert.equal(dispatches.length, 2);
+    assert.equal(dispatches[1].type, 'MESSAGE_UPDATE');
+    assert.equal(dispatches[1].message.content, storeBefore.content);
+    assert.deepEqual(dispatches[1].message.attachments, storeBefore.attachments);
+    assert.equal(observerHarness.observers[0].disconnected, true);
+    assert.equal(fixture.plugin._savedAttachmentPresentationTransitions.size, 0);
+
+    observerHarness.observers[0].trigger();
+    assert.equal(dispatches.length, 2);
+    assert.deepEqual(fixture.message, canonicalBefore);
+    assert.equal(
+      fixture.messageStoreMessage.content,
+      fixture.plugin._savedAttachmentPresentationTransitionSentinel,
+      'the plugin must dispatch rollback instead of directly mutating MessageStore'
+    );
+    assert.deepEqual(fixture.messageStoreMessage.attachments, storeBefore.attachments);
+  } finally {
+    global.document = originalDocument;
+    global.MutationObserver = OriginalMutationObserver;
+  }
+});
+
+test('protected attachment remount falls back to an immediate Blob update without a mounted target', () => {
+  const dispatches = [];
+  const originalDocument = global.document;
+  const OriginalMutationObserver = global.MutationObserver;
+  const fixture = createSavedAttachmentTransitionFixture(dispatches);
+  const canonicalBefore = structuredClone(fixture.message);
+  const storeBefore = structuredClone(fixture.messageStoreMessage);
+
+  try {
+    global.document = { getElementById: () => null };
+    global.MutationObserver = createSavedAttachmentTransitionObserverHarness().FakeMutationObserver;
+    fixture.plugin.remountSavedAttachmentPresentationRecords(fixture.record);
+
+    assert.equal(dispatches.length, 1);
+    assert.equal(dispatches[0].type, 'MESSAGE_UPDATE');
+    assert.equal(dispatches[0].message.content, '');
+    assert.equal(dispatches[0].message.attachments.length, 1);
+    assert.equal(fixture.plugin._savedAttachmentPresentationTransitions.size, 0);
+    assert.deepEqual(fixture.message, canonicalBefore);
+    assert.deepEqual(fixture.messageStoreMessage, storeBefore);
+
+    const noObserverDispatches = [];
+    const noObserverFixture = createSavedAttachmentTransitionFixture(noObserverDispatches);
+    const mountedDom = createSavedAttachmentTransitionDom('710', '710', '[image:Synology_AUX.png]');
+    global.document = mountedDom.document;
+    global.MutationObserver = undefined;
+    noObserverFixture.plugin.remountSavedAttachmentPresentationRecords(noObserverFixture.record);
+    assert.equal(noObserverDispatches.length, 1);
+    assert.equal(noObserverDispatches[0].message.content, '');
+    assert.equal(noObserverFixture.plugin._savedAttachmentPresentationTransitions.size, 0);
+  } finally {
+    global.document = originalDocument;
+    global.MutationObserver = OriginalMutationObserver;
+  }
+});
+
+test('protected attachment transition remains inert when shouldPresentSavedMessage is false from the outset', () => {
+  const dispatches = [];
+  const originalDocument = global.document;
+  const OriginalMutationObserver = global.MutationObserver;
+  const dom = createSavedAttachmentTransitionDom('710', '710', '[image:Synology_AUX.png]');
+  const observerHarness = createSavedAttachmentTransitionObserverHarness();
+  const fixture = createSavedAttachmentTransitionFixture(dispatches);
+
+  try {
+    fixture.plugin.shouldPresentSavedMessage = () => false;
+    global.document = dom.document;
+    global.MutationObserver = observerHarness.FakeMutationObserver;
+    fixture.plugin.remountSavedAttachmentPresentationRecords(fixture.record);
+
+    assert.equal(dispatches.length, 0);
+    assert.equal(observerHarness.observers.length, 0);
+    assert.equal(fixture.plugin._savedAttachmentPresentationTransitions.size, 0);
+
+    fixture.plugin.__started = false;
+    fixture.plugin.stop();
+    assert.equal(dispatches.length, 0);
+    assert.equal(fixture.plugin._savedAttachmentPresentationTransitions.size, 0);
+  } finally {
+    global.document = originalDocument;
+    global.MutationObserver = OriginalMutationObserver;
+  }
+});
+
+test('newer protected attachment transitions and reset cancel stale observers', () => {
+  const dispatches = [];
+  const originalDocument = global.document;
+  const OriginalMutationObserver = global.MutationObserver;
+  const dom = createSavedAttachmentTransitionDom('710', '710', '[image:Synology_AUX.png]');
+  const observerHarness = createSavedAttachmentTransitionObserverHarness();
+  const fixture = createSavedAttachmentTransitionFixture(dispatches);
+
+  try {
+    global.document = dom.document;
+    global.MutationObserver = observerHarness.FakeMutationObserver;
+    fixture.plugin.remountSavedAttachmentPresentationRecords(fixture.record);
+    const staleObserver = observerHarness.observers[0];
+    fixture.plugin.remountSavedAttachmentPresentationRecords(fixture.record);
+    const currentObserver = observerHarness.observers[1];
+
+    assert.equal(dispatches.length, 2);
+    assert.equal(staleObserver.disconnected, true);
+    assert.equal(currentObserver.disconnected, false);
+    assert.equal(fixture.plugin._savedAttachmentPresentationTransitions.size, 1);
+
+    dom.content.textContent = '';
+    staleObserver.trigger();
+    assert.equal(dispatches.length, 2);
+
+    fixture.plugin.resetSavedAttachmentPresentationState();
+    assert.equal(currentObserver.disconnected, true);
+    assert.equal(fixture.plugin._savedAttachmentPresentationTransitions.size, 0);
+    currentObserver.trigger();
+    staleObserver.trigger();
+    assert.equal(dispatches.length, 2);
+
+    dom.content.textContent = '[image:Synology_AUX.png]';
+    fixture.plugin.remountSavedAttachmentPresentationRecords(fixture.record);
+    const stopObserver = observerHarness.observers[2];
+    assert.equal(stopObserver.disconnected, false);
+    const stopDispatches = dispatches.length;
+    fixture.plugin.__started = false;
+    fixture.plugin.stop();
+
+    assert.equal(stopObserver.disconnected, true);
+    assert.equal(fixture.plugin._savedAttachmentPresentationTransitions.size, 0);
+    stopObserver.trigger();
+    staleObserver.trigger();
+    assert.equal(dispatches.length, stopDispatches);
+  } finally {
+    global.document = originalDocument;
+    global.MutationObserver = OriginalMutationObserver;
+  }
+});
+
+test('MessageContent mount path applies latest deleted attachment presentation content', () => {
+  const canonicalMessage = {
+    id: '700',
+    channel_id: '700',
+    content: '',
+    attachments: [
+      {
+        id: '700',
+        filename: 'photo.png',
+        url: 'https://cdn.discordapp.com/attachments/700/photo.png'
+      }
+    ]
+  };
+  const messageRecord = {
+    '700': {
+      message: structuredClone(canonicalMessage),
+      delete_data: { time: 123 },
+      edit_history: [{ content: '[image:photo.png]', time: 123 }]
+    }
+  };
+  const messageRecordBefore = structuredClone(messageRecord['700'].message);
+  const plugin = createPlugin({
+    messageRecord,
+    messageRecordIds: new Set(Object.keys(messageRecord)),
+    deletedMessageRecord: { '700': ['700'] },
+    deletedMessageSet: new Map([['700', new Set(['700'])]]),
+    purgedMessageSet: new Map(),
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => '/cache/700.png',
+      get: () => 'blob://local/cached/photo-700.png'
+    }
+  });
+  plugin.shouldPresentSavedMessage = () => true;
+
+  const liveWithPlaceholder = {
+    id: '700',
+    channel_id: '700',
+    content: '[image:photo.png]',
+    attachments: []
+  };
+  const blobRendered = plugin.getNativeDeletedAttachmentPresentationMessageForMessageContent(liveWithPlaceholder);
+
+  assert.equal(blobRendered.content, '');
+  assert.notStrictEqual(blobRendered, liveWithPlaceholder);
+  assert.equal(liveWithPlaceholder.content, '[image:photo.png]');
+  assert.deepEqual(plugin.messageRecord['700'].message, messageRecordBefore);
+
+  plugin.settings.cacheAllImages = false;
+  plugin.settings.onlyRenderCachedAttachments = false;
+  const masterOffLive = {
+    id: '700',
+    channel_id: '700',
+    content: '',
+    attachments: []
+  };
+  const offRendered = plugin.getNativeDeletedAttachmentPresentationMessageForMessageContent(masterOffLive);
+
+  assert.equal(offRendered.content, '[image:photo.png]');
+  assert.equal(offRendered !== masterOffLive, true);
+  assert.equal(masterOffLive.content, '');
+
+  const unrelated = { id: 'not-tracked', channel_id: '700', content: 'normal row' };
+  const identityResult = plugin.getNativeDeletedAttachmentPresentationMessageForMessageContent(unrelated);
+  assert.strictEqual(identityResult, unrelated);
+  plugin.settings.cacheAllImages = true;
+  plugin.settings.onlyRenderCachedAttachments = true;
+  let setUsed = false;
+  const immutableMessage = {
+    id: '700',
+    channel_id: '700',
+    content: '[image:photo.png]',
+    set(key, value) {
+      if (key === 'content') {
+        setUsed = true;
+        return { ...immutableMessage, content: value };
+      }
+      return this;
+    }
+  };
+  const immutableResult = plugin.getNativeDeletedAttachmentPresentationMessageForMessageContent(immutableMessage);
+
+  assert.equal(setUsed, true);
+  assert.equal(immutableResult.content, '');
+  assert.notStrictEqual(immutableResult, immutableMessage);
+  assert.deepEqual(plugin.messageRecord['700'].message, messageRecordBefore);
 });
 
 test('native attachment media error ignores non-deleted message rows and wrong target URLs', () => {
