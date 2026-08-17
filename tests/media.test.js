@@ -3533,6 +3533,50 @@ test('refreshCacheOnlyMessage dispatches detached placeholder content when cache
   assert.deepEqual(message, canonicalBefore);
 });
 
+test('refreshCacheOnlyMessage dispatches latest blob presentation if cache state becomes available before callback', async () => {
+  const dispatches = [];
+  const state = {
+    hasBlob: false
+  };
+  const plugin = createPlugin({
+    dispatcher: {
+      dispatch(action) {
+        dispatches.push(action);
+      }
+    },
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: true
+    },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      get: () => (state.hasBlob ? 'blob://local/cached/image-700.png' : null),
+      _resolveImagePath: () => '/cache/700.png'
+    }
+  });
+  const message = {
+    id: '700',
+    channel_id: '700',
+    content: '',
+    attachments: [{ id: '700', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/700/photo.png' }]
+  };
+  const canonicalBefore = structuredClone(message);
+
+  plugin.refreshCacheOnlyMessage(message);
+
+  state.hasBlob = true;
+
+  await setImmediatePromise();
+
+  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches[0].type, 'MESSAGE_UPDATE');
+  assert.equal(dispatches[0].message.attachments.length, 1);
+  assert.equal(dispatches[0].message.attachments[0].url, 'blob://local/cached/image-700.png');
+  assert.equal(dispatches[0].message.content, '');
+  assert.notStrictEqual(dispatches[0].message, message);
+  assert.deepEqual(message, canonicalBefore);
+});
+
 test('native attachment media error ignores non-deleted message rows and wrong target URLs', () => {
   const dispatches = [];
   const plugin = createPlugin({

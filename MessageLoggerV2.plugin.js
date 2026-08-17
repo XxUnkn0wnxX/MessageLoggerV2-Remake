@@ -10168,9 +10168,9 @@ module.exports = class MessageLoggerV2 {
     }
   }
   refreshCacheOnlyMessage(message) {
-    const filtered = this.getNativeDeletedAttachmentPresentationMessage(message);
-    if (filtered === message) return;
     setImmediate(() => {
+      const filtered = this.getNativeDeletedAttachmentPresentationMessage(message);
+      if (filtered === message) return;
       this.dispatcher.dispatch({
         type: 'MESSAGE_UPDATE',
         message: filtered,

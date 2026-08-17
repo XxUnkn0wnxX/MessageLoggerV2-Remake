@@ -29,18 +29,18 @@ This file is both the implementation checklist and the handoff record.
 - **Root rollout record:**
   `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T11-07-23-01a00d42-4986-7971-94de-11f09f6630d1.jsonl`
 - **Working branch:** `develop`
-- **Verified pre-commit base:** Stage 3 rendering commit
-  `ed59642aa6c9c45af8865846f3efd3a8861efbf9`; the four-file follow-up containing
-  this entry is the next `develop` commit. Nothing has been pushed.
-- **Verified worktree:** the Stage 3 timing correction modifies only
-  `MessageLoggerV2.plugin.js`, `tests/media.test.js`,
-  `tests/live-mount-settings.test.js`, and this checklist.
+- **Verified HEAD:** Stage 3 cache-completion commit
+  `ca1c127ddda93824c63c8da129c3f1d29d003a03`; `develop` is five commits ahead
+  of `origin/develop` and nothing has been pushed.
+- **Verified worktree:** clean immediately after `ca1c127`; this checklist is
+  now modified to track the forum transition-flicker follow-up. Disposable trace
+  work remains ignored under `tmp/`.
 - **Baseline:** `npm test` passed `471/471` before this checklist was created.
 - **Checklist verification:** the Stage 2 parent rerun of `npm test` passes
   `476/476`; the checklist new-file whitespace check is clean.
-- **Live parity:** verified for the correction build. Repository and installed
-  plugin SHA-256 both equal
-  `551690965624202ce67d0dfbe6bc032b3643c396116dcd0fe140751c47cd9770`.
+- **Live parity:** verified for the forum timing correction. Repository and
+  installed plugin SHA-256 both equal
+  `32a611291cb964268f79f0cb813f0ba3529f914ca81236b00e928edc6704aba0`.
 - **Implementation state:** Stage 1 runtime tracing and Stage 2 persistence are
   complete. Stage 3 now has full-message remount refresh plus one shared
   attachment-presentation order across native mounts, Logger rows, deleted
@@ -52,14 +52,23 @@ This file is both the implementation checklist and the handoff record.
   write. Its live gate is accepted; forum mounts can show the classified
   placeholder for a moment during an initial image/attachment deletion or a
   **Render & Cache media** Off-to-On transition before the cached Blob replaces
-  it. Stage 4 still separately owns external opening.
-- **Runtime-trace state:** Stage 1 and the later native-mount fallback trace are
-  complete and cleaned up. The exact helper symlinks, generated reports, and
-  ignored helper sources were removed after their evidence was recorded.
+  it. The user accepted the functional result but requested one final
+  trace-first Stage 3 follow-up. `refreshCacheOnlyMessage` now resolves its
+  detached presentation inside the already scheduled callback, so a same-turn
+  pre-cache promotion is observed before the one update is dispatched. Stage 4
+  still separately owns external opening. The user confirmed the initial forum
+  deletion no longer flickers. A separate master Off-to-On transition lag or
+  flicker remains and must be traced after this accepted correction is committed.
+- **Runtime-trace state:** The forum-media timing trace captured both requested
+  transitions and its live symlink has been removed. Its valid evidence is
+  recorded below. The helper itself contained a repeated `idSource` reference
+  error and over-captured data URLs into a 229 MB report, so that trace-induced
+  settings stall is not attributed to MessageLogger. After the compact evidence
+  was integrated, the ignored helper source and generated report were removed.
 - **Current gate:** Parent syntax/check passes. The current combined media,
-  live-mount-setting, and source-contract suites pass `192/192`. `npm test`
+  live-mount-setting, and source-contract suites pass `193/193`. `npm test`
   resolves exactly to `node --check MessageLoggerV2.plugin.js && node --test
-  tests/*.test.js` and passes `511/511`; `git diff --check` is clean. Runtime
+  tests/*.test.js` and passes `512/512`; `git diff --check` is clean. Runtime
   evidence proved the target direct CDN URL is live while its media proxy is
   dead, and the saved legacy record contains that proxy in both canonical URL
   fields. The implementation therefore derives the equivalent CDN URL only in
@@ -67,22 +76,34 @@ This file is both the implementation checklist and the handoff record.
   exact saved message. The committed build passes those gates, but fresh live
   uploads exposed a missing cache-completion refresh in local-only mode. The
   correction now supplies that exact remount after `PROMOTE` or a confirmed
-  write. The user confirmed it works without a setting toggle or channel
-  change; the only reported residual is a very brief placeholder transition in
-  forum mounts. No new MessageLogger exception accompanies the accepted build.
+  write. The timing trace proved initial forum deletion computes a placeholder
+  clone before pre-cache promotion, dispatches it at `09:08:59.069`, and then
+  dispatches the cached Blob at `09:08:59.077`. The Off-to-On handler instead
+  completed normally and dispatched the Blob directly. No new MessageLogger
+  exception accompanies the accepted build; the repeated runtime exception was
+  isolated to the disposable helper. The narrow timing correction and its
+  deterministic late-Blob regression now pass every local gate; live sync and
+  the focused forum deletion retest passed. The master-toggle transition still
+  visibly lags/flickers, but it is not part of the now-accepted stale deletion
+  clone correction.
 - **Checklist state:** include this file in every user-confirmed stage commit;
   archive it only after implementation, validation, and user acceptance are
   complete.
 - **Change-control state:** `ed59642` is the accepted Stage 3 checkpoint. The
   narrow local-cache-completion correction passed its parent and live gates,
-  and the user explicitly authorized its follow-up commit. Version bumps,
-  changelog edits, pushes, merges, and releases remain unauthorized.
+  and its follow-up is committed as `ca1c127`. The user requested tracing and a
+  final forum-flicker fix before Stage 4; commit that correction only after its
+  automated and live gates pass. Version bumps, changelog edits, pushes,
+  merges, and releases remain unauthorized.
 
 ### Exact next action
 
-After the four-file Stage 3 follow-up containing this entry is committed, pause.
-Stage 4 may begin only after a new explicit user instruction. Do not push,
-merge, bump release metadata, or begin the external-open implementation.
+Commit the accepted deletion-timing correction (`MessageLoggerV2.plugin.js`,
+`tests/media.test.js`, and this checklist) without pushing. Only after that
+checkpoint, prepare a new minimal master-toggle trace that does not patch the
+high-frequency presentation planner or serialize DOM data URLs. Determine
+whether the residual Off-to-On lag is Blob revocation/recreation, image decode,
+or the broad cache/UI refresh before changing tracked source again.
 
 ### Resume procedure
 
@@ -1509,3 +1530,75 @@ full setting matrix in every channel type.
   forum/thread promotion path.
 - Commit only the plugin, two regression files, and this checklist. Stage 4
   remains paused and no push or release action is authorized.
+
+### 2026-08-17 - Forum transition-flicker follow-up opened
+
+- The user requested one final Stage 3 polish pass before Stage 4. The forum
+  image eventually renders correctly, but the exact classified placeholder is
+  briefly visible on both an initial attachment deletion and the main media
+  gate's Off-to-On transition.
+- Keep the investigation trace-first. Time saved-presentation plans, Logger
+  remount methods, ML2 dispatcher events, cache promotion, MessageStore state,
+  and the DOM transition. Do not infer a fix from the final successful Blob.
+- Preserve the committed source-selection rules, text mounting, forum/thread
+  promotion, schema, persistence, and external-open boundary. ImageUtilities
+  may remain enabled because this trace targets saved-message presentation and
+  DOM timing rather than its viewer/context-menu changes.
+
+### 2026-08-17 - Forum transition-flicker trace completed
+
+- The trace captured forum message `1538837015364108309` with attachment
+  `1538837015187951656`. On deletion, `refreshCacheOnlyMessage` computed the
+  placeholder before the local pre-cache promotion completed. Promotion then
+  succeeded, but the previously captured placeholder still dispatched at
+  `09:08:59.069`; the Blob remount dispatched at `09:08:59.077`.
+- The DOM subsequently showed the classified label alongside the loading Blob
+  before settling to the Blob-only presentation. This proves the flicker is an
+  intermediate detached presentation clone, not forum/thread promotion or a
+  failed local renderer.
+- The master Off transition correctly dispatched the placeholder. The matching
+  On transition completed normally and dispatched the existing Blob directly;
+  it did not generate a second placeholder plan after enabling.
+- The disposable trace helper itself threw `ReferenceError: idSource is not
+  defined` from its after-hook and serialized data URLs into a 229 MB report,
+  which explains the settings stall seen during tracing. Its exact live symlink
+  was unlinked immediately; after recording the evidence, its ignored source
+  and generated report were removed. No tracked MessageLogger source caused
+  that error.
+- The narrow implementation target is therefore only evaluation timing inside
+  `refreshCacheOnlyMessage`. Do not alter forum promotion, text mounting,
+  source ordering, persistence, settings, or Stage 4 external-open behavior.
+
+### 2026-08-17 - Forum deletion presentation timing corrected locally
+
+- `refreshCacheOnlyMessage` now calls
+  `getNativeDeletedAttachmentPresentationMessage` inside its existing
+  `setImmediate` callback. It still emits at most one detached
+  `MESSAGE_UPDATE`, but it observes a pre-cache promotion that completed before
+  dispatch instead of sending a stale clone.
+- Added a deterministic regression proving that a Blob which becomes available
+  after `refreshCacheOnlyMessage` is called but before its callback runs is the
+  presentation dispatched. The existing master-Off placeholder regression is
+  unchanged and still passes.
+- Parent validation passed: `npm run check`; the combined
+  `tests/media.test.js`, `tests/live-mount-settings.test.js`, and
+  `tests/source-contracts.test.js` gate at `193/193`; bounded `npm test` at
+  `512/512`; and `git diff --check`.
+- Only `MessageLoggerV2.plugin.js` was synced live. Repository/live SHA-256 is
+  `32a611291cb964268f79f0cb813f0ba3529f914ca81236b00e928edc6704aba0`;
+  BetterDiscord hot-reloaded it without a new MessageLogger exception.
+- Changed scope remains `MessageLoggerV2.plugin.js`, `tests/media.test.js`, and
+  this checklist. The smallest forum runtime retest is next; do not commit
+  until the user confirms that gate.
+
+### 2026-08-17 - Forum deletion timing live gate accepted
+
+- With ImageUtilities enabled, the user confirmed a fresh forum image deletion
+  now moves to the cached Blob without the previous placeholder flash.
+- The master **Render & Cache media** Off-to-On transition still has a visible
+  flicker or lag. The earlier trace proved that transition selected the Blob
+  directly, so it remains a separate lifecycle/render-timing issue rather than
+  a reason to reopen the accepted stale deletion clone fix.
+- The user explicitly requested committing this confirmed correction before a
+  new master-toggle trace is prepared. Commit only the plugin, its one media
+  regression file, and this checklist; do not push and do not begin Stage 4.
