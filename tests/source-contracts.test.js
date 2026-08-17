@@ -21,20 +21,36 @@ function readDefaultSettings() {
 }
 
 test('plugin metadata and updater remain pointed at the maintained main branch', () => {
-  assert.match(source, /@version 2\.8\.2\.18/);
+  assert.match(source, /@version 2\.8\.2\.19/);
   assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   const changesBlock = source.match(/  getChanges\(\) \{([\s\S]*?)\n  \}\n  async checkNewUpdate/);
   assert.ok(changesBlock, 'getChanges block was not found');
   assert.deepEqual(
-    [...changesBlock[1].matchAll(/title: '([^']+)'/g)].map(([, title]) => title),
-    ['Reliable schema-update detection', 'Critical BetterDiscord compatibility fix', 'Trimmer toast master switch', 'Trimmer lifecycle toasts', 'Precise media size limits', 'Media settings follow-up']
+    [...changesBlock[1].matchAll(/title: '([^']+)'[\s\S]*?type: '([^']+)'[\s\S]*?items: \[\n\s*'([^']+)'/g)].map(([, title, type, item]) => ({ title, type, item })),
+    [
+      {
+        title: 'Unified saved attachment rendering',
+        type: 'fixed',
+        item: 'Saved image, video, audio, TXT, Markdown, and PDF attachments now use one remote-first policy: CDN -> distinct proxy -> cached local file -> exact filename placeholder; local-only attachments use cached local file -> placeholder, avoiding duplicate or incorrect media mounts.'
+      },
+      {
+        title: 'Native Logger media previews',
+        type: 'improved',
+        item: 'Logger viewer now reuses guarded Discord-native audio, TXT, Markdown, and PDF presentation, remains available when live saved-message mounting is disabled, and isolates each attachment in mixed batches.'
+      },
+      {
+        title: 'Open Attachment routing',
+        type: 'improved',
+        item: 'Every exact-owned saved attachment now routes a usable CDN/proxy URL through the OS default browser or an existing cached physical file through the OS default application; it never externalizes a Blob URL and never guesses the first batch sibling.'
+      },
+      {
+        title: 'Immediate media setting transitions',
+        type: 'fixed',
+        item: 'Render & Cache media and Only render locally cached attachments now refresh saved live mounts and Logger views immediately, preserve child values, cancel stale cache work, and keep the Logger viewer independent of the live-mount display toggle.'
+      }
+    ]
   );
-  assert.match(changesBlock[1], /title: 'Reliable schema-update detection'[\s\S]*type: 'fixed'[\s\S]*Reordered JSON object keys no longer trigger a misleading logger data schema-update notice; real data or schema changes, including array-order changes, are still detected normally\./);
-  assert.match(changesBlock[1], /title: 'Critical BetterDiscord compatibility fix'[\s\S]*type: 'fixed'[\s\S]*Fixed a critical compatibility failure with BetterDiscord's current chained Patcher\.instead behavior that could trigger _waitQueue errors and repeated GatewaySocket reset\/reconnect loops while MessageLoggerV2 was enabled\./);
-  assert.match(changesBlock[1], /title: 'Trimmer toast master switch'[\s\S]*type: 'fixed'[\s\S]*Show trimmer toasts now controls every trimmer notice, including startup\/timer, limit-change, warning, phase, and error toasts; TIMER\/TRIM console lines and error logs remain visible while it is Off\./);
-  assert.match(changesBlock[1], /title: 'Precise media size limits'[\s\S]*type: 'improved'[\s\S]*Live\/pre-cache GB caps and per-file MB limits now accept whole numbers or up to two decimal places and use decimal SI units to align with Finder; blank or 0 remains unlimited\./);
-  assert.match(changesBlock[1], /title: 'Media settings follow-up'[\s\S]*type: 'fixed'[\s\S]*Age and other whole-number settings now reject decimal, scientific, and hexadecimal syntax, and cached-file deletion notices keep the View files action available for five seconds\./);
 });
 
 test('all fresh-install settings defaults remain stable', () => {
@@ -356,14 +372,15 @@ test('the BdApi notification setting omits the outdated basic qualifier', () => 
   assert.doesNotMatch(source, /BdApi basic notifications/i);
 });
 
-test('the current changelog covers trimmer lifecycle toast behavior', () => {
+test('the current changelog covers the accepted saved-attachment release', () => {
   const changesBlock = source.match(/  getChanges\(\) \{([\s\S]*?)\n  \}\n  async checkNewUpdate/);
   assert.ok(changesBlock, 'getChanges block was not found');
-  assert.match(changesBlock[1], /type: 'improved'/);
-  assert.match(changesBlock[1], /both age and GB limits are enabled for one cache root, the age \+ GB size phases use one combined start toast and one combined end toast/);
-  assert.match(changesBlock[1], /a single enabled limit keeps its individual phase start\/end toasts/);
-  assert.match(changesBlock[1], /blank or 0 remains unlimited and silent/);
-  assert.match(changesBlock[1], /individual age\/GB phase lines remain visible in the console/);
+  assert.match(changesBlock[1], /CDN -> distinct proxy -> cached local file -> exact filename placeholder/);
+  assert.match(changesBlock[1], /guarded Discord-native audio, TXT, Markdown, and PDF presentation/);
+  assert.match(changesBlock[1], /OS default browser[\s\S]*OS default application/);
+  assert.match(changesBlock[1], /never externalizes a Blob URL and never guesses the first batch sibling/);
+  assert.match(changesBlock[1], /keep the Logger viewer independent of the live-mount display toggle/);
+  assert.doesNotMatch(changesBlock[1], /Trimmer lifecycle toasts|Reliable schema-update detection/);
 });
 
 test('settings documentation retains audited group order and current UI labels', () => {
@@ -620,6 +637,14 @@ test('all rich UI state labels share the native positive and danger colors', () 
     '<strong style="color: var(--status-danger);">Off</strong>'
   );
   assert.equal((source.match(/Legacy control locked ',\s*this\.createSettingStateLabel\(true\)/g) || []).length, 2);
+  const cacheAllAttachmentTypesStart = source.indexOf('name: "Cache all attachment types"');
+  const cacheAllAttachmentTypesId = source.indexOf("id: 'newSaveAllFileTypes'", cacheAllAttachmentTypesStart);
+  assert.ok(cacheAllAttachmentTypesStart >= 0);
+  assert.ok(cacheAllAttachmentTypesId > cacheAllAttachmentTypesStart);
+  assert.match(
+    source.slice(cacheAllAttachmentTypesStart, cacheAllAttachmentTypesId),
+    /createSettingStateLabel\(true\)[\s\S]*createSettingStateLabel\(false\)/
+  );
 });
 
 test('date order applies to optional timestamps and forced logger dates', () => {
@@ -861,7 +886,7 @@ test('saved restored video ownership projects MessageAccessories.render before a
     source.indexOf('  renderSavedAttachmentMessageAccessories(thisObject, args, original) {')
   );
   assert.match(projection, /const displayedPlans = this\.getSavedAttachmentPresentationPlans\(message, presentationOptions\)/);
-  assert.match(projection, /message\.attachments\.filter\(\(_, index\) => displayedPlans\[index\]\?\.mediaType !== 'video'\)/);
+  assert.match(projection, /displayedAttachments\.filter\(\(_, index\) => displayedPlans\[index\]\?\.mediaType !== 'video'\)/);
   assert.doesNotMatch(projection, /loggerVideoKeys|getSavedAttachmentPresentationIdentityKeys/);
   assert.match(
     projection,
@@ -901,14 +926,14 @@ test('saved restored video ownership projects MessageAccessories.render before a
   );
 });
 
-test('document Blob plans stay bounded while native MessageAccessories projection remains video-only', () => {
+test('renderer Blob plans accept generic attachments while native MessageAccessories projection remains video-only', () => {
   const cacheBlobSlice = source.slice(
-    source.indexOf('"get": (path) => {'),
-    source.indexOf('"getSettings":', source.indexOf('"get": (path) => {'))
+    source.indexOf('"get": (path, canonicalAttachment = null) => {'),
+    source.indexOf('"getSettings":', source.indexOf('"get": (path, canonicalAttachment = null) => {'))
   );
   assert.match(
     cacheBlobSlice,
-    /new Blob\(\[arrayBuffer\],\s*\{\s*type:\s*this\.getCachedAttachmentMimeType\(parsedFile\.ext\)\s*\}\)/
+    /"get": \(path, canonicalAttachment = null\) => \{[\s\S]*new Blob\(\[arrayBuffer\],\s*\{\s*type:\s*this\.getCachedAttachmentMimeType\(parsedFile\.ext, canonicalAttachment\)\s*\}\)/
   );
   assert.doesNotMatch(cacheBlobSlice, /type:\s*['"]image\/['"]\s*\+/);
 
@@ -918,27 +943,24 @@ test('document Blob plans stay bounded while native MessageAccessories projectio
   );
   assert.match(planSlice, /attachment\?\.contentType/);
   assert.match(planSlice, /attachment\?\.originalContentType/);
-  assert.match(planSlice, /isPlainTextAttachment\(source\)/);
-  assert.match(planSlice, /isPdfAttachment\(source\)/);
-  assert.match(planSlice, /mediaType[\s\S]*['"]text['"][\s\S]*['"]pdf['"][\s\S]*['"]attachment['"]/);
-  assert.match(planSlice, /!isImage && !isVideo && !isAudio && !isText && !isPdf/);
-  assert.match(planSlice, /if \(!allowBlob[\s\S]*!isImage && !isVideo && !isAudio && !isText && !isPdf/);
+  assert.match(planSlice, /const mediaType = isImage[\s\S]*isVideo[\s\S]*isAudio[\s\S]*: 'attachment';/);
+  assert.match(planSlice, /this\.imageCacheServerSimulator\?\.get\?\.\(cacheUrl, attachment\)/);
+  assert.doesNotMatch(planSlice, /isPlainTextAttachment\(source\)|isPdfAttachment\(source\)/);
+  assert.doesNotMatch(planSlice, /newSaveAllFileTypes/);
+  assert.doesNotMatch(planSlice, /!isImage && !isVideo && !isAudio/);
 
   const refreshSlice = source.slice(
     source.indexOf('  scheduleSavedAttachmentPresentationRefresh(messageId, attachmentId) {'),
     source.indexOf('  remountSavedAttachmentPresentationRecords(records) {')
   );
-  assert.match(refreshSlice, /plan\.mediaType !== 'image'/);
-  assert.match(refreshSlice, /plan\.mediaType !== 'video'/);
-  assert.match(refreshSlice, /plan\.mediaType !== 'audio'/);
-  assert.match(refreshSlice, /plan\.mediaType !== 'text'/);
-  assert.match(refreshSlice, /plan\.mediaType !== 'pdf'/);
+  assert.match(refreshSlice, /if \(!plan \|\| plan\.action !== 'blob'\) return;/);
+  assert.doesNotMatch(refreshSlice, /plan\.mediaType/);
 
   const projection = source.slice(
     source.indexOf('  getSavedAttachmentMessageContentPresentationMessage(message) {'),
     source.indexOf('  renderSavedAttachmentMessageAccessories(thisObject, args, original) {')
   );
-  assert.match(projection, /message\.attachments\.filter\(\(_, index\) => displayedPlans\[index\]\?\.mediaType !== 'video'\)/);
+  assert.match(projection, /displayedAttachments\.filter\(\(_, index\) => displayedPlans\[index\]\?\.mediaType !== 'video'\)/);
   assert.doesNotMatch(projection, /displayedPlans\[index\].*mediaType === '(?:text|pdf)'/);
 });
 
@@ -1155,6 +1177,78 @@ test('deleted markdown tint excludes Components V2 markdown containers', () => {
     false
   );
   assert.equal(deletedTint.includes('.${this.classes.container} *'), false);
+});
+
+test('deleted text and background styles retain the configured color with red only as fallback', () => {
+  const deletedStyles = source.slice(
+    source.indexOf('this.style.css,'),
+    source.indexOf('.theme-dark .${this.classes.markup}.${this.style.edited}')
+  );
+  assert.match(
+    deletedStyles,
+    /color: \$\{this\.settings\.deletedMessageColor \|\| "#f04747"\} !important;/
+  );
+  assert.match(
+    deletedStyles,
+    /html #app-mount \.\$\{this\.style\.deletedAlt\} \{\s*background-color: \$\{this\.settings\.deletedMessageColor \? hexToRgb\(this\.settings\.deletedMessageColor, 0\.15\) : "rgba\(240, 71, 71, 0\.15\)"\} !important;/
+  );
+  assert.match(
+    deletedStyles,
+    /html #app-mount \.\$\{this\.style\.deletedAlt\}:hover, html #app-mount \.\$\{this\.style\.deletedAlt\}\.\$\{this\.classes\.selected\} \{\s*background-color: \$\{this\.settings\.deletedMessageColor \? hexToRgb\(this\.settings\.deletedMessageColor, 0\.1\) : "rgba\(240, 71, 71, 0\.1\)"\} !important;/
+  );
+  assert.doesNotMatch(
+    deletedStyles,
+    /html #app-mount \.\$\{this\.style\.deletedAlt\}(?::hover|\.\$\{this\.classes\.selected\})? \{\s*color:/
+  );
+});
+
+test('deleted attachment renderer tint stays exact-row owned and renderer-driven', () => {
+  const styleInit = source.slice(
+    source.indexOf("this.style.deleted = 'ml2-deleted';"),
+    source.indexOf("this.style.deletedAlt =")
+  );
+  assert.match(styleInit, /this\.style\.deletedAttachmentRenderer = this\.obfuscatedClass\('ml2-deleted-attachment-renderer'\)/);
+
+  const deletedTint = source.slice(
+    source.indexOf('this.style.css,'),
+    source.indexOf('html #app-mount [data-item-id].${this.style.deleted}')
+  );
+  assert.doesNotMatch(
+    deletedTint,
+    /deletedAttachmentRenderer[\s\S]*color: \$\{this\.settings\.deletedMessageColor/
+  );
+  assert.doesNotMatch(deletedTint, /deletedAlt[\s\S]*deletedAttachmentRenderer/);
+
+  const mediaTint = source.slice(
+    source.indexOf('.theme-dark .${this.style.deleted}:not(:hover) img:not'),
+    source.indexOf('.theme-dark .${this.style.tab}')
+  );
+  assert.match(
+    mediaTint,
+    /\.theme-dark \.\$\{this\.style\.deleted\}:not\(:hover\) \.\$\{this\.style\.deletedAttachmentRenderer\}[\s\S]*filter: grayscale\(100%\) !important;/
+  );
+  assert.match(
+    mediaTint,
+    /\.\$\{this\.style\.deleted\} \.\$\{this\.style\.deletedAttachmentRenderer\}[\s\S]*transition: filter 0\.3s !important;/
+  );
+
+  const tintOwnership = source.slice(
+    source.indexOf('const clearDeletedAttachmentRendererMarkers ='),
+    source.indexOf('const findLowestCommonAncestor =')
+  );
+  assert.match(tintOwnership, /targetId = `message-accessories-\$\{messageId\}`/);
+  assert.match(tintOwnership, /querySelectorAll\?\.\('\[id\]'\)[\s\S]*node\?\.id === targetId[\s\S]*wrapper\.contains\?\.\(target\)/);
+  assert.match(tintOwnership, /clearDeletedAttachmentRendererMarkers\(wrapper, target\)/);
+  assert.match(tintOwnership, /node === keep \|\| !node\?\.classList\?\.contains\?\.\(marker\)/);
+  assert.match(tintOwnership, /!marker \|\| !shouldTint \|\| this\.settings\.useAlternativeDeletedStyle/);
+  assert.doesNotMatch(tintOwnership, /isImage|isVideo|isAudio|filename|content_type|\.mp4|\.pdf/);
+
+  const observer = source.slice(
+    source.indexOf('const tintObserver = new MutationObserver'),
+    source.indexOf('  return () => {', source.indexOf('const tintObserver = new MutationObserver'))
+  );
+  assert.match(observer, /messageNode\) tintMessageNode\(messageNode\)/);
+  assert.match(observer, /resolvedMessageNode\) tintMessageNode\(resolvedMessageNode\)/);
 });
 
 test('logger location titles reserve warning color for structurally deleted roots', () => {
@@ -1835,11 +1929,12 @@ test('populateParent sources logger media rows from saved attachment presentatio
   assert.match(viewer, /plan\?\.action === 'remote' \|\| plan\?\.action === 'blob'/);
   assert.match(viewer, /renderedAttachment\._ml2PresentationAction = plan\.action;/);
   assert.match(viewer, /renderedAttachment\._ml2PresentationLabel = typeof plan\?\.label === 'string' \? plan\.label : null;/);
+  assert.match(viewer, /renderedAttachment\._ml2PresentationUnavailableLabel = typeof plan\?\.unavailableLabel === 'string'/);
   assert.match(viewer, /renderedAttachment\._ml2PresentationMediaType = typeof plan\?\.mediaType === 'string'/);
   assert.match(viewer, /if \(!renderedAttachment\.filename && plan\.filename\) \{\s*renderedAttachment\.filename = plan\.filename;\s*\}/);
   assert.match(viewer, /renderedAttachment\.proxy_url = plan\.url;/);
   assert.match(viewer, /const presentationAction = attachment\._ml2PresentationAction;/);
-  assert.match(viewer, /const presentationLabel = attachment\._ml2PresentationLabel;/);
+  assert.match(viewer, /const getPresentationFallbackLabel = \(plan = null, mediaAttachment = null, sourceAttachment = null\) =>/);
   assert.match(viewer, /const isCached = presentationAction\s*\?[\s\S]*presentationAction === 'blob'/);
   assert.match(viewer, /const linkUrl = plan\.action === 'remote' \? \(plan\.url \|\| attachment\.url \|\| attachment\.proxy_url\)/);
   assert.match(viewer, /const getLoggerAttachmentEntry = \(mediaAttachment\) =>/);
@@ -1848,9 +1943,8 @@ test('populateParent sources logger media rows from saved attachment presentatio
   assert.match(viewer, /const appendUnavailableAttachmentPlaceholder = \(label, attachment = null\) =>/);
   assert.match(viewer, /markLoggerAttachmentTarget\(placeholder, attachment\);/);
   assert.match(viewer, /if \(\(plan\.action === 'placeholder' \|\| plan\.action === 'omit'\) && safePlanLabel\) \{\s*appendUnavailableAttachmentPlaceholder\(safePlanLabel, attachment\);/);
-  assert.match(viewer, /createUnavailableAttachmentPlaceholder\(\s*presentationLabel \|\| attachment\.filename,\s*getLoggerAttachmentEntry\(attachment\)\?\.attachment \|\| attachment\s*\)/);
-  assert.match(viewer, /attemptToUseCachedImage\([\s\S]*presentationLabel[\s\S]*\);/);
-  assert.match(viewer, /attemptToUseCachedVideo\([\s\S]*presentationLabel[\s\S]*\);/);
+  assert.match(viewer, /createUnavailableAttachmentPlaceholder\(\s*getPresentationFallbackLabel\(null, attachment, getLoggerAttachmentEntry\(attachment\)\?\.attachment\),\s*getLoggerAttachmentEntry\(attachment\)\?\.attachment \|\| attachment\s*\)/);
+  assert.match(viewer, /getPresentationFallbackLabel\(nextPlan, mediaAttachment, sourceAttachment\)/);
   assert.match(viewer, /fallbackToNextLoggerRemotePlan\(video,\s*container,\s*attachment,\s*attemptToUseCachedVideo/);
   assert.match(viewer, /fallbackToNextLoggerRemotePlan\(img,\s*img,\s*attachment,\s*attemptToUseCachedImage/);
 });
@@ -1860,7 +1954,7 @@ test('populateParent routes audio through one native host and the shared saved-a
     source.indexOf('populateParent(parent, messages)'),
     source.indexOf('sortMessagesByAge(map, useCaptureBatchOrder')
   );
-  assert.match(viewer, /\['image', 'video', 'audio', 'text', 'pdf'\]\.includes\(plan\.mediaType\)/);
+  assert.match(viewer, /\['image', 'video', 'audio', 'attachment'\]\.includes\(plan\.mediaType\)/);
   assert.match(viewer, /attachmentSources\.some\(source => this\.isImage\(source\)[\s\S]*this\.isAudio\(source\)\)\) continue;/);
   const audioStart = viewer.indexOf("const isAudioFile = attachment?._ml2PresentationMediaType === 'audio'");
   const audioEnd = viewer.indexOf('const isCached = presentationAction', audioStart);
@@ -1880,7 +1974,7 @@ test('populateParent routes audio through one native host and the shared saved-a
   assert.doesNotMatch(audioBranch, /createModal\(|attemptToUseCachedImage|attemptToUseCachedVideo/);
 });
 
-test('populateParent keeps document rendering isolated, exact, and per attachment', () => {
+test('populateParent keeps native attachment rendering isolated, exact, and per attachment', () => {
   const viewer = source.slice(
     source.indexOf('populateParent(parent, messages)'),
     source.indexOf('sortMessagesByAge(map, useCaptureBatchOrder')
@@ -1888,7 +1982,7 @@ test('populateParent keeps document rendering isolated, exact, and per attachmen
   const markerStart = viewer.indexOf('const appendRemoteCachedFailureMarker =');
   const markerEnd = viewer.indexOf('if (record) {', markerStart);
   const failureMarker = viewer.slice(markerStart, markerEnd);
-  const documentStart = viewer.indexOf("const isDocumentFile = attachment?._ml2PresentationMediaType === 'text'");
+  const documentStart = viewer.indexOf("const isNativeAttachment = attachment?._ml2PresentationMediaType === 'attachment';");
   const audioStart = viewer.indexOf("if (isAudioFile) {", documentStart);
   const documentBranch = viewer.slice(documentStart, audioStart);
   const renderLoop = viewer.slice(
@@ -1897,7 +1991,7 @@ test('populateParent keeps document rendering isolated, exact, and per attachmen
   );
 
   assert.ok(markerStart >= 0 && markerEnd > markerStart);
-  assert.match(failureMarker, /\['image', 'video', 'audio', 'text', 'pdf'\]\.includes\(plan\.mediaType\)/);
+  assert.match(failureMarker, /\['image', 'video', 'audio', 'attachment'\]\.includes\(plan\.mediaType\)/);
   const placeholderIndex = failureMarker.indexOf("plan.action === 'placeholder' || plan.action === 'omit'");
   const rendererSuppressionIndex = failureMarker.indexOf('if (attachmentIsMedia) {');
   const genericPayloadIndex = failureMarker.indexOf('appendPayloadReference(');
@@ -1906,12 +2000,13 @@ test('populateParent keeps document rendering isolated, exact, and per attachmen
   assert.match(viewer, /for \(const attachment of message\.attachments \|\| \[\]\) \{[\s\S]*appendPayloadReference\(isVoiceMessage \? 'Voice message' : 'Attachment', attachment\.filename, attachment\.url\);/);
 
   assert.ok(documentStart >= 0 && audioStart > documentStart, 'document rendering must precede audio rendering');
-  assert.match(documentBranch, /attachment\?\._ml2PresentationMediaType === 'text'[\s\S]*attachment\?\._ml2PresentationMediaType === 'pdf'/);
+  assert.match(documentBranch, /const isNativeAttachment = attachment\?\._ml2PresentationMediaType === 'attachment';[\s\S]*if \(isNativeAttachment\)/);
   assert.match(documentBranch, /const loggerAttachmentEntry = getLoggerAttachmentEntry\(attachment\);[\s\S]*const sourceAttachment = loggerAttachmentEntry\?\.attachment \|\| null;/);
   assert.match(documentBranch, /const documentHost = document\.createElement\('div'\);[\s\S]*markLoggerAttachmentTarget\(documentHost, sourceAttachment \|\| attachment\);[\s\S]*contentDiv\.appendChild\(documentHost\);/);
-  assert.match(documentBranch, /const onDocumentUnavailable = \(\) => \{[\s\S]*cleanupLoggerNativeDocumentRoots\(documentHost\);[\s\S]*documentHost\.replaceWith\(createUnavailableAttachmentPlaceholder\([\s\S]*presentationLabel \|\| attachment\.filename,[\s\S]*sourceAttachment \|\| attachment/);
+  assert.match(documentBranch, /const onDocumentUnavailable = \(\) => \{[\s\S]*cleanupLoggerNativeDocumentRoots\(documentHost\);[\s\S]*documentHost\.replaceWith\(createUnavailableAttachmentPlaceholder\([\s\S]*getPresentationFallbackLabel\(null, attachment, sourceAttachment\),[\s\S]*sourceAttachment \|\| attachment/);
   assert.match(documentBranch, /this\.mountLoggerNativeDocument\([\s\S]*documentHost,[\s\S]*message,[\s\S]*attachment,[\s\S]*sourceMessage,[\s\S]*onDocumentUnavailable[\s\S]*\);[\s\S]*return;/);
   assert.doesNotMatch(documentBranch, /createModal\(|createElement\('(?:iframe|a)'\)|addEventListener\('click'|onMediaItemContextMenu/);
+  assert.doesNotMatch(documentBranch, /_ml2PresentationMediaType === '(?:text|pdf)'/);
   assert.doesNotMatch(documentBranch, /message\.attachments|attachments\s*\[\s*0\s*\]|\.find\(/);
   assert.match(renderLoop, /for \(let ii = 0; ii < renderedMedia\.length; ii\+\+\) handleCreateImage\(renderedMedia\[ii\], ii\);/);
   assert.ok(renderLoop.indexOf('const documentHost = document.createElement') >= 0);
@@ -2166,6 +2261,7 @@ test('media routing converges through cacheImage and cacheMessageImages across e
   assert.match(imageCacheSlice, /let response;[\s\S]*response = await this\.fetchMediaCacheResponse\(url\);/);
   assert.match(deferredSlice, /Promise\.resolve\(this\.cacheImage\(/);
   assert.match(removedSlice, /this\.cacheImage\([\s\S]*?'confirmed'\s*\);/);
+  assert.match(removedSlice, /if \(this\.settings\.cacheAllImages && \(this\.isImage\(url\) \|\| this\.settings\.newSaveAllFileTypes\)\) \{\s*this\.cacheImage\(/);
   assert.match(updatePayloadSlice, /this\.cacheMessageImages\(current, \{[\s\S]*cacheState:[\s\S]*?\}\);/);
   assert.match(dispatchSlice, /this\.cacheMessageImages\(dispatch\.message, \{[\s\S]*cacheState: 'precache'[\s\S]*\}\);/);
   assert.match(antiNukeSlice, /this\.cacheMessageImages\(cacheMessage, \{[\s\S]*cacheState: 'precache'[\s\S]*\}\);/);

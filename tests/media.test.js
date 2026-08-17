@@ -2005,7 +2005,7 @@ function createSavedAttachmentTransitionFixture(dispatches) {
   const messageStoreMessage = {
     id: '710',
     channel_id: '710',
-    content: '[image:Synology_AUX.png]',
+    content: '[Not cached: Synology_AUX.png]',
     attachments: [{
       id: '710',
       filename: 'Synology_AUX.png',
@@ -2174,9 +2174,9 @@ test('reAddDeletedMessages keeps attachment-only cache-master-off records as pla
   const textSiblingRow = rowsById.get('102');
 
   assert.equal(messages.length, 2);
-  assert.equal(attachmentOnlyRow?.content, '[image:photo.png]');
+  assert.equal(attachmentOnlyRow?.content, '[Not cached: photo.png]');
   assert.equal(textSiblingRow?.id, '102');
-  assert.equal(textSiblingRow?.content, 'kept text\n[attachment:notes.txt]');
+  assert.equal(textSiblingRow?.content, 'kept text\n[Not cached: notes.txt]');
   assert.deepEqual(plugin.messageRecord['101'].message, attachmentOnlyBefore);
   assert.deepEqual(plugin.messageRecord['102'].message, textBefore);
 });
@@ -2231,7 +2231,7 @@ test('reAddDeletedMessages local-only keeps cached blob rows and labels missing 
   assert.equal(messages[0].attachments.length, 1);
   assert.equal(messages[0].attachments[0].id, '300');
   assert.equal(messages[0].attachments[0].url, 'blob://local/cached/image-300');
-  assert.equal(messages[0].content, '[attachment:notes.txt]');
+  assert.equal(messages[0].content, '[Not cached: notes.txt]');
   assert.deepEqual(plugin.messageRecord['301'].message, before);
 });
 
@@ -2286,7 +2286,7 @@ test('reAddDeletedMessages remote-first has no label before native failure, then
   plugin.reAddDeletedMessages(afterFailure, ['401'], true, true);
 
   assert.equal(afterFailure.length, 1);
-  assert.equal(afterFailure[0].content, 'remote cache-on\n[image:photo.png]');
+  assert.equal(afterFailure[0].content, 'remote cache-on\n[Deleted: photo.png]');
   assert.equal(afterFailure[0].attachments.length, 0);
   assert.deepEqual(plugin.messageRecord['401'].message, before);
 });
@@ -2656,9 +2656,9 @@ test('edit-history inline segments replace matched markers with exact placeholde
   const segments = plugin.getEditHistoryContentSegments(content, removedAttachments, message);
 
   assert.equal(segments.filter(segment => segment.kind === 'removedAttachment').length, 0);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[image:first.gif]'), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[attachment:second.mp4]'), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[attachment:third.pdf]'), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[Not cached: first.gif]'), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[Not cached: second.mp4]'), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[Not cached: third.pdf]'), true);
   assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('missing.txt')), true);
   assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('cdn.discordapp.com/attachments/channel/111111111111111111/first.gif')), false);
   assert.deepEqual(removedAttachments, before.removedAttachments);
@@ -2716,6 +2716,25 @@ test('edit-history inline segments keep text for non-media/unmatched and preserv
   assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('missing.mp4')), true);
   assert.deepEqual(removedAttachments, before.removedAttachments);
   assert.deepEqual(message, before.message);
+
+  const firstAttachmentPlan = plugin.getSavedAttachmentPresentationPlan(
+    removedAttachments[0],
+    message,
+    { allowRemote: true }
+  );
+  for (const candidate of firstAttachmentPlan.sources) {
+    assert.equal(
+      plugin.markSavedAttachmentMediaCandidateFailure(removedAttachments[0], message, candidate),
+      true
+    );
+    plugin.getSavedAttachmentPresentationPlan(removedAttachments[0], message, { allowRemote: true });
+  }
+  const exhaustedSegments = plugin.getEditHistoryContentSegments(
+    '`Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif',
+    removedAttachments,
+    message
+  );
+  assert.equal(exhaustedSegments[0]?.value, '[Deleted: first.gif]');
 });
 
 test('edit-history inline segments emit cached Blob plans with exact fallbacks and classify missing local-only attachments', () => {
@@ -2780,8 +2799,8 @@ test('edit-history inline segments emit cached Blob plans with exact fallbacks a
   assert.equal(removedSegments.every(segment => segment.presentationPlan?.url?.startsWith('blob:')), true);
   assert.equal(removedSegments[0]?.value, '[image:first.gif]');
   assert.equal(removedSegments[1]?.value, '[attachment:second.mp4]');
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[image:missing.gif]'), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[attachment:third.pdf]'), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[Not cached: missing.gif]'), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[Not cached: third.pdf]'), true);
   assert.equal(requestLog.length >= 1, true);
   assert.equal(requestLog.every(url => !url.startsWith('http://cdn.discordapp.com') && !url.startsWith('https://media.discordapp.net')), true);
   assert.deepEqual(removedAttachments, before.removedAttachments);
@@ -2911,6 +2930,177 @@ test('cache-only rendering uses direct, then proxy media URLs when master is on 
   assert.deepEqual(message, canonicalBefore);
 });
 
+test('saved attachment presentation plans expose policy, candidate-failure, and cached fallback reasons', () => {
+  const attachment = {
+    id: 'plan-image',
+    filename: 'photo.png',
+    url: 'https://cdn.discordapp.com/attachments/plan-channel/plan-image/photo.png',
+    proxy_url: 'https://media.discordapp.net/attachments/plan-channel/plan-image/photo.png'
+  };
+  const message = {
+    id: 'plan-message',
+    channel_id: 'plan-channel',
+    attachments: [attachment]
+  };
+  const settings = (cacheAllImages = true) => ({
+    cacheAllImages,
+    newSaveAllFileTypes: false,
+    onlyRenderCachedAttachments: false
+  });
+
+  let plugin = createPlugin({ settings: settings(false) });
+  let plan = plugin.getSavedAttachmentPresentationPlan(attachment, message, { allowRemote: true });
+  assert.equal(plan.action, 'placeholder');
+  assert.equal(plan.unavailableReason, 'policy');
+  assert.equal(plan.unavailableLabel, '[Not cached: photo.png]');
+  assert.equal(plan.label, '[image:photo.png]');
+
+  plugin = createPlugin({
+    settings: settings(),
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => '/cache/plan-image.png',
+      get: () => null
+    }
+  });
+  plan = plugin.getSavedAttachmentPresentationPlan(attachment, message, { allowBlob: true });
+  assert.equal(plan.action, 'omit');
+  assert.equal(plan.unavailableReason, 'policy');
+  assert.equal(plan.unavailableLabel, '[Not cached: photo.png]');
+  assert.equal(plan.label, '[image:photo.png]');
+
+  plugin = createPlugin({ settings: settings() });
+  plan = plugin.getSavedAttachmentPresentationPlan(attachment, message, { allowRemote: true });
+  assert.equal(plan.action, 'remote');
+  assert.equal(plan.unavailableReason, null);
+  assert.equal(plan.unavailableLabel, '[Not cached: photo.png]');
+  assert.equal(plan.label, '[image:photo.png]');
+  const candidates = [...plan.sources];
+  assert.equal(candidates.length > 0, true);
+  for (let index = 0; index < candidates.length; index++) {
+    assert.equal(
+      plugin.markSavedAttachmentMediaCandidateFailure(attachment, message, candidates[index]),
+      true
+    );
+    plan = plugin.getSavedAttachmentPresentationPlan(attachment, message, { allowRemote: true });
+    if (index < candidates.length - 1) {
+      assert.equal(plan.action, 'remote');
+      assert.equal(plan.url, candidates[index + 1]);
+      assert.equal(plan.unavailableReason, null);
+      assert.equal(plan.unavailableLabel, '[Not cached: photo.png]');
+      assert.equal(plan.label, '[image:photo.png]');
+    }
+  }
+  assert.equal(plan.action, 'omit');
+  assert.equal(plan.unavailableReason, 'remote-failed');
+  assert.equal(plan.unavailableLabel, '[Deleted: photo.png]');
+  assert.equal(plan.label, '[image:photo.png]');
+
+  const cachedBlobAvailable = true;
+  plugin = createPlugin({
+    settings: settings(),
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => '/cache/plan-image.png',
+      get: () => cachedBlobAvailable ? 'blob://local/plan-image' : null
+    }
+  });
+  plan = plugin.getSavedAttachmentPresentationPlan(attachment, message, { allowRemote: true });
+  for (const candidate of plan.sources) {
+    assert.equal(
+      plugin.markSavedAttachmentMediaCandidateFailure(attachment, message, candidate),
+      true
+    );
+  }
+  plan = plugin.getSavedAttachmentPresentationPlan(attachment, message, { allowRemote: true });
+  assert.equal(plan.action, 'blob');
+  assert.equal(plan.url, 'blob://local/plan-image');
+  assert.equal(plan.unavailableReason, null);
+  assert.equal(plan.unavailableLabel, '[Deleted: photo.png]');
+  assert.equal(plan.label, '[image:photo.png]');
+
+  const noCandidateAttachment = {
+    id: 'plan-missing',
+    filename: 'missing.png'
+  };
+  const noCandidateMessage = {
+    id: 'plan-missing-message',
+    channel_id: 'plan-channel',
+    attachments: [noCandidateAttachment]
+  };
+  plugin = createPlugin({
+    settings: settings(),
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => null,
+      get: () => null
+    }
+  });
+  plan = plugin.getSavedAttachmentPresentationPlan(
+    noCandidateAttachment,
+    noCandidateMessage,
+    { allowRemote: true }
+  );
+  assert.equal(plan.action, 'omit');
+  assert.equal(plan.unavailableReason, 'no-candidate');
+  assert.equal(plan.unavailableLabel, '[Not cached: missing.png]');
+  assert.equal(plan.label, '[image:missing.png]');
+
+  plugin = createPlugin({
+    settings: settings(),
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => '/cache/plan-missing.png',
+      get: () => 'blob://local/plan-missing'
+    }
+  });
+  plan = plugin.getSavedAttachmentPresentationPlan(
+    noCandidateAttachment,
+    noCandidateMessage,
+    { allowRemote: true }
+  );
+  assert.equal(plan.action, 'blob');
+  assert.equal(plan.url, 'blob://local/plan-missing');
+  assert.equal(plan.unavailableReason, null);
+  assert.equal(plan.unavailableLabel, '[Not cached: missing.png]');
+  assert.equal(plan.label, '[image:missing.png]');
+});
+
+test('saved media React components carry unavailable labels through remote and error fallback state', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'MessageLoggerV2.plugin.js'),
+    'utf8'
+  );
+  const videoStart = source.indexOf('const SavedAttachmentPresentationVideo');
+  const videoEnd = source.indexOf('SavedAttachmentPresentationVideo.displayName', videoStart);
+  const videoSource = source.slice(videoStart, videoEnd);
+  assert.ok(videoSource.includes('unavailableLabel: typeof presentationPlan?.unavailableLabel'));
+  assert.ok(videoSource.indexOf('plan?.unavailableLabel') < videoSource.indexOf('plan?.label'));
+  assert.ok(videoSource.includes('unavailableLabel: nextPlan.unavailableLabel'));
+
+  const editStart = source.indexOf('const EditHistoryMedia');
+  const editEnd = source.indexOf('EditHistoryMedia.displayName', editStart);
+  const editSource = source.slice(editStart, editEnd);
+  assert.ok(editSource.includes('unavailableLabel: initialUnavailableLabel'));
+  assert.ok(editSource.includes('setErrorFallbackForPlan'));
+  assert.ok(editSource.includes('setErrorFallback(label ? parseContent(label) : fallback)'));
+  assert.ok(editSource.includes('unavailableLabel: nextPlan.unavailableLabel'));
+});
+
+test('Logger attachment rendering carries unavailable labels through every media fallback path', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'MessageLoggerV2.plugin.js'),
+    'utf8'
+  );
+  const populateStart = source.indexOf('populateParent(parent, messages)');
+  const populateEnd = source.indexOf('\n  refilterMessages()', populateStart);
+  const populateSource = source.slice(populateStart, populateEnd);
+  assert.ok(populateSource.includes('getPresentationFallbackLabel'));
+  assert.ok(populateSource.includes('planUnavailableLabel'));
+  assert.ok(populateSource.includes('renderedUnavailableLabel'));
+  assert.ok(populateSource.includes('renderedAttachment._ml2PresentationLabel'));
+  assert.ok(populateSource.includes('renderedAttachment._ml2PresentationUnavailableLabel'));
+  assert.ok(populateSource.includes('mediaAttachment._ml2PresentationUnavailableLabel = typeof nextPlan.unavailableLabel'));
+  assert.ok(populateSource.includes('attachment._ml2PresentationUnavailableLabel = typeof nextPlan.unavailableLabel'));
+  assert.ok(populateSource.includes('getPresentationFallbackLabel(null, attachment, sourceAttachment)'));
+});
+
 test('cache-only audio attachments classify as media and keep CDN then proxy ordering', () => {
   const message = {
     id: 'message',
@@ -2936,6 +3126,7 @@ test('cache-only audio attachments classify as media and keep CDN then proxy ord
   const plugin = createPlugin({
     settings: {
       cacheAllImages: true,
+      newSaveAllFileTypes: false,
       onlyRenderCachedAttachments: false
     },
     imageCacheServerSimulator: { exists: () => false }
@@ -2960,7 +3151,7 @@ test('cache-only audio attachments classify as media and keep CDN then proxy ord
   assert.deepEqual(message, canonicalBefore);
 });
 
-test('cache-only TXT and PDF attachments classify by exact extension or MIME and keep remote ordering', () => {
+test('cache-only non-media attachments keep remote ordering and canonical identity', () => {
   const message = {
     id: 'message',
     channel_id: 'channel',
@@ -2977,6 +3168,19 @@ test('cache-only TXT and PDF attachments classify by exact extension or MIME and
         filename: 'extensionless-text',
         content_type: 'text/plain; charset=utf-8',
         proxy_url: 'https://media.discordapp.net/attachments/channel/txt-mime/extensionless-text'
+      },
+      {
+        id: 'md-ext',
+        filename: 'README.md',
+        url: 'https://cdn.discordapp.com/attachments/channel/md-ext/README.md',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/md-ext/README.md'
+      },
+      {
+        id: 'md-mime',
+        filename: 'extensionless-markdown',
+        content_type: 'text/markdown; charset=utf-8',
+        original_content_type: 'text/markdown',
+        proxy_url: 'https://media.discordapp.net/attachments/channel/md-mime/extensionless-markdown'
       },
       {
         id: 'pdf-ext',
@@ -2996,6 +3200,7 @@ test('cache-only TXT and PDF attachments classify by exact extension or MIME and
   const plugin = createPlugin({
     settings: {
       cacheAllImages: true,
+      newSaveAllFileTypes: false,
       onlyRenderCachedAttachments: false
     },
     imageCacheServerSimulator: { exists: () => false }
@@ -3006,8 +3211,10 @@ test('cache-only TXT and PDF attachments classify by exact extension or MIME and
   ));
   const rendered = plugin.getCacheOnlyMessage(message);
 
-  assert.deepEqual(plans.map(plan => plan.mediaType), ['text', 'text', 'pdf', 'pdf']);
-  assert.deepEqual(plans.map(plan => plan.action), ['remote', 'remote', 'remote', 'remote']);
+  assert.deepEqual(plans.map(plan => plan.mediaType), [
+    'attachment', 'attachment', 'attachment', 'attachment', 'attachment', 'attachment'
+  ]);
+  assert.deepEqual(plans.map(plan => plan.action), ['remote', 'remote', 'remote', 'remote', 'remote', 'remote']);
   assert.equal(plans[0].url, message.attachments[0].url);
   assert.equal(plans[0].fallbackUrl, message.attachments[0].proxy_url);
   assert.equal(
@@ -3019,22 +3226,31 @@ test('cache-only TXT and PDF attachments classify by exact extension or MIME and
   assert.equal(plans[2].fallbackUrl, message.attachments[2].proxy_url);
   assert.equal(
     plans[3].url,
+    'https://cdn.discordapp.com/attachments/channel/md-mime/extensionless-markdown'
+  );
+  assert.equal(plans[3].fallbackUrl, message.attachments[3].proxy_url);
+  assert.equal(plans[4].url, message.attachments[4].url);
+  assert.equal(plans[4].fallbackUrl, message.attachments[4].proxy_url);
+  assert.equal(
+    plans[5].url,
     'https://cdn.discordapp.com/attachments/channel/pdf-mime/extensionless-pdf'
   );
-  assert.equal(plans[3].fallbackUrl, message.attachments[3].proxyURL);
+  assert.equal(plans[5].fallbackUrl, message.attachments[5].proxyURL);
   assert.deepEqual(plans.map(plan => plan.label), [
     '[attachment:notes.txt]',
     '[attachment:extensionless-text]',
+    '[attachment:README.md]',
+    '[attachment:extensionless-markdown]',
     '[attachment:manual.pdf]',
     '[attachment:extensionless-pdf]'
   ]);
   assert.deepEqual(rendered.attachments.map(attachment => attachment.id), [
-    'txt-ext', 'txt-mime', 'pdf-ext', 'pdf-mime'
+    'txt-ext', 'txt-mime', 'md-ext', 'md-mime', 'pdf-ext', 'pdf-mime'
   ]);
   assert.deepEqual(message, canonicalBefore);
 });
 
-test('cached attachment Blob MIME mapping is bounded to supported extensions', () => {
+test('cached attachment Blob MIME mapping prefers validated metadata before extension fallback', () => {
   const plugin = createPlugin();
   const expected = {
     '.jpg': 'image/jpeg',
@@ -3056,6 +3272,7 @@ test('cached attachment Blob MIME mapping is bounded to supported extensions', (
     '.oga': 'audio/ogg',
     '.opus': 'audio/opus',
     '.txt': 'text/plain',
+    '.md': 'text/markdown',
     '.pdf': 'application/pdf'
   };
   for (const [extension, mimeType] of Object.entries(expected)) {
@@ -3065,6 +3282,22 @@ test('cached attachment Blob MIME mapping is bounded to supported extensions', (
   assert.equal(plugin.getCachedAttachmentMimeType('.PDF?ignored'), 'application/pdf');
   assert.equal(plugin.getCachedAttachmentMimeType('.doc'), 'application/octet-stream');
   assert.equal(plugin.getCachedAttachmentMimeType(''), 'application/octet-stream');
+  assert.equal(
+    plugin.getCachedAttachmentMimeType('.bin', { content_type: 'application/json; charset=utf-8' }),
+    'application/json'
+  );
+  assert.equal(
+    plugin.getCachedAttachmentMimeType('.bin', { contentType: 'text/css; charset=utf-8' }),
+    'text/css'
+  );
+  assert.equal(
+    plugin.getCachedAttachmentMimeType('.bin', { original_content_type: 'application/octet-stream; version=1' }),
+    'application/octet-stream'
+  );
+  assert.equal(
+    plugin.getCachedAttachmentMimeType('.txt', { content_type: 'not a MIME' }),
+    'text/plain'
+  );
 });
 
 test('cache master defaults to enabled when cacheAllImages is undefined', () => {
@@ -3114,17 +3347,19 @@ test('cache-only plan indices remain aligned when malformed attachments are pres
   assert.equal(rendered.attachments[1].id, 'img-id-3');
 });
 
-test('cache-only rendering uses cached Blob URLs only for supported local-only media and documents', () => {
+test('cache-only rendering uses cached Blob URLs for local media, documents, and generic files', () => {
   const blobMap = new Map([
     ['100', 'blob://local/cached/image-100'],
     ['101', 'blob://local/cached/video-101'],
     ['102', 'blob://local/cached/text-102'],
     ['104', 'blob://local/cached/pdf-104'],
+    ['106', 'blob://local/cached/markdown-106'],
     ['105', 'blob://local/cached/doc-105']
   ]);
   const plugin = createPlugin({
     settings: {
       cacheAllImages: true,
+      newSaveAllFileTypes: false,
       onlyRenderCachedAttachments: true
     },
     imageCacheServerSimulator: {
@@ -3136,6 +3371,7 @@ test('cache-only rendering uses cached Blob URLs only for supported local-only m
         if (ext === '.mp4' && attachmentId === '101') return '/cache/101.mp4';
         if (ext === '.txt' && attachmentId === '102') return '/cache/102.txt';
         if (ext === '.pdf' && attachmentId === '104') return '/cache/104.pdf';
+        if (ext === '.md' && attachmentId === '106') return '/cache/106.md';
         if (ext === '.doc' && attachmentId === '105') return '/cache/105.doc';
         return null;
       },
@@ -3167,6 +3403,13 @@ test('cache-only rendering uses cached Blob URLs only for supported local-only m
         content_type: 'application/pdf',
         url: 'https://cdn.discordapp.com/attachments/channel/111/manual.pdf'
       },
+      {
+        id: '106',
+        filename: 'README.md',
+        content_type: 'text/markdown; charset=utf-8',
+        original_content_type: 'text/markdown',
+        url: 'https://cdn.discordapp.com/attachments/channel/111/README.md'
+      },
       { id: '105', filename: 'unsupported.doc', url: 'https://cdn.discordapp.com/attachments/channel/111/unsupported.doc' }
     ]
   };
@@ -3179,21 +3422,26 @@ test('cache-only rendering uses cached Blob URLs only for supported local-only m
   const fourthPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[3], message, { allowBlob: true });
   const fifthPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[4], message, { allowBlob: true });
   const sixthPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[5], message, { allowBlob: true });
+  const seventhPlan = plugin.getSavedAttachmentPresentationPlan(message.attachments[6], message, { allowBlob: true });
 
   assert.equal(firstPlan.action, 'blob');
   assert.equal(firstPlan.url, 'blob://local/cached/image-100');
   assert.equal(secondPlan.action, 'blob');
   assert.equal(secondPlan.url, 'blob://local/cached/video-101');
   assert.equal(thirdPlan.action, 'blob');
-  assert.equal(thirdPlan.mediaType, 'text');
+  assert.equal(thirdPlan.mediaType, 'attachment');
   assert.equal(thirdPlan.url, 'blob://local/cached/text-102');
   assert.equal(fourthPlan.action, 'omit');
   assert.equal(fifthPlan.action, 'blob');
-  assert.equal(fifthPlan.mediaType, 'pdf');
+  assert.equal(fifthPlan.mediaType, 'attachment');
   assert.equal(fifthPlan.url, 'blob://local/cached/pdf-104');
-  assert.equal(sixthPlan.action, 'omit');
+  assert.equal(sixthPlan.action, 'blob');
   assert.equal(sixthPlan.mediaType, 'attachment');
-  assert.equal(rendered.attachments.length, 4);
+  assert.equal(sixthPlan.url, 'blob://local/cached/markdown-106');
+  assert.equal(seventhPlan.action, 'blob');
+  assert.equal(seventhPlan.mediaType, 'attachment');
+  assert.equal(seventhPlan.url, 'blob://local/cached/doc-105');
+  assert.equal(rendered.attachments.length, 6);
   assert.equal(rendered.attachments[0].url, 'blob://local/cached/image-100');
   assert.equal(rendered.attachments[1].url, 'blob://local/cached/video-101');
   assert.equal(rendered.attachments[2].url, 'blob://local/cached/text-102');
@@ -3202,11 +3450,17 @@ test('cache-only rendering uses cached Blob URLs only for supported local-only m
   assert.equal(rendered.attachments[1].proxy_url, 'blob://local/cached/video-101');
   assert.equal(rendered.attachments[2].proxy_url, 'blob://local/cached/text-102');
   assert.equal(rendered.attachments[3].proxy_url, 'blob://local/cached/pdf-104');
+  assert.equal(rendered.attachments.filter(attachment => attachment.id === '106').length, 1);
+  assert.equal(rendered.attachments[4].url, 'blob://local/cached/markdown-106');
+  assert.equal(rendered.attachments[4].proxy_url, 'blob://local/cached/markdown-106');
+  assert.equal(rendered.attachments[5].id, '105');
+  assert.equal(rendered.attachments[5].url, 'blob://local/cached/doc-105');
+  assert.equal(rendered.attachments[5].proxy_url, 'blob://local/cached/doc-105');
   assert.equal(rendered.content, 'body');
   assert.deepEqual(message, canonicalBefore);
 });
 
-test('cache-only local rendering includes cached audio blobs and omits missing audio and plaintext files', () => {
+test('cache-only local rendering includes cached audio blobs and omits missing cached attachments', () => {
   const blobMap = new Map([
     ['100.mp3', 'blob://local/cached/audio-100'],
     ['101.ogg', 'blob://local/cached/audio-101']
@@ -3214,6 +3468,7 @@ test('cache-only local rendering includes cached audio blobs and omits missing a
   const plugin = createPlugin({
     settings: {
       cacheAllImages: true,
+      newSaveAllFileTypes: false,
       onlyRenderCachedAttachments: true
     },
     imageCacheServerSimulator: {
@@ -3264,7 +3519,7 @@ test('cache-only local rendering includes cached audio blobs and omits missing a
   assert.equal(thirdPlan.action, 'omit');
   assert.equal(thirdPlan.mediaType, 'audio');
   assert.equal(fourthPlan.action, 'omit');
-  assert.equal(fourthPlan.mediaType, 'text');
+  assert.equal(fourthPlan.mediaType, 'attachment');
   assert.equal(rendered.attachments.length, 2);
   assert.equal(rendered.attachments[0].url, 'blob://local/cached/audio-100');
   assert.equal(rendered.attachments[1].url, 'blob://local/cached/audio-101');
@@ -3357,6 +3612,129 @@ test('logger saved-attachment presentation entries keep canonical current order 
   assert.equal(entries.every(entry => entry.plan.action === 'remote'), true);
 });
 
+test('removed ordinary attachment cache admission follows main and all-attachment gates', () => {
+  const cached = [];
+  const removedAttachments = [
+    {
+      id: 'removed-image',
+      filename: 'removed.png',
+      url: 'https://cdn.example/removed/removed.png'
+    },
+    {
+      id: 'removed-video',
+      filename: 'removed.mp4',
+      url: 'https://cdn.example/removed/removed.mp4'
+    },
+    {
+      id: 'removed-generic',
+      filename: 'removed.bin',
+      url: 'https://cdn.example/removed/removed.bin'
+    }
+  ];
+  const messageId = 'removed-attachment-message';
+  const channelId = 'removed-channel';
+  const guildId = 'removed-guild';
+  const plugin = createPlugin({
+    __started: true,
+    settings: {
+      cacheAllImages: true,
+      dontSaveData: false,
+      maxCacheFileSize: 0,
+      newSaveAllFileTypes: false
+    },
+    messageRecord: {
+      [messageId]: { logged_attachments: [], removed_attachments: [] }
+    },
+    cacheImage(...args) { cached.push(args); }
+  });
+  const expectedContent = removedAttachments
+    .map(attachment => '`Attachment Deleted: `' + attachment.url + '\n')
+    .join('');
+  const expectedRecord = removedAttachments.map(attachment => ({
+    id: attachment.id,
+    filename: attachment.filename,
+    url: attachment.url
+  }));
+  const expectedImageCall = [
+    removedAttachments[0].url,
+    0,
+    removedAttachments[0].id,
+    messageId,
+    channelId,
+    guildId,
+    0,
+    plugin._mediaCacheWriteEpoch || 0,
+    'confirmed'
+  ];
+
+  plugin.settings.cacheAllImages = false;
+  const masterOff = plugin._getChangedAttachments(
+    removedAttachments,
+    [],
+    messageId,
+    channelId,
+    guildId
+  );
+
+  assert.equal(masterOff.content, expectedContent);
+  assert.deepEqual(masterOff.logged_attachments, removedAttachments.map(attachment => attachment.id));
+  assert.deepEqual(
+    masterOff.removed_attachments.map(({ id, filename, url }) => ({ id, filename, url })),
+    expectedRecord
+  );
+  assert.deepEqual(cached, []);
+
+  plugin.settings.cacheAllImages = true;
+  const gateOff = plugin._getChangedAttachments(
+    removedAttachments,
+    [],
+    messageId,
+    channelId,
+    guildId
+  );
+
+  assert.equal(gateOff.content, expectedContent);
+  assert.deepEqual(gateOff.logged_attachments, removedAttachments.map(attachment => attachment.id));
+  assert.deepEqual(
+    gateOff.removed_attachments.map(({ id, filename, url }) => ({ id, filename, url })),
+    expectedRecord
+  );
+  assert.deepEqual(cached, [expectedImageCall]);
+
+  cached.length = 0;
+  plugin.settings.newSaveAllFileTypes = true;
+  plugin.messageRecord[messageId] = { logged_attachments: [], removed_attachments: [] };
+
+  const gateOn = plugin._getChangedAttachments(
+    removedAttachments,
+    [],
+    messageId,
+    channelId,
+    guildId
+  );
+
+  assert.equal(gateOn.content, expectedContent);
+  assert.deepEqual(gateOn.logged_attachments, removedAttachments.map(attachment => attachment.id));
+  assert.deepEqual(
+    gateOn.removed_attachments.map(({ id, filename, url }) => ({ id, filename, url })),
+    expectedRecord
+  );
+  assert.deepEqual(
+    cached,
+    removedAttachments.map((attachment, index) => [
+      attachment.url,
+      index,
+      attachment.id,
+      messageId,
+      channelId,
+      guildId,
+      0,
+      plugin._mediaCacheWriteEpoch || 0,
+      'confirmed'
+    ])
+  );
+});
+
 test('logger saved-attachment presentation entries expose exact image/attachment placeholder labels when master media cache is off', () => {
   const message = {
     id: 'message',
@@ -3389,7 +3767,7 @@ test('logger saved-attachment presentation entries expose exact image/attachment
   assert.equal(entries.every(entry => entry.plan.action === 'placeholder'), true);
 });
 
-test('logger saved-attachment presentation entries use remote display for remote-first without selecting cached blob', () => {
+test('logger saved-attachment presentation entries prefer remote display and only probe a blob when no remote candidate exists', () => {
   const imageCacheGets = [];
   const plugin = createPlugin({
     settings: {
@@ -3401,7 +3779,7 @@ test('logger saved-attachment presentation entries use remote display for remote
       _resolveImagePath: () => '/cache/offline-cache-file.png',
       get(url) {
         imageCacheGets.push(url);
-        throw new Error(`blob URL read should not happen for remote plan: ${url}`);
+        return null;
       }
     }
   });
@@ -3444,7 +3822,9 @@ test('logger saved-attachment presentation entries use remote display for remote
   assert.equal(entries[3].plan.action, 'remote');
   assert.equal(entries[3].plan.url, 'https://cdn.discordapp.com/attachments/channel/200/removed.png');
   assert.equal(entries[3].plan.fallbackUrl, 'https://media.discordapp.net/attachments/channel/200/removed.png');
-  assert.equal(imageCacheGets.length, 0);
+  assert.deepEqual(imageCacheGets, [
+    'http://localhost:7474/102.txt#channel,102,message'
+  ]);
 });
 
 test('logger saved-attachment presentation entries in local-only mode keep only cached media blobs', () => {
@@ -3733,7 +4113,7 @@ test('saved MessageAccessories render exposes projected video-free props only du
   assert.strictEqual(lockedInstance.props, originalProps);
 });
 
-test('logger native document message isolates one TXT or PDF attachment with safe Discord defaults', () => {
+test('logger native document message isolates TXT, Markdown, PDF, and generic attachments with safe Discord defaults', () => {
   class NativeDocumentMessage {
     constructor(payload) {
       Object.assign(this, payload);
@@ -3748,8 +4128,50 @@ test('logger native document message isolates one TXT or PDF attachment with saf
     content: 'canonical content must stay untouched',
     flags: 64,
     attachments: [
-      { id: 'txt', filename: 'notes.txt', url: 'https://cdn.example/notes.txt' },
-      { id: 'pdf', filename: 'manual.pdf', url: 'https://cdn.example/manual.pdf' }
+      { id: 'txt', filename: 'notes.txt', size: 11, url: 'https://cdn.example/notes.txt' },
+      {
+        id: 'markdown',
+        filename: 'README.md',
+        size: 22,
+        content_type: 'text/markdown',
+        original_content_type: 'text/markdown',
+        url: 'https://cdn.example/README.md'
+      },
+      { id: 'pdf', filename: 'manual.pdf', size: 33, url: 'https://cdn.example/manual.pdf' },
+      {
+        id: 'json',
+        filename: 'data.json',
+        size: 44,
+        content_type: 'application/json; charset=utf-8',
+        url: 'https://cdn.example/data.json'
+      },
+      {
+        id: 'bin',
+        filename: 'archive.bin',
+        size: 55,
+        content_type: 'application/octet-stream',
+        url: 'https://cdn.example/archive.bin'
+      },
+      {
+        id: 'zip',
+        filename: 'bundle.zip',
+        size: 66,
+        content_type: 'application/zip',
+        url: 'https://cdn.example/bundle.zip'
+      },
+      {
+        id: 'font',
+        filename: 'font.woff2',
+        size: 77,
+        content_type: 'font/woff2',
+        url: 'https://cdn.example/font.woff2'
+      },
+      {
+        id: 'unknown',
+        filename: 'README.unknown',
+        size: 88,
+        url: 'https://cdn.example/README.unknown'
+      }
     ],
     codedLinks: [{ type: 'invite' }],
     giftCodes: ['gift'],
@@ -3764,14 +4186,21 @@ test('logger native document message isolates one TXT or PDF attachment with saf
   const plugin = createPlugin();
   plugin.shouldPresentSavedMessage = () => assert.fail('Logger document rendering must not use live-mount policy');
 
-  for (const projected of [
-    { ...canonical.attachments[0], url: 'https://cdn.example/notes.txt', proxy_url: 'https://cdn.example/notes.txt' },
-    { ...canonical.attachments[1], url: 'blob:https://discord.com/manual.pdf', proxy_url: 'blob:https://discord.com/manual.pdf' }
-  ]) {
+  for (const [index, sourceAttachment] of canonical.attachments.entries()) {
+    const projected = {
+      ...sourceAttachment,
+      url: index === 0
+        ? sourceAttachment.url
+        : `blob:https://discord.com/${sourceAttachment.filename}`,
+      proxy_url: index === 0
+        ? sourceAttachment.url
+        : `blob:https://discord.com/${sourceAttachment.filename}`
+    };
     const native = plugin.createLoggerNativeDocumentMessage(canonical, projected, nativeSource);
     assert.ok(native instanceof NativeDocumentMessage);
     assert.equal(native.attachments.length, 1);
     assert.notStrictEqual(native.attachments[0], projected);
+    assert.deepEqual(native.attachments[0], projected);
     assert.equal(native.attachments[0].id, projected.id);
     assert.equal(native.attachments[0].url, projected.url);
     assert.equal(native.attachments[0].proxy_url, projected.proxy_url);
@@ -4472,7 +4901,7 @@ test('logger native audio props, root ownership, error forwarding, and browser f
   }
 });
 
-test('logger native documents mount one marked TXT/PDF message per host and clean up independently', () => {
+test('logger native attachments mount one marked TXT/Markdown/PDF/generic message per host and clean up independently', () => {
   class MessageAccessories {
     renderEmbeds() {}
     renderAttachments() {}
@@ -4515,8 +4944,50 @@ test('logger native documents mount one marked TXT/PDF message per host and clea
       channel_id: 'document-channel',
       content: 'repeated [attachment:document] content',
       attachments: [
-        { id: 'doc-txt', filename: 'notes.txt', url: 'https://cdn.example/notes.txt' },
-        { id: 'doc-pdf', filename: 'manual.pdf', url: 'https://cdn.example/manual.pdf' }
+        { id: 'doc-txt', filename: 'notes.txt', size: 11, url: 'https://cdn.example/notes.txt' },
+        {
+          id: 'doc-markdown',
+          filename: 'README.md',
+          size: 22,
+          content_type: 'text/markdown',
+          original_content_type: 'text/markdown',
+          url: 'https://cdn.example/README.md'
+        },
+        { id: 'doc-pdf', filename: 'manual.pdf', size: 33, url: 'https://cdn.example/manual.pdf' },
+        {
+          id: 'doc-json',
+          filename: 'data.json',
+          size: 44,
+          content_type: 'application/json; charset=utf-8',
+          url: 'https://cdn.example/data.json'
+        },
+        {
+          id: 'doc-bin',
+          filename: 'archive.bin',
+          size: 55,
+          content_type: 'application/octet-stream',
+          url: 'https://cdn.example/archive.bin'
+        },
+        {
+          id: 'doc-zip',
+          filename: 'bundle.zip',
+          size: 66,
+          content_type: 'application/zip',
+          url: 'https://cdn.example/bundle.zip'
+        },
+        {
+          id: 'doc-font',
+          filename: 'font.woff2',
+          size: 77,
+          content_type: 'font/woff2',
+          url: 'https://cdn.example/font.woff2'
+        },
+        {
+          id: 'doc-unknown',
+          filename: 'README.unknown',
+          size: 88,
+          url: 'https://cdn.example/README.unknown'
+        }
       ]
     });
     const renderMessage = structuredClone(sourceMessage);
@@ -4528,62 +4999,78 @@ test('logger native documents mount one marked TXT/PDF message per host and clea
     const plugin = createPlugin({
       tools: { getChannel: id => id === 'document-channel' ? channel : null }
     });
-    const txtHost = createLoggerAudioHost();
-    const pdfHost = createLoggerAudioHost();
-    const txtMount = plugin.mountLoggerNativeDocument(
-      txtHost,
-      renderMessage,
-      { ...renderMessage.attachments[0], url: 'blob:https://discord.com/notes.txt' },
+    const projectedAttachments = renderMessage.attachments.map((attachment, index) => ({
+      ...attachment,
+      url: index === 0
+        ? attachment.url
+        : `blob:https://discord.com/${attachment.filename}`,
+      proxy_url: index === 0
+        ? attachment.url
+        : `blob:https://discord.com/${attachment.filename}`
+    }));
+    const hosts = renderMessage.attachments.map(() => createLoggerAudioHost());
+    const mounts = hosts.map((host, index) => plugin.mountLoggerNativeDocument(
+      host,
+      index === 2
+        ? { ...renderMessage, attachments: [...renderMessage.attachments].reverse() }
+        : renderMessage,
+      projectedAttachments[index],
       sourceMessage
-    );
-    const pdfMount = plugin.mountLoggerNativeDocument(
-      pdfHost,
-      { ...renderMessage, attachments: [...renderMessage.attachments].reverse() },
-      { ...renderMessage.attachments[1], url: 'https://cdn.example/manual.pdf' },
-      sourceMessage
-    );
+    ));
 
-    assert.equal(txtMount?.native, true);
-    assert.equal(pdfMount?.native, true);
-    assert.equal(plugin._loggerNativeDocumentRoots.size, 2);
+    assert.ok(mounts.every(mount => mount?.native === true));
+    assert.equal(plugin._loggerNativeDocumentRoots.size, hosts.length);
     assert.deepEqual(
-      [txtHost.dataset, pdfHost.dataset],
-      [
-        {
-          ml2AttachmentMessageId: 'document-message',
-          ml2AttachmentId: 'doc-txt',
-          ml2AttachmentDocumentHost: 'true'
-        },
-        {
-          ml2AttachmentMessageId: 'document-message',
-          ml2AttachmentId: 'doc-pdf',
-          ml2AttachmentDocumentHost: 'true'
-        }
-      ]
+      hosts.map(host => host.dataset),
+      renderMessage.attachments.map(attachment => ({
+        ml2AttachmentMessageId: 'document-message',
+        ml2AttachmentId: attachment.id,
+        ml2AttachmentDocumentHost: 'true'
+      }))
     );
 
-    for (const [host, attachmentId] of [[txtHost, 'doc-txt'], [pdfHost, 'doc-pdf']]) {
+    for (const [index, host] of hosts.entries()) {
       const boundary = rendered.get(host);
       const accessories = boundary.props.children[0];
       assert.equal(typeof accessories.type?.prototype?.renderAttachments, 'function');
       assert.equal(accessories.props.message.attachments.length, 1);
-      assert.equal(accessories.props.message.attachments[0].id, attachmentId);
+      assert.deepEqual(accessories.props.message.attachments[0], projectedAttachments[index]);
       assert.equal(accessories.props.onMediaItemContextMenu, undefined);
+      assert.equal(accessories.props.inlineAttachmentMedia, true);
+      assert.equal(accessories.props.disableMediaOptions, true);
       assert.strictEqual(accessories.props.channel, channel);
     }
     assert.deepEqual({ ...sourceMessage, attachments: structuredClone(sourceMessage.attachments) }, sourceBefore);
 
-    plugin.cleanupLoggerNativeDocumentRoots(txtHost);
-    assert.equal(unmounts.get(txtHost), 1);
-    assert.equal(unmounts.get(pdfHost) || 0, 0);
-    assert.equal(plugin._loggerNativeDocumentRoots.size, 1);
-    plugin.cleanupLoggerNativeDocumentRoots(pdfHost);
-    assert.equal(unmounts.get(pdfHost), 1);
+    for (const [index, host] of hosts.entries()) {
+      plugin.cleanupLoggerNativeDocumentRoots(host);
+      assert.equal(unmounts.get(host), 1);
+      assert.equal(plugin._loggerNativeDocumentRoots.size, hosts.length - index - 1);
+    }
     assert.equal(plugin._loggerNativeDocumentRoots.size, 0);
   } finally {
     if (originalReactComponent === undefined) delete React.Component;
     else React.Component = originalReactComponent;
   }
+});
+
+test('Logger attachment plans use one native facade before custom media renderers', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'MessageLoggerV2.plugin.js'),
+    'utf8'
+  );
+  const populateStart = source.indexOf('populateParent(parent, messages)');
+  const populateEnd = source.indexOf('\n  refilterMessages()', populateStart);
+  const populateSource = source.slice(populateStart, populateEnd);
+  const nativeBranch = populateSource.indexOf('const isNativeAttachment = attachment?._ml2PresentationMediaType === \'attachment\';');
+  const cachedBranch = populateSource.indexOf('const isCached = presentationAction');
+
+  assert.ok(populateSource.includes("['image', 'video', 'audio', 'attachment'].includes(plan.mediaType)"));
+  assert.ok(nativeBranch >= 0);
+  assert.ok(populateSource.includes('mountLoggerNativeDocument('));
+  assert.ok(nativeBranch < cachedBranch);
+  assert.doesNotMatch(populateSource, /_ml2PresentationMediaType === 'text'/);
+  assert.doesNotMatch(populateSource, /_ml2PresentationMediaType === 'pdf'/);
 });
 
 test('native attachment media error remounts one failed remote attachment as a placeholder without cached blob', async () => {
@@ -4670,7 +5157,8 @@ test('native attachment media error remounts one failed remote attachment as a p
   });
   fallbackRender = plugin.getNativeDeletedAttachmentPresentationMessage(message);
   assert.equal(fallbackRender.attachments.length, 0);
-  assert.equal(fallbackRender.content, '[image:photo.png]');
+  assert.equal(fallbackRender.content, '[Deleted: photo.png]');
+  assert.equal(plugin._getSavedAttachmentPresentationPlaceholderContent(message), '[Not cached: photo.png]');
   assert.deepEqual(plugin.messageRecord['502'].message, canonicalBefore);
 
   await setImmediatePromise();
@@ -4741,7 +5229,7 @@ test('attachment presentation remount coalesces channels and protects Discord-ow
   assert.equal(dispatches[2].ML2, true);
   assert.equal(dispatches[2].message.id, 'thread');
   assert.equal(dispatches[2].message.attachments.length, 0);
-  assert.equal(dispatches[2].message.content, 'thread root\n[image:thread.png]');
+  assert.equal(dispatches[2].message.content, 'thread root\n[Not cached: thread.png]');
 
   await setImmediatePromise();
   assert.deepEqual([...invalidations].sort(), ['channel', 'thread']);
@@ -4777,7 +5265,7 @@ test('refreshCacheOnlyMessage dispatches detached placeholder content when cache
 
   assert.equal(dispatches.length, 1);
   assert.equal(dispatches[0].type, 'MESSAGE_UPDATE');
-  assert.equal(dispatches[0].message.content, '[image:photo.png]');
+  assert.equal(dispatches[0].message.content, '[Not cached: photo.png]');
   assert.equal(dispatches[0].message.attachments.length, 0);
   assert.notStrictEqual(dispatches[0].message, message);
   assert.deepEqual(message, canonicalBefore);
@@ -4880,12 +5368,13 @@ test('scheduleSavedAttachmentPresentationRefresh accepts cached audio blobs for 
   assert.equal(remountCalls, 1);
 });
 
-test('scheduleSavedAttachmentPresentationRefresh accepts cached TXT and PDF blobs for remount scheduling', async () => {
+test('scheduleSavedAttachmentPresentationRefresh accepts cached TXT, PDF, and generic blobs for remount scheduling', async () => {
   let remountCalls = 0;
   const resolveCalls = [];
   const blobMap = new Map([
     ['901.txt', 'blob://local/cached/text-901'],
-    ['902.pdf', 'blob://local/cached/pdf-902']
+    ['902.pdf', 'blob://local/cached/pdf-902'],
+    ['903.bin', 'blob://local/cached/generic-903']
   ]);
   const messageRecord = {
     '901': {
@@ -4915,12 +5404,27 @@ test('scheduleSavedAttachmentPresentationRefresh accepts cached TXT and PDF blob
           url: 'https://cdn.discordapp.com/attachments/902/manual.pdf'
         }]
       }
+    },
+    '903': {
+      delete_data: { time: 1 },
+      message: {
+        id: '903',
+        channel_id: '903',
+        content: '',
+        attachments: [{
+          id: '903',
+          filename: 'archive.bin',
+          content_type: 'application/octet-stream',
+          url: 'https://cdn.discordapp.com/attachments/903/archive.bin'
+        }]
+      }
     }
   };
   const canonicalBefore = structuredClone(messageRecord);
   const plugin = createPlugin({
     settings: {
       cacheAllImages: true,
+      newSaveAllFileTypes: false,
       onlyRenderCachedAttachments: true
     },
     dispatcher: {
@@ -4935,6 +5439,9 @@ test('scheduleSavedAttachmentPresentationRefresh accepts cached TXT and PDF blob
         }
         if (attachmentId === '902' && extension === '.pdf' && channelId === '902' && messageId === '902') {
           return '/trusted/cache/902.pdf';
+        }
+        if (attachmentId === '903' && extension === '.bin' && channelId === '903' && messageId === '903') {
+          return '/trusted/cache/903.bin';
         }
         return null;
       },
@@ -4959,17 +5466,25 @@ test('scheduleSavedAttachmentPresentationRefresh accepts cached TXT and PDF blob
     messageRecord['902'].message,
     { allowBlob: true }
   );
+  const genericPlan = plugin.getSavedAttachmentPresentationPlan(
+    messageRecord['903'].message.attachments[0],
+    messageRecord['903'].message,
+    { allowBlob: true }
+  );
   assert.equal(textPlan.action, 'blob');
-  assert.equal(textPlan.mediaType, 'text');
+  assert.equal(textPlan.mediaType, 'attachment');
   assert.equal(pdfPlan.action, 'blob');
-  assert.equal(pdfPlan.mediaType, 'pdf');
+  assert.equal(pdfPlan.mediaType, 'attachment');
+  assert.equal(genericPlan.action, 'blob');
+  assert.equal(genericPlan.mediaType, 'attachment');
 
   plugin.scheduleSavedAttachmentPresentationRefresh('901', '901');
   plugin.scheduleSavedAttachmentPresentationRefresh('902', '902');
+  plugin.scheduleSavedAttachmentPresentationRefresh('903', '903');
   await setImmediatePromise();
 
-  assert.equal(remountCalls, 2);
-  assert.ok(resolveCalls.length >= 4);
+  assert.equal(remountCalls, 3);
+  assert.ok(resolveCalls.length >= 6);
   assert.ok(resolveCalls.every(call => (
     (call.attachmentId === '901'
       && call.extension === '.txt'
@@ -4979,6 +5494,10 @@ test('scheduleSavedAttachmentPresentationRefresh accepts cached TXT and PDF blob
       && call.extension === '.pdf'
       && call.channelId === '902'
       && call.messageId === '902')
+    || (call.attachmentId === '903'
+      && call.extension === '.bin'
+      && call.channelId === '903'
+      && call.messageId === '903')
   )));
   assert.deepEqual(messageRecord, canonicalBefore);
 });
@@ -4987,7 +5506,7 @@ test('protected attachment remount transitions through a hidden sentinel until t
   const dispatches = [];
   const originalDocument = global.document;
   const OriginalMutationObserver = global.MutationObserver;
-  const dom = createSavedAttachmentTransitionDom('710', '710', '[image:Synology_AUX.png]');
+  const dom = createSavedAttachmentTransitionDom('710', '710', '[Not cached: Synology_AUX.png]');
   const observerHarness = createSavedAttachmentTransitionObserverHarness();
   const fixture = createSavedAttachmentTransitionFixture(dispatches);
   const canonicalBefore = structuredClone(fixture.message);
@@ -5016,7 +5535,7 @@ test('protected attachment remount transitions through a hidden sentinel until t
     assert.deepEqual(dispatches[0].message.attachments, []);
     assert.equal(observerHarness.observers.length, 1);
     assert.equal(fixture.plugin._savedAttachmentPresentationTransitions.size, 1);
-    assert.equal(dom.content.textContent, '[image:Synology_AUX.png]');
+    assert.equal(dom.content.textContent, '[Not cached: Synology_AUX.png]');
 
     const hiddenSentinel = fixture.plugin.getNativeDeletedAttachmentPresentationMessageForMessageContent(
       dispatches[0].message
@@ -5025,7 +5544,7 @@ test('protected attachment remount transitions through a hidden sentinel until t
 
     fixture.setBlobUrl('blob://fresh/Synology_AUX.png');
     const replacedContent = dom.content;
-    dom.replaceContentNode('[image:Synology_AUX.png]');
+    dom.replaceContentNode('[Not cached: Synology_AUX.png]');
     assert.notStrictEqual(dom.content, replacedContent);
     dom.replaceContentNode('');
     observerHarness.observers[0].trigger();
@@ -5049,7 +5568,7 @@ test('protected attachment remount rolls back to store placeholder state when pr
   const dispatches = [];
   const originalDocument = global.document;
   const OriginalMutationObserver = global.MutationObserver;
-  const dom = createSavedAttachmentTransitionDom('710', '710', '[image:Synology_AUX.png]');
+  const dom = createSavedAttachmentTransitionDom('710', '710', '[Not cached: Synology_AUX.png]');
   const observerHarness = createSavedAttachmentTransitionObserverHarness();
   const fixture = createSavedAttachmentTransitionFixture(dispatches);
   const canonicalBefore = structuredClone(fixture.message);
@@ -5117,7 +5636,7 @@ test('protected attachment remount falls back to an immediate Blob update withou
 
     const noObserverDispatches = [];
     const noObserverFixture = createSavedAttachmentTransitionFixture(noObserverDispatches);
-    const mountedDom = createSavedAttachmentTransitionDom('710', '710', '[image:Synology_AUX.png]');
+    const mountedDom = createSavedAttachmentTransitionDom('710', '710', '[Not cached: Synology_AUX.png]');
     global.document = mountedDom.document;
     global.MutationObserver = undefined;
     noObserverFixture.plugin.remountSavedAttachmentPresentationRecords(noObserverFixture.record);
@@ -5134,7 +5653,7 @@ test('protected attachment transition remains inert when shouldPresentSavedMessa
   const dispatches = [];
   const originalDocument = global.document;
   const OriginalMutationObserver = global.MutationObserver;
-  const dom = createSavedAttachmentTransitionDom('710', '710', '[image:Synology_AUX.png]');
+  const dom = createSavedAttachmentTransitionDom('710', '710', '[Not cached: Synology_AUX.png]');
   const observerHarness = createSavedAttachmentTransitionObserverHarness();
   const fixture = createSavedAttachmentTransitionFixture(dispatches);
 
@@ -5162,7 +5681,7 @@ test('newer protected attachment transitions and reset cancel stale observers', 
   const dispatches = [];
   const originalDocument = global.document;
   const OriginalMutationObserver = global.MutationObserver;
-  const dom = createSavedAttachmentTransitionDom('710', '710', '[image:Synology_AUX.png]');
+  const dom = createSavedAttachmentTransitionDom('710', '710', '[Not cached: Synology_AUX.png]');
   const observerHarness = createSavedAttachmentTransitionObserverHarness();
   const fixture = createSavedAttachmentTransitionFixture(dispatches);
 
@@ -5190,7 +5709,7 @@ test('newer protected attachment transitions and reset cancel stale observers', 
     staleObserver.trigger();
     assert.equal(dispatches.length, 2);
 
-    dom.content.textContent = '[image:Synology_AUX.png]';
+    dom.content.textContent = '[Not cached: Synology_AUX.png]';
     fixture.plugin.remountSavedAttachmentPresentationRecords(fixture.record);
     const stopObserver = observerHarness.observers[2];
     assert.equal(stopObserver.disconnected, false);
@@ -5270,7 +5789,7 @@ test('MessageContent mount path applies latest deleted attachment presentation c
   };
   const offRendered = plugin.getNativeDeletedAttachmentPresentationMessageForMessageContent(masterOffLive);
 
-  assert.equal(offRendered.content, '[image:photo.png]');
+  assert.equal(offRendered.content, '[Not cached: photo.png]');
   assert.equal(offRendered !== masterOffLive, true);
   assert.equal(masterOffLive.content, '');
 
@@ -6256,7 +6775,7 @@ test('saved attachment open descriptor resolves a local-only cached TXT anchor f
   assert.deepEqual(target, targetBefore);
 });
 
-test('saved attachment open descriptor keeps each marked TXT/PDF document host authoritative with repeated content', () => {
+test('saved attachment open descriptor keeps each marked TXT/Markdown/PDF document host authoritative with repeated content', () => {
   const attachments = [
     {
       id: '501',
@@ -6271,6 +6790,14 @@ test('saved attachment open descriptor keeps each marked TXT/PDF document host a
       content_type: 'application/pdf',
       url: 'https://cdn.example/shared.pdf',
       proxy_url: 'https://media.example/shared.pdf'
+    },
+    {
+      id: '503',
+      filename: 'README.md',
+      content_type: 'text/markdown; charset=utf-8',
+      original_content_type: 'text/markdown',
+      url: 'https://cdn.example/README.md',
+      proxy_url: 'https://media.example/README.md'
     }
   ];
   const record = {
@@ -6278,7 +6805,7 @@ test('saved attachment open descriptor keeps each marked TXT/PDF document host a
     message: {
       id: 'marked-message',
       channel_id: 'marked-channel',
-      content: '[attachment:shared.txt] [attachment:shared.pdf] https://cdn.example/shared.txt https://cdn.example/shared.pdf [attachment:shared.txt] [attachment:shared.pdf]',
+      content: '[attachment:shared.txt] [attachment:shared.pdf] [attachment:README.md] https://cdn.example/shared.txt https://cdn.example/shared.pdf https://cdn.example/README.md [attachment:shared.txt] [attachment:shared.pdf] [attachment:README.md]',
       attachments
     }
   };
@@ -6288,6 +6815,7 @@ test('saved attachment open descriptor keeps each marked TXT/PDF document host a
       _resolveImagePath: (attachmentId, extension) => (
         attachmentId === '501' && extension === '.txt' ? '/trusted/cache/shared.txt'
           : attachmentId === '502' && extension === '.pdf' ? '/trusted/cache/shared.pdf'
+            : attachmentId === '503' && extension === '.md' ? '/trusted/cache/README.md'
             : null
       )
     }
@@ -6321,20 +6849,23 @@ test('saved attachment open descriptor keeps each marked TXT/PDF document host a
   };
   const targets = [
     createMarkedDocumentTarget(attachments[0], 'blob://local/cached/shared.txt'),
-    createMarkedDocumentTarget(attachments[1], 'blob://local/cached/shared.pdf')
+    createMarkedDocumentTarget(attachments[1], 'blob://local/cached/shared.pdf'),
+    createMarkedDocumentTarget(attachments[2], 'blob://local/cached/README.md')
   ];
 
   const descriptors = targets.map(target => plugin.getSavedAttachmentOpenDescriptor(target, record));
-  assert.deepEqual(descriptors.map(descriptor => descriptor?.attachment_id), ['501', '502']);
-  assert.deepEqual(descriptors.map(descriptor => descriptor?.display_url), [null, null]);
-  assert.deepEqual(descriptors.map(descriptor => descriptor?.blob_url), [null, null]);
+  assert.deepEqual(descriptors.map(descriptor => descriptor?.attachment_id), ['501', '502', '503']);
+  assert.deepEqual(descriptors.map(descriptor => descriptor?.display_url), [null, null, null]);
+  assert.deepEqual(descriptors.map(descriptor => descriptor?.blob_url), [null, null, null]);
   assert.deepEqual(descriptors.map(descriptor => descriptor?.local_path), [
     '/trusted/cache/shared.txt',
-    '/trusted/cache/shared.pdf'
+    '/trusted/cache/shared.pdf',
+    '/trusted/cache/README.md'
   ]);
   assert.deepEqual(descriptors.map(descriptor => descriptor?.remote_urls), [
     [attachments[0].url, attachments[0].proxy_url],
-    [attachments[1].url, attachments[1].proxy_url]
+    [attachments[1].url, attachments[1].proxy_url],
+    [attachments[2].url, attachments[2].proxy_url]
   ]);
 
   for (const target of targets) {
@@ -7606,6 +8137,12 @@ test('remote Components V2 files follow the all-attachment-types setting', async
     ]
   };
 
+  plugin.settings.cacheAllImages = false;
+  plugin.cacheMessageImages(message);
+  await waitForQueuedMediaTasks();
+  assert.deepEqual(cached, []);
+
+  plugin.settings.cacheAllImages = true;
   plugin.cacheMessageImages(message);
   await waitForQueuedMediaTasks();
 
@@ -7622,6 +8159,136 @@ test('remote Components V2 files follow the all-attachment-types setting', async
     ['https://cdn.example/thumbnail.png', 'component:0:thumbnail', null],
     ['https://cdn.example/archive.zip', 'component:1:file', null]
   ]);
+});
+
+test('ordinary attachment cache admission follows image-family and all-attachment gates', async () => {
+  const cached = [];
+  const plugin = createPlugin({
+    __started: true,
+    settings: {
+      cacheAllImages: true,
+      dontSaveData: false,
+      maxCacheFileSize: 0,
+      newSaveAllFileTypes: false
+    },
+    cacheImage(...args) { cached.push(args); }
+  });
+  const attachments = [
+    ['image-jpg', 'image.jpg'],
+    ['image-jpeg', 'image.jpeg'],
+    ['image-png', 'image.png'],
+    ['image-gif', 'image.gif'],
+    ['image-bmp', 'image.bmp'],
+    ['image-webp', 'image.webp'],
+    ['image-avif', 'image.avif'],
+    ['image-tif', 'image.tif'],
+    ['image-tiff', 'image.tiff'],
+    ['video', 'clip.mp4'],
+    ['audio', 'clip.mp3'],
+    ['text', 'notes.txt'],
+    ['markdown', 'README.md'],
+    ['pdf', 'manual.pdf'],
+    ['generic', 'archive.bin'],
+    ['archive', 'bundle.zip'],
+    ['font', 'font.woff2'],
+    ['unknown', 'payload.unknown']
+  ].map(([id, filename]) => ({
+    id,
+    filename,
+    url: `https://cdn.example/ordinary/${id}/${filename}`
+  }));
+  const message = {
+    id: 'ordinary-attachment-gate',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    attachments,
+    embeds: [],
+    sticker_items: []
+  };
+  const expectedOwnership = attachments.map((attachment, index) => [
+    attachment.url,
+    index,
+    attachment.id
+  ]);
+  const imageOwnership = expectedOwnership.slice(0, 9);
+
+  plugin.settings.cacheAllImages = false;
+  plugin.cacheMessageImages(message);
+  await waitForQueuedMediaTasks();
+  assert.deepEqual(cached, []);
+
+  plugin.settings.cacheAllImages = true;
+  plugin.cacheMessageImages(message);
+  await waitForQueuedMediaTasks();
+  assert.deepEqual(
+    cached.map(args => args.slice(0, 3)),
+    imageOwnership
+  );
+
+  plugin.settings.newSaveAllFileTypes = true;
+  plugin.cacheMessageImages(message);
+  await waitForQueuedMediaTasks();
+
+  assert.deepEqual(
+    cached.map(args => args.slice(0, 3)),
+    [...imageOwnership, ...expectedOwnership]
+  );
+});
+
+test('sticker image cache admission is owned by the main gate, independent of all-file types', async () => {
+  const cached = [];
+  const plugin = createPlugin({
+    __started: true,
+    settings: {
+      cacheAllImages: false,
+      dontSaveData: false,
+      newSaveAllFileTypes: false,
+      maxCacheFileSize: 0
+    },
+    cacheImage(...args) { cached.push(args); }
+  });
+  const message = {
+    id: 'sticker-cache-gate',
+    channel_id: 'channel',
+    guild_id: 'guild',
+    attachments: [],
+    embeds: [],
+    sticker_items: [
+      { id: 'sticker-static', name: 'static', format_type: 1 },
+      { id: 'sticker-animated', name: 'animated', format_type: 4 },
+      {
+        id: 'sticker-webp',
+        name: 'webp',
+        format_type: 1,
+        url: 'https://cdn.example/stickers/sticker-webp.webp'
+      }
+    ]
+  };
+  const expected = [
+    ['https://media.discordapp.net/stickers/sticker-static.png?size=160', 0, 'sticker-static'],
+    ['https://media.discordapp.net/stickers/sticker-animated.gif?size=160', 1, 'sticker-animated'],
+    ['https://cdn.example/stickers/sticker-webp.webp', 2, 'sticker-webp']
+  ];
+
+  plugin.cacheMessageImages(message);
+  await waitForQueuedMediaTasks();
+  assert.deepEqual(cached, []);
+
+  plugin.settings.cacheAllImages = true;
+  plugin.cacheMessageImages(message);
+  await waitForQueuedMediaTasks();
+  assert.deepEqual(cached.map(args => args.slice(0, 3)), expected);
+
+  plugin.settings.newSaveAllFileTypes = true;
+  plugin.cacheMessageImages(message);
+  await waitForQueuedMediaTasks();
+  assert.deepEqual(cached.map(args => args.slice(0, 3)), [...expected, ...expected]);
+
+  plugin.settings.newSaveAllFileTypes = false;
+  plugin.settings.dontSaveData = true;
+  plugin.cacheMessageImages(message);
+  await waitForQueuedMediaTasks();
+  assert.equal(pendingMediaRequestCount(plugin), expected.length);
 });
 
 test('external gallery media uses distinct fallback filenames at the final cache write', async t => {
@@ -7892,6 +8559,353 @@ test('sticker media keeps common image formats and rejects unsupported formats',
   assert.equal(plugin.getStickerMedia({ id: '1', name: 'wave', url: 'https://cdn.example/wave.gif' }).filename, 'wave.gif');
   assert.equal(plugin.getStickerMedia({ id: '2', name: 'static', format_type: 1 }).filename, 'static.png');
   assert.equal(plugin.getStickerMedia({ id: '3', name: 'vector', url: 'https://cdn.example/vector.json' }), null);
+});
+
+test('sticker presentation plans project image-backed formats and retain unsupported native aliases', () => {
+  const message = {
+    id: 'sticker-message',
+    channel_id: 'sticker-channel',
+    content: 'body',
+    attachments: [],
+    sticker_items: [
+      { id: 'sticker-static', name: 'static', format_type: 1 },
+      { id: 'sticker-animated', name: 'animated', format_type: 4 },
+      { id: 'sticker-webp', name: 'webp', url: 'https://cdn.example/sticker-webp.webp' },
+      { id: 'sticker-native', name: 'native', url: 'https://cdn.example/sticker-native.json', format_type: 3 }
+    ],
+    stickerItems: [
+      { id: 'sticker-static', name: 'static', format_type: 1 },
+      { id: 'sticker-native', name: 'native', url: 'https://cdn.example/sticker-native.json', format_type: 3 }
+    ],
+    stickers: [
+      { id: 'sticker-native', name: 'native', url: 'https://cdn.example/sticker-native.json', format_type: 3 }
+    ]
+  };
+  const canonicalBefore = structuredClone(message);
+  const createStickerPlugin = (settings, cached = false) => createPlugin({
+    settings: {
+      cacheAllImages: true,
+      newSaveAllFileTypes: settings.newSaveAllFileTypes,
+      onlyRenderCachedAttachments: settings.onlyRenderCachedAttachments,
+      ...settings
+    },
+    imageCacheServerSimulator: {
+      _resolveImagePath: (id, extension) => cached && id.startsWith('sticker-')
+        ? `/cache/${id}${extension}`
+        : null,
+      get: cacheUrl => {
+        if (!cached) return null;
+        const match = /\/([^/]+)(\.[a-z0-9]+)#/.exec(cacheUrl);
+        return match ? `blob://local/${match[1]}${match[2]}` : null;
+      }
+    }
+  });
+
+  const remotePlugin = createStickerPlugin({
+    cacheAllImages: true,
+    newSaveAllFileTypes: false,
+    onlyRenderCachedAttachments: false
+  });
+  const remoteEntries = remotePlugin.getSavedStickerPresentationEntries(message, { allowRemote: true });
+  assert.deepEqual(remoteEntries.slice(0, 3).map(entry => entry.attachment.filename), [
+    'static.png',
+    'animated.gif',
+    'webp.webp'
+  ]);
+  assert.deepEqual(remoteEntries.slice(0, 3).map(entry => entry.plan.mediaType), ['image', 'image', 'image']);
+  assert.deepEqual(remoteEntries.slice(0, 3).map(entry => entry.plan.action), ['remote', 'remote', 'remote']);
+  assert.equal(remoteEntries[3].attachment, null);
+  assert.equal(remoteEntries[3].plan.action, 'native');
+  assert.equal(remoteEntries[3].plan.label, '[image:native]');
+
+  const remoteRendered = remotePlugin.getCacheOnlyMessage(message);
+  assert.deepEqual(remoteRendered.attachments.map(attachment => attachment.id), [
+    'sticker-static',
+    'sticker-animated',
+    'sticker-webp'
+  ]);
+  assert.equal(remoteRendered.attachments.every(attachment => (
+    attachment._ml2PresentationSourceKind === 'sticker'
+      && attachment._ml2PresentationAction === 'remote'
+      && attachment._ml2PresentationLabel.startsWith('[image:')
+  )), true);
+  assert.equal(remoteRendered.sticker_items.length, 1);
+  assert.equal(remoteRendered.sticker_items[0].id, 'sticker-native');
+  assert.equal(remoteRendered.stickerItems.length, 1);
+  assert.equal(remoteRendered.stickers.length, 1);
+  assert.deepEqual(message, canonicalBefore);
+
+  const localPlugin = createStickerPlugin({
+    cacheAllImages: true,
+    newSaveAllFileTypes: true,
+    onlyRenderCachedAttachments: true
+  }, true);
+  const localEntries = localPlugin.getSavedStickerPresentationEntries(message, { allowBlob: true });
+  assert.deepEqual(localEntries.slice(0, 3).map(entry => entry.plan.action), ['blob', 'blob', 'blob']);
+  assert.deepEqual(localEntries.slice(0, 3).map(entry => entry.plan.url), [
+    'blob://local/sticker-static.png',
+    'blob://local/sticker-animated.gif',
+    'blob://local/sticker-webp.webp'
+  ]);
+  assert.equal(localEntries[3].plan.action, 'omit');
+  assert.equal(localEntries[3].plan.unavailableLabel, '[Not cached: native]');
+  const localRendered = localPlugin.getCacheOnlyMessage(message);
+  assert.equal(localRendered.attachments.length, 3);
+  assert.equal(localRendered.attachments.every(attachment => attachment._ml2PresentationAction === 'blob'), true);
+  assert.equal(localRendered.sticker_items.length, 0);
+  assert.equal(localRendered.stickerItems.length, 0);
+  assert.equal(localRendered.stickers.length, 0);
+  assert.deepEqual(message, canonicalBefore);
+
+  for (const childValue of [false, true]) {
+    const masterOffPlugin = createStickerPlugin({
+      cacheAllImages: false,
+      newSaveAllFileTypes: childValue,
+      onlyRenderCachedAttachments: false
+    });
+    const masterOffEntries = masterOffPlugin.getSavedStickerPresentationEntries(message, { allowRemote: true });
+    assert.deepEqual(masterOffEntries.map(entry => entry.plan.action), [
+      'placeholder', 'placeholder', 'placeholder', 'placeholder'
+    ]);
+    assert.equal(masterOffEntries[0].plan.unavailableLabel, '[Not cached: static.png]');
+    assert.equal(masterOffEntries[3].plan.unavailableLabel, '[Not cached: native]');
+    const masterOffRendered = masterOffPlugin.getCacheOnlyMessage(message);
+    assert.equal(masterOffRendered.attachments.length, 0);
+    assert.equal(masterOffRendered.sticker_items.length, 0);
+    assert.equal(masterOffRendered.stickerItems.length, 0);
+    assert.equal(masterOffRendered.stickers.length, 0);
+    const nativePlaceholder = masterOffPlugin.getNativeDeletedAttachmentPresentationMessage(message);
+    assert.equal(nativePlaceholder.content.includes('[Not cached: static.png]'), true);
+    assert.equal(nativePlaceholder.content.includes('[Not cached: native]'), true);
+    assert.deepEqual(message, canonicalBefore);
+  }
+
+  const loggerEntries = remotePlugin.getLoggerSavedAttachmentPresentationEntries(message, {});
+  assert.deepEqual(loggerEntries.map(entry => entry.sourceKind), ['sticker', 'sticker', 'sticker']);
+  assert.deepEqual(loggerEntries.map(entry => entry.attachment.id), [
+    'sticker-static',
+    'sticker-animated',
+    'sticker-webp'
+  ]);
+  assert.deepEqual(loggerEntries.map(entry => entry.plan.url), remoteEntries.slice(0, 3).map(entry => entry.plan.url));
+});
+
+test('sticker-only saved records use native projection, content correction, refresh, and media retry paths', async () => {
+  const sticker = {
+    id: 'live-sticker',
+    name: 'live-sticker',
+    format_type: 1
+  };
+  const message = {
+    id: '153899100000000001',
+    channel_id: '361510651807531009',
+    content: '',
+    attachments: [],
+    sticker_items: [sticker],
+    stickerItems: [{ ...sticker }],
+    stickers: [{ ...sticker }]
+  };
+  const record = {
+    message,
+    delete_data: { time: 1 }
+  };
+  const canonicalBefore = structuredClone(message);
+  const stickerUrl = 'https://media.discordapp.net/stickers/live-sticker.png?size=160';
+
+  const masterOffPlugin = createPlugin({
+    settings: {
+      cacheAllImages: false,
+      newSaveAllFileTypes: false,
+      onlyRenderCachedAttachments: false
+    },
+    messageRecord: { [message.id]: record },
+    messageRecordIds: new Set([message.id])
+  });
+  masterOffPlugin.shouldPresentSavedMessage = () => true;
+  const offRendered = masterOffPlugin.getNativeDeletedAttachmentPresentationMessage(message);
+  assert.equal(offRendered.content, '[Not cached: live-sticker.png]');
+  assert.deepEqual(offRendered.attachments, []);
+  assert.deepEqual(offRendered.sticker_items, []);
+  assert.deepEqual(offRendered.stickerItems, []);
+  assert.deepEqual(offRendered.stickers, []);
+  const corrected = masterOffPlugin.getNativeDeletedAttachmentPresentationMessageForMessageContent({
+    ...message,
+    sticker_items: [{ ...sticker }],
+    stickerItems: [{ ...sticker }],
+    stickers: [{ ...sticker }]
+  });
+  assert.equal(corrected.content, '[Not cached: live-sticker.png]');
+  const stickerOnlyWithoutAttachments = structuredClone(message);
+  delete stickerOnlyWithoutAttachments.attachments;
+  assert.doesNotThrow(() => {
+    masterOffPlugin.getSavedAttachmentMessageContentPresentationMessage(
+      stickerOnlyWithoutAttachments
+    );
+  });
+  assert.deepEqual(message, canonicalBefore);
+
+  const remotePlugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      newSaveAllFileTypes: false,
+      onlyRenderCachedAttachments: false
+    },
+    imageCacheServerSimulator: { get: () => null }
+  });
+  const remoteRendered = remotePlugin.getCacheOnlyMessage(message);
+  assert.equal(remoteRendered.attachments.length, 1);
+  assert.equal(remoteRendered.attachments[0].id, 'live-sticker');
+  assert.equal(remoteRendered.attachments[0].url, stickerUrl);
+  assert.equal(remoteRendered.attachments[0]._ml2PresentationSourceKind, 'sticker');
+  assert.deepEqual(remoteRendered.sticker_items, []);
+  assert.deepEqual(remoteRendered.stickerItems, []);
+  assert.deepEqual(remoteRendered.stickers, []);
+
+  const localPlugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      newSaveAllFileTypes: false,
+      onlyRenderCachedAttachments: true
+    },
+    imageCacheServerSimulator: {
+      _resolveImagePath: (attachmentId, extension, channelId, messageId) => {
+        assert.equal(attachmentId, 'live-sticker');
+        assert.equal(extension, '.png');
+        assert.equal(channelId, '361510651807531009');
+        assert.equal(messageId, '153899100000000001');
+        return '/cache/live-sticker.png';
+      },
+      get: cacheUrl => cacheUrl.includes('/live-sticker.png#')
+        ? 'blob://local/live-sticker.png'
+        : null
+    }
+  });
+  const localRendered = localPlugin.getCacheOnlyMessage(message);
+  assert.equal(localRendered.attachments.length, 1);
+  assert.equal(localRendered.attachments[0].url, 'blob://local/live-sticker.png');
+  assert.deepEqual(message, canonicalBefore);
+
+  let refreshRecords = null;
+  const refreshPlugin = createPlugin({
+    selectedChannel: { id: message.channel_id },
+    deletedMessageRecord: { [message.channel_id]: [message.id] },
+    messageRecord: { [message.id]: record },
+    settings: { cacheAllImages: false, newSaveAllFileTypes: false },
+    remountSavedAttachmentPresentationRecords(records) {
+      refreshRecords = records;
+      return records.length;
+    }
+  });
+  refreshPlugin.refreshAttachmentRendering();
+  assert.equal(refreshRecords.length, 1);
+  assert.strictEqual(refreshRecords[0], record);
+
+  let scheduledRemounts = 0;
+  const schedulePlugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      newSaveAllFileTypes: false,
+      onlyRenderCachedAttachments: true
+    },
+    messageRecord: { [message.id]: record },
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => '/cache/live-sticker.png',
+      get: () => 'blob://local/live-sticker.png'
+    },
+    remountSavedAttachmentPresentationRecords() {
+      scheduledRemounts++;
+    },
+    dispatcher: { dispatch() {} }
+  });
+  schedulePlugin.scheduleSavedAttachmentPresentationRefresh(message.id, sticker.id);
+  await setImmediatePromise();
+  assert.equal(scheduledRemounts, 1);
+
+  let blobAvailable = true;
+  const errorPlugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      newSaveAllFileTypes: false,
+      onlyRenderCachedAttachments: false
+    },
+    messageRecord: { [message.id]: record },
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => '/cache/live-sticker.png',
+      get: () => blobAvailable ? 'blob://local/live-sticker.png' : null
+    },
+    remountSavedAttachmentPresentationRecords() {}
+  });
+  const targetRow = { id: `chat-messages-${message.channel_id}-${message.id}` };
+  errorPlugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: stickerUrl,
+      closest: createNativeMediaClosest(targetRow)
+    }
+  });
+  const blobFallback = errorPlugin.getNativeDeletedAttachmentPresentationMessage(message);
+  assert.equal(blobFallback.attachments[0].url, 'blob://local/live-sticker.png');
+  blobAvailable = false;
+  const deletedFallback = errorPlugin.getNativeDeletedAttachmentPresentationMessage(message);
+  assert.equal(deletedFallback.attachments.length, 0);
+  assert.equal(deletedFallback.content, '[Deleted: live-sticker.png]');
+  assert.deepEqual(message, canonicalBefore);
+});
+
+test('unsupported native-only stickers show one Logger placeholder only when remote presentation is unavailable', () => {
+  const message = {
+    id: 'unsupported-sticker-message',
+    channel_id: 'unsupported-sticker-channel',
+    content: '',
+    attachments: [],
+    sticker_items: [{
+      id: 'unsupported-sticker',
+      name: 'native-only',
+      format_type: 3,
+      url: 'https://cdn.example/native-only.json'
+    }]
+  };
+  const record = { message, delete_data: { time: 1 } };
+  const canonicalBefore = structuredClone(message);
+
+  for (const [label, settings, expectedAction] of [
+    ['master off', { cacheAllImages: false, onlyRenderCachedAttachments: false }, 'placeholder'],
+    ['local only', { cacheAllImages: true, onlyRenderCachedAttachments: true }, 'omit']
+  ]) {
+    for (const newSaveAllFileTypes of [false, true]) {
+      const plugin = createPlugin({
+        settings: { ...settings, newSaveAllFileTypes },
+        messageRecord: { [message.id]: record }
+      });
+      const entries = plugin.getLoggerSavedAttachmentPresentationEntries(message, record);
+      assert.equal(entries.length, 1, `${label} must expose one placeholder entry`);
+      assert.equal(entries[0].sourceKind, 'sticker');
+      assert.equal(entries[0].attachment.id, 'unsupported-sticker');
+      assert.equal(entries[0].attachment.filename, 'native-only');
+      assert.equal(entries[0].attachment.url, undefined);
+      assert.equal(entries[0].attachment._ml2UnsupportedSticker, true);
+      assert.equal(entries[0].plan.action, expectedAction);
+      assert.equal(entries[0].plan.unavailableLabel, '[Not cached: native-only]');
+      assert.deepEqual(message, canonicalBefore);
+    }
+  }
+
+  for (const newSaveAllFileTypes of [false, true]) {
+    const plugin = createPlugin({
+      settings: {
+        cacheAllImages: true,
+        onlyRenderCachedAttachments: false,
+        newSaveAllFileTypes
+      },
+      messageRecord: { [message.id]: record }
+    });
+    const entries = plugin.getLoggerSavedAttachmentPresentationEntries(message, record);
+    assert.equal(entries.length, 0, 'remote/native presentation must retain native behavior without a duplicate');
+    const stickerEntry = plugin.getSavedStickerPresentationEntries(message, { allowRemote: true })[0];
+    assert.equal(stickerEntry.attachment, null);
+    assert.equal(stickerEntry.plan.action, 'native');
+    assert.deepEqual(message, canonicalBefore);
+  }
 });
 
 test('no-save queues attachment, embed, sticker, and video media without fetching or creating files in attached and detached modes', async t => {

@@ -109,7 +109,8 @@ function createRestoredAttachmentTarget({
   channelId = CHANNEL_ID,
   source,
   tagName = 'A',
-  children = []
+  children = [],
+  textContent = ''
 } = {}) {
   const row = { id: `chat-messages-${channelId}-${messageId}` };
   const target = {
@@ -122,6 +123,7 @@ function createRestoredAttachmentTarget({
     currentSrc: source,
     src: source,
     href: source,
+    textContent,
     getAttribute(name) {
       if (name === 'data-ml2-attachment-id') return attachmentId || null;
       if (name === 'data-safe-src') return source || null;
@@ -148,6 +150,7 @@ function createStage4AttachmentBatch() {
     ['200000000000000102', 'stage4-video.mp4', 'video', 'blob:stage4-video'],
     ['200000000000000103', 'stage4-audio.mp3', 'audio', 'blob:stage4-audio'],
     ['200000000000000104', 'stage4-notes.txt', 'text', 'blob:stage4-text'],
+    ['200000000000000107', 'stage4-README.md', 'markdown', 'blob:stage4-markdown'],
     ['200000000000000105', 'stage4-guide.pdf', 'pdf', 'blob:stage4-pdf'],
     ['200000000000000106', 'stage4-archive.bin', 'generic', null]
   ].map(([id, filename, kind, blobUrl]) => {
@@ -164,6 +167,20 @@ function createStage4AttachmentBatch() {
       localPath: `/tmp/cache/${filename}`
     };
   });
+  const stickers = [
+    ['300000000000000101', 'stage4-sticker-one', 'blob:stage4-sticker-one'],
+    ['300000000000000102', 'stage4-sticker-two', 'blob:stage4-sticker-two']
+  ].map(([id, name, blobUrl]) => ({
+    id,
+    name,
+    format_type: 1,
+    filename: `${name}.png`,
+    extension: '.png',
+    blobUrl,
+    url: `https://media.discordapp.net/stickers/${id}.png?size=160`,
+    proxy_url: `https://media.discordapp.net/stickers/${id}.png?size=160`,
+    localPath: `/tmp/cache/${name}.png`
+  }));
   const record = {
     message: {
       id: MESSAGE_ID,
@@ -171,11 +188,11 @@ function createStage4AttachmentBatch() {
       attachments,
       embeds: [],
       components: [],
-      sticker_items: []
+      sticker_items: stickers.map(({ id, name, format_type }) => ({ id, name, format_type }))
     },
     delete_data: { time: Date.now() }
   };
-  const blobUrls = new Map(attachments
+  const blobUrls = new Map([...attachments, ...stickers]
     .filter(attachment => attachment.blobUrl)
     .map(attachment => [
       `http://localhost:7474/${attachment.id}${attachment.extension}#${CHANNEL_ID},${attachment.id},${MESSAGE_ID}`,
@@ -183,12 +200,13 @@ function createStage4AttachmentBatch() {
     ]));
   return {
     attachments,
+    stickers,
     record,
     install(plugin) {
       plugin.imageCacheServerSimulator = {
         get: cacheUrl => blobUrls.get(cacheUrl) || null
       };
-      installCachedFiles(plugin, attachments.map(attachment => ({
+      installCachedFiles(plugin, [...attachments, ...stickers].map(attachment => ({
         cacheId: attachment.id,
         extension: attachment.extension,
         path: attachment.localPath
@@ -199,6 +217,13 @@ function createStage4AttachmentBatch() {
         attachmentId: attachment.id,
         source: attachment.blobUrl || attachment.url,
         tagName
+      });
+    },
+    stickerTargetFor(sticker, source = sticker.blobUrl || sticker.url) {
+      return createRestoredAttachmentTarget({
+        attachmentId: sticker.id,
+        source,
+        tagName: 'IMG'
       });
     }
   };
@@ -1224,7 +1249,7 @@ test('image-context menu keeps copy action and adds a Message Logger submenu for
   assert.equal(opened[1].display_url, record.message.attachments[0].url);
 });
 
-test('batch restored attachments resolve each exact id and local-only blob source', () => {
+test('batch restored attachments and stickers resolve each exact id and local-only blob source', () => {
   const batch = createStage4AttachmentBatch();
   const plugin = createPlugin({
     settings: {
@@ -1249,6 +1274,142 @@ test('batch restored attachments resolve each exact id and local-only blob sourc
       assert.notEqual(descriptor.attachment_id, batch.attachments[0].id, attachment.filename);
     }
   }
+  for (const [index, sticker] of batch.stickers.entries()) {
+    const descriptor = plugin.getSavedAttachmentOpenDescriptor(
+      batch.stickerTargetFor(sticker),
+      batch.record
+    );
+    assert.notEqual(descriptor, null, sticker.filename);
+    assert.equal(descriptor.attachment_id, sticker.id, sticker.filename);
+    assert.equal(descriptor.filename, sticker.filename, sticker.filename);
+    assert.equal(descriptor.local_path, sticker.localPath, sticker.filename);
+    assert.equal(descriptor.display_url, sticker.blobUrl, sticker.filename);
+    assert.equal(descriptor.blob_url, sticker.blobUrl, sticker.filename);
+    if (index > 0) {
+      assert.notEqual(descriptor.attachment_id, batch.stickers[0].id, sticker.filename);
+    }
+  }
+});
+
+test('saved attachment open targets index marked and unavailable labels without guessing same-name siblings', () => {
+  const exactRecord = {
+    message: {
+      id: MESSAGE_ID,
+      channel_id: CHANNEL_ID,
+      attachments: [
+        {
+          id: '200000000000000201',
+          filename: 'exact.txt',
+          url: 'https://cdn.discordapp.com/attachments/100000000000000002/200000000000000201/exact.txt'
+        },
+        {
+          id: '200000000000000202',
+          filename: 'sibling.txt',
+          url: 'https://cdn.discordapp.com/attachments/100000000000000002/200000000000000202/sibling.txt'
+        }
+      ]
+    },
+    delete_data: { time: Date.now() }
+  };
+  const exactPlugin = createPlugin({ settings: { cacheAllImages: false } });
+  const exactDescriptor = exactPlugin.getSavedAttachmentOpenDescriptor(
+    createRestoredAttachmentTarget({
+      attachmentId: exactRecord.message.attachments[1].id,
+      source: '',
+      textContent: '[Not cached: exact.txt]'
+    }),
+    exactRecord
+  );
+  assert.equal(exactDescriptor?.attachment_id, exactRecord.message.attachments[1].id);
+
+  const deletedAttachment = {
+    id: '200000000000000203',
+    filename: 'deleted.txt',
+    url: 'https://cdn.discordapp.com/attachments/100000000000000002/200000000000000203/deleted.txt',
+    proxy_url: 'https://media.discordapp.net/attachments/100000000000000002/200000000000000203/deleted.txt'
+  };
+  const deletedRecord = {
+    message: { id: MESSAGE_ID, channel_id: CHANNEL_ID, attachments: [deletedAttachment] },
+    delete_data: { time: Date.now() }
+  };
+  const deletedPlugin = createPlugin({
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    imageCacheServerSimulator: { get: () => null, _resolveImagePath: () => null }
+  });
+  let deletedPlan = deletedPlugin.getSavedAttachmentPresentationPlan(
+    deletedAttachment,
+    deletedRecord.message,
+    { allowRemote: true }
+  );
+  for (const candidate of deletedPlan.sources) {
+    assert.equal(
+      deletedPlugin.markSavedAttachmentMediaCandidateFailure(
+        deletedAttachment,
+        deletedRecord.message,
+        candidate
+      ),
+      true
+    );
+    deletedPlan = deletedPlugin.getSavedAttachmentPresentationPlan(
+      deletedAttachment,
+      deletedRecord.message,
+      { allowRemote: true }
+    );
+  }
+  assert.equal(deletedPlan.unavailableLabel, '[Deleted: deleted.txt]');
+  const deletedDescriptor = deletedPlugin.getSavedAttachmentOpenDescriptor(
+    createRestoredAttachmentTarget({
+      attachmentId: '',
+      source: '',
+      textContent: '[Deleted: deleted.txt]'
+    }),
+    deletedRecord
+  );
+  assert.equal(deletedDescriptor?.attachment_id, deletedAttachment.id);
+
+  const uniqueRecord = createRecord({ attachmentId: '200000000000000204', extension: 'txt' });
+  const uniquePlugin = createPlugin({ settings: { cacheAllImages: false } });
+  const uniqueDescriptor = uniquePlugin.getSavedAttachmentOpenDescriptor(
+    createRestoredAttachmentTarget({
+      attachmentId: '',
+      source: '',
+      textContent: '[Not cached: media.txt]'
+    }),
+    uniqueRecord
+  );
+  assert.equal(uniqueDescriptor?.attachment_id, uniqueRecord.message.attachments[0].id);
+
+  const ambiguousRecord = {
+    message: {
+      id: MESSAGE_ID,
+      channel_id: CHANNEL_ID,
+      attachments: [
+        {
+          id: '200000000000000205',
+          filename: 'same.txt',
+          url: 'https://cdn.discordapp.com/attachments/100000000000000002/200000000000000205/same.txt'
+        },
+        {
+          id: '200000000000000206',
+          filename: 'same.txt',
+          url: 'https://cdn.discordapp.com/attachments/100000000000000002/200000000000000206/same.txt'
+        }
+      ]
+    },
+    delete_data: { time: Date.now() }
+  };
+  const ambiguousPlugin = createPlugin({ settings: { cacheAllImages: false } });
+  assert.equal(
+    ambiguousPlugin.getSavedAttachmentOpenDescriptor(
+      createRestoredAttachmentTarget({
+        attachmentId: '',
+        source: '',
+        textContent: '[Not cached: same.txt]'
+      }),
+      ambiguousRecord
+    ),
+    null
+  );
 });
 
 test('batch restored attachment context menus route only the selected sibling and fail closed when ambiguous', () => {
@@ -1302,7 +1463,7 @@ test('batch restored attachment context menus route only the selected sibling an
   assert.equal(opened.at(-1).attachment_id, image.id);
   assert.equal(opened.at(-1).display_url, image.blobUrl);
 
-  for (const kind of ['audio', 'text', 'pdf', 'generic']) {
+  for (const kind of ['audio', 'text', 'markdown', 'pdf', 'generic']) {
     const attachment = batch.attachments.find(candidate => candidate.kind === kind);
     const target = batch.targetFor(attachment);
     const nativeAction = () => {};

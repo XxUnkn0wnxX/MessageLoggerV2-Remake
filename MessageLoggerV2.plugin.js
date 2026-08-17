@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.18
+ * @version 2.8.2.19
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -738,45 +738,31 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Reliable schema-update detection',
+        title: 'Unified saved attachment rendering',
         type: 'fixed',
         items: [
-          'Reordered JSON object keys no longer trigger a misleading logger data schema-update notice; real data or schema changes, including array-order changes, are still detected normally.'
+          'Saved image, video, audio, TXT, Markdown, and PDF attachments now use one remote-first policy: CDN -> distinct proxy -> cached local file -> exact filename placeholder; local-only attachments use cached local file -> placeholder, avoiding duplicate or incorrect media mounts.'
         ]
       },
       {
-        title: 'Critical BetterDiscord compatibility fix',
-        type: 'fixed',
-        items: [
-          "Fixed a critical compatibility failure with BetterDiscord's current chained Patcher.instead behavior that could trigger _waitQueue errors and repeated GatewaySocket reset/reconnect loops while MessageLoggerV2 was enabled."
-        ]
-      },
-      {
-        title: 'Trimmer toast master switch',
-        type: 'fixed',
-        items: [
-          'Show trimmer toasts now controls every trimmer notice, including startup/timer, limit-change, warning, phase, and error toasts; TIMER/TRIM console lines and error logs remain visible while it is Off.'
-        ]
-      },
-      {
-        title: 'Trimmer lifecycle toasts',
+        title: 'Native Logger media previews',
         type: 'improved',
         items: [
-          'When both age and GB limits are enabled for one cache root, the age + GB size phases use one combined start toast and one combined end toast; a single enabled limit keeps its individual phase start/end toasts, blank or 0 remains unlimited and silent, and individual age/GB phase lines remain visible in the console.'
+          'Logger viewer now reuses guarded Discord-native audio, TXT, Markdown, and PDF presentation, remains available when live saved-message mounting is disabled, and isolates each attachment in mixed batches.'
         ]
       },
       {
-        title: 'Precise media size limits',
+        title: 'Open Attachment routing',
         type: 'improved',
         items: [
-          'Live/pre-cache GB caps and per-file MB limits now accept whole numbers or up to two decimal places and use decimal SI units to align with Finder; blank or 0 remains unlimited.'
+          'Every exact-owned saved attachment now routes a usable CDN/proxy URL through the OS default browser or an existing cached physical file through the OS default application; it never externalizes a Blob URL and never guesses the first batch sibling.'
         ]
       },
       {
-        title: 'Media settings follow-up',
+        title: 'Immediate media setting transitions',
         type: 'fixed',
         items: [
-          'Age and other whole-number settings now reject decimal, scientific, and hexadecimal syntax, and cached-file deletion notices keep the View files action available for five seconds.'
+          'Render & Cache media and Only render locally cached attachments now refresh saved live mounts and Logger views immediately, preserve child values, cancel stale cache work, and keep the Logger viewer independent of the live-mount display toggle.'
         ]
       }
     ];
@@ -1245,7 +1231,7 @@ module.exports = class MessageLoggerV2 {
           return false;
         }
       },
-      "get": (path) => {
+      "get": (path, canonicalAttachment = null) => {
         if (!this.imageCacheServerSimulator.cached[path]) {
           try {
             const parsedUrl = new URL(path);
@@ -1264,7 +1250,9 @@ module.exports = class MessageLoggerV2 {
               image.byteOffset,
               image.byteOffset + image.byteLength
             );
-            const blob = new Blob([arrayBuffer], { type: this.getCachedAttachmentMimeType(parsedFile.ext) });
+            const blob = new Blob([arrayBuffer], {
+              type: this.getCachedAttachmentMimeType(parsedFile.ext, canonicalAttachment)
+            });
             const dataUri = URL.createObjectURL(blob);
             this.imageCacheServerSimulator.cached[path] = dataUri;
           }
@@ -1703,6 +1691,7 @@ module.exports = class MessageLoggerV2 {
     this.editModifiers = {};
     this.style = {};
     this.style.deleted = 'ml2-deleted';
+    this.style.deletedAttachmentRenderer = this.obfuscatedClass('ml2-deleted-attachment-renderer');
     this.style.deletedAlt = this.obfuscatedClass('ml2-deleted-alt');
     this.style.deletedForumText = this.obfuscatedClass('ml2-deleted-forum-text');
     this.style.forumLogPath = this.obfuscatedClass('ml2-forum-log-path');
@@ -2005,10 +1994,10 @@ module.exports = class MessageLoggerV2 {
                     .${this.style.editedCompact} {
                         text-indent: 0;
                     }
-                    .theme-dark .${this.style.deleted}:not(:hover) img:not(.${this.classes.avatar}), .theme-dark .${this.style.deleted}:not(:hover) video, .theme-dark .${this.style.deleted}:not(:hover) audio, .theme-dark .${this.style.deleted}:not(:hover) canvas, .${this.style.deleted}:not(:hover) .mention, .${this.style.deleted}:not(:hover) .reactions, .${this.style.deleted}:not(:hover) a {
+                    .theme-dark .${this.style.deleted}:not(:hover) img:not(.${this.classes.avatar}), .theme-dark .${this.style.deleted}:not(:hover) video, .theme-dark .${this.style.deleted}:not(:hover) audio, .theme-dark .${this.style.deleted}:not(:hover) canvas, .theme-dark .${this.style.deleted}:not(:hover) .${this.style.deletedAttachmentRenderer}, .${this.style.deleted}:not(:hover) .mention, .${this.style.deleted}:not(:hover) .reactions, .${this.style.deleted}:not(:hover) a {
                         filter: grayscale(100%) !important;
                     }
-                    .${this.style.deleted} img:not(.${this.classes.avatar}), .${this.style.deleted} video, .${this.style.deleted} audio, .${this.style.deleted} canvas, .${this.style.deleted} .mention, .${this.style.deleted} .reactions, .${this.style.deleted} a {
+                    .${this.style.deleted} img:not(.${this.classes.avatar}), .${this.style.deleted} video, .${this.style.deleted} audio, .${this.style.deleted} canvas, .${this.style.deleted} .${this.style.deletedAttachmentRenderer}, .${this.style.deleted} .mention, .${this.style.deleted} .reactions, .${this.style.deleted} a {
                         transition: filter 0.3s !important;
                     }
                     .theme-dark .${this.style.tab} {
@@ -5523,7 +5512,15 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: "Cache all attachment types",
-            note: 'Known limitation: intended to cache videos, audio, and other files, but arbitrary non-image types may stay CDN-backed when On or remain Logger references when Off.',
+            note: React.createElement(
+              'span',
+              null,
+              'Known limitation: intended to cache videos, audio, and other files, but arbitrary non-image types may stay CDN-backed when ',
+              this.createSettingStateLabel(true),
+              ' or remain Logger references when ',
+              this.createSettingStateLabel(false),
+              '.'
+            ),
             id: 'newSaveAllFileTypes',
             enableWith: 'cacheAllImages',
             type: 'switch',
@@ -6502,7 +6499,10 @@ module.exports = class MessageLoggerV2 {
       if (attachment && plan && (plan.action === 'placeholder' || plan.action === 'omit')) {
         const identity = this.getRemovedAttachmentIdentity(attachment);
         if (identity) attachmentIds.add(identity);
-        segments.push({ kind: 'text', value: plan.label || match[0] });
+        segments.push({
+          kind: 'text',
+          value: plan.unavailableLabel || plan.label || match[0]
+        });
       } else if (attachment && (plan?.action === 'remote' || plan?.action === 'blob')) {
         const isMediaPlan = plan.mediaType === 'image' || plan.mediaType === 'video';
         if (isMediaPlan) {
@@ -7600,7 +7600,8 @@ module.exports = class MessageLoggerV2 {
       for (const tintClass of [
         this.style?.deleted,
         this.style?.deletedAlt,
-        this.style?.deletedForumText
+        this.style?.deletedForumText,
+        this.style?.deletedAttachmentRenderer
       ].filter(Boolean)) {
         let tintedNodes = [];
         try {
@@ -10842,10 +10843,6 @@ module.exports = class MessageLoggerV2 {
     const isImage = classifierSources.some(source => this.isImage(source));
     const isVideo = !isImage && classifierSources.some(source => this.isVideo(source));
     const isAudio = !isImage && !isVideo && classifierSources.some(source => this.isAudio(source));
-    const isText = !isImage && !isVideo && !isAudio
-      && classifierSources.some(source => this.isPlainTextAttachment(source));
-    const isPdf = !isImage && !isVideo && !isAudio && !isText
-      && classifierSources.some(source => this.isPdfAttachment(source));
     const labelType = isImage ? 'image' : 'attachment';
     const label = `[${labelType}:${sourceText}]`;
     const mediaType = isImage
@@ -10854,28 +10851,30 @@ module.exports = class MessageLoggerV2 {
         ? 'video'
         : isAudio
           ? 'audio'
-          : isText
-            ? 'text'
-            : isPdf
-              ? 'pdf'
-              : 'attachment';
+          : 'attachment';
+    const notCachedLabel = `[Not cached: ${sourceText}]`;
+    const deletedLabel = `[Deleted: ${sourceText}]`;
+    const createPlan = (action, extra = {}) => ({
+      attachment_id: descriptor.attachment_id,
+      mediaType,
+      filename: sourceText,
+      action,
+      label,
+      sources: remoteSources,
+      unavailableReason: null,
+      unavailableLabel: notCachedLabel,
+      ...extra
+    });
 
     if (!cacheAllImages || (!allowRemote && !allowBlob)) {
-      return {
-        attachment_id: descriptor.attachment_id,
-        mediaType,
-        filename: sourceText,
-        action: 'placeholder',
-        label,
-        sources: remoteSources
-      };
+      return createPlan('placeholder', { unavailableReason: 'policy' });
     }
     const getCachedBlobUrl = () => {
       if (!descriptor.attachment_id || !descriptor.message_id || !descriptor.channel_id
-        || !descriptor.local_path || (!isImage && !isVideo && !isAudio && !isText && !isPdf)
+        || !descriptor.local_path
       ) return null;
       const cacheUrl = `http://localhost:7474/${descriptor.attachment_id}${descriptor.extension || ''}#${descriptor.channel_id},${descriptor.attachment_id},${descriptor.message_id}`;
-      const blobUrl = this.imageCacheServerSimulator?.get?.(cacheUrl);
+      const blobUrl = this.imageCacheServerSimulator?.get?.(cacheUrl, attachment);
       return typeof blobUrl === 'string' && blobUrl.startsWith('blob:')
         ? blobUrl
         : null;
@@ -10884,24 +10883,15 @@ module.exports = class MessageLoggerV2 {
       if (isRemoteFailure) {
         const cachedBlobUrl = getCachedBlobUrl();
         if (cachedBlobUrl) {
-          return {
-            attachment_id: descriptor.attachment_id,
-            mediaType,
-            filename: sourceText,
-            action: 'blob',
-            label,
-            sources: remoteSources,
+          return createPlan('blob', {
+            unavailableLabel: deletedLabel,
             url: cachedBlobUrl
-          };
+          });
         }
-        return {
-          attachment_id: descriptor.attachment_id,
-          mediaType,
-          filename: sourceText,
-          action: 'omit',
-          label,
-          sources: remoteSources
-        };
+        return createPlan('omit', {
+          unavailableReason: 'remote-failed',
+          unavailableLabel: deletedLabel
+        });
       }
       const candidatePlans = remoteSources
         .map(candidate => {
@@ -10932,84 +10922,37 @@ module.exports = class MessageLoggerV2 {
         }
         const cachedBlobUrl = getCachedBlobUrl();
         if (cachedBlobUrl) {
-          return {
-            attachment_id: descriptor.attachment_id,
-            mediaType,
-            filename: sourceText,
-            action: 'blob',
-            label,
-            sources: remoteSources,
+          return createPlan('blob', {
+            unavailableLabel: deletedLabel,
             url: cachedBlobUrl
-          };
+          });
         }
-        return {
-          attachment_id: descriptor.attachment_id,
-          mediaType,
-          filename: sourceText,
-          action: 'omit',
-          label,
-          sources: remoteSources
-        };
+        return createPlan('omit', {
+          unavailableReason: 'remote-failed',
+          unavailableLabel: deletedLabel
+        });
       }
-      if (!nextAvailableCandidate) return {
-        attachment_id: descriptor.attachment_id,
-        mediaType,
-        filename: sourceText,
-        action: 'omit',
-        label,
-        sources: remoteSources
-      };
-      return {
-        attachment_id: descriptor.attachment_id,
-        mediaType,
-        filename: sourceText,
-        action: 'remote',
-        label,
-        sources: remoteSources,
+      if (!nextAvailableCandidate) {
+        const cachedBlobUrl = getCachedBlobUrl();
+        if (cachedBlobUrl) return createPlan('blob', { url: cachedBlobUrl });
+        return createPlan('omit', { unavailableReason: 'no-candidate' });
+      }
+      return createPlan('remote', {
         url: nextAvailableCandidate.candidate,
         fallbackUrl: nextAvailableFallback ? nextAvailableFallback.candidate : null
-      };
+      });
     }
-    if (!allowBlob || !descriptor.local_path || (!isImage && !isVideo && !isAudio && !isText && !isPdf)) {
-      return {
-        attachment_id: descriptor.attachment_id,
-        mediaType,
-        filename: sourceText,
-        action: 'omit',
-        label,
-        sources: remoteSources
-      };
+    if (!allowBlob || !descriptor.local_path) {
+      return createPlan('omit', { unavailableReason: 'policy' });
     }
     if (!descriptor.attachment_id || !descriptor.message_id || !descriptor.channel_id) {
-      return {
-        attachment_id: descriptor.attachment_id,
-        mediaType,
-        filename: sourceText,
-        action: 'omit',
-        label,
-        sources: remoteSources
-      };
+      return createPlan('omit', { unavailableReason: 'policy' });
     }
     const blobUrl = getCachedBlobUrl();
     if (!blobUrl) {
-      return {
-        attachment_id: descriptor.attachment_id,
-        mediaType,
-        filename: sourceText,
-        action: 'omit',
-        label,
-        sources: remoteSources
-      };
+      return createPlan('omit', { unavailableReason: 'policy' });
     }
-    return {
-      attachment_id: descriptor.attachment_id,
-      mediaType,
-      filename: sourceText,
-      action: 'blob',
-      label,
-      sources: remoteSources,
-      url: blobUrl
-    };
+    return createPlan('blob', { url: blobUrl });
   }
   getSavedAttachmentPresentationPlans(message, options = {}) {
     const renderMessage = message && typeof message === 'object' ? message : null;
@@ -11026,9 +10969,57 @@ module.exports = class MessageLoggerV2 {
     }
     return plans;
   }
+  getSavedStickerPresentationEntries(message, options = {}) {
+    const renderMessage = message && typeof message === 'object' ? message : null;
+    if (!renderMessage) return [];
+    const allowBlob = options.allowBlob === true;
+    const allowRemote = options.allowRemote === true;
+    const cacheAllImages = this.settings?.cacheAllImages !== false;
+    const entries = [];
+    for (const [index, sticker] of this.getMessageStickerItems(renderMessage).entries()) {
+      if (!sticker || typeof sticker !== 'object' || Array.isArray(sticker)) continue;
+      const stickerMedia = this.getStickerMedia(sticker);
+      if (stickerMedia) {
+        const plan = this.getSavedAttachmentPresentationPlan(stickerMedia, renderMessage, {
+          allowBlob,
+          allowRemote
+        });
+        entries.push({ sticker, attachment: stickerMedia, plan, index });
+        continue;
+      }
+      const stickerName = this.getSafeAttachmentFilename(
+        { filename: sticker.name || sticker.id || 'sticker' },
+        null
+      );
+      const label = `[image:${stickerName}]`;
+      const unavailableLabel = `[Not cached: ${stickerName}]`;
+      const action = !cacheAllImages
+        ? 'placeholder'
+        : allowRemote
+          ? 'native'
+          : 'omit';
+      entries.push({
+        sticker,
+        attachment: null,
+        plan: {
+          attachment_id: sticker.id == null ? null : String(sticker.id),
+          mediaType: 'image',
+          filename: stickerName,
+          action,
+          label,
+          sources: [],
+          unavailableReason: 'policy',
+          unavailableLabel
+        },
+        index
+      });
+    }
+    return entries;
+  }
   getSavedAttachmentMessageContentPresentationMessage(message) {
-    if (!message || typeof message !== 'object' || !Array.isArray(message.attachments)
-      || !message.attachments.length) return message;
+    const messageHasAttachments = Array.isArray(message?.attachments) && message.attachments.length > 0;
+    const messageHasStickers = this.getMessageStickerItems(message).length > 0;
+    if (!message || typeof message !== 'object' || (!messageHasAttachments && !messageHasStickers)) return message;
     const messageId = String(message.id || '');
     const channelId = String(message.channel_id ?? message.channelId ?? '');
     if (!messageId || !channelId) return message;
@@ -11044,16 +11035,18 @@ module.exports = class MessageLoggerV2 {
     const sourceAttachments = Array.isArray(sourceMessage.attachments)
       ? sourceMessage.attachments
       : [];
-    if (!sourceAttachments.length) return message;
+    const sourceHasStickers = this.getMessageStickerItems(sourceMessage).length > 0;
+    if (!sourceAttachments.length && !sourceHasStickers) return message;
     const cacheAllImages = this.settings?.cacheAllImages !== false;
     const presentationOptions = cacheAllImages
       ? this.settings?.onlyRenderCachedAttachments
         ? { allowBlob: true }
         : { allowRemote: true }
       : {};
+    const displayedAttachments = Array.isArray(message.attachments) ? message.attachments : [];
     const displayedPlans = this.getSavedAttachmentPresentationPlans(message, presentationOptions);
-    const attachments = message.attachments.filter((_, index) => displayedPlans[index]?.mediaType !== 'video');
-    if (attachments.length === message.attachments.length) return message;
+    const attachments = displayedAttachments.filter((_, index) => displayedPlans[index]?.mediaType !== 'video');
+    if (attachments.length === displayedAttachments.length) return message;
     try {
       if (typeof message.set === 'function') {
         const updatedMessage = message.set('attachments', attachments);
@@ -11116,6 +11109,27 @@ module.exports = class MessageLoggerV2 {
       if (!plan) continue;
       entries.push({ attachment, plan, removed: false });
     }
+    for (const entry of this.getSavedStickerPresentationEntries(renderMessage, presentationOptions)) {
+      if (!entry?.plan) continue;
+      const attachment = entry.attachment || (
+        (entry.plan.action === 'placeholder' || entry.plan.action === 'omit')
+          ? {
+            id: entry.plan.attachment_id || entry.sticker?.id || null,
+            filename: entry.plan.filename || 'sticker',
+            isSticker: true,
+            _ml2PresentationSourceKind: 'sticker',
+            _ml2UnsupportedSticker: true
+          }
+          : null
+      );
+      if (!attachment) continue;
+      entries.push({
+        attachment,
+        plan: entry.plan,
+        removed: false,
+        sourceKind: 'sticker'
+      });
+    }
     for (const attachment of this.getRecordRemovedAttachments(record)) {
       if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)) continue;
       const identity = this.getRemovedAttachmentIdentity(attachment);
@@ -11139,12 +11153,12 @@ module.exports = class MessageLoggerV2 {
     // Keep the canonical archive byte-for-byte intact while shielding Discord from
     // legacy or mixed-fork media objects that do not satisfy its render contract.
     this.sanitizeNestedEmbedCollections(renderMessage);
-    if (!renderMessage.attachments?.length) return renderMessage;
     const cacheAllImages = this.settings?.cacheAllImages !== false;
-    const plans = this.getSavedAttachmentPresentationPlans(renderMessage, {
+    const presentationOptions = {
       allowBlob: cacheAllImages && this.settings?.onlyRenderCachedAttachments,
       allowRemote: cacheAllImages && !this.settings?.onlyRenderCachedAttachments
-    });
+    };
+    const plans = this.getSavedAttachmentPresentationPlans(renderMessage, presentationOptions);
     const attachments = [];
     for (const [index, plan] of plans.entries()) {
       if (!plan || (plan.action !== 'remote' && plan.action !== 'blob')) continue;
@@ -11154,6 +11168,38 @@ module.exports = class MessageLoggerV2 {
       if (plan.url) rendered.url = plan.url;
       if (plan.url) rendered.proxy_url = plan.url;
       attachments.push(rendered);
+    }
+    const excludedStickerIds = new Set();
+    for (const entry of this.getSavedStickerPresentationEntries(renderMessage, presentationOptions)) {
+      const stickerId = entry?.sticker?.id == null ? null : String(entry.sticker.id);
+      const plan = entry?.plan;
+      if (entry?.attachment && (plan?.action === 'remote' || plan?.action === 'blob')) {
+        const rendered = { ...entry.attachment };
+        rendered._ml2PresentationAction = plan.action;
+        rendered._ml2PresentationLabel = typeof plan.label === 'string' ? plan.label : null;
+        rendered._ml2PresentationUnavailableLabel = typeof plan.unavailableLabel === 'string'
+          ? plan.unavailableLabel
+          : null;
+        rendered._ml2PresentationMediaType = typeof plan.mediaType === 'string'
+          ? plan.mediaType
+          : null;
+        rendered._ml2PresentationSourceKind = 'sticker';
+        if (plan.url) {
+          rendered.url = plan.url;
+          rendered.proxy_url = plan.url;
+        }
+        attachments.push(rendered);
+        if (stickerId) excludedStickerIds.add(stickerId);
+      } else if (stickerId && plan?.action !== 'native') {
+        excludedStickerIds.add(stickerId);
+      }
+    }
+    for (const alias of ['sticker_items', 'stickerItems', 'stickers']) {
+      if (!Array.isArray(renderMessage[alias])) continue;
+      renderMessage[alias] = renderMessage[alias].filter(sticker => {
+        const stickerId = sticker?.id == null ? null : String(sticker.id);
+        return !stickerId || !excludedStickerIds.has(stickerId);
+      });
     }
     return {
       ...renderMessage,
@@ -11170,10 +11216,14 @@ module.exports = class MessageLoggerV2 {
         ? { allowBlob: true }
         : { allowRemote: true }
       : {};
-    const plans = this.getSavedAttachmentPresentationPlans(sourceMessage || renderMessage, presentationOptions);
+    const plans = [
+      ...this.getSavedAttachmentPresentationPlans(sourceMessage || renderMessage, presentationOptions),
+      ...this.getSavedStickerPresentationEntries(sourceMessage || renderMessage, presentationOptions)
+        .map(entry => entry.plan)
+    ];
     const labels = plans
       .filter(plan => plan?.action === 'placeholder' || plan?.action === 'omit')
-      .map(plan => plan?.label)
+      .map(plan => plan?.unavailableLabel || plan?.label)
       .filter(label => typeof label === 'string');
     if (!labels.length) return renderMessage;
     const baseContent = typeof renderMessage.content === 'string' ? renderMessage.content : '';
@@ -11211,7 +11261,10 @@ module.exports = class MessageLoggerV2 {
     if (!record?.delete_data || !sourceMessage || typeof sourceMessage !== 'object') return message;
     if (String(sourceMessage.id || '') !== messageId) return message;
     if (String(sourceMessage.channel_id || '') !== String(message.channel_id || '')) return message;
-    if (!Array.isArray(sourceMessage.attachments) || sourceMessage.attachments.length === 0) return message;
+    const sourceHasAttachments = Array.isArray(sourceMessage.attachments)
+      && sourceMessage.attachments.length > 0;
+    const sourceHasStickers = this.getMessageStickerItems(sourceMessage).length > 0;
+    if (!sourceHasAttachments && !sourceHasStickers) return message;
     if (!this.shouldPresentSavedMessage?.(sourceMessage.channel_id, messageId)) return message;
     const renderedMessage = this.getNativeDeletedAttachmentPresentationMessage(sourceMessage);
     const desiredContent = isProtectedTransitionSentinel
@@ -11303,11 +11356,17 @@ module.exports = class MessageLoggerV2 {
   }
   _getSavedAttachmentPresentationPlaceholderContent(message) {
     const sourceMessage = message && typeof message === 'object' ? message : null;
-    if (!sourceMessage || !Array.isArray(sourceMessage.attachments) || !sourceMessage.attachments.length) return '';
-    const plans = this.getSavedAttachmentPresentationPlans(sourceMessage, {});
+    const hasAttachments = Array.isArray(sourceMessage?.attachments)
+      && sourceMessage.attachments.length > 0;
+    const hasStickers = this.getMessageStickerItems(sourceMessage).length > 0;
+    if (!sourceMessage || (!hasAttachments && !hasStickers)) return '';
+    const plans = [
+      ...this.getSavedAttachmentPresentationPlans(sourceMessage, {}),
+      ...this.getSavedStickerPresentationEntries(sourceMessage, {}).map(entry => entry.plan)
+    ];
     const labels = plans
       .filter(plan => plan?.action === 'placeholder' || plan?.action === 'omit')
-      .map(plan => plan?.label)
+      .map(plan => plan?.unavailableLabel || plan?.label)
       .filter(label => typeof label === 'string');
     return labels.join('\n');
   }
@@ -11463,17 +11522,16 @@ module.exports = class MessageLoggerV2 {
       if (!attachment) {
         attachment = this.getRecordRemovedAttachments(record).find(item => String(item?.id || '') === safeAttachmentId);
       }
+      if (!attachment) {
+        attachment = this.getMessageStickerItems(sourceMessage)
+          .map(sticker => this.getStickerMedia(sticker))
+          .find(item => String(item?.id || '') === safeAttachmentId);
+      }
       if (!attachment) return;
       const plan = this.getSavedAttachmentPresentationPlan(attachment, sourceMessage, {
         allowBlob: true
       });
-      if (!plan || plan.action !== 'blob' || (
-        plan.mediaType !== 'image'
-        && plan.mediaType !== 'video'
-        && plan.mediaType !== 'audio'
-        && plan.mediaType !== 'text'
-        && plan.mediaType !== 'pdf'
-      )) return;
+      if (!plan || plan.action !== 'blob') return;
       this.remountSavedAttachmentPresentationRecords(record);
       this.dispatcher?.dispatch?.({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' });
       for (const [threadId, refresh] of this._forumThreadLogRefreshers?.entries?.() || []) {
@@ -11497,7 +11555,8 @@ module.exports = class MessageLoggerV2 {
       const message = record.message;
       if (!message?.id || !message.channel_id) continue;
       const attachments = Array.isArray(message.attachments) && message.attachments.length ? message.attachments : [];
-      if (!attachments.length || record.delete_data.hidden) continue;
+      const hasStickers = this.getMessageStickerItems(message).length > 0;
+      if (!attachments.length && !hasStickers || record.delete_data.hidden) continue;
       const channelId = String(message.channel_id);
       const liveSavedChannel = this.tools?.getChannel?.(channelId);
       const keepsDiscordOwnedThreadMount = [10, 11, 12].includes(Number(liveSavedChannel?.type))
@@ -11513,7 +11572,11 @@ module.exports = class MessageLoggerV2 {
               ? { allowBlob: true }
               : { allowRemote: true }
             : {};
-          const finalPlans = this.getSavedAttachmentPresentationPlans(sourceMessage, presentationOptions);
+          const finalPlans = [
+            ...this.getSavedAttachmentPresentationPlans(sourceMessage, presentationOptions),
+            ...this.getSavedStickerPresentationEntries(sourceMessage, presentationOptions)
+              .map(entry => entry.plan)
+          ];
           const finalMessage = this.getNativeDeletedAttachmentPresentationMessage(sourceMessage);
           const placeholderContent = this._getSavedAttachmentPresentationPlaceholderContent(sourceMessage);
           const blobOnlyFinalAttachments = Array.isArray(finalMessage?.attachments)
@@ -11648,6 +11711,9 @@ module.exports = class MessageLoggerV2 {
                   ...message,
                   content: this._savedAttachmentPresentationTransitionSentinel,
                   attachments: [],
+                  sticker_items: [],
+                  stickerItems: [],
+                  stickers: []
                 },
                 ML2: true
               });
@@ -11743,9 +11809,13 @@ module.exports = class MessageLoggerV2 {
     const attachments = Array.isArray(record.message?.attachments)
       ? record.message.attachments
       : [];
-    if (!attachments.length) return;
+    const stickerAttachments = this.getMessageStickerItems(record.message)
+      .map(sticker => this.getStickerMedia(sticker))
+      .filter(Boolean);
+    const candidateAttachments = [...attachments, ...stickerAttachments];
+    if (!candidateAttachments.length) return;
 
-    for (const attachment of attachments) {
+    for (const attachment of candidateAttachments) {
       const descriptor = this.getSavedAttachmentDescriptor(attachment, record.message);
       if (!descriptor || !Array.isArray(descriptor.remote_urls) || !descriptor.remote_urls.length) continue;
 
@@ -11795,7 +11865,10 @@ module.exports = class MessageLoggerV2 {
       for (const id of ids) {
         const record = this.messageRecord?.[id];
         if (!record?.delete_data || !record.message || record.delete_data?.hidden) continue;
-        if (!Array.isArray(record.message?.attachments) || !record.message.attachments.length) continue;
+        const hasAttachments = Array.isArray(record.message?.attachments)
+          && record.message.attachments.length > 0;
+        const hasStickers = this.getMessageStickerItems(record.message).length > 0;
+        if (!hasAttachments && !hasStickers) continue;
         records.push(record);
       }
       remountedCount = this.remountSavedAttachmentPresentationRecords(records) || 0;
@@ -12653,7 +12726,7 @@ module.exports = class MessageLoggerV2 {
       const url = attachment?.url || changed[i]?.url;
       if (!attachmentId || !url || logged.includes(attachmentId)) continue;
       content += "`Attachment Deleted: `" + url + "\n";
-      if (this.settings.cacheAllImages) {
+      if (this.settings.cacheAllImages && (this.isImage(url) || this.settings.newSaveAllFileTypes)) {
         this.cacheImage(
           url,
           i,
@@ -14824,14 +14897,31 @@ module.exports = class MessageLoggerV2 {
     return this._testUrlPattern(url, /\.(mp3|ogg|oga|opus)$/i);
   }
   isPlainTextAttachment(value) {
-    if (typeof value === 'string' && /^text\/plain(?:\s*;|$)/i.test(value.trim())) return true;
-    return this._testUrlPattern(value, /\.txt$/i);
+    if (typeof value === 'string' && (
+      /^text\/plain(?:\s*;|$)/i.test(value.trim())
+      || /^text\/markdown(?:\s*;|$)/i.test(value.trim())
+    )) return true;
+    return this._testUrlPattern(value, /\.(txt|md)$/i);
   }
   isPdfAttachment(value) {
     if (typeof value === 'string' && /^application\/pdf(?:\s*;|$)/i.test(value.trim())) return true;
     return this._testUrlPattern(value, /\.pdf$/i);
   }
-  getCachedAttachmentMimeType(extension) {
+  getCachedAttachmentMimeType(extension, attachment = null) {
+    const mimeCandidates = [
+      attachment?.content_type,
+      attachment?.contentType,
+      attachment?.original_content_type,
+      attachment?.originalContentType
+    ];
+    for (const candidate of mimeCandidates) {
+      const baseMime = String(candidate || '')
+        .trim()
+        .split(';', 1)[0]
+        .trim()
+        .toLowerCase();
+      if (/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(baseMime)) return baseMime;
+    }
     const normalizedExtension = String(extension || '')
       .trim()
       .toLowerCase()
@@ -14857,6 +14947,7 @@ module.exports = class MessageLoggerV2 {
       oga: 'audio/ogg',
       opus: 'audio/opus',
       txt: 'text/plain',
+      md: 'text/markdown',
       pdf: 'application/pdf'
     };
     return extensionMimeTypes[normalizedExtension] || 'application/octet-stream';
@@ -19292,6 +19383,9 @@ module.exports = class MessageLoggerV2 {
         action: presentationPlan?.action,
         mediaType: presentationPlan?.mediaType,
         label: typeof presentationPlan?.label === 'string' ? presentationPlan.label : null,
+        unavailableLabel: typeof presentationPlan?.unavailableLabel === 'string'
+          ? presentationPlan.unavailableLabel
+          : null,
         url: typeof presentationPlan?.url === 'string' ? presentationPlan.url : ''
       };
       const [displayPlan, setDisplayPlan] = React.useState(initialPlan);
@@ -19307,9 +19401,11 @@ module.exports = class MessageLoggerV2 {
         'data-ml2-attachment-id': attachmentId,
         'data-ml2-attachment-video-host': 'true'
       };
-      const getPlanLabel = plan => typeof plan?.label === 'string'
-        ? plan.label
-        : (attachment?.filename || 'unknown file');
+      const getPlanLabel = plan => typeof plan?.unavailableLabel === 'string'
+        ? plan.unavailableLabel
+        : typeof plan?.label === 'string'
+          ? plan.label
+          : (attachment?.filename || 'unknown file');
       const renderPlaceholder = label => React.createElement(
         'div',
         {
@@ -19359,6 +19455,7 @@ module.exports = class MessageLoggerV2 {
             action: nextPlan.action,
             mediaType: nextPlan.mediaType,
             label: nextPlan.label,
+            unavailableLabel: nextPlan.unavailableLabel,
             url: nextPlan.url
           });
           return;
@@ -19488,6 +19585,9 @@ module.exports = class MessageLoggerV2 {
       }) => {
         const initialMediaType = presentationPlan?.mediaType;
         const initialLabel = typeof presentationPlan?.label === 'string' ? presentationPlan.label : null;
+        const initialUnavailableLabel = typeof presentationPlan?.unavailableLabel === 'string'
+          ? presentationPlan.unavailableLabel
+          : null;
         const initialDisplayUrl = typeof presentationPlan?.url === 'string'
           ? presentationPlan.url
           : '';
@@ -19495,19 +19595,31 @@ module.exports = class MessageLoggerV2 {
           action: presentationPlan?.action,
           mediaType: initialMediaType,
           label: initialLabel,
+          unavailableLabel: initialUnavailableLabel,
           url: initialDisplayUrl
         });
         const [errored, setErrored] = React.useState(false);
+        const [errorFallback, setErrorFallback] = React.useState(null);
+        const getPlanLabel = plan => typeof plan?.unavailableLabel === 'string'
+          ? plan.unavailableLabel
+          : typeof plan?.label === 'string'
+            ? plan.label
+            : null;
+        const setErrorFallbackForPlan = plan => {
+          const label = getPlanLabel(plan);
+          setErrorFallback(label ? parseContent(label) : fallback);
+          setErrored(true);
+        };
         if (displayPlan?.action !== 'remote' && displayPlan?.action !== 'blob') return fallback;
         if (typeof displayPlan?.url !== 'string' || !displayPlan.url) return fallback;
         if (displayPlan?.mediaType !== 'image' && displayPlan?.mediaType !== 'video') return fallback;
-        if (errored) return fallback;
+        if (errored) return errorFallback || fallback;
         const onError = () => {
           if (errored) return;
           if (displayPlan?.action !== 'remote'
             || plugin.settings?.cacheAllImages === false
             || plugin.settings?.onlyRenderCachedAttachments) {
-            setErrored(true);
+            setErrorFallbackForPlan(displayPlan);
             return;
           }
 
@@ -19531,11 +19643,12 @@ module.exports = class MessageLoggerV2 {
               action: nextPlan.action,
               mediaType: nextPlan.mediaType,
               label: nextPlan.label,
+              unavailableLabel: nextPlan.unavailableLabel,
               url: nextPlan.url
             });
             return;
           }
-          setErrored(true);
+          setErrorFallbackForPlan(nextPlan || displayPlan);
         };
         const onClick = () => {
           const savedImageOpenDescriptor = displayPlan?.mediaType === 'image'
@@ -19761,12 +19874,13 @@ module.exports = class MessageLoggerV2 {
           const record = this.messageRecord[props.message.id];
           const isSavedAttachmentPresentationReentry = Boolean(props?.[SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER]);
           const recordMessage = record?.message;
-          const hasAttachments = Array.isArray(recordMessage?.attachments)
-            && recordMessage.attachments.length > 0;
+          const hasSavedMedia = (Array.isArray(recordMessage?.attachments)
+            && recordMessage.attachments.length > 0)
+            || this.getMessageStickerItems(recordMessage).length > 0;
           if (
             !isSavedAttachmentPresentationReentry
             && recordMessage
-            && hasAttachments
+            && hasSavedMedia
             && record?.delete_data
             && this.shouldPresentSavedMessage?.(recordMessage.channel_id, recordMessage.id) !== false
           ) {
@@ -19837,6 +19951,39 @@ module.exports = class MessageLoggerV2 {
         if (!node || node.nodeType !== 1 || seen.has(node)) continue;
         seen.add(node);
         changed = clearTintClasses(node) || changed;
+      }
+      return changed;
+    };
+    const clearDeletedAttachmentRendererMarkers = (root, keep = null) => {
+      const marker = this.style?.deletedAttachmentRenderer;
+      if (!root || root.nodeType !== 1 || !marker) return false;
+      const markedNodes = [];
+      if (root.classList?.contains?.(marker)) markedNodes.push(root);
+      markedNodes.push(...Array.from(root.querySelectorAll?.(`.${marker}`) || []));
+      let changed = false;
+      for (const node of markedNodes) {
+        if (node === keep || !node?.classList?.contains?.(marker)) continue;
+        node.classList.remove(marker);
+        changed = true;
+      }
+      return changed;
+    };
+    const syncDeletedAttachmentRendererMarker = (wrapper, messageId, shouldTint) => {
+      const marker = this.style?.deletedAttachmentRenderer;
+      if (!marker || !shouldTint || this.settings.useAlternativeDeletedStyle
+        || !wrapper || wrapper.nodeType !== 1 || !messageId) {
+        return clearDeletedAttachmentRendererMarkers(wrapper);
+      }
+      const targetId = `message-accessories-${messageId}`;
+      const target = Array.from(wrapper.querySelectorAll?.('[id]') || [])
+        .find(node => node?.id === targetId);
+      if (!target || target === wrapper || !wrapper.contains?.(target)) {
+        return clearDeletedAttachmentRendererMarkers(wrapper);
+      }
+      let changed = clearDeletedAttachmentRendererMarkers(wrapper, target);
+      if (!target.classList.contains(marker)) {
+        target.classList.add(marker);
+        changed = true;
       }
       return changed;
     };
@@ -20046,11 +20193,14 @@ module.exports = class MessageLoggerV2 {
       const messageId = parts.slice(3).join('-');
       const wrapper = getMessageTintTarget(node);
       if (!wrapper || wrapper.tagName !== 'DIV') return;
-      if (!shouldTintMessage(channelId, messageId) || this.noTintIds.has(messageId)) {
+      const shouldTint = shouldTintMessage(channelId, messageId) && !this.noTintIds.has(messageId);
+      if (!shouldTint) {
         clearTintClasses(wrapper);
+        syncDeletedAttachmentRendererMarker(wrapper, messageId, false);
         return;
       }
       addTintClass(wrapper);
+      syncDeletedAttachmentRendererMarker(wrapper, messageId, true);
     };
     const findLowestCommonAncestor = (left, right) => {
       if (!left || !right) return null;
@@ -20961,8 +21111,10 @@ module.exports = class MessageLoggerV2 {
       if (article) {
         if (shouldTintMessage(channelId, messageId) && !this.noTintIds.has(messageId)) {
           if (addTintClass(article)) applied = true;
+          syncDeletedAttachmentRendererMarker(article, messageId, true);
         } else {
           clearTintClasses(article);
+          syncDeletedAttachmentRendererMarker(article, messageId, false);
         }
       }
       return applied;
@@ -21531,10 +21683,17 @@ module.exports = class MessageLoggerV2 {
         presentationLabel: typeof presentationPlan?.label === 'string'
           ? presentationPlan.label
           : null,
+        presentationUnavailableLabel: typeof presentationPlan?.unavailableLabel === 'string'
+          ? presentationPlan.unavailableLabel
+          : null,
         hidden: attachment.hidden === true
       });
     };
     for (const attachment of message.attachments || []) addEntry(attachment, 'attachment');
+    for (const sticker of this.getMessageStickerItems(message)) {
+      const stickerMedia = this.getStickerMedia(sticker);
+      if (stickerMedia) addEntry(stickerMedia, 'sticker');
+    }
     for (const attachment of this.getRecordRemovedAttachments(record)) {
       addEntry(attachment, 'removedAttachment');
     }
@@ -21558,6 +21717,7 @@ module.exports = class MessageLoggerV2 {
     const entriesById = new Map();
     const entriesBySource = new Map();
     const entriesByLabel = new Map();
+    const entriesByUnavailableLabel = new Map();
     const blockedIds = new Set();
     const blockedSources = new Set();
     const messageContent = String(record.message.content || '');
@@ -21573,6 +21733,7 @@ module.exports = class MessageLoggerV2 {
       addEvidence(entry?.attachment?.url);
       addEvidence(entry?.attachment?.proxy_url);
       addEvidence(entry?.presentationLabel);
+      addEvidence(entry?.presentationUnavailableLabel);
       addEvidence(entry?.descriptor?.direct_url);
       addEvidence(entry?.descriptor?.proxy_url);
       if (Array.isArray(entry?.descriptor?.remote_urls)) {
@@ -21603,9 +21764,12 @@ module.exports = class MessageLoggerV2 {
       addIndexEntry(entriesById, entry.attachmentId, entry);
       for (const sourceKey of entry.sourceKeys) addIndexEntry(entriesBySource, sourceKey, entry);
       addIndexEntry(entriesByLabel, entry.presentationLabel, entry);
+      addIndexEntry(entriesByUnavailableLabel, entry.presentationUnavailableLabel, entry);
     }
     for (const payloadEntry of this._getRecordClipboardMediaEntries(record)) {
-      if (payloadEntry?.sourceKind === 'attachment' || payloadEntry?.sourceKind === 'removedAttachment') continue;
+      if (payloadEntry?.sourceKind === 'attachment'
+        || payloadEntry?.sourceKind === 'removedAttachment'
+        || payloadEntry?.sourceKind === 'sticker') continue;
       for (const id of payloadEntry?.domIds || []) {
         if (id != null && String(id)) blockedIds.add(String(id));
       }
@@ -21643,6 +21807,7 @@ module.exports = class MessageLoggerV2 {
       const idMatches = new Map();
       const sourceMatches = new Map();
       const labelMatches = new Map();
+      const unavailableLabelMatches = new Map();
       let blockedEvidence = false;
       const recordMatch = (matches, entry, evidence) => {
         const current = matches.get(entry);
@@ -21679,6 +21844,7 @@ module.exports = class MessageLoggerV2 {
         }
         const text = String(node?.textContent || '').trim();
         if (text) recordIndexedMatches(entriesByLabel, text, labelMatches, {});
+        if (text) recordIndexedMatches(entriesByUnavailableLabel, text, unavailableLabelMatches, {});
       }
       const pickUnique = matches => {
         const [entry, evidence] = matches.entries().next().value;
@@ -21696,9 +21862,13 @@ module.exports = class MessageLoggerV2 {
         if (!ignoreContentCollision && messageEvidenceCollision(sourceMatch.entry, sourceMatch)) return null;
         return sourceMatch;
       }
-      if (labelMatches.size > 1) return null;
-      if (labelMatches.size === 1) {
-        const labelMatch = pickUnique(labelMatches);
+      const allLabelMatches = new Map(labelMatches);
+      for (const [entry, evidence] of unavailableLabelMatches) {
+        if (!allLabelMatches.has(entry)) allLabelMatches.set(entry, evidence);
+      }
+      if (allLabelMatches.size > 1) return null;
+      if (allLabelMatches.size === 1) {
+        const labelMatch = pickUnique(allLabelMatches);
         if (!ignoreContentCollision && messageEvidenceCollision(labelMatch.entry, labelMatch)) return null;
         return labelMatch;
       }
@@ -21715,7 +21885,9 @@ module.exports = class MessageLoggerV2 {
       return matchNodes([target]);
     }
     const targetText = String(target.textContent || '').trim();
-    if (targetText && entriesByLabel.has(targetText)) return matchNodes([target]);
+    if (targetText && (entriesByLabel.has(targetText) || entriesByUnavailableLabel.has(targetText))) {
+      return matchNodes([target]);
+    }
 
     let ancestor = target.parentElement;
     for (let depth = 0; ancestor && depth < 4; depth++, ancestor = ancestor.parentElement) {
@@ -21723,7 +21895,8 @@ module.exports = class MessageLoggerV2 {
       const candidateNodes = getCandidateNodes(ancestor);
       const hasMediaCandidate = candidateNodes.length > 1;
       const ancestorText = String(ancestor.textContent || '').trim();
-      const hasExactLabel = ancestorText && entriesByLabel.has(ancestorText);
+      const hasExactLabel = ancestorText
+        && (entriesByLabel.has(ancestorText) || entriesByUnavailableLabel.has(ancestorText));
       if (!hasMediaCandidate && !hasExactLabel) continue;
       // Stop at the first concrete attachment-like ancestor. If it belongs to an embed or other
       // non-canonical payload, returning null here prevents a later broad message ancestor match.
@@ -22769,17 +22942,40 @@ module.exports = class MessageLoggerV2 {
           markup.appendChild(placeholder);
           hasPayloadReference = true;
         };
+        const getPresentationFallbackLabel = (plan = null, mediaAttachment = null, sourceAttachment = null) => {
+          const planUnavailableLabel = typeof plan?.unavailableLabel === 'string'
+            && plan.unavailableLabel
+            ? plan.unavailableLabel
+            : null;
+          const renderedUnavailableLabel = typeof mediaAttachment?._ml2PresentationUnavailableLabel === 'string'
+            && mediaAttachment._ml2PresentationUnavailableLabel
+            ? mediaAttachment._ml2PresentationUnavailableLabel
+            : null;
+          const planLabel = typeof plan?.label === 'string' && plan.label ? plan.label : null;
+          const renderedLabel = typeof mediaAttachment?._ml2PresentationLabel === 'string'
+            && mediaAttachment._ml2PresentationLabel
+            ? mediaAttachment._ml2PresentationLabel
+            : null;
+          return planUnavailableLabel
+            || planLabel
+            || renderedUnavailableLabel
+            || renderedLabel
+            || plan?.filename
+            || mediaAttachment?.filename
+            || sourceAttachment?.filename
+            || 'unknown file';
+        };
         const appendRemoteCachedFailureMarker = (entry, isRemoved) => {
           const attachment = entry.attachment;
           if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)) return;
           const plan = entry.plan || {};
           const filename = attachment.filename || 'unknown file';
-          const attachmentIsMedia = ['image', 'video', 'audio', 'text', 'pdf'].includes(plan.mediaType)
+          const attachmentIsMedia = ['image', 'video', 'audio', 'attachment'].includes(plan.mediaType)
             || this.isImage(currentCachedAttachmentFilename(attachment))
             || this.isVideo(currentCachedAttachmentFilename(attachment))
             || this.isAudio(currentCachedAttachmentFilename(attachment));
           const safePlanFilename = plan?.filename || filename;
-          const safePlanLabel = typeof plan?.label === 'string' ? plan.label : null;
+          const safePlanLabel = getPresentationFallbackLabel(plan, attachment);
           if ((plan.action === 'placeholder' || plan.action === 'omit') && safePlanLabel) {
             appendUnavailableAttachmentPlaceholder(safePlanLabel, attachment);
             return;
@@ -22818,6 +23014,9 @@ module.exports = class MessageLoggerV2 {
               const renderedAttachment = { ...attachment };
               renderedAttachment._ml2PresentationAction = plan.action;
               renderedAttachment._ml2PresentationLabel = typeof plan?.label === 'string' ? plan.label : null;
+              renderedAttachment._ml2PresentationUnavailableLabel = typeof plan?.unavailableLabel === 'string'
+                ? plan.unavailableLabel
+                : null;
               renderedAttachment._ml2PresentationMediaType = typeof plan?.mediaType === 'string'
                 ? plan.mediaType
                 : null;
@@ -23044,7 +23243,6 @@ module.exports = class MessageLoggerV2 {
           };
           const handleCreateImage = (attachment, idx) => {
             const presentationAction = attachment._ml2PresentationAction;
-            const presentationLabel = attachment._ml2PresentationLabel;
             const fallbackToNextLoggerRemotePlan = (mediaElement, hostElement, mediaAttachment, useCachedRenderer, width, height) => {
               const fallbackHost = hostElement || mediaElement;
               const loggerAttachmentEntry = getLoggerAttachmentEntry(mediaAttachment);
@@ -23052,7 +23250,7 @@ module.exports = class MessageLoggerV2 {
               if (!sourceAttachment) {
                 fallbackHost?.replaceWith(
                   createUnavailableAttachmentPlaceholder(
-                    presentationLabel || mediaAttachment.filename,
+                    getPresentationFallbackLabel(null, mediaAttachment),
                     mediaAttachment
                   )
                 );
@@ -23075,9 +23273,7 @@ module.exports = class MessageLoggerV2 {
                 if (nextPlan.url === mediaAttachment.url) {
                   fallbackHost?.replaceWith(
                     createUnavailableAttachmentPlaceholder(
-                      typeof nextPlan.label === 'string'
-                        ? nextPlan.label
-                        : (presentationLabel || mediaAttachment.filename),
+                      getPresentationFallbackLabel(nextPlan, mediaAttachment, sourceAttachment),
                       sourceAttachment
                     )
                   );
@@ -23089,10 +23285,20 @@ module.exports = class MessageLoggerV2 {
                 mediaAttachment._ml2PresentationLabel = typeof nextPlan.label === 'string'
                   ? nextPlan.label
                   : mediaAttachment._ml2PresentationLabel;
+                mediaAttachment._ml2PresentationUnavailableLabel = typeof nextPlan.unavailableLabel === 'string'
+                  ? nextPlan.unavailableLabel
+                  : mediaAttachment._ml2PresentationUnavailableLabel;
                 mediaElement.src = nextPlan.url;
                 return;
               }
               if (nextPlan?.action === 'blob' && typeof nextPlan.url === 'string') {
+                mediaAttachment._ml2PresentationAction = nextPlan.action;
+                mediaAttachment._ml2PresentationLabel = typeof nextPlan.label === 'string'
+                  ? nextPlan.label
+                  : mediaAttachment._ml2PresentationLabel;
+                mediaAttachment._ml2PresentationUnavailableLabel = typeof nextPlan.unavailableLabel === 'string'
+                  ? nextPlan.unavailableLabel
+                  : mediaAttachment._ml2PresentationUnavailableLabel;
                 fallbackHost?.remove();
                 useCachedRenderer(
                   mediaAttachment.id,
@@ -23101,15 +23307,13 @@ module.exports = class MessageLoggerV2 {
                   mediaAttachment.filename,
                   width,
                   height,
-                  typeof nextPlan.label === 'string' ? nextPlan.label : presentationLabel
+                  getPresentationFallbackLabel(nextPlan, mediaAttachment, sourceAttachment)
                 );
                 return;
               }
               fallbackHost?.replaceWith(
                 createUnavailableAttachmentPlaceholder(
-                  typeof nextPlan?.label === 'string'
-                    ? nextPlan.label
-                    : (presentationLabel || mediaAttachment.filename),
+                  getPresentationFallbackLabel(nextPlan, mediaAttachment, sourceAttachment),
                   sourceAttachment
                 )
               );
@@ -23123,9 +23327,8 @@ module.exports = class MessageLoggerV2 {
             ];
             const isAudioFile = attachment?._ml2PresentationMediaType === 'audio'
               || attachmentSources.some(source => this.isAudio(source));
-            const isDocumentFile = attachment?._ml2PresentationMediaType === 'text'
-              || attachment?._ml2PresentationMediaType === 'pdf';
-            if (isDocumentFile) {
+            const isNativeAttachment = attachment?._ml2PresentationMediaType === 'attachment';
+            if (isNativeAttachment) {
               const loggerAttachmentEntry = getLoggerAttachmentEntry(attachment);
               const sourceAttachment = loggerAttachmentEntry?.attachment || null;
               const documentHost = document.createElement('div');
@@ -23137,7 +23340,7 @@ module.exports = class MessageLoggerV2 {
                 unavailableHandled = true;
                 this.cleanupLoggerNativeDocumentRoots(documentHost);
                 documentHost.replaceWith(createUnavailableAttachmentPlaceholder(
-                  presentationLabel || attachment.filename,
+                  getPresentationFallbackLabel(null, attachment, sourceAttachment),
                   sourceAttachment || attachment
                 ));
               };
@@ -23159,9 +23362,7 @@ module.exports = class MessageLoggerV2 {
               const replaceAudioWithPlaceholder = plan => {
                 this.cleanupLoggerNativeAudioRoots(audioHost);
                 audioHost.replaceWith(createUnavailableAttachmentPlaceholder(
-                  typeof plan?.label === 'string'
-                    ? plan.label
-                    : (presentationLabel || attachment.filename),
+                  getPresentationFallbackLabel(plan, attachment, sourceAttachment),
                   sourceAttachment || attachment
                 ));
               };
@@ -23200,6 +23401,9 @@ module.exports = class MessageLoggerV2 {
                   attachment._ml2PresentationLabel = typeof nextPlan.label === 'string'
                     ? nextPlan.label
                     : attachment._ml2PresentationLabel;
+                  attachment._ml2PresentationUnavailableLabel = typeof nextPlan.unavailableLabel === 'string'
+                    ? nextPlan.unavailableLabel
+                    : attachment._ml2PresentationUnavailableLabel;
                   attachment.url = nextUrl;
                   this.mountLoggerNativeAudio(
                     audioHost,
@@ -23234,7 +23438,7 @@ module.exports = class MessageLoggerV2 {
                 attachment.filename,
                 attachment.width,
                 attachment.height,
-                presentationLabel
+                getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment)
               );
             } else if (isCached) {
               attemptToUseCachedImage(
@@ -23244,7 +23448,7 @@ module.exports = class MessageLoggerV2 {
                 attachment.filename,
                 attachment.width,
                 attachment.height,
-                presentationLabel
+                getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment)
               );
             } else if (this.isVideo(attachment.url)) {
               const { container, video } = createVideoContainer(attachment.id, idx, this.clamp(attachment.width, 200, 400));
@@ -23291,11 +23495,11 @@ module.exports = class MessageLoggerV2 {
                     attachment.filename,
                     attachment.width,
                     attachment.height,
-                    presentationLabel
+                    getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment)
                   );
                 } else {
                   container.replaceWith(createUnavailableAttachmentPlaceholder(
-                    presentationLabel || attachment.filename,
+                    getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment),
                     getLoggerAttachmentEntry(attachment)?.attachment || attachment
                   ));
                 }
@@ -23363,11 +23567,11 @@ module.exports = class MessageLoggerV2 {
                     attachment.filename,
                     attachment.width,
                     attachment.height,
-                    presentationLabel
+                    getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment)
                   );
                 } else {
                   img.replaceWith(createUnavailableAttachmentPlaceholder(
-                    presentationLabel || attachment.filename,
+                    getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment),
                     getLoggerAttachmentEntry(attachment)?.attachment || attachment
                   ));
                 }
