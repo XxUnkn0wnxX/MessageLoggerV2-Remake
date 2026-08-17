@@ -3,7 +3,8 @@
 > Tracked working checklist for a focused change on `develop`.
 > Keep it in the repository root while implementation and validation are in
 > progress, include its current evidence in every user-confirmed stage commit,
-> and move it to `docs/archive/checklists/` in the final accepted stage.
+> and leave it in the repository root after the current release. Archive it
+> only if the user explicitly requests that in a later session.
 
 ## How to use this file
 
@@ -33,19 +34,18 @@ This file is both the implementation checklist and the handoff record.
 - **Predecessor rollout record:**
   `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T11-07-23-01a00d42-4986-7971-94de-11f09f6630d1.jsonl`
 - **Working branch:** `develop`
-- **Verified HEAD:** accepted Stage 4 local commit
-  `4433a618775e8416d0b9abac9af3857695dd99a7`; local `develop` is one commit
+- **Verified HEAD:** accepted reopened Stage 3 local commit
+  `b9a1ebc41f0b8ca7324fb9e14b900b6a7fecd55e`; local `develop` is two commits
   ahead of `origin/develop`. A read-only `git ls-remote` confirmed the actual
   remote `develop` remains at
   `89d51f7a59f3ff7be79ebeb551a4f17c3a8cab69`; nothing was pushed.
-- **Verified worktree:** the accepted Stage 4 commit remains HEAD. The current
-  reopened Stage 3 correction modifies this checklist,
-  `MessageLoggerV2.plugin.js`, `tests/media.test.js`, and
-  `tests/source-contracts.test.js`. Ignored evidence remains in `tmp/1.html`
-  and `tmp/MessageLoggerAttachmentMountTrace.plugin.js`; the helper's exact
-  symlink is still installed in the BetterDiscord plugins folder together with
-  the fresh Off/On ownership reports. None of those ignored/runtime artifacts
-  may be committed.
+- **Verified worktree:** the accepted reopened Stage 3 correction is committed.
+  The separate Logger-view audio follow-up currently modifies this checklist,
+  `MessageLoggerV2.plugin.js`, `tests/helpers/plugin-harness.js`,
+  `tests/media.test.js`, and `tests/source-contracts.test.js`. The ignored
+  v1.0.5 trace helper, `tmp/1.html`, and runtime reports remain outside commit
+  scope. The helper's exact symlink is installed in the BetterDiscord plugins
+  folder. None of those ignored/runtime artifacts may be committed.
 - **Baseline:** `npm test` passed `471/471` before this checklist was created.
 - **Current Stage 4 verification:** the parent has rerun `npm run check`,
   `tests/clipboard.test.js` at `16/16`, `tests/media.test.js` at `156/156`,
@@ -54,9 +54,9 @@ This file is both the implementation checklist and the handoff record.
   build. After the escaping-native-action correction, the parent reran
   `npm run check`, clipboard `16/16`, media `156/156`, source contracts
   `68/68`, full `npm test` at `561/561`, and `git diff --check` successfully.
-- **Live parity:** the current reopened Stage 3 repository build and installed
-  BetterDiscord plugin are byte-identical at SHA-256
-  `cf3347cce594996a198903364ed7b38cdc8b3f52a157f991f5abda92d1be457e`.
+- **Live parity:** the current Stage 3 point 2 Logger-view audio build and
+  installed BetterDiscord plugin are byte-identical at SHA-256
+  `f4dc7aa4bdc225c7b80094e9aa0d6438cce3fafb4b88c38c894ebd876d033b62`.
   The temporary unmodified `main` control is no longer installed.
 - **Implementation state:** Stages 1-3 are complete, accepted, committed, and
   pushed. Stage 4 is implemented, parent-verified, live-synced, and accepted,
@@ -79,38 +79,41 @@ This file is both the implementation checklist and the handoff record.
   occurred on either escaping path. The user then verified both corrected
   controls and ordinary-viewer isolation; the helper, symlink, and report are
   now in Trash.
-- **Current gate:** Stage 4 is accepted and locally committed without a push.
-  The reopened Stage 3 live video/audio correction is accepted: the user
-  confirmed one working video block with no duplicate Discord placeholder.
-  The parent pre-commit gate passes `npm run check`, all `569/569` tests, plugin
-  syntax, and `git diff --check`. Commit this accepted stage locally without a
-  push. Logger-view audio remains a separate post-commit change and Stage 9
-  warning detail remains deferred.
+- **Current gate:** Stage 4 and the reopened Stage 3 video correction are
+  accepted and locally committed without a push. Stage 3 point 2 Logger-view
+  audio is now live-accepted. Production has guarded lazy discovery, the traced
+  native player prop contract, one Logger audio host with browser fallback,
+  remote/proxy/Blob/placeholder policy routing, Stage 4 ownership markers, and
+  scoped cleanup. A read-only review caught and the parent fixed double error
+  ownership by excluding Logger audio hosts from the global restored-message
+  listener. Parent syntax, `236/236` focused media/source-contract tests, and
+  `git diff --check` pass. The user confirmed remote-first/local-only audio and
+  open-policy behavior work, and the live log contains no MessageLogger error
+  through those toggles. The next active work is Stage 3 point 3 TXT/PDF Blob
+  and Logger-view parity; Stage 9 warning detail remains deferred.
 - **Worker state:** the user reported Spark at 24%, but Spark returned an
   explicit `Selected model is at capacity` failure. Per the session routing
   rule, bounded work moved to Luna Extra High for the rest of this session;
   the Sol parent is unchanged. Spark applied the first traced MessageContent
   suppression slice before interruption, Luna completed the classification-
   based legacy/collision cleanup, and the parent ran all focused checks.
-- **Checklist state:** include this file in every user-confirmed stage commit;
-  archive it only after implementation, validation, and user acceptance are
-  complete.
-- **Change-control state:** The user accepted Stage 4 and authorized its local
-  commit, explicitly without a push; commit `4433a61` is local only. Do not
-  push, merge, switch branches, tag, release, bump the version, or edit the
-  changelog. Await the current Stage 3 fixture pass/fail matrix before the full
-  pre-commit gate or any further rendering edit.
+- **Checklist state:** include this file in every user-confirmed stage commit
+  and keep it in the repository root after the current release. Do not archive
+  it unless the user explicitly requests that in a later session.
+- **Change-control state:** The accepted Stage 4 commit `4433a61` and reopened
+  Stage 3 correction commit `b9a1ebc` are both local only. Do not push, merge,
+  switch branches, tag, release, bump the version, or edit the changelog. For
+  Logger-view audio, run only focused tests until its live runtime gate passes;
+  restore the full gate only before its requested commit.
 
 ### Exact next action
 
-Commit the four accepted tracked Stage 3 files locally without pushing. Confirm
-the resulting local commit and clean tracked boundary, then begin Logger-view
-audio as a separate change. Reuse Discord's native audio presentation rather
-than inventing a second player where practical, and keep its CDN -> proxy ->
-local Blob/placeholder policy aligned with the now-accepted attachment route.
-Use only focused tests during implementation, then restore the full gate before
-the next requested commit. Do not merge, switch branches, tag, release, bump the
-version, or edit the changelog.
+Commit the accepted Stage 3 point 2 audio checkpoint locally without pushing,
+then begin point 3 with a trace of the already-working remote TXT/PDF
+presentation versus the failing local Blob/restored path and missing Logger-view
+renderer. Keep the full suite paused until point 3 is complete; then run it
+before the user's final release smoke test. Do not push, merge, switch branches,
+tag, release, bump the version, or edit the changelog yet.
 
 ### Resume procedure
 
@@ -150,6 +153,24 @@ version, or edit the changelog.
 The user's latest instruction and the **Approved focused contract** below control
 this work. A later explicit user instruction supersedes this checklist and must
 be recorded before implementation continues.
+
+## Current release boundary and paused work
+
+- [x] Finish Stage 3 point 2 (Logger-view audio), obtain its focused live
+      acceptance, and commit it locally without pushing.
+- [ ] Finish Stage 3 point 3 (TXT/PDF cached-Blob/restored and Logger-view
+      parity, including `Open Attachment`) with trace-first implementation and
+      focused validation.
+- [ ] Only after point 3 is complete, run the full automated suite and obtain
+      the user's final live smoke-test acceptance across the release scope.
+- [ ] After that acceptance, prepare the explicitly requested release step:
+      concise version metadata/changelog and merge into `main`, following the
+      repository branch model and verifying local/remote refs before any push.
+- [ ] Do not start new or deferred Stage 5-and-later work in this run. Preserve
+      already completed historical work, leave all deferred checklist items in
+      place, and resume them only in a later user-directed session.
+- [ ] Keep this checklist in the repository root through and after the current
+      release; do not move it to `docs/archive/checklists/`.
 
 ## Current status
 
@@ -777,6 +798,53 @@ later matrix and must not pull video/audio fixes into Stage 4.
 - [ ] Sync only the plugin, compare hashes, and repeat the two-setting MP4 live
       gate before requesting acceptance of the reopened Stage 3 correction.
 
+### Stage 3 format-rendering follow-up points (current order)
+
+This ordered follow-up supersedes the earlier no-new-renderer boundary only for
+the trace-proven Discord formats named below. It does not authorize an arbitrary
+file renderer or a cache-eligibility expansion.
+
+1. [x] **Video live/restored rendering:** accepted and committed locally as
+       `b9a1ebc41f0b8ca7324fb9e14b900b6a7fecd55e`. Discord-native duplicate
+       ownership is suppressed and the working Logger video presentation keeps
+       the shared remote/local policy. Nothing was pushed.
+2. [x] **Logger-view audio rendering:** reuse the semantically traced Discord
+       native player, with a browser `<audio>` fallback only when unavailable.
+       The implementation and focused deterministic checks are complete; the
+       user verified remote-first and local-only Logger-view playback and the
+       accepted open behavior. Its focused gate is the authorized point 2
+       checkpoint; the full suite remains paused until point 3 is complete.
+3. [ ] **TXT/PDF Blob and Logger-view rendering:** the user reports that
+       Discord's ordinary/live remote text and PDF presentations already work,
+       while their local Blob/restored path does not and the Logger viewer has
+       no inline renderer. Preserve the working remote presentation and trace
+       the exact native ownership/component contract before changing either
+       missing path.
+   - [ ] Cover extension and MIME discovery for `.txt` / `text/plain` and
+         `.pdf` / `application/pdf` without minified export names or keys.
+   - [ ] With local-only Off, preserve CDN -> proxy -> cached Blob -> exact
+         placeholder order. With local-only On, begin from the verified cache
+         only and make zero remote presentation requests. Cache-master Off
+         remains the exact attachment placeholder.
+   - [ ] Reuse Discord's trace-proven native text/PDF presentation in restored
+         live Blob mounts and the Logger viewer where available. Do not use an
+         unsandboxed custom iframe, execute attachment text, or route either
+         format through image/video/audio renderers.
+   - [ ] Show the neutral Stage 4 `Open Attachment` action on every exact-owned
+         text/PDF preview or container where practical, including restored live
+         rows, Logger-view rows, and native preview surfaces. Remote opens use
+         accepted HTTP(S) candidates; local-only opens the verified physical
+         cache path through the OS default application, never a Blob URL.
+   - [ ] Fail closed for ambiguous or foreign mounts and preserve canonical
+         records, signed URLs, current/removed order, mixed attachments, and all
+         existing image/video/audio/sticker/embed/Components V2 behavior.
+         Prevent duplicate native/Logger mounts and duplicate Attachment text.
+   - [ ] Add focused deterministic coverage for classification, both policy
+         modes, master Off, missing cache/module, render failure, mixed formats,
+         duplicate suppression, canonical immutability, menu/open ownership,
+         and lifecycle cleanup. Then run trace-backed live TXT/PDF checks on
+         both restored rows and Logger views before the full gate and commit.
+
 ### Stage 3 result
 
 - **Checkpoint implementation:** Added one detached saved-attachment
@@ -1082,14 +1150,16 @@ full setting matrix in every channel type.
       remaining limitation to the user.
 - [x] Wait for user acceptance before any separately requested commit/push or
       release work.
-- [ ] After acceptance, continue only into the explicitly deferred final
-      post-cleanup warning pass below; do not archive this checklist first.
+- [ ] After current release acceptance, keep the deferred warning pass below
+      paused for a later session and leave this checklist in the repository
+      root.
 
 ## Stage 9 - Final post-cleanup media-cache warning identity
 
-This is a deliberately deferred diagnostic-polish pass. It starts only after
-Stages 4-8 are accepted and must not change caching eligibility, request order,
-retry behavior, persistence, rendering, or external-open behavior.
+This is a deliberately deferred diagnostic-polish pass, with one optional
+Webpack-availability compatibility cleanup. It starts only after Stages 4-8
+are accepted and must not change caching eligibility, request order, retry
+behavior, persistence, rendering, or external-open behavior.
 
 - [ ] Replace unhelpful warnings such as
       `Image null unavailable (403), skipping cache` with a concise identity for
@@ -1112,12 +1182,29 @@ retry behavior, persistence, rendering, or external-open behavior.
       characters, and a hostname-only fallback in deterministic tests.
 - [ ] Confirm ordinary successful caching and request/retry/cancellation paths
       are byte-for-byte behaviorally unchanged apart from diagnostic text.
+- [ ] **Optional Webpack availability cleanup:** inventory Logger's semantic
+      Discord-module lookups that can remain unresolved because their owning
+      lazy entry has not loaded. Use live trace evidence to identify each exact
+      owning entry; do not generalize from minified export names or keys.
+- [ ] For each trace-proven entry, keep the existing semantic resolver first.
+      If it misses and `BdApi.Utils.loadEntry` exists, allow a guarded,
+      deduplicated best-effort load either during Logger startup warm-up or
+      immediately before the feature's first use, then retry that same semantic
+      resolver. Never bulk-load arbitrary Discord entries.
+- [ ] If `loadEntry` is unavailable, rejects, returns null/empty, completes
+      without revealing the target, or Logger stops before completion, retain
+      the feature's current resolver/mount fallback unchanged. Do not cache a
+      miss permanently, use stale post-stop results, or suppress a still-valid
+      missing-module warning.
+- [ ] Cover the optional loader path with focused tests for already-resolved,
+      successful load-and-retry, unavailable API, rejection, null/empty result,
+      post-load unresolved, shared concurrent request, and stop/restart cases;
+      confirm upstream BetterDiscord remains supported without the new API.
 - [ ] Run the focused media-cache warning tests, `npm run check`, `npm test`, and
       `git diff --check`; sync only the plugin, compare hashes, and inspect the
       hot-reload log before user acceptance.
-- [ ] After final acceptance, move this checklist from the repository root to
-      `docs/archive/checklists/` and include that tracked move in the final
-      accepted-stage commit.
+- [ ] After any later Stage 9 acceptance, keep this checklist in the repository
+      root unless the user separately requests archival.
 
 ## Handoff activity log
 
@@ -2743,3 +2830,112 @@ retry behavior, persistence, rendering, or external-open behavior.
   `MessageLoggerV2.plugin.js`, `tests/media.test.js`, and
   `tests/source-contracts.test.js`. Do not include ignored trace helpers,
   reports, or `tmp/1.html`; do not push the commit.
+
+### 2026-08-18 - Logger-view native audio ownership trace ready
+
+- The accepted Stage 3 correction is committed locally as
+  `b9a1ebc41f0b8ca7324fb9e14b900b6a7fecd55e`; nothing was pushed. Logger-view
+  audio now proceeds as a separate change.
+- Existing A01/A02 reports prove deleted live rows use Discord's native
+  `H -> eA -> audio/source` React chain for remote and Blob URLs, but the old
+  report did not expose a stable Webpack export identity. The Logger viewer
+  currently admits audio presentation entries but renders neither an inline
+  audio player nor a native audio component.
+- Enhanced the ignored helper only to version `1.0.4` / `mount-trace-v4` with
+  `dumpAudioOwner(label)`. It captures only A01/A02, walks the mounted audio
+  fiber owner chain, records bounded component/prototype/source-marker and raw
+  Webpack export-identity evidence, and reports `BdApi.Utils.loadEntry` plus
+  `Webpack.waitForModule` capabilities without recording function bodies,
+  message text, authors, secrets, or full Blob URLs.
+- Read-only host comparison confirms `BdApi.Utils.loadEntry` is public in both
+  the live fork's `develop` and mainstream `upstream/development`. The final
+  plugin must still feature-detect it for older BetterDiscord builds and retain
+  a direct loaded-module/Logger React-mount fallback.
+- The parent passed helper syntax and tracked diff hygiene, forced an
+  unload/reload event for the exact helper symlink, and enabled
+  `MessageLoggerAttachmentMountTrace` in Stable's plugin state. The user should
+  keep A01/A02 mounted and run
+  `MessageLoggerAttachmentMountTrace.dumpAudioOwner("logger-audio-owner")`.
+  Only focused tests are authorized until the Logger-view player passes live.
+
+### 2026-08-18 - Live lazy-entry proof and native audio discovery infrastructure
+
+- Hot-reloaded the ignored helper at version `1.0.5` / `mount-trace-v5` and
+  ran
+  `await MessageLoggerAttachmentMountTrace.verifyAudioLoadEntry("logger-audio-load-entry")`
+  with A01/A02 mounted. The report is
+  `MessageLoggerAttachmentMountTrace-report-logger-audio-load-entry-2026-08-17T16-18-02-444Z.json`.
+- The scoped `BdApi.Utils.loadEntry` call was supported and attempted, completed
+  in 22 ms, returned an array containing one module object, and reported no
+  error. This proves the live fork's older-client backend port can parse and
+  load the real `MessageAccessories` lazy entry; capability detection alone is
+  no longer being treated as success.
+- Both A01/A02 still resolved the same native `eA` media-player export after the
+  call. Its stable prototype contains `renderAudio`, `renderVideo`,
+  `renderControls`, and `checkVideoDecodability`; the traced obfuscated export
+  name/key are evidence only and must not become production selectors.
+- The native prop contract records `type: "AUDIO"`, `playable: true`, a formatted
+  string `fileSize`, numeric `fileSizeBytes`, a MIME array, function-valued
+  `volume` and `autoMute` getters, one-argument mute/volume callbacks, zero-
+  argument volume visibility callbacks, a three-argument play callback, and a
+  one-argument link renderer.
+- Added production infrastructure only: semantic native-player discovery,
+  guarded `Utils.loadEntry(MessageAccessories)` with direct Webpack retry,
+  shared non-sticky load promises, stale-generation protection, and scoped
+  React-root/listener cleanup on Logger refilter, DOM removal, hot unload, and
+  same-instance restart. No Logger-view audio is rendered by this slice.
+- Parent syntax and `git diff --check` pass. Focused behavior tests remain for
+  the complete mount slice; no full suite or live production sync is claimed.
+- Recorded a separate optional Stage 9 compatibility cleanup for Logger module
+  lookups hidden behind Discord lazy entries. It may use a guarded startup
+  warm-up or first-use `BdApi.Utils.loadEntry` call only for a trace-proven
+  owner, then retry the existing semantic resolver; unavailable, rejected,
+  empty, stale, or still-unresolved loads retain today's resolver/mount fallback
+  and warning behavior.
+
+### 2026-08-18 - Logger-view native audio focused build ready for live gate
+
+- Added one Logger-view audio host that first resolves Discord's native player
+  by the traced semantic prototype, invokes the proven guarded
+  `BdApi.Utils.loadEntry(MessageAccessories)` path only when missing, and falls
+  back to a browser `<audio controls preload="metadata">` element when native
+  resolution is unavailable.
+- The native prop adapter follows the v5 trace: `AUDIO`, playable state,
+  formatted and numeric size, MIME array, function-valued volume/auto-mute,
+  bounded callbacks, the semantic mosaic class, and a neutral non-escaping link
+  renderer. No obfuscated component/export key is used.
+- Logger-view audio now uses the same detached saved-attachment plan as image /
+  video: CDN -> proxy -> cached Blob -> exact placeholder in remote-first mode,
+  Blob/placeholder only in local-only mode, and the existing placeholder when
+  cache master is Off. Canonical records are never mutated and successful
+  inline audio no longer receives a duplicate Attachment/Voice text row.
+- Stage 4 message/attachment markers are present on native and browser-fallback
+  audio hosts. React roots and capture listeners are cleaned on remount,
+  placeholder replacement, Logger refilter, DOM removal, stop, and restart.
+- A read-only defect review found that Logger audio errors could also reach the
+  global restored-message media listener. The parent added the audio-host
+  exclusion beside the existing video-host exclusion, preventing one error from
+  advancing the candidate state twice, and added a focused regression case.
+- Parent syntax checks, `tests/media.test.js` plus
+  `tests/source-contracts.test.js` at `236/236`, and `git diff --check` pass.
+  The full suite remains deliberately paused until the user accepts the live
+  Logger-view audio result.
+- Per the user's corrected ordering, TXT/PDF work is no longer Stage 9A. It is
+  Stage 3 point 3 after audio acceptance: preserve their already-working remote
+  live presentation, fix cached Blob/restored rendering, add Logger-view
+  rendering, and expose Stage 4 `Open Attachment` on every exact-owned surface
+  where practical. Stage 9 remains warning identity plus optional guarded
+  Webpack warm-up only.
+- Live-synced only `MessageLoggerV2.plugin.js`; repository and installed hashes
+  match at
+  `f4dc7aa4bdc225c7b80094e9aa0d6438cce3fafb4b88c38c894ebd876d033b62`.
+  The 16:40:25-16:40:28 hot reload removed the old patches, resolved ImageModal,
+  applied the new patches, completed its UI refresh, and scheduled the shared
+  cache timer without a MessageLogger exception or module-resolution warning.
+  The simultaneous `PersonalPins` dispatch exception is unrelated. At that
+  boundary, user verification of Logger-view audio Off/On, playback, single
+  ownership, and `Open Attachment` was the only remaining point 2 gate.
+- The user completed that gate successfully. Debug-log evidence records
+  local-only On at 16:41:20, cache-master Off at 16:41:41, and cache-master On
+  again at 16:41:57 with the expected refreshes and no MessageLogger exception.
+  Stage 3 point 2 is accepted for a local focused-gate commit without a push.

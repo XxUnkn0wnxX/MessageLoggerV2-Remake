@@ -8,8 +8,11 @@ const {
   captureConsoleEvent,
   createPlugin,
   Patcher,
+  ReactDOM,
   loggerEvents,
-  resetHarness
+  resetHarness,
+  Utils,
+  Webpack
 } = require('./helpers/plugin-harness');
 
 let styledConsoleEvents = [];
@@ -126,8 +129,58 @@ function createFakeEventTarget() {
   };
 }
 
+function createLoggerAudioHost() {
+  const state = {
+    addCalls: [],
+    removeCalls: [],
+    listeners: [],
+    replacement: null
+  };
+  const host = {
+    dataset: {},
+    children: [],
+    isConnected: true,
+    appendChild(child) {
+      child.parentElement = this;
+      this.children.push(child);
+      return child;
+    },
+    replaceChildren(...children) {
+      this.children = children;
+      for (const child of children) child.parentElement = this;
+    },
+    replaceWith(replacement) {
+      state.replacement = replacement;
+      this.isConnected = false;
+    },
+    contains(node) {
+      return node === this || this.children.includes(node);
+    },
+    addEventListener(eventName, listener, capture) {
+      state.addCalls.push({ eventName, listener, capture });
+      state.listeners.push({ eventName, listener, capture });
+    },
+    removeEventListener(eventName, listener, capture) {
+      state.removeCalls.push({ eventName, listener, capture });
+      state.listeners = state.listeners.filter(
+        candidate => candidate.eventName !== eventName
+          || candidate.listener !== listener
+          || candidate.capture !== capture
+      );
+    },
+    dispatchErrorEvent(target) {
+      for (const entry of [...state.listeners]) {
+        if (entry.eventName === 'error') entry.listener({ target });
+      }
+    },
+    state
+  };
+  return host;
+}
+
 function createNativeMediaClosest(messageRow) {
   return selector => selector === '[data-ml2-attachment-video-host="true"]'
+    || selector === '[data-ml2-attachment-audio-host="true"]'
     ? null
     : messageRow;
 }
@@ -3905,6 +3958,234 @@ test('native audio source error retries CDN then proxy and then shows cached aud
   assert.deepEqual(cacheRefreshes, ['701']);
 });
 
+test('logger native audio discovery retries one guarded lazy entry without sticky or stale misses', async () => {
+  class MessageAccessories {
+    renderEmbeds() {}
+    renderAttachments() {}
+  }
+  class NativeAudioPlayer {
+    renderAudio() {}
+    renderVideo() {}
+    renderControls() {}
+    checkVideoDecodability() {}
+  }
+  class PartialMediaPlayer {
+    renderAudio() {}
+    renderVideo() {}
+    renderControls() {}
+  }
+
+  Webpack.Filters.byPrototypeKeys = (...keys) => candidate => keys.every(
+    key => typeof candidate?.prototype?.[key] === 'function'
+  );
+  let nativeAvailable = false;
+  Webpack.getModule = filter => [
+    MessageAccessories,
+    ...(nativeAvailable ? [NativeAudioPlayer] : [])
+  ].find(candidate => {
+    try {
+      return filter(candidate);
+    } catch {
+      return false;
+    }
+  }) || null;
+
+  const plugin = createPlugin();
+  assert.equal(plugin.isLoggerNativeAudioPlayer(PartialMediaPlayer), false);
+  assert.equal(plugin.resolveLoggerNativeAudioPlayer(), null);
+
+  let releaseFirstLoad;
+  let loadCalls = 0;
+  Utils.loadEntry = entry => {
+    loadCalls += 1;
+    assert.equal(entry, MessageAccessories);
+    return new Promise(resolve => {
+      releaseFirstLoad = () => {
+        nativeAvailable = true;
+        resolve([entry]);
+      };
+    });
+  };
+  const firstLookup = plugin.ensureLoggerNativeAudioPlayer();
+  const sharedLookup = plugin.ensureLoggerNativeAudioPlayer();
+  assert.equal(loadCalls, 1);
+  releaseFirstLoad();
+  assert.deepEqual(
+    await Promise.all([firstLookup, sharedLookup]),
+    [NativeAudioPlayer, NativeAudioPlayer]
+  );
+
+  const directPlugin = createPlugin();
+  assert.equal(await directPlugin.ensureLoggerNativeAudioPlayer(), NativeAudioPlayer);
+  assert.equal(loadCalls, 1, 'an already-resolved player must not force-load its entry');
+
+  nativeAvailable = false;
+  const emptyPlugin = createPlugin();
+  Utils.loadEntry = async () => [];
+  assert.equal(await emptyPlugin.ensureLoggerNativeAudioPlayer(), null);
+  nativeAvailable = true;
+  assert.equal(
+    await emptyPlugin.ensureLoggerNativeAudioPlayer(),
+    NativeAudioPlayer,
+    'a null miss must not be cached permanently'
+  );
+
+  nativeAvailable = false;
+  const rejectedPlugin = createPlugin();
+  Utils.loadEntry = async () => {
+    throw new Error('lazy entry unavailable');
+  };
+  assert.equal(await rejectedPlugin.ensureLoggerNativeAudioPlayer(), null);
+  assert.ok(
+    loggerEvents.some(event => event[0] === 'warn'
+      && String(event[1]).includes('Could not load the Discord native audio player entry.'))
+  );
+
+  const stalePlugin = createPlugin();
+  let releaseStaleLoad;
+  Utils.loadEntry = () => new Promise(resolve => {
+    releaseStaleLoad = resolve;
+  });
+  const staleLookup = stalePlugin.ensureLoggerNativeAudioPlayer();
+  stalePlugin.stop();
+  nativeAvailable = true;
+  releaseStaleLoad([MessageAccessories]);
+  assert.equal(await staleLookup, null);
+
+  nativeAvailable = false;
+  delete Utils.loadEntry;
+  assert.equal(await createPlugin().ensureLoggerNativeAudioPlayer(), null);
+});
+
+test('logger native audio props, root ownership, error forwarding, and browser fallback match the traced contract', () => {
+  class NativeAudioPlayer {
+    renderAudio() {}
+    renderVideo() {}
+    renderControls() {}
+    checkVideoDecodability() {}
+  }
+  const audioClasses = { mosaicItemContent: 'mosaicItemContent_test' };
+  Webpack.getModule = filter => [NativeAudioPlayer, audioClasses].find(candidate => {
+    try {
+      return filter(candidate);
+    } catch {
+      return false;
+    }
+  }) || null;
+
+  const attachment = {
+    id: 'audio-801',
+    filename: 'sample.mp3',
+    size: 8876,
+    content_type: 'audio/mpeg',
+    original_content_type: 'audio/ogg'
+  };
+  const sourceMessage = { id: 'message-801', channel_id: 'channel-801' };
+  const plugin = createPlugin();
+  const props = plugin.createLoggerNativeAudioProps(
+    'blob:https://discord.com/audio-801',
+    attachment,
+    sourceMessage
+  );
+  assert.equal(props.src, 'blob:https://discord.com/audio-801');
+  assert.equal(props.fileName, 'sample.mp3');
+  assert.equal(props.fileSize, '8.67 KB');
+  assert.equal(props.fileSizeBytes, 8876);
+  assert.equal(props.type, 'AUDIO');
+  assert.equal(props.className, 'mosaicItemContent_test');
+  assert.equal(props.playable, true);
+  assert.equal(props.volume(), 1);
+  assert.equal(props.autoMute(), false);
+  assert.deepEqual(props.mimeType, ['audio/mpeg', 'audio/ogg']);
+  assert.equal(props.onMute.length, 1);
+  assert.equal(props.onVolumeChange.length, 1);
+  assert.equal(props.onVolumeShow.length, 0);
+  assert.equal(props.onVolumeHide.length, 0);
+  assert.equal(props.onPlay.length, 3);
+  assert.equal(props.renderLinkComponent({ children: 'sample.mp3' }).type, 'span');
+
+  let renderedElement = null;
+  let unmountCalls = 0;
+  ReactDOM.createRoot = target => ({
+    target,
+    render(element) {
+      renderedElement = element;
+    },
+    unmount() {
+      unmountCalls += 1;
+    }
+  });
+  const nativeErrors = [];
+  const nativeHost = createLoggerAudioHost();
+  const nativeMount = plugin.mountLoggerNativeAudio(
+    nativeHost,
+    props.src,
+    attachment,
+    sourceMessage,
+    (event, currentSource) => nativeErrors.push({ event, currentSource })
+  );
+  assert.equal(nativeMount.native, true);
+  assert.equal(renderedElement.type, NativeAudioPlayer);
+  assert.equal(renderedElement.props.type, 'AUDIO');
+  assert.equal(nativeHost.dataset.ml2AttachmentMessageId, 'message-801');
+  assert.equal(nativeHost.dataset.ml2AttachmentId, 'audio-801');
+  assert.equal(nativeHost.dataset.ml2AttachmentAudioHost, 'true');
+  nativeHost.dispatchErrorEvent({
+    tagName: 'SOURCE',
+    src: 'blob:https://discord.com/audio-801'
+  });
+  assert.equal(nativeErrors.length, 1);
+  assert.equal(nativeErrors[0].currentSource, 'blob:https://discord.com/audio-801');
+  plugin.cleanupLoggerNativeAudioRoots(nativeHost);
+  assert.equal(unmountCalls, 1);
+  assert.equal(nativeHost.state.listeners.length, 0);
+  assert.equal(plugin._loggerNativeAudioRoots.size, 0);
+
+  const originalDocument = global.document;
+  try {
+    global.document = {
+      createElement(tagName) {
+        assert.equal(tagName, 'audio');
+        return {
+          tagName: 'AUDIO',
+          dataset: {},
+          controls: false,
+          preload: '',
+          src: ''
+        };
+      }
+    };
+    Webpack.getModule = () => null;
+    const fallbackPlugin = createPlugin();
+    const fallbackHost = createLoggerAudioHost();
+    const fallbackErrors = [];
+    const fallbackMount = fallbackPlugin.mountLoggerNativeAudio(
+      fallbackHost,
+      'blob:https://discord.com/fallback-audio-801',
+      attachment,
+      sourceMessage,
+      (event, currentSource) => fallbackErrors.push({ event, currentSource }),
+      { retryNative: false }
+    );
+    assert.equal(fallbackMount.native, false);
+    assert.equal(fallbackHost.children.length, 1);
+    assert.equal(fallbackMount.audio.controls, true);
+    assert.equal(fallbackMount.audio.preload, 'metadata');
+    assert.equal(fallbackMount.audio.src, 'blob:https://discord.com/fallback-audio-801');
+    assert.equal(fallbackMount.audio.dataset.ml2AttachmentMessageId, 'message-801');
+    assert.equal(fallbackMount.audio.dataset.ml2AttachmentId, 'audio-801');
+    fallbackHost.dispatchErrorEvent(fallbackMount.audio);
+    assert.equal(fallbackErrors.length, 1);
+    assert.equal(fallbackErrors[0].currentSource, 'blob:https://discord.com/fallback-audio-801');
+    fallbackPlugin.cleanupLoggerNativeAudioRoots(null, true);
+    assert.equal(fallbackHost.state.listeners.length, 0);
+    assert.equal(fallbackPlugin._loggerNativeAudioRoots.size, 0);
+  } finally {
+    if (originalDocument === undefined) delete global.document;
+    else global.document = originalDocument;
+  }
+});
+
 test('native attachment media error remounts one failed remote attachment as a placeholder without cached blob', async () => {
   const dispatches = [];
   const invalidations = [];
@@ -4571,6 +4852,17 @@ test('native attachment media error ignores non-deleted message rows and wrong t
       tagName: 'IMG',
       currentSrc: 'https://cdn.discordapp.com/attachments/503/photo.png',
       closest: createNativeMediaClosest({ id: 'chat-messages-503-503' })
+    }
+  });
+  plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'AUDIO',
+      currentSrc: 'https://cdn.discordapp.com/attachments/504/photo.png',
+      closest: selector => {
+        if (selector === '[data-ml2-attachment-video-host="true"]') return null;
+        if (selector === '[data-ml2-attachment-audio-host="true"]') return {};
+        return wrongUrlRow;
+      }
     }
   });
 

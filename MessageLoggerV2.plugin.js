@@ -475,6 +475,10 @@ module.exports = class MessageLoggerV2 {
     this._savedAttachmentViewerLabelChanges = new Map();
     this._loggerOwnedAttachmentMediaModalKeys = new Set();
     this._nativeAttachmentMediaViewerOwnershipTrackingInstalled = false;
+    this._loggerNativeAudioPlayer = null;
+    this._loggerNativeAudioLoadPromise = null;
+    this._loggerNativeAudioLoadGeneration = 0;
+    this._loggerNativeAudioRoots = new Map();
   }
   getName() {
     return this.meta.name;
@@ -517,6 +521,10 @@ module.exports = class MessageLoggerV2 {
   }
   stop() {
     this._startupGeneration = (this._startupGeneration || 0) + 1;
+    this._loggerNativeAudioLoadGeneration = (this._loggerNativeAudioLoadGeneration || 0) + 1;
+    this._loggerNativeAudioLoadPromise = null;
+    this._loggerNativeAudioPlayer = null;
+    this.cleanupLoggerNativeAudioRoots?.(null, true);
     this._startupPending = false;
     this.cancelSavedMediaExternalOpenProbes?.();
     this.stopMediaCacheTrimmer?.();
@@ -10190,6 +10198,251 @@ module.exports = class MessageLoggerV2 {
     }
     return 'unknown file';
   }
+  isLoggerNativeAudioPlayer(candidate) {
+    try {
+      const prototype = candidate?.prototype;
+      return typeof candidate === 'function'
+        && typeof prototype?.renderAudio === 'function'
+        && typeof prototype?.renderVideo === 'function'
+        && typeof prototype?.renderControls === 'function'
+        && typeof prototype?.checkVideoDecodability === 'function';
+    } catch {
+      return false;
+    }
+  }
+  resolveLoggerNativeAudioPlayer() {
+    if (this.isLoggerNativeAudioPlayer(this._loggerNativeAudioPlayer)) {
+      return this._loggerNativeAudioPlayer;
+    }
+    this._loggerNativeAudioPlayer = null;
+    try {
+      const candidate = Webpack.getModule(
+        moduleExport => this.isLoggerNativeAudioPlayer(moduleExport),
+        { searchExports: true }
+      );
+      if (this.isLoggerNativeAudioPlayer(candidate)) {
+        this._loggerNativeAudioPlayer = candidate;
+        return candidate;
+      }
+    } catch (error) {
+      Logger.warn('Could not resolve Discord native audio player component.', error);
+    }
+    return null;
+  }
+  async ensureLoggerNativeAudioPlayer() {
+    const immediate = this.resolveLoggerNativeAudioPlayer();
+    if (immediate) return immediate;
+    if (this._loggerNativeAudioLoadPromise) return this._loggerNativeAudioLoadPromise;
+
+    const generation = this._loggerNativeAudioLoadGeneration;
+    const loadPromise = (async () => {
+      try {
+        const messageAccessories = DiscordModules.MessageAccessories;
+        if (typeof Utils?.loadEntry === 'function' && messageAccessories) {
+          try {
+            await Utils.loadEntry(messageAccessories);
+          } catch (error) {
+            Logger.warn('Could not load the Discord native audio player entry.', error);
+          }
+          if (this._loggerNativeAudioLoadGeneration !== generation) return null;
+          const afterLoad = this.resolveLoggerNativeAudioPlayer();
+          if (afterLoad) return afterLoad;
+        }
+        if (this._loggerNativeAudioLoadGeneration !== generation) return null;
+        return this.resolveLoggerNativeAudioPlayer();
+      } catch (error) {
+        Logger.warn('Could not prepare the Discord native audio player lookup.', error);
+        return null;
+      }
+    })();
+
+    this._loggerNativeAudioLoadPromise = loadPromise;
+    loadPromise.then(
+      () => {
+        if (this._loggerNativeAudioLoadPromise === loadPromise) {
+          this._loggerNativeAudioLoadPromise = null;
+        }
+      },
+      () => {
+        if (this._loggerNativeAudioLoadPromise === loadPromise) {
+          this._loggerNativeAudioLoadPromise = null;
+        }
+      }
+    );
+    return loadPromise;
+  }
+  formatLoggerNativeAudioFileSize(bytes) {
+    const numeric = Number(bytes);
+    if (!Number.isFinite(numeric) || numeric < 0) return '0.00 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = numeric;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex++;
+    }
+    return `${value.toFixed(2)} ${units[unitIndex]}`;
+  }
+  getLoggerNativeAudioMimeTypes(attachment) {
+    const mimeTypes = [];
+    const addMimeType = value => {
+      if (typeof value !== 'string') return;
+      const mimeType = value.trim().toLowerCase();
+      if (!/^audio\//.test(mimeType) || mimeTypes.includes(mimeType)) return;
+      mimeTypes.push(mimeType);
+    };
+    addMimeType(attachment?.content_type);
+    addMimeType(attachment?.original_content_type);
+    const filename = typeof attachment?.filename === 'string'
+      ? attachment.filename.trim().toLowerCase()
+      : '';
+    const extension = filename.match(/\.([a-z0-9]+)$/)?.[1];
+    const extensionMimeTypes = {
+      mp3: 'audio/mpeg',
+      ogg: 'audio/ogg',
+      oga: 'audio/ogg',
+      opus: 'audio/opus'
+    };
+    addMimeType(extensionMimeTypes[extension]);
+    return mimeTypes;
+  }
+  getLoggerNativeAudioClassName() {
+    try {
+      const module = Webpack.getModule(
+        exportedValue => typeof exportedValue?.mosaicItemContent === 'string',
+        { searchExports: true }
+      );
+      return typeof module?.mosaicItemContent === 'string' ? module.mosaicItemContent : '';
+    } catch {
+      return '';
+    }
+  }
+  createLoggerNativeAudioProps(src, attachment, sourceMessage) {
+    const fileSizeBytes = Number(attachment?.size);
+    const normalizedFileSizeBytes = Number.isFinite(fileSizeBytes) && fileSizeBytes >= 0
+      ? fileSizeBytes
+      : 0;
+    const fileName = this.getSafeAttachmentFilename(attachment, null);
+    const renderLinkComponent = props => React.createElement(
+      'span',
+      null,
+      props?.children ?? fileName
+    );
+    return {
+      src,
+      fileName,
+      fileSize: this.formatLoggerNativeAudioFileSize(normalizedFileSizeBytes),
+      fileSizeBytes: normalizedFileSizeBytes,
+      type: 'AUDIO',
+      className: this.getLoggerNativeAudioClassName(),
+      playable: true,
+      volume: () => 1,
+      autoMute: () => false,
+      onMute: event => {},
+      onVolumeChange: event => {},
+      onVolumeShow: () => {},
+      onVolumeHide: () => {},
+      renderLinkComponent,
+      mimeType: this.getLoggerNativeAudioMimeTypes(attachment),
+      onPlay: (event, currentTime, duration) => {}
+    };
+  }
+  mountLoggerNativeAudio(host, src, attachment, sourceMessage, onError = null, options = {}) {
+    if (!host || typeof host.appendChild !== 'function') return null;
+    this.cleanupLoggerNativeAudioRoots(host);
+    try {
+      host.replaceChildren?.();
+    } catch {}
+    const messageId = String(sourceMessage?.id || '');
+    const attachmentId = String(attachment?.id || '');
+    const setAttachmentDatasets = node => {
+      if (!node?.dataset) return;
+      node.dataset.ml2AttachmentMessageId = messageId;
+      node.dataset.ml2AttachmentId = attachmentId;
+      node.dataset.ml2AttachmentAudioHost = 'true';
+    };
+    setAttachmentDatasets(host);
+    const listener = event => {
+      const tagName = String(event?.target?.tagName || '').toUpperCase();
+      if (tagName !== 'AUDIO' && tagName !== 'SOURCE') return;
+      const currentSource = event?.target?.currentSrc
+        || event?.target?.src
+        || event?.target?.getAttribute?.('src')
+        || '';
+      if (typeof onError === 'function') onError(event, currentSource);
+    };
+    const cleanup = () => {
+      try {
+        host.removeEventListener?.('error', listener, true);
+      } catch {}
+    };
+    try {
+      host.addEventListener?.('error', listener, true);
+    } catch {}
+    const renderFallback = () => {
+      cleanup();
+      const fallbackCleanup = () => {
+        try {
+          host.removeEventListener?.('error', listener, true);
+        } catch {}
+      };
+      let audio = null;
+      try {
+        host.replaceChildren?.();
+        setAttachmentDatasets(host);
+        audio = document.createElement('audio');
+        audio.controls = true;
+        audio.preload = 'metadata';
+        audio.src = src;
+        setAttachmentDatasets(audio);
+        host.appendChild(audio);
+        host.addEventListener?.('error', listener, true);
+      } catch {}
+      const entry = { host, root: null, cleanup: fallbackCleanup };
+      this._loggerNativeAudioRoots.set(host, entry);
+      return { ...entry, audio, native: false };
+    };
+    const nativePlayer = this.resolveLoggerNativeAudioPlayer();
+    if (!nativePlayer || typeof ReactDOM?.createRoot !== 'function') {
+      const fallback = renderFallback();
+      if (!nativePlayer && options.retryNative !== false) {
+        const generation = this._loggerNativeAudioLoadGeneration;
+        const fallbackEntry = this._loggerNativeAudioRoots.get(host);
+        void Promise.resolve(this.ensureLoggerNativeAudioPlayer()).then(component => {
+          const owned = this._loggerNativeAudioRoots.get(host);
+          const connected = host.isConnected !== false;
+          if (!component || !connected || owned !== fallbackEntry || generation !== this._loggerNativeAudioLoadGeneration) return;
+          this.cleanupLoggerNativeAudioRoots(host);
+          if (host.isConnected === false) return;
+          this.mountLoggerNativeAudio(
+            host,
+            src,
+            attachment,
+            sourceMessage,
+            onError,
+            { retryNative: false }
+          );
+        }).catch(() => {});
+      }
+      return fallback;
+    }
+    let root = null;
+    try {
+      root = ReactDOM.createRoot(host);
+      root.render(React.createElement(
+        nativePlayer,
+        this.createLoggerNativeAudioProps(src, attachment, sourceMessage)
+      ));
+      const entry = { host, root, cleanup };
+      this._loggerNativeAudioRoots.set(host, entry);
+      return { ...entry, native: true };
+    } catch {
+      try {
+        root?.unmount?.();
+      } catch {}
+      return renderFallback();
+    }
+  }
   getSavedAttachmentPresentationPlan(attachment, message, options = {}) {
     const descriptor = this.getSavedAttachmentDescriptor(attachment, message);
     if (!descriptor) return null;
@@ -11084,7 +11337,8 @@ module.exports = class MessageLoggerV2 {
     const target = event?.target;
     const mediaTag = String(target?.tagName || '').toUpperCase();
     if (mediaTag !== 'IMG' && mediaTag !== 'VIDEO' && mediaTag !== 'AUDIO' && mediaTag !== 'SOURCE') return;
-    if (target.closest?.('[data-ml2-attachment-video-host="true"]')) return;
+    if (target.closest?.('[data-ml2-attachment-video-host="true"]')
+      || target.closest?.('[data-ml2-attachment-audio-host="true"]')) return;
 
     const sourceUrl = target.currentSrc || target.src;
     if (typeof sourceUrl !== 'string' || !sourceUrl.trim()) return;
@@ -17659,6 +17913,33 @@ module.exports = class MessageLoggerV2 {
       this._copiedDeleteControlRoots.delete(host);
     }
   }
+  cleanupLoggerNativeAudioRoots(rootNode = null, force = false) {
+    for (const [key, entry] of this._loggerNativeAudioRoots || []) {
+      const ownedNode = entry?.host || key;
+      const root = entry?.root || (typeof key?.unmount === 'function' ? key : null);
+      const belongsToRoot = rootNode && (
+        rootNode === key
+        || rootNode === ownedNode
+        || rootNode.contains?.(key)
+        || rootNode.contains?.(ownedNode)
+      );
+      if (!force) {
+        if (rootNode && !belongsToRoot) continue;
+        if (!rootNode && ownedNode?.isConnected) continue;
+      }
+      try {
+        entry?.cleanup?.();
+      } catch (error) {
+        Logger.warn('Could not clean up a Logger native audio listener.', error);
+      }
+      try {
+        root?.unmount?.();
+      } catch (error) {
+        Logger.warn('Could not unmount a Logger native audio root.', error);
+      }
+      this._loggerNativeAudioRoots.delete(key);
+    }
+  }
   refreshCopiedNativeDeleteControls() {
     if (typeof document === 'undefined') return;
     const hosts = Array.from(document.querySelectorAll('[data-ml2-native-delete-host="true"]'));
@@ -20292,6 +20573,7 @@ module.exports = class MessageLoggerV2 {
         if (m.type === 'childList') {
           for (const node of m.removedNodes) {
             if (node.nodeType === 1) this.cleanupCopiedNativeDeleteControls(node);
+            this.cleanupLoggerNativeAudioRoots(node);
           }
           const targetMessageNode = getMessageNodeFromAnyNode(m.target);
           if (targetMessageNode) tintMessageNode(targetMessageNode);
@@ -20354,6 +20636,7 @@ module.exports = class MessageLoggerV2 {
     this.unpatches.push(() => {
       try { tintObserver.disconnect(); } catch {}
       this.cleanupCopiedNativeDeleteControls(null, true);
+      this.cleanupLoggerNativeAudioRoots(null, true);
       this._nativeDeleteButtonPresentation = null;
       this._nativeDeleteButtonPresentationSignature = '';
       this._nativeDeleteTemplateWarningShown = false;
@@ -22049,8 +22332,10 @@ module.exports = class MessageLoggerV2 {
           if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)) return;
           const plan = entry.plan || {};
           const filename = attachment.filename || 'unknown file';
-          const attachmentIsMedia = this.isImage(currentCachedAttachmentFilename(attachment))
-            || this.isVideo(currentCachedAttachmentFilename(attachment));
+          const attachmentIsMedia = ['image', 'video', 'audio'].includes(plan.mediaType)
+            || this.isImage(currentCachedAttachmentFilename(attachment))
+            || this.isVideo(currentCachedAttachmentFilename(attachment))
+            || this.isAudio(currentCachedAttachmentFilename(attachment));
           const safePlanFilename = plan?.filename || filename;
           const safePlanLabel = typeof plan?.label === 'string' ? plan.label : null;
           if ((plan.action === 'placeholder' || plan.action === 'omit') && safePlanLabel) {
@@ -22091,6 +22376,9 @@ module.exports = class MessageLoggerV2 {
               const renderedAttachment = { ...attachment };
               renderedAttachment._ml2PresentationAction = plan.action;
               renderedAttachment._ml2PresentationLabel = typeof plan?.label === 'string' ? plan.label : null;
+              renderedAttachment._ml2PresentationMediaType = typeof plan?.mediaType === 'string'
+                ? plan.mediaType
+                : null;
               if (!renderedAttachment.filename && plan.filename) {
                 renderedAttachment.filename = plan.filename;
               }
@@ -22109,7 +22397,15 @@ module.exports = class MessageLoggerV2 {
           for (const entry of removedLoggerAttachmentEntries) appendRemoteCachedFailureMarker(entry, true);
         } else {
           for (const attachment of message.attachments || []) {
-            if (this.isImage(attachment.filename || attachment.url) || this.isVideo(attachment.filename || attachment.url)) continue;
+            const attachmentSources = [
+              attachment?.filename,
+              attachment?.url,
+              attachment?.content_type,
+              attachment?.original_content_type
+            ];
+            if (attachmentSources.some(source => this.isImage(source)
+              || this.isVideo(source)
+              || this.isAudio(source))) continue;
             const isVoiceMessage = (Number(message.flags) & 8192) === 8192;
             appendPayloadReference(isVoiceMessage ? 'Voice message' : 'Attachment', attachment.filename, attachment.url);
           }
@@ -22376,6 +22672,86 @@ module.exports = class MessageLoggerV2 {
                 )
               );
             };
+            const attachmentSources = [
+              attachment?._ml2PresentationMediaType,
+              attachment?.filename,
+              attachment?.url,
+              attachment?.content_type,
+              attachment?.original_content_type
+            ];
+            const isAudioFile = attachment?._ml2PresentationMediaType === 'audio'
+              || attachmentSources.some(source => this.isAudio(source));
+            if (isAudioFile) {
+              const loggerAttachmentEntry = getLoggerAttachmentEntry(attachment);
+              const sourceAttachment = loggerAttachmentEntry?.attachment || null;
+              const audioAttachment = sourceAttachment || attachment;
+              const audioHost = document.createElement('div');
+              contentDiv.appendChild(audioHost);
+              const replaceAudioWithPlaceholder = plan => {
+                this.cleanupLoggerNativeAudioRoots(audioHost);
+                audioHost.replaceWith(createUnavailableAttachmentPlaceholder(
+                  typeof plan?.label === 'string'
+                    ? plan.label
+                    : (presentationLabel || attachment.filename),
+                  sourceAttachment || attachment
+                ));
+              };
+              const onAudioError = (event, currentSource) => {
+                const failedSource = typeof currentSource === 'string' && currentSource
+                  ? currentSource
+                  : attachment.url;
+                const currentPresentationAction = attachment._ml2PresentationAction || presentationAction;
+                if (!sourceAttachment
+                  || currentPresentationAction !== 'remote'
+                  || this.settings.cacheAllImages === false
+                  || this.settings.onlyRenderCachedAttachments) {
+                  replaceAudioWithPlaceholder();
+                  return;
+                }
+                let nextPlan;
+                try {
+                  this.markSavedAttachmentMediaCandidateFailure(
+                    sourceAttachment,
+                    sourceMessage,
+                    failedSource
+                  );
+                  nextPlan = this.getSavedAttachmentPresentationPlan(
+                    sourceAttachment,
+                    sourceMessage,
+                    { allowRemote: true }
+                  );
+                } catch {}
+                const nextUrl = typeof nextPlan?.url === 'string' ? nextPlan.url : '';
+                const nextAction = nextPlan?.action;
+                if ((nextAction === 'remote' || nextAction === 'blob')
+                  && nextUrl
+                  && nextUrl !== failedSource
+                  && nextUrl !== attachment.url) {
+                  attachment._ml2PresentationAction = nextAction;
+                  attachment._ml2PresentationLabel = typeof nextPlan.label === 'string'
+                    ? nextPlan.label
+                    : attachment._ml2PresentationLabel;
+                  attachment.url = nextUrl;
+                  this.mountLoggerNativeAudio(
+                    audioHost,
+                    nextUrl,
+                    audioAttachment,
+                    sourceMessage,
+                    onAudioError
+                  );
+                  return;
+                }
+                replaceAudioWithPlaceholder(nextPlan);
+              };
+              this.mountLoggerNativeAudio(
+                audioHost,
+                attachment.url,
+                audioAttachment,
+                sourceMessage,
+                onAudioError
+              );
+              return;
+            }
             const isCached = presentationAction
               ? presentationAction === 'blob' || attachment.url == 'ERROR'
               : attachment.url == 'ERROR' || this.isAttachmentLocallyCached(attachment, message);
@@ -22757,6 +23133,7 @@ module.exports = class MessageLoggerV2 {
   refilterMessages() {
     const messagesDIV = document.getElementById(this.style.menuMessages);
     const original = messagesDIV.style.display;
+    this.cleanupLoggerNativeAudioRoots(messagesDIV);
     messagesDIV.style.display = 'none';
     while (messagesDIV.firstChild) messagesDIV.firstChild.remove();
     this.menu.messages = this.getFilteredMessages();

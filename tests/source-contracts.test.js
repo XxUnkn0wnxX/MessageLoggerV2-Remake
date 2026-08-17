@@ -839,7 +839,10 @@ test('saved live rows render video attachments through Logger-owned React hosts'
     source.indexOf('  handleSavedAttachmentMediaError(event = {}) {'),
     source.indexOf('  refreshCacheOnlyMessage(message) {')
   );
-  assert.match(mediaErrorHandler, /target\.closest\?\.\('\[data-ml2-attachment-video-host="true"\]'\)\) return;/);
+  assert.match(
+    mediaErrorHandler,
+    /target\.closest\?\.\('\[data-ml2-attachment-video-host="true"\]'\)[\s\S]{0,100}\|\| target\.closest\?\.\('\[data-ml2-attachment-audio-host="true"\]'\)\) return;/
+  );
 });
 
 test('saved restored video ownership projects MessageAccessories.render before attachment rendering', () => {
@@ -1791,6 +1794,7 @@ test('populateParent sources logger media rows from saved attachment presentatio
   assert.match(viewer, /plan\?\.action === 'remote' \|\| plan\?\.action === 'blob'/);
   assert.match(viewer, /renderedAttachment\._ml2PresentationAction = plan\.action;/);
   assert.match(viewer, /renderedAttachment\._ml2PresentationLabel = typeof plan\?\.label === 'string' \? plan\.label : null;/);
+  assert.match(viewer, /renderedAttachment\._ml2PresentationMediaType = typeof plan\?\.mediaType === 'string'/);
   assert.match(viewer, /if \(!renderedAttachment\.filename && plan\.filename\) \{\s*renderedAttachment\.filename = plan\.filename;\s*\}/);
   assert.match(viewer, /renderedAttachment\.proxy_url = plan\.url;/);
   assert.match(viewer, /const presentationAction = attachment\._ml2PresentationAction;/);
@@ -1808,6 +1812,59 @@ test('populateParent sources logger media rows from saved attachment presentatio
   assert.match(viewer, /attemptToUseCachedVideo\([\s\S]*presentationLabel[\s\S]*\);/);
   assert.match(viewer, /fallbackToNextLoggerRemotePlan\(video,\s*container,\s*attachment,\s*attemptToUseCachedVideo/);
   assert.match(viewer, /fallbackToNextLoggerRemotePlan\(img,\s*img,\s*attachment,\s*attemptToUseCachedImage/);
+});
+
+test('populateParent routes audio through one native host and the shared saved-attachment policy', () => {
+  const viewer = source.slice(
+    source.indexOf('populateParent(parent, messages)'),
+    source.indexOf('sortMessagesByAge(map, useCaptureBatchOrder')
+  );
+  assert.match(viewer, /\['image', 'video', 'audio'\]\.includes\(plan\.mediaType\)/);
+  assert.match(viewer, /attachmentSources\.some\(source => this\.isImage\(source\)[\s\S]*this\.isAudio\(source\)\)\) continue;/);
+  const audioStart = viewer.indexOf("const isAudioFile = attachment?._ml2PresentationMediaType === 'audio'");
+  const audioEnd = viewer.indexOf('const isCached = presentationAction', audioStart);
+  assert.ok(audioStart >= 0 && audioEnd > audioStart, 'Logger viewer must have a bounded audio-first render branch');
+  const audioBranch = viewer.slice(audioStart, audioEnd);
+  assert.match(audioBranch, /const sourceAttachment = loggerAttachmentEntry\?\.attachment \|\| null;/);
+  assert.match(audioBranch, /contentDiv\.appendChild\(audioHost\);/);
+  assert.match(audioBranch, /this\.mountLoggerNativeAudio\([\s\S]*audioHost,[\s\S]*attachment\.url,[\s\S]*audioAttachment,[\s\S]*sourceMessage,[\s\S]*onAudioError/);
+  assert.match(audioBranch, /currentPresentationAction !== 'remote'/);
+  assert.match(audioBranch, /this\.settings\.cacheAllImages === false/);
+  assert.match(audioBranch, /this\.settings\.onlyRenderCachedAttachments/);
+  assert.match(audioBranch, /markSavedAttachmentMediaCandidateFailure\([\s\S]*sourceAttachment,[\s\S]*sourceMessage,[\s\S]*failedSource/);
+  assert.match(audioBranch, /getSavedAttachmentPresentationPlan\([\s\S]*\{ allowRemote: true \}/);
+  assert.match(audioBranch, /nextAction === 'remote' \|\| nextAction === 'blob'/);
+  assert.match(audioBranch, /nextUrl !== failedSource[\s\S]*nextUrl !== attachment\.url/);
+  assert.match(audioBranch, /cleanupLoggerNativeAudioRoots\(audioHost\)[\s\S]*audioHost\.replaceWith\(createUnavailableAttachmentPlaceholder/);
+  assert.doesNotMatch(audioBranch, /createModal\(|attemptToUseCachedImage|attemptToUseCachedVideo/);
+});
+
+test('native Logger audio host uses semantic discovery, guarded lazy loading, markers, and browser fallback', () => {
+  const nativeAudio = source.slice(
+    source.indexOf('  isLoggerNativeAudioPlayer(candidate) {'),
+    source.indexOf('  getSavedAttachmentPresentationPlan(attachment, message, options = {}) {')
+  );
+  assert.match(nativeAudio, /prototype\?\.renderAudio/);
+  assert.match(nativeAudio, /prototype\?\.renderVideo/);
+  assert.match(nativeAudio, /prototype\?\.renderControls/);
+  assert.match(nativeAudio, /prototype\?\.checkVideoDecodability/);
+  assert.match(nativeAudio, /Webpack\.getModule\([\s\S]*searchExports: true/);
+  assert.match(nativeAudio, /typeof Utils\?\.loadEntry === 'function'/);
+  assert.match(nativeAudio, /await Utils\.loadEntry\(messageAccessories\)/);
+  assert.match(nativeAudio, /_loggerNativeAudioLoadGeneration !== generation/);
+  assert.match(nativeAudio, /return this\.resolveLoggerNativeAudioPlayer\(\)/);
+  assert.match(nativeAudio, /type: 'AUDIO'/);
+  assert.match(nativeAudio, /mimeType: this\.getLoggerNativeAudioMimeTypes\(attachment\)/);
+  assert.match(nativeAudio, /volume: \(\) => 1/);
+  assert.match(nativeAudio, /autoMute: \(\) => false/);
+  assert.match(nativeAudio, /node\.dataset\.ml2AttachmentMessageId = messageId/);
+  assert.match(nativeAudio, /node\.dataset\.ml2AttachmentId = attachmentId/);
+  assert.match(nativeAudio, /tagName !== 'AUDIO' && tagName !== 'SOURCE'/);
+  assert.match(nativeAudio, /document\.createElement\('audio'\)/);
+  assert.match(nativeAudio, /audio\.controls = true/);
+  assert.match(nativeAudio, /audio\.preload = 'metadata'/);
+  assert.match(nativeAudio, /ReactDOM\.createRoot\(host\)/);
+  assert.doesNotMatch(nativeAudio, /['"](?:eA|Ay)['"]/);
 });
 
 test('component-only records receive a visible Logger viewer fallback before empty-row pruning', () => {
