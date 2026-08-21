@@ -4756,6 +4756,601 @@ test('saved media failure resolver accepts exact current and removed attachments
   );
 });
 
+test('saved inline text/code attachment classifier accepts strict extensions and MIME types', () => {
+  const plugin = createPlugin();
+  const positiveExtensions = ['txt', 'md', 'json', 'js', 'py', 'html', 'csv', 'xml', 'log', 'css', 'sh', 'zsh', 'command'];
+  for (const extension of positiveExtensions) {
+    assert.equal(
+      plugin.isSavedInlineTextCodeAttachment(`https://cdn.example/files/NOTES.${extension.toUpperCase()}?download=1`),
+      true,
+      extension
+    );
+  }
+  for (const mime of [
+    'text/plain; charset=utf-8',
+    'text/markdown; charset=utf-8',
+    'text/html',
+    'application/json; charset=utf-8',
+    'application/javascript; charset=utf-8',
+    'application/xml; charset=utf-8'
+  ]) {
+    assert.equal(plugin.isSavedInlineTextCodeAttachment(mime), true, mime);
+  }
+  assert.equal(plugin.isSavedInlineTextCodeAttachment({
+    filename: 'notes.txt',
+    url: 'https://cdn.example/files/notes.txt',
+    content_type: 'application/octet-stream'
+  }), false);
+  for (const value of [
+    'manual.pdf',
+    'archive.BIN',
+    'archive.zip',
+    'font.woff2',
+    'photo.png',
+    'clip.mp4',
+    'recording.mp3',
+    'unknown.data',
+    'application/pdf',
+    'application/octet-stream',
+    'application/zip',
+    'font/woff2',
+    'image/png',
+    'video/mp4',
+    'audio/mpeg'
+  ]) {
+    assert.equal(plugin.isSavedInlineTextCodeAttachment(value), false, value);
+  }
+});
+
+test('saved inline text/code attachment probe resolves exact current and removed sources without mutation', () => {
+  const currentAttachment = {
+    id: 'inline-current',
+    filename: 'notes.txt',
+    content_type: 'text/plain; charset=utf-8',
+    url: 'https://cdn.discordapp.com/attachments/inline-channel/inline-current/notes.txt',
+    proxy_url: 'https://media.discordapp.net/attachments/inline-channel/inline-current/notes.txt'
+  };
+  const removedAttachment = {
+    id: 'inline-removed',
+    filename: 'script.JS',
+    content_type: 'application/javascript; charset=utf-8',
+    url: 'https://cdn.discordapp.com/attachments/inline-channel/inline-removed/script.JS',
+    proxy_url: 'https://media.discordapp.net/attachments/inline-channel/inline-removed/script.JS'
+  };
+  const message = {
+    id: 'inline-message',
+    channel_id: 'inline-channel',
+    content: '',
+    attachments: [currentAttachment]
+  };
+  const record = {
+    message,
+    delete_data: { time: 1 },
+    removed_attachments: [removedAttachment]
+  };
+  const plugin = createPlugin({
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    messageRecord: { [message.id]: record }
+  });
+  const before = structuredClone({ messageRecord: plugin.messageRecord });
+  const renderedCurrent = { ...currentAttachment, proxy_url: currentAttachment.url };
+  const currentContext = plugin.getSavedInlineTextAttachmentProbeContext(renderedCurrent, message);
+  assert.equal(currentContext.sourceKind, 'attachment');
+  assert.equal(currentContext.channelId, message.channel_id);
+  assert.equal(currentContext.messageId, message.id);
+  assert.equal(currentContext.attachmentId, currentAttachment.id);
+  assert.equal(currentContext.action, 'remote');
+  assert.equal(currentContext.sourceUrl, currentAttachment.url);
+  assert.equal(currentContext.sourceKey, plugin.normalizeSavedAttachmentMediaUrl(currentAttachment.url));
+  assert.equal(currentContext.identityKey, `${message.channel_id}:${message.id}:${currentAttachment.id}`);
+
+  const renderedRemoved = { ...removedAttachment, url: removedAttachment.url };
+  const removedContext = plugin.getSavedInlineTextAttachmentProbeContext(renderedRemoved, message);
+  assert.equal(removedContext.sourceKind, 'removedAttachment');
+  assert.equal(removedContext.attachmentId, removedAttachment.id);
+  assert.equal(removedContext.action, 'remote');
+  assert.equal(removedContext.sourceUrl, removedAttachment.url);
+  assert.equal(plugin.getSavedInlineTextAttachmentProbeContext(
+    {
+      ...renderedCurrent,
+      url: 'https://cdn.example/wrong.txt',
+      proxy_url: 'https://media.example/wrong.txt'
+    },
+    message
+  ), null);
+  assert.equal(plugin.getSavedInlineTextAttachmentProbeContext(
+    { ...renderedCurrent, id: 'missing' },
+    message
+  ), null);
+  plugin.settings.onlyRenderCachedAttachments = true;
+  plugin.imageCacheServerSimulator = {};
+  plugin.imageCacheServerSimulator._resolveImagePath = () => '/cache/inline-current.txt';
+  plugin.imageCacheServerSimulator.get = () => 'blob:https://discord.example/inline-current';
+  const renderedBlob = {
+    ...currentAttachment,
+    url: 'blob:https://discord.example/inline-current',
+    proxy_url: 'blob:https://discord.example/inline-current'
+  };
+  const blobContext = plugin.getSavedInlineTextAttachmentProbeContext(renderedBlob, message);
+  assert.equal(blobContext.action, 'blob');
+  assert.equal(blobContext.sourceUrl, renderedBlob.url);
+  plugin.settings.cacheAllImages = false;
+  assert.equal(plugin.getSavedInlineTextAttachmentProbeContext(renderedBlob, message), null);
+  assert.deepEqual(plugin.messageRecord, before.messageRecord);
+});
+
+test('saved inline text/code live preview contexts remain visible current direct attachments only', () => {
+  const attachment = {
+    id: 'live-inline',
+    filename: 'README.md',
+    content_type: 'text/markdown; charset=utf-8',
+    url: 'https://cdn.discordapp.com/attachments/live-channel/live-inline/README.md',
+    proxy_url: 'https://media.discordapp.net/attachments/live-channel/live-inline/README.md'
+  };
+  const sourceMessage = {
+    id: 'live-message',
+    channel_id: 'live-channel',
+    content: '',
+    attachments: [attachment],
+    embeds: [{ title: 'ignored' }],
+    components: [{ type: 1 }],
+    sticker_items: [{ id: 'sticker' }]
+  };
+  const record = { message: sourceMessage, delete_data: { time: 1 } };
+  const plugin = createPlugin({
+    settings: {
+      cacheAllImages: true,
+      onlyRenderCachedAttachments: false,
+      restoreDeletedMessages: true,
+      showDeletedMessages: true
+    },
+    messageRecord: { [sourceMessage.id]: record },
+    deletedMessageSet: new Map([['live-channel', new Set(['live-message'])]])
+  });
+  const displayed = { ...sourceMessage, attachments: [{ ...attachment }] };
+  plugin.shouldPresentSavedMessage = () => true;
+  const contexts = plugin.getSavedInlineTextPreviewProbeContexts(displayed);
+  assert.equal(contexts.length, 1);
+  assert.equal(contexts[0].sourceKind, 'attachment');
+  assert.equal(contexts[0].attachmentId, attachment.id);
+
+  plugin.shouldPresentSavedMessage = () => false;
+  assert.deepEqual(plugin.getSavedInlineTextPreviewProbeContexts(displayed), []);
+  plugin.shouldPresentSavedMessage = () => true;
+  assert.deepEqual(plugin.getSavedInlineTextPreviewProbeContexts({
+    ...displayed,
+    id: 'ordinary-message'
+  }), []);
+  assert.deepEqual(plugin.getSavedInlineTextPreviewProbeContexts({
+    ...displayed,
+    channel_id: 'other-channel'
+  }), []);
+  assert.deepEqual(plugin.getSavedInlineTextPreviewProbeContexts({
+    ...displayed,
+    attachments: [{ ...attachment, url: 'https://cdn.example/wrong.txt' }]
+  }), []);
+  record.delete_data.hidden = true;
+  assert.deepEqual(plugin.getSavedInlineTextPreviewProbeContexts(displayed), []);
+  record.delete_data.hidden = false;
+  record.message.attachments = [];
+  record.removed_attachments = [{ ...attachment }];
+  assert.deepEqual(plugin.getSavedInlineTextPreviewProbeContexts(displayed), []);
+  record.message.attachments = [attachment];
+  delete record.removed_attachments;
+  plugin.settings.cacheAllImages = false;
+  assert.deepEqual(plugin.getSavedInlineTextPreviewProbeContexts(displayed), []);
+});
+
+function createSavedInlineTextProbeFixture() {
+  const attachment = {
+    id: 'probe-inline',
+    filename: 'notes.txt',
+    content_type: 'text/plain; charset=utf-8',
+    url: 'https://cdn.discordapp.com/attachments/probe-channel/probe-inline/notes.txt',
+    proxy_url: 'https://media.discordapp.net/attachments/probe-channel/probe-inline/notes.txt'
+  };
+  const message = {
+    id: 'probe-message',
+    channel_id: 'probe-channel',
+    content: '',
+    attachments: [attachment]
+  };
+  const record = { message, delete_data: { time: 1 } };
+  const plugin = createPlugin({
+    __started: true,
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    messageRecord: { [message.id]: record }
+  });
+  plugin.shouldPresentSavedMessage = () => true;
+  const context = plugin.getSavedInlineTextAttachmentProbeContext(
+    { ...attachment },
+    message
+  );
+  return { attachment, message, record, plugin, context };
+}
+
+test('saved inline text probe uses the exact no-timeout request and releases responses', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const fixture = createSavedInlineTextProbeFixture();
+  const requests = [];
+  let releases = 0;
+  const response = {
+    ok: true,
+    release() {
+      releases += 1;
+    }
+  };
+  global.BdApi.Net = { fetch() {} };
+  fixture.plugin.fetchMediaNetworkResponse = (...args) => {
+    requests.push(args);
+    return Promise.resolve(response);
+  };
+  try {
+    const subscription = fixture.plugin.acquireSavedInlineTextAttachmentProbe(fixture.context);
+    const entry = fixture.plugin._savedInlineTextAttachmentProbeInFlight.values().next().value;
+    assert.equal(typeof subscription, 'function');
+    assert.equal(await entry.promise, true);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0][0], fixture.context.sourceUrl);
+    assert.deepEqual(requests[0][1].method, 'GET');
+    assert.deepEqual(requests[0][1].headers, { Range: 'bytes=0-0' });
+    assert.equal(requests[0][1].timeout, 0);
+    assert.equal(requests[0][1].signal, entry.controller.signal);
+    assert.deepEqual(requests[0][2], { nativeOnly: true });
+    assert.equal(releases, 1);
+    assert.equal(fixture.plugin._savedInlineTextAttachmentProbeInFlight.size, 0);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+  }
+});
+
+test('saved inline text probe coordinates one non-ok or rejected response and stays inert on success', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const fixture = createSavedInlineTextProbeFixture();
+  global.BdApi.Net = { fetch() {} };
+  const outcomes = [
+    { response: { ok: false, release() { this.released = true; } }, expectedRelease: true },
+    { response: Promise.reject(new Error('probe rejected')), expectedRelease: false }
+  ];
+  try {
+    for (const outcome of outcomes) {
+      const calls = [];
+      fixture.plugin.coordinateSavedAttachmentMediaFailure = (...args) => calls.push(args);
+      fixture.plugin.fetchMediaNetworkResponse = () => outcome.response;
+      const context = fixture.plugin.getSavedInlineTextAttachmentProbeContext(
+        { ...fixture.attachment },
+        fixture.message
+      );
+      const subscription = fixture.plugin.acquireSavedInlineTextAttachmentProbe(context);
+      const entry = fixture.plugin._savedInlineTextAttachmentProbeInFlight.values().next().value;
+      await entry.promise;
+      assert.equal(calls.length, 1);
+      assert.strictEqual(calls[0][0].identityKey, context.identityKey);
+      assert.equal(calls[0][1], context.sourceUrl);
+      if (outcome.expectedRelease) assert.equal(outcome.response.released, true);
+      subscription();
+    }
+  } finally {
+    global.BdApi.Net = originalNetApi;
+  }
+});
+
+test('saved inline text probe shares one request, ref-counts consumers, and aborts only final release', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const fixture = createSavedInlineTextProbeFixture();
+  const controllerState = mockAbortControllerWithSignalCapture();
+  const OriginalAbortController = global.AbortController;
+  let resolveRequest;
+  let fetchCalls = 0;
+  global.BdApi.Net = { fetch() {} };
+  global.AbortController = class {
+    constructor() {
+      return controllerState.controller;
+    }
+  };
+  fixture.plugin.fetchMediaNetworkResponse = () => {
+    fetchCalls += 1;
+    return new Promise(resolve => {
+      resolveRequest = resolve;
+    });
+  };
+  try {
+    const first = fixture.plugin.acquireSavedInlineTextAttachmentProbe(fixture.context);
+    await Promise.resolve();
+    await Promise.resolve();
+    const second = fixture.plugin.acquireSavedInlineTextAttachmentProbe(fixture.context);
+    const entry = fixture.plugin._savedInlineTextAttachmentProbeInFlight.values().next().value;
+    assert.equal(fetchCalls, 1);
+    assert.equal(entry.consumers.size, 2);
+    first();
+    assert.equal(controllerState.signal.aborted, false);
+    second();
+    assert.equal(controllerState.signal.aborted, true);
+    assert.equal(fixture.plugin._savedInlineTextAttachmentProbeInFlight.size, 0);
+    resolveRequest({ ok: true });
+    await entry.promise;
+  } finally {
+    global.BdApi.Net = originalNetApi;
+    global.AbortController = OriginalAbortController;
+  }
+});
+
+test('saved inline text probe cancellation and revalidation isolate stale, local-only, and unavailable contexts', async () => {
+  const originalNetApi = global.BdApi.Net;
+  const fixture = createSavedInlineTextProbeFixture();
+  const pending = [];
+  global.BdApi.Net = { fetch() {} };
+  fixture.plugin.fetchMediaNetworkResponse = () => new Promise((resolve, reject) => {
+    pending.push({ resolve, reject });
+  });
+  try {
+    const first = fixture.plugin.acquireSavedInlineTextAttachmentProbe(fixture.context);
+    const firstEntry = fixture.plugin._savedInlineTextAttachmentProbeInFlight.values().next().value;
+    fixture.plugin.resetSavedAttachmentPresentationState();
+    assert.equal(firstEntry.controller.signal.aborted, true);
+    assert.equal(fixture.plugin._savedInlineTextAttachmentProbeInFlight.size, 0);
+    pending.shift()?.reject(new Error('late rejection'));
+    await firstEntry.promise;
+    assert.equal(first(), true);
+
+    const staleContext = fixture.plugin.getSavedInlineTextAttachmentProbeContext(
+      { ...fixture.attachment },
+      fixture.message
+    );
+    fixture.record.message.attachments[0].url = 'https://cdn.example/new.txt';
+    assert.equal(fixture.plugin.acquireSavedInlineTextAttachmentProbe(staleContext), null);
+    fixture.record.message.attachments[0].url = fixture.attachment.url;
+    fixture.plugin.settings.onlyRenderCachedAttachments = true;
+    assert.equal(fixture.plugin.acquireSavedInlineTextAttachmentProbe(fixture.context), null);
+    fixture.plugin.settings.onlyRenderCachedAttachments = false;
+    fixture.plugin.settings.cacheAllImages = false;
+    assert.equal(fixture.plugin.acquireSavedInlineTextAttachmentProbe(fixture.context), null);
+    fixture.plugin.settings.cacheAllImages = true;
+    global.BdApi.Net = undefined;
+    assert.equal(fixture.plugin.acquireSavedInlineTextAttachmentProbe(fixture.context), null);
+    global.BdApi.Net = { fetch() {} };
+    const OriginalAbortController = global.AbortController;
+    global.AbortController = undefined;
+    assert.equal(fixture.plugin.acquireSavedInlineTextAttachmentProbe(fixture.context), null);
+    global.AbortController = OriginalAbortController;
+
+    const stopFixture = createSavedInlineTextProbeFixture();
+    const stopSubscription = stopFixture.plugin.acquireSavedInlineTextAttachmentProbe(stopFixture.context);
+    const stopEntry = stopFixture.plugin._savedInlineTextAttachmentProbeInFlight.values().next().value;
+    stopFixture.plugin.__started = false;
+    stopFixture.plugin.stop();
+    assert.equal(stopEntry.controller.signal.aborted, true);
+    assert.equal(stopFixture.plugin._savedInlineTextAttachmentProbeInFlight.size, 0);
+    assert.equal(stopSubscription(), true);
+  } finally {
+    global.BdApi.Net = originalNetApi;
+  }
+});
+
+test('saved inline text probe lifecycle sentinel is cached, null-rendering, and source-key scoped', () => {
+  const OriginalComponent = React.Component;
+  class Component {
+    constructor(props) {
+      this.props = props;
+    }
+  }
+  React.Component = Component;
+  const fixture = createSavedInlineTextProbeFixture();
+  const releases = [];
+  const acquisitions = [];
+  fixture.plugin.acquireSavedInlineTextAttachmentProbe = context => {
+    acquisitions.push(context);
+    const release = () => releases.push(context);
+    return release;
+  };
+  try {
+    const Sentinel = fixture.plugin.getSavedInlineTextAttachmentProbeComponent();
+    assert.strictEqual(Sentinel, fixture.plugin.getSavedInlineTextAttachmentProbeLifecycleComponent());
+    const instance = new Sentinel({ context: fixture.context });
+    assert.equal(instance.render(), null);
+    instance.componentDidMount();
+    assert.equal(acquisitions.length, 1);
+    const sameContext = { ...fixture.context };
+    instance.props = { context: sameContext };
+    instance.componentDidUpdate({ context: fixture.context });
+    assert.equal(acquisitions.length, 1);
+    const changedContext = { ...fixture.context, sourceKey: `${fixture.context.sourceKey}?changed` };
+    instance.props = { context: changedContext };
+    instance.componentDidUpdate({ context: sameContext });
+    assert.equal(acquisitions.length, 2);
+    assert.equal(releases.length, 1);
+    instance.componentWillUnmount();
+    assert.equal(releases.length, 2);
+  } finally {
+    React.Component = OriginalComponent;
+  }
+});
+
+test('saved inline text probe render wrapper keeps original output and mounts one stable sentinel', () => {
+  const originalFragment = React.Fragment;
+  const originalComponent = React.Component;
+  class Component {
+    constructor(props) {
+      this.props = props;
+    }
+  }
+  React.Fragment = Symbol('Fragment');
+  React.Component = Component;
+  const fixture = createSavedInlineTextProbeFixture();
+  const acquisitions = [];
+  const releases = [];
+  fixture.plugin.acquireSavedInlineTextAttachmentProbe = context => {
+    acquisitions.push(context);
+    return () => releases.push(context);
+  };
+  const originalValue = { kind: 'native-render-result' };
+  try {
+    const wrapped = fixture.plugin.wrapSavedInlineTextAttachmentProbeRender(
+      originalValue,
+      fixture.message
+    );
+    assert.equal(wrapped.type, React.Fragment);
+    assert.equal(wrapped.props.children.length, 2);
+    assert.strictEqual(wrapped.props.children[0], originalValue);
+    const sentinelElement = wrapped.props.children[1];
+    assert.equal(sentinelElement.key ?? sentinelElement.props.key, fixture.context.identityKey);
+    assert.strictEqual(sentinelElement.props.context.identityKey, fixture.context.identityKey);
+
+    const sentinel = new sentinelElement.type(sentinelElement.props);
+    assert.equal(sentinel.render(), null);
+    sentinel.componentDidMount();
+    assert.equal(acquisitions.length, 1);
+    const sameContext = { ...fixture.context };
+    sentinel.props = { context: sameContext };
+    sentinel.componentDidUpdate({ context: fixture.context });
+    assert.equal(acquisitions.length, 1);
+    const changedSource = { ...fixture.context, sourceKey: `${fixture.context.sourceKey}:proxy` };
+    sentinel.props = { context: changedSource };
+    sentinel.componentDidUpdate({ context: sameContext });
+    assert.equal(acquisitions.length, 2);
+    assert.equal(releases.length, 1);
+    sentinel.componentWillUnmount();
+    assert.equal(releases.length, 2);
+
+    const noContextValue = { kind: 'unchanged' };
+    assert.strictEqual(
+      fixture.plugin.wrapSavedInlineTextAttachmentProbeRender(noContextValue, []),
+      noContextValue
+    );
+  } finally {
+    if (originalFragment === undefined) delete React.Fragment;
+    else React.Fragment = originalFragment;
+    if (originalComponent === undefined) delete React.Component;
+    else React.Component = originalComponent;
+  }
+});
+
+test('saved inline text probe render wrapper isolates ordinary, unsupported, media, and local plans', () => {
+  const originalFragment = React.Fragment;
+  React.Fragment = Symbol('Fragment');
+  const plugin = createPlugin({
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    messageRecord: {}
+  });
+  plugin.shouldPresentSavedMessage = () => true;
+  const cases = [
+    ['ordinary', null, 'notes.txt'],
+    ['pdf', 'manual.pdf', 'manual.pdf'],
+    ['bin', 'archive.bin', 'archive.bin'],
+    ['generic', 'README.unknown', 'README.unknown'],
+    ['image', 'photo.png', 'photo.png'],
+    ['video', 'clip.mp4', 'clip.mp4'],
+    ['audio', 'sound.mp3', 'sound.mp3']
+  ];
+  try {
+    for (const [name, filename, sourceName] of cases) {
+      const message = {
+        id: `isolation-${name}`,
+        channel_id: 'isolation-channel',
+        content: '',
+        attachments: filename
+          ? [{ id: `attachment-${name}`, filename, url: `https://cdn.example/${sourceName}` }]
+          : []
+      };
+      if (filename) {
+        plugin.messageRecord[message.id] = { message, delete_data: { time: 1 } };
+      }
+      const rendered = { kind: name };
+      assert.strictEqual(
+        plugin.wrapSavedInlineTextAttachmentProbeRender(rendered, message),
+        rendered,
+        name
+      );
+    }
+
+    const localMessage = {
+      id: 'isolation-local',
+      channel_id: 'isolation-channel',
+      content: '',
+      attachments: [{
+        id: 'attachment-local',
+        filename: 'notes.txt',
+        url: 'https://cdn.example/notes.txt'
+      }]
+    };
+    plugin.messageRecord[localMessage.id] = {
+      message: localMessage,
+      delete_data: { time: 1 }
+    };
+    const localContext = {
+      ...plugin.getSavedInlineTextAttachmentProbeContext(
+        localMessage.attachments[0],
+        localMessage
+      ),
+      action: 'blob',
+      sourceUrl: 'blob:https://discord.example/notes'
+    };
+    const localRendered = { kind: 'local' };
+    assert.strictEqual(
+      plugin.wrapSavedInlineTextAttachmentProbeRender(localRendered, [localContext]),
+      localRendered
+    );
+  } finally {
+    if (originalFragment === undefined) delete React.Fragment;
+    else React.Fragment = originalFragment;
+  }
+});
+
+test('saved MessageAccessories render projects video then wraps one text probe without mutating canonical data', () => {
+  const originalFragment = React.Fragment;
+  const originalComponent = React.Component;
+  React.Fragment = Symbol('Fragment');
+  React.Component = class {};
+  const textAttachment = {
+    id: 'mixed-text',
+    filename: 'notes.txt',
+    content_type: 'text/plain',
+    url: 'https://cdn.discordapp.com/attachments/mixed/mixed-text/notes.txt'
+  };
+  const videoAttachment = {
+    id: 'mixed-video',
+    filename: 'clip.mp4',
+    content_type: 'video/mp4',
+    url: 'https://cdn.discordapp.com/attachments/mixed/mixed-video/clip.mp4'
+  };
+  const message = {
+    id: 'mixed-message',
+    channel_id: 'mixed-channel',
+    content: '',
+    attachments: [videoAttachment, textAttachment]
+  };
+  const before = structuredClone(message);
+  const plugin = createPlugin({
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    messageRecord: {
+      [message.id]: { message, delete_data: { time: 1 } }
+    }
+  });
+  plugin.shouldPresentSavedMessage = () => true;
+  const instance = { props: { message: { ...message, attachments: [...message.attachments] } } };
+  try {
+    const result = plugin.renderSavedAttachmentMessageAccessories(
+      instance,
+      [],
+      function () {
+        assert.deepEqual(this.props.message.attachments.map(attachment => attachment.id), ['mixed-text']);
+        return { kind: 'native-accessories' };
+      }
+    );
+    assert.equal(result.type, React.Fragment);
+    assert.equal(result.props.children.length, 2);
+    assert.equal(result.props.children[0].kind, 'native-accessories');
+    assert.equal(result.props.children[1].props.context.attachmentId, textAttachment.id);
+    assert.strictEqual(instance.props.message.attachments[0].id, videoAttachment.id);
+    assert.deepEqual(message, before);
+  } finally {
+    if (originalFragment === undefined) delete React.Fragment;
+    else React.Fragment = originalFragment;
+    if (originalComponent === undefined) delete React.Component;
+    else React.Component = originalComponent;
+  }
+});
+
 test('saved media failure coordinator refreshes one exact context once and preserves row progression', () => {
   const message = {
     id: 'coordinator-message',
@@ -5312,6 +5907,182 @@ test('logger native attachments mount one marked TXT/Markdown/PDF/generic messag
   } finally {
     if (originalReactComponent === undefined) delete React.Component;
     else React.Component = originalReactComponent;
+  }
+});
+
+test('logger native TXT host owns the single probe sentinel when live MessageAccessories is also eligible', async () => {
+  const originalFragment = React.Fragment;
+  const originalComponent = React.Component;
+  React.Fragment = Symbol('Fragment');
+  React.Component = class {
+    constructor(props) {
+      this.props = props;
+    }
+  };
+  class MessageAccessories {
+    renderEmbeds() {}
+    renderAttachments() {}
+  }
+  class NativeDocumentMessage {
+    constructor(payload) {
+      Object.assign(this, payload);
+    }
+    isPoll() { return false; }
+    hasFlag() { return false; }
+  }
+  const sourceMessage = new NativeDocumentMessage({
+    id: 'detached-text-message',
+    channel_id: 'detached-text-channel',
+    content: '',
+    attachments: [{
+      id: 'detached-text',
+      filename: 'notes.txt',
+      content_type: 'text/plain',
+      url: 'https://cdn.example/notes.txt'
+    }]
+  });
+  const plugin = createPlugin({
+    tools: { getChannel: id => id === sourceMessage.channel_id ? { id } : null },
+    messageRecord: {
+      [sourceMessage.id]: { message: sourceMessage, delete_data: { time: 1 } }
+    },
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false }
+  });
+  plugin.shouldPresentSavedMessage = () => true;
+  const originalFilter = Webpack.Filters.byPrototypeKeys;
+  const originalGetModule = Webpack.getModule;
+  const originalCreateRoot = ReactDOM.createRoot;
+  const originalNetApi = global.BdApi.Net;
+  const rendered = [];
+  try {
+    Webpack.Filters.byPrototypeKeys = (...keys) => candidate => keys.every(
+      key => typeof candidate?.prototype?.[key] === 'function'
+    );
+    Webpack.getModule = filter => [MessageAccessories, NativeDocumentMessage].find(candidate => {
+      try { return filter(candidate); } catch { return false; }
+    }) || null;
+    ReactDOM.createRoot = () => ({
+      render(element) { rendered.push(element); },
+      unmount() {}
+    });
+    const host = createLoggerAudioHost();
+    const mount = plugin.mountLoggerNativeDocument(
+      host,
+      sourceMessage,
+      { ...sourceMessage.attachments[0] },
+      sourceMessage
+    );
+    assert.equal(mount.native, true);
+    const boundary = rendered.at(-1);
+    const fragment = boundary.props.children[0];
+    assert.equal(fragment.type, React.Fragment);
+    assert.equal(fragment.props.children.length, 2);
+    const accessories = fragment.props.children[0];
+    assert.equal(typeof accessories.type?.prototype?.renderAttachments, 'function');
+    assert.equal(accessories.props.__ml2SavedInlineTextAttachmentProbeDetached, true);
+
+    const liveResult = plugin.renderSavedAttachmentMessageAccessories(
+      { props: accessories.props },
+      [],
+      () => ({ kind: 'detached-native-result' })
+    );
+    assert.deepEqual(liveResult, { kind: 'detached-native-result' });
+    const context = plugin.getSavedInlineTextAttachmentProbeContext(
+      sourceMessage.attachments[0],
+      sourceMessage
+    );
+    const wrappedAgain = plugin.wrapSavedInlineTextAttachmentProbeRender(
+      liveResult,
+      [context]
+    );
+    assert.equal(wrappedAgain.props.children.length, 2);
+    assert.equal(
+      wrappedAgain.props.children.filter(child => child?.type === fragment.props.children[1]?.type).length,
+      1
+    );
+    const requests = [];
+    global.BdApi.Net = { fetch() {} };
+    plugin.fetchMediaNetworkResponse = (...args) => {
+      requests.push(args);
+      return Promise.resolve({ ok: true, release() {} });
+    };
+    const sentinelElement = fragment.props.children[1];
+    const sentinel = new sentinelElement.type(sentinelElement.props);
+    sentinel.componentDidMount();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(requests.length, 1);
+    sentinel.componentWillUnmount();
+    plugin.cleanupLoggerNativeDocumentRoots(host);
+
+    for (const [name, attachment] of [
+      ['pdf', { id: 'detached-pdf', filename: 'manual.pdf', url: 'https://cdn.example/manual.pdf' }],
+      ['bin', { id: 'detached-bin', filename: 'archive.bin', url: 'https://cdn.example/archive.bin' }],
+      ['generic', { id: 'detached-generic', filename: 'README.unknown', url: 'https://cdn.example/README.unknown' }]
+    ]) {
+      const unsupportedMessage = new NativeDocumentMessage({
+        id: `detached-${name}-message`,
+        channel_id: 'detached-text-channel',
+        content: '',
+        attachments: [attachment]
+      });
+      plugin.messageRecord[unsupportedMessage.id] = {
+        message: unsupportedMessage,
+        delete_data: { time: 1 }
+      };
+      const unsupportedHost = createLoggerAudioHost();
+      plugin.mountLoggerNativeDocument(
+        unsupportedHost,
+        unsupportedMessage,
+        { ...attachment },
+        unsupportedMessage
+      );
+      assert.notEqual(rendered.at(-1).props.children[0].type, React.Fragment, name);
+      plugin.cleanupLoggerNativeDocumentRoots(unsupportedHost);
+    }
+
+    const localMessage = new NativeDocumentMessage({
+      id: 'detached-local-message',
+      channel_id: 'detached-text-channel',
+      content: '',
+      attachments: [{
+        id: 'detached-local',
+        filename: 'notes.txt',
+        url: 'https://cdn.example/notes.txt'
+      }]
+    });
+    plugin.messageRecord[localMessage.id] = {
+      message: localMessage,
+      delete_data: { time: 1 }
+    };
+    plugin.settings.onlyRenderCachedAttachments = true;
+    plugin.imageCacheServerSimulator = {
+      _resolveImagePath: () => '/cache/detached-local.txt',
+      get: () => 'blob:https://discord.example/detached-local'
+    };
+    const localHost = createLoggerAudioHost();
+    plugin.mountLoggerNativeDocument(
+      localHost,
+      localMessage,
+      {
+        ...localMessage.attachments[0],
+        url: 'blob:https://discord.example/detached-local',
+        proxy_url: 'blob:https://discord.example/detached-local'
+      },
+      localMessage
+    );
+    assert.notEqual(rendered.at(-1).props.children[0].type, React.Fragment, 'local-only Blob');
+    plugin.cleanupLoggerNativeDocumentRoots(localHost);
+  } finally {
+    Webpack.Filters.byPrototypeKeys = originalFilter;
+    Webpack.getModule = originalGetModule;
+    ReactDOM.createRoot = originalCreateRoot;
+    global.BdApi.Net = originalNetApi;
+    if (originalFragment === undefined) delete React.Fragment;
+    else React.Fragment = originalFragment;
+    if (originalComponent === undefined) delete React.Component;
+    else React.Component = originalComponent;
   }
 });
 

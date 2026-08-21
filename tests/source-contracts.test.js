@@ -726,11 +726,13 @@ test('date order applies to optional timestamps and forced logger dates', () => 
   );
   assert.ok(stopStart >= 0 && stopEnd > stopStart);
   assert.match(stopAndResetTransitionCleanup, /this\._cancelAllSavedAttachmentPresentationTransitions\?\.\(\);/);
+  assert.match(stopAndResetTransitionCleanup, /this\.cancelSavedInlineTextAttachmentProbes\?\.\(\);/);
   const resetAttachmentPresentationState = source.slice(
     source.indexOf('  resetSavedAttachmentPresentationState() {'),
     source.indexOf('  handleLocalOnlyCachedAttachmentRenderingSetting(')
   );
   assert.match(resetAttachmentPresentationState, /this\._cancelAllSavedAttachmentPresentationTransitions\?\.\(\);/);
+  assert.match(resetAttachmentPresentationState, /this\.cancelSavedInlineTextAttachmentProbes\?\.\(\);/);
   const transitionTargetLocator = source.slice(
     source.indexOf('_findSavedAttachmentPresentationTransitionTarget(channelId, messageId) {'),
     source.indexOf('_transitionTargetMatchesPlaceholder(target, placeholderContent) {')
@@ -883,6 +885,14 @@ test('saved restored video ownership projects MessageAccessories.render before a
     source.indexOf('  getSavedAttachmentMessageContentPresentationMessage(message) {'),
     source.indexOf('  renderSavedAttachmentMessageAccessories(thisObject, args, original) {')
   );
+  const inlineProbeWrapper = source.slice(
+    source.indexOf('  wrapSavedInlineTextAttachmentProbeRender(renderedValue, contextsOrMessage) {'),
+    source.indexOf('  renderSavedAttachmentMessageAccessories(thisObject, args, original) {')
+  );
+  assert.match(inlineProbeWrapper, /getSavedInlineTextAttachmentProbeComponent\(\)/);
+  assert.match(inlineProbeWrapper, /React\.Fragment/);
+  assert.match(inlineProbeWrapper, /key: context\.identityKey/);
+  assert.doesNotMatch(inlineProbeWrapper, /setTimeout|setInterval|requestAnimationFrame|MutationObserver|fetchMediaNetworkResponse/);
   assert.match(projection, /const displayedPlans = this\.getSavedAttachmentPresentationPlans\(message, presentationOptions\)/);
   assert.match(projection, /displayedAttachments\.filter\(\(_, index\) => displayedPlans\[index\]\?\.mediaType !== 'video'\)/);
   assert.doesNotMatch(projection, /loggerVideoKeys|getSavedAttachmentPresentationIdentityKeys/);
@@ -894,9 +904,11 @@ test('saved restored video ownership projects MessageAccessories.render before a
     source.indexOf('  renderSavedAttachmentMessageAccessories(thisObject, args, original) {'),
     source.indexOf('  getLoggerSavedAttachmentPresentationEntries(message, record) {')
   );
+  assert.match(accessoriesOwner, /SAVED_INLINE_TEXT_ATTACHMENT_PROBE_DETACHED_PROP\] === true[\s\S]*return original\.apply\(thisObject, args\)/);
+  assert.match(accessoriesOwner, /wrapSavedInlineTextAttachmentProbeRender\([\s\S]*message/);
   assert.match(
     accessoriesOwner,
-    /projectedMessage = this\.getSavedAttachmentMessageContentPresentationMessage\(message\)[\s\S]*return original\.apply\(thisObject, args\)/
+    /projectedMessage = this\.getSavedAttachmentMessageContentPresentationMessage\(message\)[\s\S]*wrapSavedInlineTextAttachmentProbeRender\([\s\S]*original\.apply\(thisObject, args\)/
   );
   assert.match(
     accessoriesOwner,
@@ -2122,6 +2134,26 @@ test('saved attachment open routes only active remote probe failures through the
   assert.doesNotMatch(openPolicy.slice(0, remoteFirstLoopStart), /coordinateSavedAttachmentMediaFailure/);
 });
 
+test('saved inline text probe wiring is native-only, exact, and event-driven', () => {
+  const probeStart = source.indexOf('  cancelSavedInlineTextAttachmentProbes() {');
+  const probeEnd = source.indexOf('  markSavedAttachmentMediaCandidateFailure(', probeStart);
+  assert.ok(probeStart >= 0 && probeEnd > probeStart);
+  const probe = source.slice(probeStart, probeEnd);
+  assert.match(probe, /fetchMediaNetworkResponse\(/);
+  assert.match(probe, /headers: \{ Range: 'bytes=0-0' \}/);
+  assert.match(probe, /timeout: 0/);
+  assert.match(probe, /signal: controller\.signal/);
+  assert.match(probe, /\{ nativeOnly: true \}/);
+  assert.match(probe, /this\._releaseSavedInlineTextAttachmentProbeResponse\(response\)/);
+  assert.match(probe, /inFlight\.get\(key\) === entry/);
+  assert.match(probe, /entry\.consumers\.size > 0/);
+  assert.match(probe, /coordinateSavedAttachmentMediaFailure\(latest, latest\.sourceUrl\)/);
+  assert.match(probe, /entry\.controller\?\.abort/);
+  assert.match(probe, /if \(!current \|\| !this\._hasSavedInlineTextAttachmentProbeNativeFetch\(\)\) return null;/);
+  assert.doesNotMatch(probe, /setTimeout|setInterval|requestAnimationFrame|MutationObserver/);
+  assert.doesNotMatch(probe, /BdApi\.Net\.fetch\(/);
+});
+
 test('populateParent keeps native attachment rendering isolated, exact, and per attachment', () => {
   const viewer = source.slice(
     source.indexOf('populateParent(parent, messages)'),
@@ -2184,6 +2216,8 @@ test('native document rendering uses guarded semantic discovery and lifecycle cl
   assert.match(nativeDocument, /_loggerNativeDocumentMessageLoadGeneration !== generation/);
   assert.match(nativeDocument, /content: '',[\s\S]*flags: typeof source\.flags === 'number' \? source\.flags : 0,[\s\S]*attachments: \[\{ \.\.\.attachment \}\]/);
   assert.match(nativeDocument, /ReactDOM\.createRoot\(host\)/);
+  assert.match(nativeDocument, /SAVED_INLINE_TEXT_ATTACHMENT_PROBE_DETACHED_PROP\]: true/);
+  assert.match(nativeDocument, /wrapSavedInlineTextAttachmentProbeRender\([\s\S]*probeContext \? \[probeContext\] : \[\]/);
   assert.match(nativeDocument, /host\.dataset\.ml2AttachmentMessageId = messageId;[\s\S]*host\.dataset\.ml2AttachmentId = attachmentId;[\s\S]*host\.dataset\.ml2AttachmentDocumentHost = 'true';/);
   assert.doesNotMatch(documentProps, /onMediaItemContextMenu/);
   assert.match(nativeDocument, /cleanupLoggerNativeDocumentRoots\(host\)/);

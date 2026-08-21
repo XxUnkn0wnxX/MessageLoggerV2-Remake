@@ -66,6 +66,7 @@ const SAVED_ATTACHMENT_OPEN_ACTION_ID = 'mlv2-open-saved-attachment';
 const SAVED_ATTACHMENT_OPEN_LEGACY_ACTION_ID = 'mlv2-open-saved-media-externally';
 const SAVED_ATTACHMENT_OPEN_LABEL = 'Open Attachment';
 const SAVED_ATTACHMENT_VIEWER_MOUNT_TIMEOUT_MS = 5 * 1000;
+const SAVED_INLINE_TEXT_ATTACHMENT_PROBE_DETACHED_PROP = '__ml2SavedInlineTextAttachmentProbeDetached';
 // BetterDiscord's native keybind recorder persists KeyboardEvent.key values as an array.
 // Keep the advertised shortcuts as defaults while allowing every binding to be
 // customized—or cleared to disable it—without introducing a fork-only settings component.
@@ -433,6 +434,9 @@ module.exports = class MessageLoggerV2 {
     this._savedMediaExternalProbeTimeoutMs = SAVED_MEDIA_EXTERNAL_PROBE_TIMEOUT_MS;
     this._savedMediaExternalProbeGeneration = 0;
     this._savedMediaExternalProbeInFlight = new Map();
+    this._savedInlineTextAttachmentProbeGeneration = 0;
+    this._savedInlineTextAttachmentProbeInFlight = new Map();
+    this._savedInlineTextAttachmentProbeComponent = null;
     this._mediaCacheTrimPeriodicTimeout = 0;
     this._mediaCacheTrimDebounceTimeout = 0;
     this._mediaCacheTrimPendingMask = 0;
@@ -540,6 +544,7 @@ module.exports = class MessageLoggerV2 {
     this.cleanupLoggerNativeDocumentRoots?.(null, true);
     this._startupPending = false;
     this.cancelSavedMediaExternalOpenProbes?.();
+    this.cancelSavedInlineTextAttachmentProbes?.();
     this.stopMediaCacheTrimmer?.();
     this.cancelPendingMediaCacheWrites?.();
     this._pendingMediaCacheRequests?.clear?.();
@@ -9452,6 +9457,7 @@ module.exports = class MessageLoggerV2 {
     this.reportMajorSettingChange('cacheAllImages', enabled);
   }
   resetSavedAttachmentPresentationState() {
+    this.cancelSavedInlineTextAttachmentProbes?.();
     this.closeLoggerOwnedAttachmentMediaViewers?.();
     this._cancelAllSavedAttachmentPresentationTransitions?.();
     this._failedNativeAttachmentMediaKeys?.clear?.();
@@ -10725,12 +10731,23 @@ module.exports = class MessageLoggerV2 {
       root = ReactDOM.createRoot(host);
       entry.root = root;
       this._loggerNativeDocumentRoots.set(host, entry);
+      const probeContext = this.getSavedInlineTextAttachmentProbeContext(
+        attachment,
+        sourceMessage || renderMessage
+      );
+      const detachedAccessories = React.createElement(
+        messageAccessories,
+        {
+          ...this.createLoggerNativeDocumentProps(nativeMessage, channel),
+          [SAVED_INLINE_TEXT_ATTACHMENT_PROBE_DETACHED_PROP]: true
+        }
+      );
       root.render(React.createElement(
         ErrorBoundary,
         null,
-        React.createElement(
-          messageAccessories,
-          this.createLoggerNativeDocumentProps(nativeMessage, channel)
+        this.wrapSavedInlineTextAttachmentProbeRender(
+          detachedAccessories,
+          probeContext ? [probeContext] : []
         )
       ));
       return { ...entry, native: true };
@@ -11247,13 +11264,50 @@ module.exports = class MessageLoggerV2 {
     } catch {}
     return { ...message, attachments };
   }
+  wrapSavedInlineTextAttachmentProbeRender(renderedValue, contextsOrMessage) {
+    const contexts = Array.isArray(contextsOrMessage)
+      ? contextsOrMessage
+      : this.getSavedInlineTextPreviewProbeContexts(contextsOrMessage);
+    if (!Array.isArray(contexts) || !contexts.length
+      || typeof React?.createElement !== 'function'
+      || !React.Fragment
+    ) return renderedValue;
+    const Sentinel = this.getSavedInlineTextAttachmentProbeComponent();
+    if (typeof Sentinel !== 'function') return renderedValue;
+    const seenIdentityKeys = new Set();
+    const eligibleContexts = contexts.filter(context => {
+      if (!context || context.sourceKind !== 'attachment' || context.action !== 'remote'
+        || typeof context.sourceUrl !== 'string' || !context.sourceUrl
+        || typeof context.identityKey !== 'string' || !context.identityKey
+        || seenIdentityKeys.has(context.identityKey)
+      ) return false;
+      seenIdentityKeys.add(context.identityKey);
+      return true;
+    });
+    if (!eligibleContexts.length) return renderedValue;
+    return React.createElement(
+      React.Fragment,
+      null,
+      renderedValue,
+      ...eligibleContexts.map(context => React.createElement(
+        Sentinel,
+        { key: context.identityKey, context }
+      ))
+    );
+  }
   renderSavedAttachmentMessageAccessories(thisObject, args, original) {
     if (typeof original !== 'function') return;
     const originalProps = thisObject?.props;
     const message = originalProps?.message;
+    if (originalProps?.[SAVED_INLINE_TEXT_ATTACHMENT_PROBE_DETACHED_PROP] === true) {
+      return original.apply(thisObject, args);
+    }
     const projectedMessage = this.getSavedAttachmentMessageContentPresentationMessage(message);
     if (!originalProps || projectedMessage === message) {
-      return original.apply(thisObject, args);
+      return this.wrapSavedInlineTextAttachmentProbeRender(
+        original.apply(thisObject, args),
+        message
+      );
     }
 
     const projectedProps = { ...originalProps, message: projectedMessage };
@@ -11264,13 +11318,18 @@ module.exports = class MessageLoggerV2 {
     } catch {}
     if (!swapped) {
       try { thisObject.props = originalProps; } catch {}
-      return original.apply(thisObject, args);
+      return this.wrapSavedInlineTextAttachmentProbeRender(
+        original.apply(thisObject, args),
+        message
+      );
     }
+    let renderedValue;
     try {
-      return original.apply(thisObject, args);
+      renderedValue = original.apply(thisObject, args);
     } finally {
       try { thisObject.props = originalProps; } catch {}
     }
+    return this.wrapSavedInlineTextAttachmentProbeRender(renderedValue, message);
   }
   _patchMessageAccessoriesForSavedAttachments(MessageAccessories, generation) {
     if (this._messageAccessoriesPatchInstalled
@@ -11790,6 +11849,362 @@ module.exports = class MessageLoggerV2 {
       };
     }
     return null;
+  }
+  _getSavedInlineTextAttachmentPresentationOptions() {
+    if (this.settings?.cacheAllImages === false) return {};
+    return this.settings?.onlyRenderCachedAttachments
+      ? { allowBlob: true }
+      : { allowRemote: true };
+  }
+  _savedInlineTextAttachmentRenderedSourceMatches(action, sourceUrl, renderedAttachment) {
+    if (typeof sourceUrl !== 'string' || !sourceUrl.trim()) return false;
+    const displaySources = [
+      renderedAttachment?.url,
+      renderedAttachment?.proxy_url,
+      renderedAttachment?.proxyUrl,
+      renderedAttachment?.proxyURL
+    ].filter(value => typeof value === 'string' && value.trim());
+    if (!displaySources.length) return false;
+    const normalizedSource = this.normalizeSavedAttachmentMediaUrl(sourceUrl);
+    if (action === 'blob') {
+      return displaySources.some(displaySource => displaySource === sourceUrl);
+    }
+    if (action !== 'remote' || !normalizedSource) return false;
+    return displaySources.some(displaySource => (
+      this.normalizeSavedAttachmentMediaUrl(displaySource) === normalizedSource
+    ));
+  }
+  getSavedInlineTextAttachmentProbeContext(attachment, message, options = {}) {
+    if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)) return null;
+    if (!message || typeof message !== 'object' || Array.isArray(message)) return null;
+    const displayedDescriptor = this.getSavedAttachmentDescriptor(attachment, message);
+    if (!displayedDescriptor) return null;
+    const exactContext = this.resolveSavedAttachmentMediaFailureContext(displayedDescriptor);
+    if (!exactContext) return null;
+    const canonicalAttachment = exactContext.attachment;
+    if (!this.isSavedInlineTextCodeAttachment(canonicalAttachment)) return null;
+    const plan = this.getSavedAttachmentPresentationPlan(
+      canonicalAttachment,
+      exactContext.message,
+      this._getSavedInlineTextAttachmentPresentationOptions()
+    );
+    const action = plan?.action;
+    const sourceUrl = typeof plan?.url === 'string' ? plan.url.trim() : '';
+    if ((action !== 'remote' && action !== 'blob') || !sourceUrl) return null;
+    if (!this._savedInlineTextAttachmentRenderedSourceMatches(action, sourceUrl, attachment)) {
+      return null;
+    }
+    const identityKey = this.getSavedAttachmentMediaFailureKey(
+      exactContext.channelId,
+      exactContext.messageId,
+      exactContext.attachmentId
+    );
+    const sourceKey = action === 'blob'
+      ? sourceUrl
+      : this.normalizeSavedAttachmentMediaUrl(sourceUrl);
+    if (!identityKey || !sourceKey) return null;
+    return {
+      record: exactContext.record,
+      message: exactContext.message,
+      attachment: canonicalAttachment,
+      renderedAttachment: attachment,
+      descriptor: exactContext.descriptor,
+      sourceKind: exactContext.sourceKind,
+      channelId: exactContext.channelId,
+      messageId: exactContext.messageId,
+      attachmentId: exactContext.attachmentId,
+      action,
+      sourceUrl,
+      identityKey,
+      sourceKey,
+      plan
+    };
+  }
+  getSavedInlineTextPreviewProbeContexts(message) {
+    if (!message || typeof message !== 'object' || Array.isArray(message)) return [];
+    const messageId = String(message.id ?? '').trim();
+    const channelId = String(message.channel_id ?? message.channelId ?? '').trim();
+    if (!messageId || !channelId || message.hidden === true) return [];
+    const record = this.messageRecord?.[messageId];
+    const sourceMessage = record?.message;
+    if (!record?.delete_data || this.isSavedRecordHidden(record) || !sourceMessage) return [];
+    if (String(sourceMessage.id ?? '').trim() !== messageId
+      || String(sourceMessage.channel_id ?? sourceMessage.channelId ?? '').trim() !== channelId) {
+      return [];
+    }
+    if (this.shouldPresentSavedMessage?.(channelId, messageId) === false) return [];
+    if (!Array.isArray(message.attachments) || !Array.isArray(sourceMessage.attachments)) return [];
+    const canonicalAttachmentIds = new Set(
+      sourceMessage.attachments
+        .map(attachment => attachment?.id == null ? '' : String(attachment.id).trim())
+        .filter(Boolean)
+    );
+    if (!canonicalAttachmentIds.size) return [];
+    const contexts = [];
+    const seenKeys = new Set();
+    for (const displayedAttachment of message.attachments) {
+      const displayedId = displayedAttachment?.id == null
+        ? ''
+        : String(displayedAttachment.id).trim();
+      if (!displayedId || !canonicalAttachmentIds.has(displayedId)) continue;
+      const context = this.getSavedInlineTextAttachmentProbeContext(
+        displayedAttachment,
+        sourceMessage
+      );
+      if (!context || context.sourceKind !== 'attachment') continue;
+      const key = `${context.identityKey}:${context.sourceKey}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      contexts.push(context);
+    }
+    return contexts;
+  }
+  cancelSavedInlineTextAttachmentProbes() {
+    this._savedInlineTextAttachmentProbeGeneration = (
+      this._savedInlineTextAttachmentProbeGeneration || 0
+    ) + 1;
+    for (const entry of this._savedInlineTextAttachmentProbeInFlight?.values?.() || []) {
+      entry.cancelled = true;
+      try {
+        entry.controller?.abort?.('Saved inline text attachment probe was cancelled');
+      } catch {}
+    }
+    this._savedInlineTextAttachmentProbeInFlight?.clear?.();
+  }
+  _hasSavedInlineTextAttachmentProbeNativeFetch() {
+    try {
+      const netApi = this._getMediaCacheNetApi?.();
+      return typeof netApi?.fetch === 'function';
+    } catch {
+      return false;
+    }
+  }
+  revalidateSavedInlineTextAttachmentProbeContext(context) {
+    if (!context || typeof context !== 'object' || Array.isArray(context)) return null;
+    if (context.sourceKind !== 'attachment' || this.__started === false) return null;
+    if (this.settings?.cacheAllImages === false || this.settings?.onlyRenderCachedAttachments === true) {
+      return null;
+    }
+    const renderedAttachment = context.renderedAttachment;
+    const sourceMessage = context.message;
+    if (!renderedAttachment || !sourceMessage) return null;
+    const current = this.getSavedInlineTextAttachmentProbeContext(
+      renderedAttachment,
+      sourceMessage
+    );
+    if (!current || current.sourceKind !== 'attachment' || current.action !== 'remote') return null;
+    if (current.identityKey !== context.identityKey
+      || current.sourceKey !== context.sourceKey
+      || current.sourceUrl !== context.sourceUrl) return null;
+    return current;
+  }
+  _releaseSavedInlineTextAttachmentProbeResponse(response) {
+    if (!response) return Promise.resolve();
+    try {
+      if (typeof response.release === 'function') {
+        return Promise.resolve(response.release.call(response)).catch(() => {});
+      }
+      if (typeof response.releaseBody === 'function') {
+        return Promise.resolve(response.releaseBody.call(response)).catch(() => {});
+      }
+      if (typeof response.body?.cancel === 'function') {
+        return Promise.resolve(response.body.cancel.call(response.body)).catch(() => {});
+      }
+    } catch {}
+    return Promise.resolve();
+  }
+  _getSavedInlineTextAttachmentProbeKey(context) {
+    if (!context?.identityKey || !context?.sourceKey) return null;
+    return JSON.stringify([context.identityKey, context.sourceKey]);
+  }
+  acquireSavedInlineTextAttachmentProbe(context) {
+    const current = this.revalidateSavedInlineTextAttachmentProbeContext(context);
+    if (!current || !this._hasSavedInlineTextAttachmentProbeNativeFetch()) return null;
+    const key = this._getSavedInlineTextAttachmentProbeKey(current);
+    if (!key) return null;
+    const inFlight = this._savedInlineTextAttachmentProbeInFlight;
+    const generation = this._savedInlineTextAttachmentProbeGeneration || 0;
+    let entry = inFlight?.get?.(key);
+    if (entry && (entry.generation !== generation || entry.cancelled || entry.settled)) {
+      if (inFlight.get(key) === entry) inFlight.delete(key);
+      entry.cancelled = true;
+      try {
+        entry.controller?.abort?.('Saved inline text attachment probe was superseded');
+      } catch {}
+      entry = null;
+    }
+    if (entry) {
+      const token = Symbol('saved-inline-text-attachment-probe');
+      entry.consumers.add(token);
+      let released = false;
+      const release = () => {
+        if (released) return false;
+        released = true;
+        entry.consumers.delete(token);
+        if (entry.consumers.size > 0) return true;
+        entry.cancelled = true;
+        if (inFlight.get(key) === entry) inFlight.delete(key);
+        try {
+          entry.controller?.abort?.('Saved inline text attachment probe released');
+        } catch {}
+        return true;
+      };
+      release.token = token;
+      release.release = release;
+      release.unsubscribe = release;
+      return release;
+    }
+    const AbortControllerClass = globalThis.AbortController;
+    if (typeof AbortControllerClass !== 'function') return null;
+    let controller;
+    try {
+      controller = new AbortControllerClass();
+    } catch {
+      return null;
+    }
+    if (!controller?.signal) return null;
+    if (!entry) {
+      entry = {
+        key,
+        generation,
+        context: current,
+        controller,
+        consumers: new Set(),
+        cancelled: false,
+        settled: false,
+        failureHandled: false,
+        promise: null,
+        run: null
+      };
+      inFlight.set(key, entry);
+      const run = async () => {
+        let response = null;
+        let failure = null;
+        const canStart = () => this.revalidateSavedInlineTextAttachmentProbeContext(current)
+          && entry.generation === (this._savedInlineTextAttachmentProbeGeneration || 0)
+          && inFlight.get(key) === entry
+          && !entry.cancelled
+          && !entry.controller?.signal?.aborted
+          && entry.consumers.size > 0
+          && this.__started !== false
+          && this._hasSavedInlineTextAttachmentProbeNativeFetch();
+        try {
+          if (!canStart()) return false;
+          response = await Promise.resolve().then(() => {
+            if (!canStart()) return null;
+            return this.fetchMediaNetworkResponse(
+              current.sourceUrl,
+              {
+                method: 'GET',
+                headers: { Range: 'bytes=0-0' },
+                timeout: 0,
+                signal: controller.signal
+              },
+              { nativeOnly: true }
+            );
+          });
+          if (!response?.ok) failure = new Error('Saved inline text attachment probe failed.');
+        } catch (error) {
+          failure = error;
+        } finally {
+          await this._releaseSavedInlineTextAttachmentProbeResponse(response);
+        }
+        if (!failure || entry.failureHandled) return !failure;
+        if (entry.generation !== (this._savedInlineTextAttachmentProbeGeneration || 0)
+          || inFlight.get(key) !== entry
+          || entry.cancelled
+          || entry.controller?.signal?.aborted
+          || entry.consumers.size === 0
+          || this.__started === false
+          || !this._hasSavedInlineTextAttachmentProbeNativeFetch()) return false;
+        const latest = this.revalidateSavedInlineTextAttachmentProbeContext(current);
+        if (!latest || latest.sourceUrl !== current.sourceUrl
+          || latest.identityKey !== current.identityKey
+          || latest.sourceKey !== current.sourceKey) return false;
+        entry.failureHandled = true;
+        try {
+          this.coordinateSavedAttachmentMediaFailure(latest, latest.sourceUrl);
+        } catch {}
+        return false;
+      };
+      entry.run = run;
+    }
+    const token = Symbol('saved-inline-text-attachment-probe');
+    entry.consumers.add(token);
+    if (!entry.promise && typeof entry.run === 'function') {
+      const run = entry.run;
+      entry.run = null;
+      entry.promise = run().finally(() => {
+        entry.settled = true;
+        if (inFlight.get(key) === entry) inFlight.delete(key);
+      });
+    }
+    let released = false;
+    const release = () => {
+      if (released) return false;
+      released = true;
+      entry.consumers.delete(token);
+      if (entry.consumers.size > 0) return true;
+      entry.cancelled = true;
+      if (inFlight.get(key) === entry) inFlight.delete(key);
+      try {
+        entry.controller?.abort?.('Saved inline text attachment probe released');
+      } catch {}
+      return true;
+    };
+    release.token = token;
+    release.release = release;
+    release.unsubscribe = release;
+    return release;
+  }
+  subscribeSavedInlineTextAttachmentProbe(context) {
+    return this.acquireSavedInlineTextAttachmentProbe(context);
+  }
+  getSavedInlineTextAttachmentProbeComponent() {
+    if (this._savedInlineTextAttachmentProbeComponent) {
+      return this._savedInlineTextAttachmentProbeComponent;
+    }
+    if (!React?.Component) return null;
+    const plugin = this;
+    const contextKey = context => context
+      ? `${context.identityKey || ''}\u0000${context.sourceKey || ''}\u0000${context.sourceUrl || ''}`
+      : '';
+    class SavedInlineTextAttachmentProbeSentinel extends React.Component {
+      constructor(props) {
+        super(props);
+        this._releaseProbe = null;
+      }
+      acquireProbe(context) {
+        this._releaseProbe?.();
+        this._releaseProbe = plugin.acquireSavedInlineTextAttachmentProbe(context);
+      }
+      componentDidMount() {
+        this.acquireProbe(this.props?.context);
+      }
+      componentDidUpdate(previousProps) {
+        if (contextKey(previousProps?.context) === contextKey(this.props?.context)) return;
+        this.acquireProbe(this.props?.context);
+      }
+      componentWillUnmount() {
+        this._releaseProbe?.();
+        this._releaseProbe = null;
+      }
+      render() {
+        return null;
+      }
+    }
+    SavedInlineTextAttachmentProbeSentinel.displayName = 'SavedInlineTextAttachmentProbeSentinel';
+    this._savedInlineTextAttachmentProbeComponent = SavedInlineTextAttachmentProbeSentinel;
+    return SavedInlineTextAttachmentProbeSentinel;
+  }
+  getSavedInlineTextAttachmentProbeLifecycleComponent() {
+    return this.getSavedInlineTextAttachmentProbeComponent();
+  }
+  getSavedInlineTextProbeComponent() {
+    return this.getSavedInlineTextAttachmentProbeComponent();
+  }
+  getSavedInlineTextProbeLifecycleComponent() {
+    return this.getSavedInlineTextAttachmentProbeComponent();
   }
   markSavedAttachmentMediaCandidateFailure(attachment, sourceMessage, sourceUrl) {
     if (!attachment || !sourceMessage || typeof sourceUrl !== 'string') return false;
@@ -15441,6 +15856,84 @@ module.exports = class MessageLoggerV2 {
       || /^text\/markdown(?:\s*;|$)/i.test(value.trim())
     )) return true;
     return this._testUrlPattern(value, /\.(txt|md)$/i);
+  }
+  isSavedInlineTextCodeAttachment(value) {
+    const extensionPattern = /\.(txt|md|json|js|py|html|csv|xml|log|css|sh|zsh|command)$/i;
+    const rejectedExtensionPattern = /\.(pdf|bin|exe|dll|dmg|iso|zip|rar|7z|tar|gz|bz2|xz|lz|lzma|woff|woff2|ttf|otf|eot|jpe?g|png|gif|bmp|webp|avif|tiff?|mp4|webm|mov|avi|mkv|mp3|ogg|oga|opus)$/i;
+    const isTextMime = candidate => {
+      if (typeof candidate !== 'string') return false;
+      const mime = candidate.trim().split(';', 1)[0].trim().toLowerCase();
+      return /^text\//.test(mime)
+        || ['application/json', 'application/javascript', 'application/xml'].includes(mime);
+    };
+    const isRejectedMime = candidate => {
+      if (typeof candidate !== 'string') return false;
+      const mime = candidate.trim().split(';', 1)[0].trim().toLowerCase();
+      return /^image\//.test(mime)
+        || /^video\//.test(mime)
+        || /^audio\//.test(mime)
+        || /^font\//.test(mime)
+        || /^binary\//.test(mime)
+        || /^application\/(?:x-)?font-/.test(mime)
+        || /^application\/(?:x-)?(?:binary|zip|rar|7z|tar|gzip|bzip2|xz|compress|lzip)/.test(mime)
+        || [
+          'application/pdf',
+          'application/octet-stream',
+          'application/binary',
+          'application/x-binary',
+          'application/zip',
+          'application/gzip',
+          'application/x-gzip',
+          'application/x-rar-compressed',
+          'application/vnd.rar',
+          'application/x-7z-compressed',
+          'application/x-tar',
+          'application/x-bzip2',
+          'application/x-xz',
+          'application/vnd.ms-fontobject'
+        ].includes(mime);
+    };
+    const hasExtension = candidate => {
+      if (typeof candidate !== 'string' || !candidate.trim()) return false;
+      const text = candidate.trim();
+      if (extensionPattern.test(text)) return true;
+      try {
+        const parsed = new URL(text);
+        return extensionPattern.test(parsed.pathname)
+          || extensionPattern.test(decodeURIComponent(parsed.pathname));
+      } catch {}
+      return extensionPattern.test(text.split(/[?#]/, 1)[0]);
+    };
+    const hasRejectedExtension = candidate => {
+      if (typeof candidate !== 'string' || !candidate.trim()) return false;
+      const text = candidate.trim();
+      if (rejectedExtensionPattern.test(text)) return true;
+      try {
+        const parsed = new URL(text);
+        return rejectedExtensionPattern.test(parsed.pathname)
+          || rejectedExtensionPattern.test(decodeURIComponent(parsed.pathname));
+      } catch {}
+      return rejectedExtensionPattern.test(text.split(/[?#]/, 1)[0]);
+    };
+    const candidates = value && typeof value === 'object' && !Array.isArray(value)
+      ? [
+        value.filename,
+        value.url,
+        value.proxy_url,
+        value.proxyUrl,
+        value.proxyURL,
+        value.content_type,
+        value.contentType,
+        value.original_content_type,
+        value.originalContentType
+      ]
+      : [value];
+    if (candidates.some(candidate => isRejectedMime(candidate)
+      || hasRejectedExtension(candidate)
+      || this.isImage(candidate)
+      || this.isVideo(candidate)
+      || this.isAudio(candidate))) return false;
+    return candidates.some(candidate => isTextMime(candidate) || hasExtension(candidate));
   }
   isPdfAttachment(value) {
     if (typeof value === 'string' && /^application\/pdf(?:\s*;|$)/i.test(value.trim())) return true;
