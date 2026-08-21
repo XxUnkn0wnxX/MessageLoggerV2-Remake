@@ -22,7 +22,7 @@ This file is both the implementation checklist and the handoff record.
 
 ## Living handoff snapshot
 
-- **Last updated:** 2026-08-18
+- **Last updated:** 2026-08-21
 - **Repository:**
   `$HOME/Apps/Dev/BD/BD-Plugins/MessageLoggerV2-Remake`
 - **Current root Codex session ID:**
@@ -34,118 +34,97 @@ This file is both the implementation checklist and the handoff record.
 - **Predecessor rollout record:**
   `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T11-07-23-01a00d42-4986-7971-94de-11f09f6630d1.jsonl`
 - **Working branch:** `develop`
-- **Verified HEAD:** accepted Gate 3.1 document-restoration commit
-  `3478423f4f9de98a864578cf0fbb126f10b19b1e`. Rewritten
-  `origin/develop` is `9dfd6d85be45072f85441d378db38858b1aba1a6`, so local
-  `develop` remains exactly one accepted commit ahead. A fresh `git ls-remote`
-  verified the remote ref after the privacy rewrite.
-- **Verified worktree:** Gate 3.2 modifies this checklist,
-  `MessageLoggerV2.plugin.js`, `tests/clipboard.test.js`,
-  `tests/media.test.js`, and `tests/source-contracts.test.js`. The ignored
-  v1.0.8 trace helper, `tmp/1.html`, and runtime reports remain outside commit
-  scope; the helper's exact symlink is still installed in the BetterDiscord
-  plugins folder. The ignored repository `AGENTS.md` now requires `$HOME` in
-  every persistent path and a privacy scan before commits, merges, rewrites,
-  or pushes. None of those ignored/runtime artifacts may be committed.
-- **Baseline:** `npm test` passed `471/471` before this checklist was created.
-- **Current Stage 4 verification:** the parent has rerun `npm run check`,
-  `tests/clipboard.test.js` at `16/16`, `tests/media.test.js` at `156/156`,
-  `tests/source-contracts.test.js` at `68/68`, full `npm test` at `560/560`,
-  plugin/test syntax, and `git diff --check` after the first generalized live
-  build. After the escaping-native-action correction, the parent reran
-  `npm run check`, clipboard `16/16`, media `156/156`, source contracts
-  `68/68`, full `npm test` at `561/561`, and `git diff --check` successfully.
-- **Current Gate 3.2 verification:** parent `node --check`, the combined
-  `tests/media.test.js` plus `tests/source-contracts.test.js` gate at `246/246`,
-  the batch attachment context suite at `18/18`, and `git diff --check` pass.
-  The full suite remains deliberately paused until the user accepts the live
-  Logger-view gate.
-- **Live parity:** Gate 3.2 was synced using only the tracked plugin. Repository
-  and installed BetterDiscord plugin SHA-256 both equal
-  `4ab847d2b0153b96ec3862af7ebaf0d6ede6eeca721f37737db8671217fefa96`,
-  and `cmp` confirmed byte-for-byte parity. The fresh hot-reload boundary
-  cleanly removed the prior patches, initialized the new plugin, reapplied its
-  patches, updated the UI, and scheduled the cache timer without a new
-  MessageLoggerV2 error. Earlier document-probe errors predate this reload.
-- **Implementation state:** Stages 1-3 are complete, accepted, committed, and
-  pushed. Stage 4 is implemented, parent-verified, live-synced, and accepted,
-  with one operating-system-neutral open policy for
-  canonical current/removed image, video, audio, and generic attachments across
-  Logger raw views, restored native message/image menus, exact ImageUtilities
-  actions, and Logger-owned native image viewers. Local-only uses only a
-  trusted existing physical cache file; remote-first keeps direct, distinct
-  proxy, then local order; cache-master Off uses only the first remote
-  candidate. Blob stays display-only. Exact target/viewer ownership and
-  user-authored URL/label collision guards are parent-verified. Viewer-tooltip
-  ownership is limited to the exact control's `aria-describedby` tooltip, and
-  frozen descendant menus use an immutable replacement path while an
-  irreducibly frozen root fails closed.
-- **Runtime-trace state:** the completed 12-event report had no drops. It
-  proved the restored-message menu retained mutable action
-  `open-native-link` under a nested React tree, while the native Media Viewer
-  button labelled **Open in Browser** called `window.open()` with the exact
-  saved Blob URL. No Electron `shell.openExternal()` or `shell.openPath()` call
-  occurred on either escaping path. The user then verified both corrected
-  controls and ordinary-viewer isolation; the helper, symlink, and report are
-  now in Trash.
-- **Current gate:** Gate 3.2 implementation, focused deterministic coverage,
-  live sync, and user acceptance are complete. Logger viewer now gives each
-  TXT/PDF attachment its own
-  detached Discord-native `MessageAccessories` host, exact message/attachment
-  ownership markers, isolated placeholder fallback, and lifecycle cleanup,
-  independently of the live-mount toggle. A multi-file batch resolves each
-  image/video/audio/TXT/PDF/generic target to its own **Open Attachment** action
-  and fails closed on ambiguous subtrees. The focused batch suite constructs
-  one grouped image/video/audio/TXT/PDF/generic record and verifies exact
-  per-sibling descriptors, Blob/local source ownership, menu actions, native
-  action reconciliation, and fail-closed ambiguity; independent TXT/PDF hosts
-  and cleanup are covered separately. The user accepted remote-first,
-  local-only, multi-document, context-menu, live-mount-Off, and mixed-file batch
-  viewer cases. The full suite remains paused until the release metadata and
-  documentation slice is ready. Stage 9 warning detail remains deferred.
-- **Worker state:** the user reported Spark at 24%, but Spark returned an
-  explicit `Selected model is at capacity` failure. Per the session routing
-  rule, bounded work moved to Luna Extra High for the rest of this session;
-  the Sol parent is unchanged. Spark applied the first traced MessageContent
-  suppression slice before interruption, Luna completed the classification-
-  based legacy/collision cleanup, and the parent ran all focused checks.
+- **Verified checkpoint base:** before this four-file checkpoint, local
+  `develop` and `origin/develop` were both
+  `8c2b3b28aaf0bfa7ec8d765de118511297d4e043` (`Complete saved attachment
+  rendering policy`). Do not describe the earlier Gate 3.1/Gate 3.2 SHAs as
+  the active branch boundary; they are historical evidence only.
+- **Verified worktree:** the user-approved error-first checkpoint modifies this
+  checklist, `MessageLoggerV2.plugin.js`, `tests/media.test.js`, and
+  `tests/records.test.js`. No release metadata, branch, remote, helper, or
+  deferred embed/Components V2 source has been changed.
+- **Preserved unsafe-work stash:** `stash@{0}` is object
+  `5d15a3ceca72837c2738f0f22599fd6330ea4233`, named
+  `WIP Stage 4 embed rendering regression investigation before pause
+  2026-08-18`. It contains changes to this checklist,
+  `MessageLoggerV2.plugin.js`, `tests/media.test.js`, and
+  `tests/source-contracts.test.js` (`2196` insertions and `189` deletions).
+  **Do not run `git stash pop` or apply it wholesale.** Keep it recoverable and
+  inspect individual diffs only when they are useful evidence.
+- **Live parity:** repository and installed BetterDiscord copies of
+  `MessageLoggerV2.plugin.js` are byte-identical at SHA-256
+  `e9413014efcce42b7797c127f0359cf763e730e3ecfddc791b5524d5a4a46abc`.
+  The live file contains only the three approved immediate repairs; it does not
+  contain the stashed native-payload experiment.
+- **Trace state:** the ignored source
+  `tmp/MessageLoggerEmbedRenderTrace.plugin.js` still has an exact symlink at
+  `$HOME/Library/Application Support/BetterDiscord/plugins/MessageLoggerEmbedRenderTrace.plugin.js`.
+  It was not implicated in the current errors. Unlink/relink it before any
+  future helper edit so BetterDiscord reloads the exact helper; remove the
+  helper, symlink, and reports when embed diagnosis is complete.
+- **Current deterministic gate:** `npm run check`, `git diff --check`, focused
+  records `76/76`, focused media `192/192`, and full `npm test` `610/610` all
+  pass. The stale attachment-only thread assertion now expects the established
+  `[Not cached: reply.png]` cache-off placeholder without changing plugin
+  behavior.
+- **Runtime defect 1 repaired - unsafe update clone:**
+  `createMessageUpdateSnapshot()` now shallow-merges previous and partial
+  update objects before the established `cleanupMessageObject()` canonical
+  serializer. Its function-bearing regression proves partial replacement,
+  retained prior fields, media-delta caching, source immutability, and detached
+  saved-record ownership.
+- **Runtime defect 2 repaired - deleted-channel cache path:** cache resolution
+  now prefers live store identity, then the record's durable deletion/saved
+  location, then an exact validated existing folder, and otherwise returns
+  `null`. Read, promotion, and confirmed-write callers pass the durable
+  location; unresolved destinations preserve pre-cache sources and perform no
+  destination write, move, deletion, refresh, or retry.
+- **Expected cache/network noise:** current 403/404 misses, DNS failures,
+  socket resets, request timeouts, certificate failures, and files with no
+  inferable extension are remote-cache outcomes rather than Logger renderer or
+  dispatch crashes. Do not mix their final wording/identity cleanup into the
+  two baseline fixes; the richer filename/URL/hostname warning work remains
+  deferred to Stage 9.
+- **Implementation state:** the stale assertion and both proven runtime defects
+  are repaired, automated gates pass, live parity is confirmed, and the
+  `2026-08-21 06:50:22` through `06:50:28` hot-reload window contains a clean
+  MessageLoggerV2 stop/start sequence with no new Logger exception. The user
+  accepted both focused smokes; later Anti-Nuke captures promoted and cached
+  their saved-message media without either repaired exception.
+- **Embed safety boundary:** the stash proved that `new MessageRecord(raw)` is
+  not a raw-wire hydration boundary. Numeric archived embed color reached
+  `getEmbedColor().toLowerCase()`, and a Components V2 Section whose accessory
+  was removed reached an unconditional `accessory.type` read. Do not overwrite
+  an already-native MessageContent message's `embeds` or `components` with
+  archived JSON. A future Logger-native payload path needs a trace-proven
+  Discord wire-to-model factory or a fail-closed summary fallback. If a type-9
+  Section loses its media accessory, retain its text by flattening valid text
+  children instead of emitting an invalid Section.
+- **Worker state:** the user reported that Spark usage had reached its current
+  limit, so bounded implementation switched to Luna Extra High for the rest of
+  this session. Luna completed only the remaining durable-location
+  promotion/write slice; the Sol parent reviewed it and reran all gates.
 - **Checklist state:** include this file in every user-confirmed stage commit
   and keep it in the repository root after the current release. Do not archive
   it unless the user explicitly requests that in a later session.
-- **Privacy state:** every expanded home path in this checklist was converted
-  to `$HOME`. The 12 `develop` commits after `main` were rewritten, and only
-  the already-published replacement tip was force-pushed with an exact lease;
-  the local Gate 3.1 commit remains unpushed. `main`,
-  `fix/attachment-gate`, its handoff, both Networking checklist locations,
-  commit subjects/bodies, Git notes, and tag messages had no path/name leak and
-  required no rewrite. Existing Git author identity metadata is separate and
-  was intentionally left unchanged.
-- **Change-control state:** The accepted Stage 4, reopened Stage 3 video, and
-  Stage 3 point 2 audio commits are now published on `develop` through
-  `9dfd6d85be45072f85441d378db38858b1aba1a6`; accepted Gate 3.1 is the local
-  commit `3478423f4f9de98a864578cf0fbb126f10b19b1e`. Do not merge, switch
-  branches, or push during Gate 3.2. The user has now authorized the final
-  release slice, after point 3 is complete and live-accepted, to bump the plugin
-  version and replace the stale built-in changelog with a concise summary of
-  everything since the last `main` release, including Logger-view TXT/PDF. The
-  same slice must update the user-facing settings and test/runtime documentation
-  for source ordering, cache/display toggle ownership, live-mount versus Logger-
-  viewer independence, supported render types, placeholders, and the global
-  **Open Attachment** route. After the accepted release is merged to `main`,
-  merge that final `main` into `fix/attachment-gate` and verify/push that branch
-  as the paused Stage 5 handoff. Keep focused tests only until point 3 is accepted;
-  do not edit those docs or release metadata until the Logger-view render is
-  working and live-accepted. The ordered final slice is documentation, version
-  and changelog, full gate, final live smoke, then merge and push.
+- **Privacy state:** persistent paths must use `$HOME`. Before any future
+  commit, merge, rewrite, or push, scan the tracked tree, staged diff, and
+  outgoing range for an expanded macOS home path.
+- **Change-control state:** the user approved the exact stale-assertion plus two
+  runtime-error repair package, its live sync, and one commit/push of the four
+  intended files to `develop`. No merge, version/changelog update, other branch
+  operation, or stash application is authorized. `stash@{0}` remains object
+  `5d15a3ceca72837c2738f0f22599fd6330ea4233`.
 
 ### Exact next action
 
-Commit the accepted five-file Gate 3.2 checkpoint without pushing. Then update
-the user-facing documentation and release metadata, including the concise
-version/changelog requested for the final release. Run the complete automated
-gate, sync only the final plugin, obtain the user's final release smoke, merge
-`develop` to `main`, and merge the resulting `main` into
-`fix/attachment-gate` before publishing all requested refs.
+If this four-file checkpoint is not yet published, commit exactly this
+checklist, `MessageLoggerV2.plugin.js`, `tests/media.test.js`, and
+`tests/records.test.js`, then push `develop` to `origin/develop`. If it is
+already published, verify local/tracking/remote equality and a clean worktree.
+In either case, stop after publication; do not resume embed/Components V2,
+Stage 4a, Stage 4b, Stage 5, Stage 9, release metadata, branch promotion, or
+cleanup work in this immediate-error scope.
 
 ### Resume procedure
 
@@ -153,9 +132,13 @@ gate, sync only the final plugin, obtain the user's final release smoke, merge
 2. Source `~/.zshrc`; confirm `/usr/local/bin/git` is selected.
 3. Confirm repository path, branch, HEAD, status, and live-plugin hash.
 4. Preserve unrelated user changes; do not reset, clean, switch, merge, or push.
-5. Compare the checkout with this snapshot and record drift.
-6. Continue from **Exact next action** and the first incomplete stage.
-7. Update this file after each implementation, test, or live-runtime stage.
+5. Confirm `stash@{0}` still names the preserved unsafe embed experiment; do
+   not pop it.
+6. Recheck `debug.log` for any newer stack than the two proven defects and
+   separate external cache failures from plugin exceptions.
+7. Compare the checkout with this snapshot and record drift.
+8. Continue from **Exact next action** and the first incomplete stage.
+9. Update this file after each implementation, test, or live-runtime stage.
 
 ### Session reconstruction references
 
@@ -188,21 +171,31 @@ be recorded before implementation continues.
 
 ## Current release boundary and paused work
 
-- [x] Finish Stage 3 point 2 (Logger-view audio), obtain its focused live
-      acceptance, and commit it locally without pushing.
-- [x] Finish Stage 3 point 3 (TXT/PDF cached-Blob/restored and Logger-view
-      parity, including `Open Attachment`) with trace-first implementation and
-      focused validation.
-- [ ] Only after point 3 is complete, run the full automated suite and obtain
-      the user's final live smoke-test acceptance across the release scope.
-- [ ] After that acceptance, prepare the explicitly requested release step:
-      concise version metadata/changelog and merge into `main`, following the
-      repository branch model and verifying local/remote refs before any push.
-- [ ] Do not start new or deferred Stage 5-and-later work in this run. Preserve
-      already completed historical work, leave all deferred checklist items in
-      place, and resume them only in a later user-directed session.
+- [x] Preserve the unsafe native embed/Components V2 work in a named stash and
+      restore/sync/push the committed `8c2b3b2` baseline.
+- [x] Reconfirm repository/live parity and triage the current stable log without
+      applying the stash.
+- [x] Obtain explicit approval for the stale assertion plus the two proven
+      baseline runtime-error fixes.
+- [x] Implement and verify the `MESSAGE_UPDATE` canonical-clone repair.
+- [x] Implement and verify durable deleted-channel cache-path resolution.
+- [x] Pass focused tests, full `npm test`, `git diff --check`, live parity, and
+      a fresh hot-reload log window.
+- [x] Obtain the user's focused edit and Anti-Nuke message/media smoke result and
+      accept the error-first checkpoint.
+- [ ] Only after that checkpoint, restart native embed/Components V2 work from
+      clean source. Do not feed archived wire JSON directly to native renderers
+      and do not pop the unsafe stash.
+- [ ] Keep Stage 4a Reveal File, Stage 4b Anti-Nuke validation, Stage 5
+      hydration, Stage 9 warning identity, release metadata, `main` promotion,
+      and branch deletion/promotion paused until separately reached and
+      authorized.
 - [ ] Keep this checklist in the repository root through and after the current
       release; do not move it to `docs/archive/checklists/`.
+
+The historical status and activity entries below remain evidence of completed
+earlier stages. Where they conflict with the living snapshot above, the living
+snapshot and latest explicit user instruction control continuation.
 
 ## Current status
 
@@ -3201,3 +3194,88 @@ behavior, persistence, rendering, or external-open behavior.
 - At the final paused Stage 5 boundary, merge the accepted release from
   `develop` to `main`, then merge that resulting `main` into
   `fix/attachment-gate`; verify and publish each intended ref separately.
+
+### 2026-08-21 - Error-first restart handoff prepared
+
+- Current root session ID is
+  `01a00f41-b9c3-7841-b0e0-175368f05084`; its exact rollout record is
+  `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T20-26-00-01a00f41-b9c3-7841-b0e0-175368f05084.jsonl`.
+- Local `develop` and `origin/develop` both remain at clean committed boundary
+  `8c2b3b28aaf0bfa7ec8d765de118511297d4e043`. Before this handoff-only edit,
+  repository and installed `MessageLoggerV2.plugin.js` copies matched SHA-256
+  `997b68c211b5c1c4d43a3e5219eafdbbfd583ab646f9f3cc386d7ba6c749aebc`.
+- Preserved unsafe embed experiment `stash@{0}` remains object
+  `5d15a3ceca72837c2738f0f22599fd6330ea4233`. Do not pop or apply it wholesale;
+  future embed work may inspect its individual diffs only as evidence.
+- The deterministic baseline is `597/598`. The only failure is the stale
+  thread-promotion assertion expecting `[image:reply.png]` instead of the
+  established `[Not cached: reply.png]` cache-off placeholder. Obtain explicit
+  approval for that exact test correction before changing it or plugin code.
+  One verification run also transiently failed the media non-stream fallback
+  timeout under full-suite load; that exact test then passed three focused runs
+  and the next full suite, so it is recorded as a possible timing flake rather
+  than a second reproducible baseline failure.
+- Stable-log triage found two real committed-baseline defects to repair first:
+  function-bearing Discord update objects fail inside
+  `createMessageUpdateSnapshot()` because of `structuredClone()`, and deferred
+  deleted-channel cache writes lose their live `ChannelStore` name before
+  `resolveNewCachePath()` calls `.normalize()`. The living snapshot records the
+  bounded designs and focused regression requirements for both fixes.
+- Current 403/404 misses, DNS/socket/timeout/certificate failures, and files
+  without inferable extensions are expected remote-cache outcomes. Their richer
+  filename, URL, and hostname diagnostics remain deferred to Stage 9 and must
+  not distract from the two proven exceptions.
+- Next-session order is strict: obtain approval for the stale assertion plus
+  the two runtime repairs; implement and verify focused regressions; run the
+  full suite and `git diff --check`; live-sync only the accepted plugin; confirm
+  repo/live hash parity and a fresh stable-log window; then obtain the user's
+  runtime acceptance. Only after that checkpoint may embed and Components V2
+  rendering restart from clean source rather than from the stash.
+- The ignored embed trace helper and its live symlink remain available for the
+  later trace-first embed stage. No source, test, live plugin, stash, branch,
+  commit, remote, release metadata, or helper state was changed by this handoff
+  update; this checklist is the sole intended tracked modification.
+
+### 2026-08-21 - Immediate runtime-error repairs synced for smoke testing
+
+- The user approved the exact three-part error-first package. The stale
+  attachment-only thread assertion now expects `[Not cached: reply.png]`
+  without a plugin behavior change.
+- `createMessageUpdateSnapshot()` now canonicalizes the shallow-merged prior
+  and partial update before any saved-record clone. The new function-bearing
+  regression proves update completion, retained fields, media-delta behavior,
+  unchanged inputs, and detached saved-record data.
+- Deleted-channel cache resolution now uses live identity, then durable
+  `delete_data.location`/`saved_location`, then an exact existing folder, and
+  otherwise fails closed. Read, pre-cache promotion, and confirmed-write paths
+  are covered, including the no-write/no-move/no-refresh unresolved case.
+- Parent verification passed `npm run check`, records `76/76`, media `192/192`,
+  full `npm test` `610/610`, and `git diff --check`.
+- Only `MessageLoggerV2.plugin.js` was synced live. Repository and installed
+  copies are byte-identical at SHA-256
+  `e9413014efcce42b7797c127f0359cf763e730e3ecfddc791b5524d5a4a46abc`.
+- The `2026-08-21 06:50:22` through `06:50:28` hot-reload window removed and
+  reapplied MessageLoggerV2 cleanly, completed its UI refresh, and scheduled
+  its shared cache timer without a new MessageLoggerV2 exception. A separate
+  PersonalPins `guild_id` error immediately before reload is unrelated and was
+  not changed in this scope.
+- Luna Extra High completed only the remaining promotion/write threading after
+  the user reported that Spark usage had reached its current limit. The Sol
+  parent reviewed the diff and reran every focused and full gate.
+- Local `develop`, `origin/develop`, and HEAD remain at `8c2b3b2`; preserved
+  `stash@{0}` remains object `5d15a3ceca72837c2738f0f22599fd6330ea4233`.
+  No commit, push, merge, version/changelog edit, branch operation, stash
+  application, or deferred embed/Components V2 work occurred.
+- The user accepted both focused smokes and clarified the product boundary:
+  Anti-Nuke stores eligible messages and per-message location metadata from a
+  deleted channel; it does not archive or recreate the channel itself.
+- The post-smoke stable-log window contains no `DataCloneError`, old
+  `normalize` exception, resolver failure, or MessageLoggerV2 error. It records
+  successful Anti-Nuke captures at `07:05:25`, `07:06:12`, and `07:08:45`,
+  followed by saved-message media promotion or confirmed caching. The final
+  capture recovered one thread/forum root plus three messages and two
+  attachments; the next lines recorded one promotion and one confirmed media
+  write.
+- The user authorized committing and pushing exactly this immediate-error
+  checkpoint to `develop`. Deferred embed/Components V2 and release work remain
+  paused.

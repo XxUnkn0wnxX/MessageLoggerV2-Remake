@@ -1963,7 +1963,7 @@ test('attachment-only thread promotion preserves canonical media while cache-off
   assert.deepEqual(promoted.message.attachments, [attachment]);
   assert.equal(promoted.delete_data.forum_thread_delete, true);
   assert.equal(promoted.delete_data.forum_metadata.rootContextMessageId, replyId);
-  assert.equal(rendered.content, '[image:reply.png]');
+  assert.equal(rendered.content, '[Not cached: reply.png]');
   assert.deepEqual(rendered.attachments, []);
   assert.deepEqual(promoted.message, canonicalBeforePresentation);
 });
@@ -2324,6 +2324,126 @@ test('starter edits replace cached thread content before deletion capture', () =
   assert.equal(edited.content, 'after edit');
   assert.equal(plugin.cachedMessagesMap.get(original.id).content, 'after edit');
   assert.deepEqual(plugin.getCachedForumThreadMessages('200').map(message => message.content), ['after edit']);
+});
+
+test('syncMessageUpdatePayload handles runtime-only function fields while applying a partial patch', () => {
+  const messageId = '202';
+  const previous = {
+    id: messageId,
+    channel_id: 'channel',
+    guild_id: 'guild',
+    content: 'before update',
+    type: 0,
+    flags: 0,
+    timestamp: '2026-01-01T00:00:00.000Z',
+    attachments: [{
+      id: 'attachment-legacy',
+      filename: 'old.png',
+      url: 'https://cdn.discordapp.com/attachments/channel/old.png',
+      proxy_url: 'https://media.discordapp.net/attachments/channel/old.png'
+    }],
+    embeds: [{ type: 'rich', description: 'cached embed' }],
+    mentions: [],
+    author: {
+      id: 'author',
+      username: 'Author',
+      discriminator: '0001',
+      avatar: 'avatar',
+      bot: false
+    },
+    runtimeOnly: () => 'runtime state only'
+  };
+  const updateRuntimeOnly = () => 'update runtime state only';
+  const update = {
+    id: messageId,
+    content: 'after update',
+    attachments: [{
+      id: 'attachment-new',
+      filename: 'new.png',
+      url: 'https://cdn.discordapp.com/attachments/channel/new.png',
+      proxy_url: 'https://media.discordapp.net/attachments/channel/new.png'
+    }],
+    runtimeOnly: updateRuntimeOnly
+  };
+  const previousBefore = {
+    ...previous,
+    attachments: previous.attachments.map(({ id, filename, url, proxy_url }) => ({ id, filename, url, proxy_url })),
+    embeds: previous.embeds.map(({ type, description }) => ({ type, description })),
+    author: { ...previous.author }
+  };
+  const updateBefore = {
+    ...update,
+    attachments: update.attachments.map(({ id, filename, url, proxy_url }) => ({ id, filename, url, proxy_url })),
+    runtimeOnly: update.runtimeOnly
+  };
+  const cacheCalls = [];
+  const trackedRecord = {
+    message: {
+      id: messageId,
+      channel_id: 'channel',
+      content: 'cached',
+      timestamp: 1,
+      guild_id: 'guild',
+      attachments: [],
+      embeds: []
+    }
+  };
+  const plugin = createPlugin({
+    messageRecord: { [messageId]: trackedRecord },
+    cachedMessageRecord: [],
+    cachedMessageIds: new Set(),
+    cachedMessagesMap: new Map(),
+    settings: { cacheAllImages: true },
+    cacheMessageImages(...args) {
+      cacheCalls.push(args);
+    },
+    messageStore: { getMessage: () => null },
+    ChannelStore: { getChannel: () => null },
+    UserStore: { getUser: () => null }
+  });
+  const records = [trackedRecord];
+
+  let current;
+  assert.doesNotThrow(() => {
+    current = plugin.syncMessageUpdatePayload(update, previous, records);
+  });
+
+  assert.equal(current.content, 'after update');
+  assert.equal(current.channel_id, 'channel');
+  assert.equal(current.guild_id, 'guild');
+  assert.equal(current.type, 0);
+  assert.equal(current.flags, 0);
+  assert.equal(current.timestamp, new Date(previous.timestamp).getTime());
+  assert.equal(current.mention_everyone, false);
+  assert.deepEqual(current.attachments, update.attachments);
+  assert.equal(current.runtimeOnly, undefined, 'runtime function is removed by the cleanup path');
+  assert.equal(current.edited_timestamp, null);
+  assert.equal(current.mention_roles.length, 0);
+  assert.equal(current.type, previous.type);
+  assert.equal(current.channel_id, previous.channel_id);
+  assert.deepEqual(current.mentions, []);
+  assert.equal(current.author.id, previous.author.id);
+
+  assert.equal(cacheCalls.length, 1, 'media caching is invoked once for net-new attachment');
+  assert.equal(cacheCalls[0][0].id, messageId);
+  assert.equal(cacheCalls[0][0].attachments[0].id, 'attachment-new');
+  assert.equal(cacheCalls[0][1].cacheState, 'confirmed');
+  assert.equal(cacheCalls[0][1].queueWhileNoSave, true);
+
+  assert.deepEqual(current.embeds, previous.embeds);
+  assert.deepEqual(previous, previousBefore);
+  assert.deepEqual(update, updateBefore);
+  assert.equal(Object.is(update.runtimeOnly, updateBefore.runtimeOnly), true);
+  assert.equal(Object.is(previous.runtimeOnly, previousBefore.runtimeOnly), true);
+
+  const detachedRecord = records[0];
+  assert.notEqual(detachedRecord.message, current);
+  assert.notEqual(detachedRecord.message.attachments, current.attachments);
+
+  current.content = 'mutated current';
+  current.attachments[0].filename = 'mutated.png';
+  assert.equal(detachedRecord.message.content, 'after update');
+  assert.equal(detachedRecord.message.attachments[0].filename, 'new.png');
 });
 
 test('newly captured records already match the canonical persisted shape', () => {

@@ -1189,7 +1189,6 @@ module.exports = class MessageLoggerV2 {
       path: require('path')
     };
     this.cleanUpStaleDataTempFiles();
-    const guildStore_ = DiscordModules.GuildStore;
     this.imageCacheServerSimulator = {
       "cached": {},
       "_getBaseCachePath": () => {
@@ -1201,14 +1200,18 @@ module.exports = class MessageLoggerV2 {
       },
       "_resolveImagePath": (attachmentId, ext, channelId, messageId) => {
         const baseCachePath = this.imageCacheServerSimulator._getBaseCachePath();
+        const record = this.messageRecord?.[messageId];
         for (const basePath of new Set([this.settings.imageCacheDir, baseCachePath])) {
           const flatPath = this.nodeModules.path.join(basePath, attachmentId + ext);
           if (this.nodeModules.fs.existsSync(flatPath)) return flatPath;
         }
-        const resolvedCachePath = this.imageCacheServerSimulator.resolveNewCachePath({ channelId });
+        const resolvedCachePath = this.imageCacheServerSimulator.resolveNewCachePath({
+          channelId,
+          serverId: record?.message?.guild_id,
+          location: record?.delete_data?.location || record?.saved_location
+        });
         if (!resolvedCachePath) return null;
         const joinBase = resolvedCachePath + "/";
-        const record = this.messageRecord[messageId];
         const sourceMessageIds = record
           ? this.getRecordCacheSourceMessageIds(record)
           : new Set([String(messageId)]);
@@ -1267,52 +1270,10 @@ module.exports = class MessageLoggerV2 {
       "getSettings": () => { return this.settings; },
       "getMessageRecord": () => { return this.messageRecord; },
       "resolveNewCachePath": (options) => {
-        const savePath = this.imageCacheServerSimulator._getBaseCachePath();
-        let { channelId, serverId } = options;
-        let channelData = DiscordModules.ChannelStore?.getChannel(channelId);
-        if (!channelData) {
-          channelData = {};
-          let basePath;
-          if (serverId) {
-            basePath = this.imageCacheServerSimulator.tryToGuessName(serverId);
-          } else if (this.nodeModules.fs.existsSync(savePath + "/DMs")) {
-            basePath = savePath + "/DMs";
-          }
-          let guessedName = this.imageCacheServerSimulator.tryToGuessName(channelId, basePath);
-          if (!guessedName) {
-            const results = this.imageCacheServerSimulator.tryToGuessNameDeep(channelId);
-            if (results.length != 0) {
-              guessedName = results[0].result;
-              serverId = results[0].parentName == "DMs" ? null : results[0].parentName.substring(0, results[0].parentName.indexOf("(") - 1);
-            }
-          }
-          if (guessedName) {
-            channelData.name = guessedName.split(channelId)[1].slice(2, -1);
-          }
-        }
-        if (!serverId)
-          serverId = channelData.guild_id ?? null;
-        let serverNameRaw;
-        if (serverId == null) {
-          serverNameRaw = "DMs";
-        } else {
-          const guildInfo = guildStore_.getGuild(serverId);
-          if (guildInfo) {
-            serverNameRaw = guildInfo.name;
-          } else {
-            serverNameRaw = this.imageCacheServerSimulator.tryToGuessName(serverId).split(serverId)[1].slice(2, -1);
-          }
-        }
-        let channelNameRaw;
-        if (serverId == null) {
-          channelNameRaw = channelData.recipients?.length == 1 ? channelData.rawRecipients[0].username : "Unknown DM";
-        } else {
-          channelNameRaw = channelData.name;
-        }
-        const serverName = serverNameRaw.normalize("NFD").replaceAll(/[\u0300-\u036f]/g, "").replaceAll(/[^a-zA-Z0-9_. -]/g, "");
-        const channelName = channelNameRaw.normalize("NFD").replaceAll(/[\u0300-\u036f]/g, "").replaceAll(/[^a-zA-Z0-9_. -]/g, "");
-        const filePath = savePath + "/" + (serverId == null ? serverName : serverId + " (" + serverName + ")") + "/" + channelId + " (" + channelName + ")";
-        return filePath;
+        return this.resolveMediaCacheDirectory({
+          ...(options || {}),
+          basePath: this.imageCacheServerSimulator._getBaseCachePath()
+        });
       },
       "cleanUp": () => {
         for (let cachedPath in this.imageCacheServerSimulator.cached) {
@@ -1322,37 +1283,7 @@ module.exports = class MessageLoggerV2 {
           }
         }
       },
-      "tryToGuessNameDeep": (id, base) => {
-        if (!base)
-          base = this.imageCacheServerSimulator._getBaseCachePath();
-        const stuffInBase = this.nodeModules.fs.readdirSync(base);
-        const results = [];
-        for (const element of stuffInBase) {
-          if (this.nodeModules.fs.statSync(base + "/" + element).isDirectory()) {
-            const result = this.imageCacheServerSimulator.tryToGuessName(id, base + "/" + element);
-            if (!result) continue;
-            results.push({ result, parentName: element });
-          }
-        }
-        return results;
-      },
-      "tryToGuessName": (id, base) => {
-        if (!base)
-          base = this.imageCacheServerSimulator._getBaseCachePath();
-        const stuffInBase = this.nodeModules.fs.readdirSync(base);
-        const filtered = stuffInBase.filter(x => x.startsWith(id));
-        switch (filtered.length) {
-          case 0:
-            return undefined;
-          case 1:
-            return filtered[0];
-          default: {
-            const temp = {};
-            filtered.forEach((v) => { temp[v] = this.nodeModules.fs.statSync(base + "/" + v).mtime });
-            return Object.keys(temp).sort((a, b) => temp[b] - temp[a])[0];
-          }
-        }
-      }
+
     };
     this.nodeModules.electron.clipboard = {};
     this.nodeModules.electron.clipboard.write = DiscordNative.clipboard.copy;
@@ -9517,6 +9448,203 @@ module.exports = class MessageLoggerV2 {
     return error?.code === 'ENOENT'
       || /\bENOENT\b/.test(String(error?.message || ''));
   }
+  _coerceMediaCacheId(value) {
+    if (typeof value === 'string') {
+      return /^[0-9]+$/.test(value) ? value : null;
+    }
+    if (typeof value === 'number') {
+      return Number.isSafeInteger(value) && value >= 0 ? String(value) : null;
+    }
+    if (typeof value === 'bigint') {
+      const normalized = String(value);
+      return /^\d+$/.test(normalized) ? normalized : null;
+    }
+    return null;
+  }
+  _sanitizeMediaCacheName(value) {
+    if (typeof value !== 'string') return null;
+    const normalized = value
+      .normalize("NFD")
+      .replaceAll(/[\u0300-\u036f]/g, "")
+      .replaceAll(/[^a-zA-Z0-9_. -]/g, "")
+      .trim();
+    return normalized || null;
+  }
+  _parseMediaCacheDirectory(name) {
+    if (typeof name !== 'string') return null;
+    const matches = /^([0-9]+) \((.+)\)$/.exec(name);
+    if (!matches) return null;
+    return { id: matches[1], name: matches[2] };
+  }
+  _findNamedMediaCacheDirectory(baseDirectory, targetId, preferredName = null) {
+    const fs = this.nodeModules?.fs;
+    const path = this.nodeModules?.path;
+    if (!fs || !path || !baseDirectory || !targetId) return null;
+    let bestCandidate = null;
+    let bestMtime = -Infinity;
+    let entries;
+    try {
+      entries = fs.readdirSync(baseDirectory);
+    } catch {
+      return null;
+    }
+    for (const entry of entries) {
+      const parsed = this._parseMediaCacheDirectory(entry);
+      if (!parsed || parsed.id !== targetId) continue;
+      const candidatePath = path.join(baseDirectory, entry);
+      let candidateStat;
+      try {
+        candidateStat = fs.statSync(candidatePath);
+      } catch {
+        continue;
+      }
+      if (!candidateStat.isDirectory()) continue;
+      if (preferredName !== null && parsed.name === preferredName) {
+        return candidatePath;
+      }
+      if (candidateStat.mtimeMs > bestMtime) {
+        bestMtime = candidateStat.mtimeMs;
+        bestCandidate = candidatePath;
+      }
+    }
+    return bestCandidate;
+  }
+  resolveMediaCacheDirectory({
+    basePath,
+    channelId,
+    serverId,
+    location
+  } = {}) {
+    const fs = this.nodeModules?.fs;
+    const path = this.nodeModules?.path;
+    if (!fs || !path || typeof basePath !== 'string' || !basePath) return null;
+    const resolvedChannelId = this._coerceMediaCacheId(channelId);
+    if (!resolvedChannelId) return null;
+    const options = arguments[0] || {};
+    const resolvedLocation = location && typeof location === 'object' ? location : null;
+    const hasExplicitServerId = Object.prototype.hasOwnProperty.call(options, 'serverId');
+    const hasLocationGuildId = Object.prototype.hasOwnProperty.call(resolvedLocation || {}, 'guildId');
+    const hasLocationGuildName = Object.prototype.hasOwnProperty.call(resolvedLocation || {}, 'guildName');
+    const hasLocationChannelId = Object.prototype.hasOwnProperty.call(resolvedLocation || {}, 'channelId');
+    const hasLocationChannelName = Object.prototype.hasOwnProperty.call(resolvedLocation || {}, 'channelName');
+    const channelData = this.ChannelStore?.getChannel?.(resolvedChannelId)
+      ?? this.tools?.getChannel?.(resolvedChannelId)
+      ?? null;
+    const isDmChannel = !!(
+      channelData?.type === 1
+      || channelData?.type === 3
+      || Array.isArray(channelData?.recipients)
+    );
+    const mayResolveAsDm = !channelData || isDmChannel;
+    let resolvedServerId = isDmChannel
+      ? null
+      : (channelData && Object.prototype.hasOwnProperty.call(channelData, 'guild_id')
+        ? this._coerceMediaCacheId(channelData.guild_id)
+        : undefined);
+    if (!isDmChannel && resolvedServerId === null) {
+      resolvedServerId = undefined;
+    }
+    if (resolvedServerId === undefined && hasExplicitServerId) {
+      if (serverId === null) {
+        if (mayResolveAsDm) resolvedServerId = null;
+      } else if (serverId !== undefined) {
+        const explicitServerId = this._coerceMediaCacheId(serverId);
+        if (explicitServerId !== null) resolvedServerId = explicitServerId;
+      }
+    }
+    if (resolvedServerId === undefined && hasLocationGuildId) {
+      if (resolvedLocation.guildId === null) {
+        if (mayResolveAsDm) resolvedServerId = null;
+      }
+      else {
+        const snapshotServerId = this._coerceMediaCacheId(resolvedLocation.guildId);
+        resolvedServerId = snapshotServerId === null ? undefined : snapshotServerId;
+      }
+    }
+
+    let resolvedGuildName = null;
+    if (resolvedServerId !== null && resolvedServerId !== undefined) {
+      if (typeof this.tools?.getServer === 'function') {
+        resolvedGuildName = this._sanitizeMediaCacheName(this.tools.getServer(resolvedServerId)?.name);
+      }
+      if (!resolvedGuildName && hasLocationGuildName) {
+        const snapshotGuildId = hasLocationGuildId ? this._coerceMediaCacheId(resolvedLocation.guildId) : null;
+        if (!hasLocationGuildId || snapshotGuildId === resolvedServerId) {
+          resolvedGuildName = this._sanitizeMediaCacheName(resolvedLocation.guildName);
+        }
+      }
+    }
+
+    let resolvedChannelName = this._sanitizeMediaCacheName(channelData?.name);
+    if (!resolvedChannelName && isDmChannel && Array.isArray(channelData?.rawRecipients) && channelData.rawRecipients.length > 0) {
+      resolvedChannelName = this._sanitizeMediaCacheName(channelData.rawRecipients[0]?.username);
+    }
+    if (!resolvedChannelName && hasLocationChannelName) {
+      const snapshotChannelId = hasLocationChannelId ? this._coerceMediaCacheId(resolvedLocation.channelId) : null;
+      if (!hasLocationChannelId || snapshotChannelId === resolvedChannelId) {
+        resolvedChannelName = this._sanitizeMediaCacheName(resolvedLocation.channelName);
+      }
+    }
+
+    if (resolvedServerId === null) {
+      const dmRoot = path.join(basePath, 'DMs');
+      if (resolvedChannelName) {
+        return path.join(dmRoot, `${resolvedChannelId} (${resolvedChannelName})`);
+      }
+      return this._findNamedMediaCacheDirectory(dmRoot, resolvedChannelId, resolvedChannelName);
+    }
+
+    if (resolvedServerId !== undefined) {
+      if (resolvedGuildName && resolvedChannelName) {
+        return path.join(basePath, `${resolvedServerId} (${resolvedGuildName})`, `${resolvedChannelId} (${resolvedChannelName})`);
+      }
+      const fallbackServerPath = this._findNamedMediaCacheDirectory(basePath, resolvedServerId);
+      if (!fallbackServerPath) return null;
+      return this._findNamedMediaCacheDirectory(fallbackServerPath, resolvedChannelId, resolvedChannelName);
+    }
+
+    if (!resolvedLocation || !Object.prototype.hasOwnProperty.call(resolvedLocation, 'guildId')) {
+      let fallbackResult = null;
+      let fallbackMtime = -Infinity;
+      let roots;
+      try {
+        roots = fs.readdirSync(basePath);
+      } catch {
+        return null;
+      }
+      if (!roots.includes('DMs')) {
+        roots.push('DMs');
+      }
+      for (const root of roots) {
+        const parsedRoot = path.join(basePath, root);
+        let rootStat;
+        try {
+          rootStat = fs.statSync(parsedRoot);
+        } catch {
+          continue;
+        }
+        if (!rootStat.isDirectory()) continue;
+        if (root !== 'DMs') {
+          const parsed = this._parseMediaCacheDirectory(root);
+          if (!parsed) continue;
+        }
+        const candidate = this._findNamedMediaCacheDirectory(parsedRoot, resolvedChannelId, resolvedChannelName);
+        if (!candidate) continue;
+        let candidateStat;
+        try {
+          candidateStat = fs.statSync(candidate);
+        } catch {
+          continue;
+        }
+        if (candidateStat.mtimeMs > fallbackMtime) {
+          fallbackMtime = candidateStat.mtimeMs;
+          fallbackResult = candidate;
+        }
+      }
+      return fallbackResult;
+    }
+    return null;
+  }
   getMediaCacheInFlightRequest(request, writeEpoch = this._mediaCacheWriteEpoch || 0) {
     for (const key of this.getMediaCacheRequestKeys(request)) {
       const state = this._mediaCacheInFlightRequests?.get?.(key);
@@ -9554,7 +9682,7 @@ module.exports = class MessageLoggerV2 {
       }
     } catch {}
   }
-  promotePreCachedMedia(requestState, fileIds, channelId, serverId) {
+  promotePreCachedMedia(requestState, fileIds, channelId, serverId, location = null) {
     if (!this.canCacheMediaLocally(requestState.writeEpoch)) return false;
     const fs = this.nodeModules.fs;
     const path = this.nodeModules.path;
@@ -9585,10 +9713,11 @@ module.exports = class MessageLoggerV2 {
       const sourcePath = path.join(sourceDirectory, fileName);
       let destinationDirectory;
       try {
-        destinationDirectory = this.imageCacheServerSimulator.resolveNewCachePath({ channelId, serverId });
+        destinationDirectory = this.imageCacheServerSimulator.resolveNewCachePath({ channelId, serverId, location });
       } catch {
         continue;
       }
+      if (!destinationDirectory) continue;
       const destinationPath = path.join(destinationDirectory, fileName);
       let destinationExists = false;
       try {
@@ -11918,9 +12047,7 @@ module.exports = class MessageLoggerV2 {
     return keys;
   }
   createMessageUpdateSnapshot(previous, update) {
-    const base = previous ? structuredClone(previous) : {};
-    const incoming = structuredClone(update || {});
-    return this.cleanupMessageObject({ ...base, ...incoming });
+    return this.cleanupMessageObject({ ...(previous || {}), ...(update || {}) });
   }
   syncMessageUpdatePayload(update, previous, records = [], options = {}) {
     const previousMediaKeys = this.getMessageMediaCacheKeys(previous);
@@ -16384,6 +16511,13 @@ module.exports = class MessageLoggerV2 {
       return 'DMs';
     }
   }
+  _getMessageDurableLocation(record) {
+    const deleteLocation = record?.delete_data?.location;
+    if (deleteLocation && typeof deleteLocation === 'object' && !Array.isArray(deleteLocation)) return deleteLocation;
+    const savedLocation = record?.saved_location;
+    if (savedLocation && typeof savedLocation === 'object' && !Array.isArray(savedLocation)) return savedLocation;
+    return null;
+  }
   getMessageLocationSnapshot(message, channel = null) {
     const liveChannel = channel || (message?.channel_id ? this.tools.getChannel(message.channel_id) : null);
     const parent = liveChannel?.parent_id ? this.tools.getChannel(liveChannel.parent_id) : null;
@@ -17459,6 +17593,8 @@ module.exports = class MessageLoggerV2 {
     }
     if (this.messageRecord?.[messageId]) requestState.cacheState = 'confirmed';
     const resolvedCacheState = requestState.cacheState === 'confirmed' ? 'confirmed' : 'precache';
+    const currentRecord = this.messageRecord?.[messageId];
+    const durableLocation = this._getMessageDurableLocation(currentRecord);
     if (this.settings?.dontSaveData) {
       if (writeEpoch === (this._mediaCacheWriteEpoch || 0)) {
         this.queuePendingMediaCacheRequest(
@@ -17491,7 +17627,7 @@ module.exports = class MessageLoggerV2 {
         const fileIds = Array.from(sourceMessageIds, sourceId =>
           this.getMediaCacheFileId(attachmentId, attachmentIdx, sourceId)
         );
-        if (this.promotePreCachedMedia(requestState, fileIds, channelId, serverId)) {
+        if (this.promotePreCachedMedia(requestState, fileIds, channelId, serverId, durableLocation)) {
           this.scheduleSavedAttachmentPresentationRefresh(messageId, attachmentId);
           return;
         }
@@ -17551,7 +17687,7 @@ module.exports = class MessageLoggerV2 {
       const fs = this.nodeModules.fs;
       const path = this.nodeModules.path;
       const filePath = requestState.cacheState === 'confirmed'
-        ? this.imageCacheServerSimulator.resolveNewCachePath({ channelId, serverId })
+        ? this.imageCacheServerSimulator.resolveNewCachePath({ channelId, serverId, location: durableLocation })
         : this.getMediaCachePreCacheDirectory(messageId);
       if (!filePath) return;
       const authorId = this.messageRecord?.[messageId]?.message?.author?.id || this.cachedMessagesMap?.get?.(messageId)?.author?.id;

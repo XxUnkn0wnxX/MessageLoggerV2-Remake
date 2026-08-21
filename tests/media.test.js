@@ -8450,6 +8450,188 @@ test('confirmed cache miss fetches into the main cache without creating pre-cach
   assert.deepEqual(presentationRefreshes, [['confirmed', '43']]);
 });
 
+test('confirmed caching promotes pre-cache media into the saved snapshot location after channel removal', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-saved-location-promote-'));
+  const cacheDir = path.join(root, 'missing-cache');
+  t.after(() => fs.rmSync(root, { force: true, recursive: true }));
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  let fetches = 0;
+  global.fetch = async () => {
+    fetches++;
+    throw new Error('saved-location promotion must not fetch');
+  };
+  const messageId = '600';
+  const channelId = '601';
+  const serverId = '700';
+  const location = {
+    guildId: serverId,
+    guildName: 'Snapshot Guild',
+    channelId,
+    channelName: 'deleted-channel'
+  };
+  const presentationRefreshes = [];
+  let plugin;
+  plugin = createMediaCachePlugin(cacheDir, {
+    nodeModules: { fs, path },
+    ChannelStore: { getChannel: () => null },
+    tools: { getChannel: () => null, getServer: () => null },
+    messageRecord: {
+      [messageId]: {
+        message: { id: messageId, channel_id: channelId, guild_id: serverId, author: { id: '800' } },
+        delete_data: { location }
+      }
+    },
+    imageCacheServerSimulator: {
+      _getBaseCachePath: () => cacheDir,
+      resolveNewCachePath: options => plugin.resolveMediaCacheDirectory({ ...options, basePath: cacheDir }),
+      cleanUp() {}
+    },
+    scheduleSavedAttachmentPresentationRefresh(...args) {
+      presentationRefreshes.push(args.map(String));
+    }
+  });
+  const sourceDirectory = path.join(`${cacheDir}_PreCache`, messageId);
+  const fileName = `41 (${messageId}).png`;
+  const sourcePath = path.join(sourceDirectory, fileName);
+  fs.mkdirSync(sourceDirectory, { recursive: true });
+  fs.writeFileSync(sourcePath, 'pre-cached');
+
+  await plugin.cacheImage('https://cdn.example/saved-location-promote.png', 0, '41', messageId, channelId, serverId, 0, 0, 'confirmed');
+
+  const destinationDirectory = path.join(cacheDir, `${serverId} (Snapshot Guild)`, `${channelId} (deleted-channel)`);
+  assert.equal(fetches, 0);
+  assert.equal(fs.existsSync(path.join(destinationDirectory, fileName)), true);
+  assert.equal(fs.existsSync(sourcePath), false);
+  assert.deepEqual(presentationRefreshes, [[messageId, '41']]);
+});
+
+test('confirmed caching writes fetched media into the saved snapshot location after channel removal', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-saved-location-write-'));
+  const cacheDir = path.join(root, 'missing-cache');
+  t.after(() => fs.rmSync(root, { force: true, recursive: true }));
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  let fetches = 0;
+  global.fetch = async () => {
+    fetches++;
+    return successfulMediaResponse();
+  };
+  const messageId = '602';
+  const channelId = '603';
+  const serverId = '704';
+  const location = {
+    guildId: serverId,
+    guildName: 'Saved Guild',
+    channelId,
+    channelName: 'removed-channel'
+  };
+  const presentationRefreshes = [];
+  let plugin;
+  plugin = createMediaCachePlugin(cacheDir, {
+    nodeModules: { fs, path },
+    ChannelStore: { getChannel: () => null },
+    tools: { getChannel: () => null, getServer: () => null },
+    messageRecord: {
+      [messageId]: {
+        message: { id: messageId, channel_id: channelId, guild_id: serverId, author: { id: '805' } },
+        saved_location: location
+      }
+    },
+    imageCacheServerSimulator: {
+      _getBaseCachePath: () => cacheDir,
+      resolveNewCachePath: options => plugin.resolveMediaCacheDirectory({ ...options, basePath: cacheDir }),
+      cleanUp() {}
+    },
+    scheduleSavedAttachmentPresentationRefresh(...args) {
+      presentationRefreshes.push(args.map(String));
+    }
+  });
+
+  await plugin.cacheImage('https://cdn.example/saved-location-write.png', 0, '42', messageId, channelId, serverId, 0, 0, 'confirmed');
+
+  const destinationPath = path.join(
+    cacheDir,
+    `${serverId} (Saved Guild)`,
+    `${channelId} (removed-channel)`,
+    `42 (${messageId}).png`
+  );
+  assert.equal(fetches, 1);
+  assert.equal(fs.existsSync(destinationPath), true);
+  assert.deepEqual(presentationRefreshes, [[messageId, '42']]);
+});
+
+test('confirmed caching fails closed when the deleted channel has no durable cache location', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-unresolved-location-'));
+  const cacheDir = path.join(root, 'missing-cache');
+  t.after(() => fs.rmSync(root, { force: true, recursive: true }));
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  let fetches = 0;
+  global.fetch = async () => {
+    fetches++;
+    return successfulMediaResponse();
+  };
+  const messageId = '606';
+  const channelId = '607';
+  const serverId = '708';
+  const fileName = `43 (${messageId}).png`;
+  const sourceDirectory = path.join(`${cacheDir}_PreCache`, messageId);
+  const sourcePath = path.join(sourceDirectory, fileName);
+  fs.mkdirSync(sourceDirectory, { recursive: true });
+  fs.writeFileSync(sourcePath, 'pre-cached');
+  const counters = { mkdir: 0, write: 0, rename: 0, unlink: 0 };
+  const fsSpy = {
+    ...fs,
+    mkdirSync(...args) { counters.mkdir++; return fs.mkdirSync(...args); },
+    writeFileSync(...args) { counters.write++; return fs.writeFileSync(...args); },
+    renameSync(...args) { counters.rename++; return fs.renameSync(...args); },
+    unlinkSync(...args) { counters.unlink++; return fs.unlinkSync(...args); }
+  };
+  const presentationRefreshes = [];
+  let plugin;
+  plugin = createMediaCachePlugin(cacheDir, {
+    nodeModules: { fs: fsSpy, path },
+    ChannelStore: { getChannel: () => null },
+    tools: { getChannel: () => null, getServer: () => null },
+    messageRecord: {
+      [messageId]: {
+        message: { id: messageId, channel_id: channelId, guild_id: serverId, author: { id: '809' } },
+        delete_data: { location: [] },
+        saved_location: []
+      }
+    },
+    imageCacheServerSimulator: {
+      _getBaseCachePath: () => cacheDir,
+      resolveNewCachePath: options => plugin.resolveMediaCacheDirectory({ ...options, basePath: cacheDir }),
+      cleanUp() {}
+    },
+    scheduleSavedAttachmentPresentationRefresh(...args) {
+      presentationRefreshes.push(args.map(String));
+    },
+    _mediaCacheMaxAttempts: 3,
+    _mediaCacheRetryDelayMs: 0
+  });
+
+  await assert.doesNotReject(() => plugin.cacheImage(
+    'https://cdn.example/unresolved-location.png',
+    0,
+    '43',
+    messageId,
+    channelId,
+    serverId,
+    0,
+    0,
+    'confirmed'
+  ));
+
+  assert.equal(fetches, 1);
+  assert.deepEqual(counters, { mkdir: 0, write: 0, rename: 0, unlink: 0 });
+  assert.deepEqual(presentationRefreshes, []);
+  assert.equal(fs.existsSync(sourcePath), true);
+  assert.equal(fs.existsSync(cacheDir), false);
+});
+
 test('a confirmed request joins an in-flight provisional fetch and writes once to main cache', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-join-'));
   const cacheDir = path.join(root, 'missing-cache');
@@ -9768,6 +9950,270 @@ test('removing a folded thread root deletes media cached under its original star
   assert.equal(plugin.deleteCachedFilesForRecord(record), 1);
   assert.equal(fs.existsSync(path.join(cacheDir, 'attachment (401).png')), false);
   assert.equal(fs.existsSync(path.join(cacheDir, 'unrelated (999).png')), true);
+});
+
+test('resolveMediaCacheDirectory prefers live cache names over conflicting saved names', t => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-cache-resolve-live-'));
+  t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
+  const channelId = '902';
+  const guildId = '2002';
+  const before = fs.readdirSync(cacheDir).sort();
+
+  const plugin = createPlugin({
+    nodeModules: { fs, path },
+    ChannelStore: {
+      getChannel: id => id === channelId
+        ? { id, guild_id: guildId, name: 'live-channel', type: 0 }
+        : null
+    },
+    tools: {
+      getChannel: id => id === channelId
+        ? { id, guild_id: '9999', name: 'tool-channel', type: 0 }
+        : null,
+      getServer: id => id === guildId ? { id, name: 'live-guild' } : null
+    }
+  });
+
+  const resolved = plugin.resolveMediaCacheDirectory({
+    basePath: cacheDir,
+    channelId,
+    serverId: '5555',
+    location: {
+      guildId: '6666',
+      guildName: 'snapshot-guild',
+      channelId,
+      channelName: 'snapshot-channel'
+    }
+  });
+  assert.equal(resolved, path.join(cacheDir, `${guildId} (live-guild)`, `${channelId} (live-channel)`));
+  assert.equal(fs.existsSync(resolved), false);
+  assert.deepEqual(fs.readdirSync(cacheDir).sort(), before);
+});
+
+test('resolveMediaCacheDirectory uses durable snapshot names when live stores are absent', t => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-cache-resolve-snapshot-'));
+  t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
+  const channelId = '903';
+  const guildId = '3003';
+  const before = fs.readdirSync(cacheDir).sort();
+
+  const plugin = createPlugin({
+    nodeModules: { fs, path },
+    ChannelStore: {
+      getChannel: () => null
+    },
+    tools: {
+      getChannel: () => null,
+      getServer: () => null
+    }
+  });
+
+  const resolved = plugin.resolveMediaCacheDirectory({
+    basePath: cacheDir,
+    channelId,
+    location: {
+      guildId,
+      guildName: 'snapshot-guild',
+      channelId,
+      channelName: 'snapshot-channel'
+    }
+  });
+  assert.equal(resolved, path.join(cacheDir, `${guildId} (snapshot-guild)`, `${channelId} (snapshot-channel)`));
+  assert.equal(fs.existsSync(resolved), false);
+  assert.deepEqual(fs.readdirSync(cacheDir).sort(), before);
+});
+
+test('resolveMediaCacheDirectory resolves saved DMs from null guild identity', t => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-cache-resolve-dm-'));
+  t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
+  const channelId = '904';
+  const before = fs.readdirSync(cacheDir).sort();
+
+  const plugin = createPlugin({
+    nodeModules: { fs, path },
+    ChannelStore: {
+      getChannel: () => null
+    },
+    tools: {
+      getChannel: () => null,
+      getServer: () => null
+    }
+  });
+
+  const resolved = plugin.resolveMediaCacheDirectory({
+    basePath: cacheDir,
+    channelId,
+    serverId: null,
+    location: {
+      guildId: null,
+      channelId,
+      channelName: 'direct-channel'
+    }
+  });
+  assert.equal(resolved, path.join(cacheDir, 'DMs', `${channelId} (direct-channel)`));
+  assert.equal(fs.existsSync(resolved), false);
+  assert.deepEqual(fs.readdirSync(cacheDir).sort(), before);
+});
+
+test('resolveMediaCacheDirectory uses direct DM recipient name when live DM has no channel name', t => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-cache-resolve-dm-recipient-'));
+  t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
+  const channelId = '905';
+
+  const plugin = createPlugin({
+    nodeModules: { fs, path },
+    ChannelStore: {
+      getChannel: id => id === channelId
+        ? {
+          id,
+          type: 1,
+          recipients: [{ id: 'r1' }],
+          rawRecipients: [{ username: 'Direct User' }]
+        }
+        : null
+    },
+    tools: {
+      getChannel: () => null,
+      getServer: () => null
+    }
+  });
+
+  const resolved = plugin.resolveMediaCacheDirectory({
+    basePath: cacheDir,
+    channelId,
+    serverId: null
+  });
+  assert.equal(resolved, path.join(cacheDir, 'DMs', `${channelId} (Direct User)`));
+});
+
+test('resolveMediaCacheDirectory rejects invalid channel ids without touching disk', t => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-cache-resolve-invalid-channel-'));
+  t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
+  const before = fs.readdirSync(cacheDir).sort();
+  const plugin = createPlugin({ nodeModules: { fs, path } });
+
+  const resolved = plugin.resolveMediaCacheDirectory({
+    basePath: cacheDir,
+    channelId: '../0010/../../etc/passwd',
+    serverId: '100',
+    location: {
+      channelId: '../0010/../../etc/passwd',
+      channelName: 'ignored',
+      guildId: '200',
+      guildName: 'ignored'
+    }
+  });
+  assert.equal(resolved, null);
+  assert.deepEqual(fs.readdirSync(cacheDir).sort(), before);
+});
+
+test('resolveMediaCacheDirectory non-DM live channels with invalid or null guild ids do not use DMs', t => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-cache-resolve-live-guild-invalid-'));
+  t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
+  const channelId = '907';
+  fs.mkdirSync(path.join(cacheDir, 'DMs'));
+
+  const plugin = createPlugin({
+    nodeModules: { fs, path },
+    ChannelStore: {
+      getChannel: id => id === channelId
+        ? {
+          id,
+          type: 0,
+          guild_id: null,
+          name: 'Guild Channel'
+        }
+        : null
+    },
+    tools: {
+      getChannel: id => id === channelId
+        ? { id, type: 0, name: 'Tool Channel', guild_id: '12 34' }
+        : null,
+      getServer: () => null
+    }
+  });
+
+  for (const serverId of ['12 34', null]) {
+    const resolved = plugin.resolveMediaCacheDirectory({
+      basePath: cacheDir,
+      channelId,
+      serverId,
+      location: {
+        channelId,
+        channelName: 'ignored'
+      }
+    });
+    assert.equal(resolved, null);
+  }
+  assert.equal(fs.existsSync(path.join(cacheDir, 'DMs', `${channelId} (Guild Channel)`)), false);
+});
+
+test('resolveMediaCacheDirectory considers existing DMs folder when guild identity is unknown', t => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-cache-resolve-dm-fallback-'));
+  t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
+  const channelId = '906';
+  const dmRoot = path.join(cacheDir, 'DMs');
+  const dmChannelPath = path.join(dmRoot, `${channelId} (fallback-dm-channel)`);
+  fs.mkdirSync(dmRoot);
+  fs.mkdirSync(dmChannelPath);
+
+  const plugin = createPlugin({
+    nodeModules: { fs, path },
+    ChannelStore: {
+      getChannel: () => null
+    },
+    tools: {
+      getChannel: () => null,
+      getServer: () => null
+    }
+  });
+
+  const resolved = plugin.resolveMediaCacheDirectory({
+    basePath: cacheDir,
+    channelId
+  });
+  assert.equal(resolved, dmChannelPath);
+});
+
+test('resolveMediaCacheDirectory falls back to matching legacy folders and ignores invalid siblings', t => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-media-cache-resolve-fallback-'));
+  t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
+  const channelId = '905';
+  const legacyOne = path.join(cacheDir, '100 (legacy-one)');
+  const legacyTwo = path.join(cacheDir, '200 (legacy-two)');
+  fs.mkdirSync(legacyOne);
+  fs.mkdirSync(legacyTwo);
+  const legacyOneChannel = path.join(legacyOne, `${channelId} (legacy-name)`);
+  const legacyTwoChannel = path.join(legacyTwo, `${channelId} (fallback-name)`);
+  fs.mkdirSync(legacyOneChannel);
+  fs.mkdirSync(legacyTwoChannel);
+  fs.mkdirSync(path.join(legacyOne, `${channelId}0 (prefix-collision)`));
+  fs.mkdirSync(path.join(legacyTwo, `${channelId} (broken`));
+  fs.writeFileSync(path.join(cacheDir, '500 (file-sibling)'), 'invalid sibling');
+  const oldTime = new Date(Date.now() - 60000);
+  const newTime = new Date();
+  fs.utimesSync(legacyOneChannel, oldTime, oldTime);
+  fs.utimesSync(legacyTwoChannel, newTime, newTime);
+
+  const plugin = createPlugin({
+    nodeModules: { fs, path },
+    tools: {
+      getChannel: () => null,
+      getServer: () => null
+    }
+  });
+
+  const resolved = plugin.resolveMediaCacheDirectory({
+    basePath: cacheDir,
+    channelId
+  });
+  assert.equal(resolved, legacyTwoChannel);
+
+  const before = fs.readdirSync(cacheDir).sort();
+  const missing = plugin.resolveMediaCacheDirectory({ basePath: cacheDir, channelId: '906' });
+  const after = fs.readdirSync(cacheDir).sort();
+  assert.equal(missing, null);
+  assert.deepEqual(before, after);
 });
 
 test('native saved-attachment viewer relabels only its linked tooltip and restores owned labels', () => {
