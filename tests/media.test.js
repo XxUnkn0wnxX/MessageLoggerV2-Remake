@@ -4113,6 +4113,103 @@ test('saved MessageAccessories render exposes projected video-free props only du
   assert.strictEqual(lockedInstance.props, originalProps);
 });
 
+test('MessageAccessories patch installs immediately or once after a guarded late module wait', async () => {
+  class MessageAccessories {
+    render() {}
+    renderEmbeds() {}
+    renderAttachments() {}
+  }
+  const originalFilter = Webpack.Filters.byPrototypeKeys;
+  const originalGetModule = Webpack.getModule;
+  const originalWaitForModule = Webpack.waitForModule;
+  const originalInstead = Patcher.instead;
+  const originalAbortController = global.AbortController;
+  const controllers = [];
+  const patchCalls = [];
+  let available = true;
+  let refreshes = 0;
+  let releaseLate;
+  let releaseStale;
+  try {
+    Webpack.Filters.byPrototypeKeys = (...keys) => candidate => keys.every(
+      key => typeof candidate?.prototype?.[key] === 'function'
+    );
+    Webpack.getModule = (filter, options) => {
+      assert.equal(options.searchExports, true);
+      return available && filter(MessageAccessories) ? MessageAccessories : null;
+    };
+    Webpack.waitForModule = (filter, options) => {
+      assert.equal(options.searchExports, true);
+      assert.ok(options.signal);
+      return new Promise(resolve => {
+        if (releaseLate) releaseStale = resolve;
+        else releaseLate = resolve;
+      });
+    };
+    Patcher.instead = (target, methodName, callback) => {
+      patchCalls.push({ target, methodName, callback });
+      return () => {};
+    };
+    global.AbortController = class {
+      constructor() {
+        this.signal = { aborted: false };
+        controllers.push(this);
+      }
+      abort() {
+        this.signal.aborted = true;
+      }
+    };
+
+    const immediate = createPlugin({ __started: true, unpatches: [] });
+    immediate.forceUpdateUI = () => { refreshes++; };
+    assert.equal(immediate.installMessageAccessoriesPatch(), true);
+    assert.equal(immediate.installMessageAccessoriesPatch(), true);
+    assert.equal(patchCalls.length, 1);
+    assert.equal(immediate._messageAccessoriesPatchInstalled, true);
+    assert.equal(refreshes, 0);
+
+    available = false;
+    const late = createPlugin({ __started: true, unpatches: [] });
+    late.forceUpdateUI = () => { refreshes++; };
+    assert.equal(late.installMessageAccessoriesPatch(), false);
+    assert.equal(late._messageAccessoriesWaitController, controllers[0]);
+    available = true;
+    releaseLate(MessageAccessories);
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(patchCalls.length, 2);
+    assert.equal(late._messageAccessoriesPatchInstalled, true);
+    assert.equal(refreshes, 1);
+    assert.equal(late.installMessageAccessoriesPatch(), true);
+    assert.equal(patchCalls.length, 2);
+    assert.equal(refreshes, 1);
+
+    available = false;
+    let releasePending;
+    Webpack.waitForModule = () => new Promise(resolve => { releasePending = resolve; });
+    const stale = createPlugin({ __started: true, unpatches: [] });
+    stale.forceUpdateUI = () => { refreshes++; };
+    assert.equal(stale.installMessageAccessoriesPatch(), false);
+    const staleController = controllers[1];
+    stale.stop();
+    assert.equal(staleController.signal.aborted, true);
+    available = true;
+    releasePending(MessageAccessories);
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(patchCalls.length, 2);
+    assert.equal(refreshes, 1);
+    assert.equal(stale._messageAccessoriesPatchInstalled, false);
+    assert.equal(stale._messageAccessoriesWaitController, null);
+  } finally {
+    Webpack.Filters.byPrototypeKeys = originalFilter;
+    Webpack.getModule = originalGetModule;
+    Webpack.waitForModule = originalWaitForModule;
+    Patcher.instead = originalInstead;
+    global.AbortController = originalAbortController;
+  }
+});
+
 test('logger native document message isolates TXT, Markdown, PDF, and generic attachments with safe Discord defaults', () => {
   class NativeDocumentMessage {
     constructor(payload) {
@@ -4588,6 +4685,170 @@ test('native audio source error retries CDN then proxy and then shows cached aud
   await setImmediatePromise();
   assert.deepEqual(invalidations, ['701']);
   assert.deepEqual(cacheRefreshes, ['701']);
+});
+
+test('saved media failure resolver accepts exact current and removed attachments only', () => {
+  const message = {
+    id: 'resolver-message',
+    channel_id: 'resolver-channel',
+    content: 'body',
+    attachments: [{
+      id: 'current-image',
+      filename: 'current.png',
+      url: 'https://cdn.discordapp.com/attachments/resolver-channel/current.png'
+    }],
+    sticker_items: [{ id: 'sticker', name: 'sticker', format_type: 1 }],
+    embeds: [{ image: { url: 'https://cdn.discordapp.com/embeds/embed.png' } }],
+    components: [{ type: 1, components: [] }]
+  };
+  const record = {
+    message,
+    delete_data: { time: 1 },
+    removed_attachments: [{
+      id: 'removed-image',
+      filename: 'removed.png',
+      url: 'https://cdn.discordapp.com/attachments/resolver-channel/removed.png'
+    }]
+  };
+  const plugin = createPlugin({
+    messageRecord: { [message.id]: record },
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false }
+  });
+
+  const currentDescriptor = plugin.getSavedAttachmentDescriptor(message.attachments[0], message);
+  const currentContext = plugin.resolveSavedAttachmentMediaFailureContext(currentDescriptor);
+  assert.strictEqual(currentContext.record, record);
+  assert.strictEqual(currentContext.message, message);
+  assert.strictEqual(currentContext.attachment, message.attachments[0]);
+  assert.equal(currentContext.sourceKind, 'attachment');
+
+  const removedAttachment = plugin.getRecordRemovedAttachments(record)[0];
+  const removedDescriptor = plugin.getSavedAttachmentDescriptor(removedAttachment, message);
+  const removedContext = plugin.resolveSavedAttachmentMediaFailureContext(removedDescriptor);
+  assert.equal(removedContext.sourceKind, 'removedAttachment');
+  assert.equal(removedContext.attachment.id, 'removed-image');
+
+  assert.equal(plugin.resolveSavedAttachmentMediaFailureContext({
+    ...currentDescriptor,
+    channel_id: 'other-channel'
+  }), null);
+  assert.equal(plugin.resolveSavedAttachmentMediaFailureContext({
+    ...currentDescriptor,
+    message_id: 'other-message'
+  }), null);
+  assert.equal(plugin.resolveSavedAttachmentMediaFailureContext({
+    ...currentDescriptor,
+    attachment_id: 'other-attachment'
+  }), null);
+
+  const stickerMedia = plugin.getStickerMedia(message.sticker_items[0]);
+  const stickerDescriptor = plugin.getSavedAttachmentDescriptor(stickerMedia, message);
+  assert.equal(plugin.resolveSavedAttachmentMediaFailureContext(stickerDescriptor), null);
+
+  const nonDeletedPlugin = createPlugin({
+    messageRecord: {
+      [message.id]: { message, delete_data: null, removed_attachments: record.removed_attachments }
+    }
+  });
+  assert.equal(
+    nonDeletedPlugin.resolveSavedAttachmentMediaFailureContext(currentDescriptor),
+    null
+  );
+});
+
+test('saved media failure coordinator refreshes one exact context once and preserves row progression', () => {
+  const message = {
+    id: 'coordinator-message',
+    channel_id: 'coordinator-channel',
+    content: 'body',
+    attachments: [{
+      id: 'coordinator-image',
+      filename: 'photo.png',
+      url: 'https://cdn.discordapp.com/attachments/coordinator-channel/photo.png',
+      proxy_url: 'https://media.discordapp.net/attachments/coordinator-channel/photo.png'
+    }]
+  };
+  const record = { message, delete_data: { time: 1 } };
+  const remounts = [];
+  let callbacks = 0;
+  let forumRefreshes = 0;
+  let menuRefreshes = 0;
+  const plugin = createPlugin({
+    messageRecord: { [message.id]: record },
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => '/cache/coordinator-image.png',
+      get: () => 'blob://local/coordinator-image.png'
+    },
+    remountSavedAttachmentPresentationRecords(value) {
+      remounts.push(value);
+    },
+    _messageUpdateRegistry: new Map([[message.id, new Set([() => { callbacks++; }])]]),
+    _forumThreadLogRefreshers: new Map([[message.channel_id, () => { forumRefreshes++; }]]),
+    scheduleLoggerMenuRefresh() {
+      menuRefreshes++;
+    }
+  });
+  const descriptor = plugin.getSavedAttachmentDescriptor(message.attachments[0], message);
+  const context = plugin.resolveSavedAttachmentMediaFailureContext(descriptor);
+  const directUrl = message.attachments[0].url;
+  const proxyUrl = message.attachments[0].proxy_url;
+
+  const first = plugin.coordinateSavedAttachmentMediaFailure(context, directUrl);
+  assert.equal(first.recordedFailure, true);
+  assert.equal(first.plan.action, 'remote');
+  assert.equal(first.plan.url, proxyUrl);
+  assert.equal(remounts.length, 1);
+  assert.equal(callbacks, 1);
+  assert.equal(forumRefreshes, 1);
+  assert.equal(menuRefreshes, 1);
+
+  const duplicate = plugin.coordinateSavedAttachmentMediaFailure(context, directUrl);
+  assert.equal(duplicate.recordedFailure, false);
+  assert.equal(duplicate.plan.action, 'remote');
+  assert.equal(duplicate.plan.url, proxyUrl);
+  assert.equal(remounts.length, 1);
+  assert.equal(callbacks, 1);
+  assert.equal(forumRefreshes, 1);
+  assert.equal(menuRefreshes, 1);
+
+  const isolated = plugin.coordinateSavedAttachmentMediaFailure(
+    context,
+    'https://cdn.discordapp.com/attachments/coordinator-channel/other.png'
+  );
+  assert.equal(isolated, null);
+  assert.equal(remounts.length, 1);
+
+  const second = plugin.coordinateSavedAttachmentMediaFailure(context, proxyUrl);
+  assert.equal(second.recordedFailure, true);
+  assert.equal(second.plan.action, 'blob');
+  assert.equal(second.plan.url, 'blob://local/coordinator-image.png');
+  assert.equal(remounts.length, 2);
+  assert.equal(callbacks, 2);
+  assert.equal(forumRefreshes, 2);
+  assert.equal(menuRefreshes, 2);
+
+  const localFailure = plugin.coordinateSavedAttachmentMediaFailure(context, second.plan.url);
+  assert.equal(localFailure.recordedFailure, true);
+  assert.equal(localFailure.plan.action, 'omit');
+  assert.equal(localFailure.plan.unavailableReason, 'local-failed');
+  assert.equal(remounts.length, 3);
+  const localDuplicate = plugin.coordinateSavedAttachmentMediaFailure(context, second.plan.url);
+  assert.equal(localDuplicate.recordedFailure, false);
+  assert.equal(localDuplicate.plan.action, 'omit');
+  assert.equal(remounts.length, 3);
+  assert.equal(
+    plugin.coordinateSavedAttachmentMediaFailure(context, 'blob://local/other-attachment'),
+    null
+  );
+  assert.equal(remounts.length, 3);
+
+  plugin.settings.onlyRenderCachedAttachments = true;
+  assert.equal(plugin.coordinateSavedAttachmentMediaFailure(context, directUrl), null);
+  plugin.settings.onlyRenderCachedAttachments = false;
+  plugin.settings.cacheAllImages = false;
+  assert.equal(plugin.coordinateSavedAttachmentMediaFailure(context, directUrl), null);
+  assert.equal(remounts.length, 3);
 });
 
 test('logger native audio discovery retries one guarded lazy entry without sticky or stale misses', async () => {
@@ -7374,6 +7635,218 @@ test('saved attachment open policy remote-first opens first live remote candidat
   assert.deepEqual(calls.probe, [descriptor.remote_urls[0]]);
   assert.deepEqual(calls.openExternal, [descriptor.remote_urls[0]]);
   assert.equal(calls.local, 0);
+});
+
+test('saved generic TXT open coordinates an exact direct failure before opening the proxy', async () => {
+  const directUrl = 'https://cdn.discordapp.com/attachments/open-text-channel/open-text/notes.txt';
+  const proxyUrl = 'https://media.discordapp.net/attachments/open-text-channel/open-text/notes.txt';
+  const attachment = {
+    id: 'open-text',
+    filename: 'notes.txt',
+    url: directUrl,
+    proxy_url: proxyUrl
+  };
+  const message = {
+    id: 'open-text-message',
+    channel_id: 'open-text-channel',
+    content: 'body',
+    attachments: [attachment]
+  };
+  const record = { message, delete_data: { time: 1 } };
+  const canonicalBefore = structuredClone(message);
+  const remounts = [];
+  let menuRefreshes = 0;
+  const plugin = createPlugin({
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    messageRecord: { [message.id]: record },
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => '/cache/notes.txt',
+      get: () => null
+    },
+    remountSavedAttachmentPresentationRecords: value => remounts.push(value),
+    scheduleLoggerMenuRefresh: () => { menuRefreshes++; },
+    nodeModules: {
+      fs: {
+        existsSync: () => true,
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path
+    }
+  });
+  const descriptor = plugin.getSavedAttachmentDescriptor(attachment, message);
+  const probes = [];
+  const opens = [];
+  plugin.probeSavedMediaExternalUrl = async url => {
+    probes.push(url);
+    return url === proxyUrl;
+  };
+  plugin.openSavedMediaExternalUrl = async url => {
+    opens.push(url);
+    return true;
+  };
+
+  assert.equal(await plugin.openSavedAttachmentDescriptor(descriptor), true);
+  assert.deepEqual(probes, [directUrl, proxyUrl]);
+  assert.deepEqual(opens, [proxyUrl]);
+  assert.deepEqual(remounts, [record]);
+  assert.equal(menuRefreshes, 1);
+  assert.deepEqual(message, canonicalBefore);
+
+  const context = plugin.resolveSavedAttachmentMediaFailureContext(descriptor);
+  const duplicate = plugin.coordinateSavedAttachmentMediaFailure(context, directUrl);
+  assert.equal(duplicate.recordedFailure, false);
+  assert.equal(remounts.length, 1);
+  assert.equal(menuRefreshes, 1);
+});
+
+test('saved generic PDF open coordinates both remote failures before opening cached local media', async () => {
+  const directUrl = 'https://cdn.discordapp.com/attachments/open-pdf-channel/open-pdf/report.pdf';
+  const proxyUrl = 'https://media.discordapp.net/attachments/open-pdf-channel/open-pdf/report.pdf';
+  const blobUrl = 'blob://local/open-pdf-report';
+  const attachment = {
+    id: 'open-pdf',
+    filename: 'report.pdf',
+    url: directUrl,
+    proxy_url: proxyUrl
+  };
+  const message = {
+    id: 'open-pdf-message',
+    channel_id: 'open-pdf-channel',
+    content: 'body',
+    attachments: [attachment]
+  };
+  const record = { message, delete_data: { time: 1 } };
+  const canonicalBefore = structuredClone(message);
+  const remounts = [];
+  const plugin = createPlugin({
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    messageRecord: { [message.id]: record },
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => '/cache/report.pdf',
+      get: () => blobUrl
+    },
+    remountSavedAttachmentPresentationRecords: value => remounts.push(value),
+    nodeModules: {
+      fs: {
+        existsSync: value => value === '/cache/report.pdf',
+        lstatSync: () => ({ isFile: () => true })
+      },
+      path
+    }
+  });
+  const descriptor = plugin.getSavedAttachmentDescriptor(attachment, message);
+  const probes = [];
+  const localOpens = [];
+  plugin.probeSavedMediaExternalUrl = async url => {
+    probes.push(url);
+    return false;
+  };
+  plugin.openSavedMediaLocalPath = async localPath => {
+    localOpens.push(localPath);
+    return true;
+  };
+
+  assert.equal(await plugin.openSavedAttachmentDescriptor(descriptor), true);
+  assert.deepEqual(probes, [directUrl, proxyUrl]);
+  assert.deepEqual(localOpens, ['/cache/report.pdf']);
+  assert.equal(remounts.length, 2);
+  const finalPlan = plugin.getSavedAttachmentPresentationPlan(attachment, message, { allowRemote: true });
+  assert.equal(finalPlan.mediaType, 'attachment');
+  assert.equal(finalPlan.action, 'blob');
+  assert.equal(finalPlan.url, blobUrl);
+  assert.deepEqual(message, canonicalBefore);
+});
+
+test('saved attachment open policy coordinates only active remote-first failures', async () => {
+  const makeHarness = settings => {
+    const directUrl = 'https://cdn.discordapp.com/attachments/open-policy-channel/open-policy/data.bin';
+    const proxyUrl = 'https://media.discordapp.net/attachments/open-policy-channel/open-policy/data.bin';
+    const attachment = {
+      id: 'open-policy',
+      filename: 'data.bin',
+      url: directUrl,
+      proxy_url: proxyUrl
+    };
+    const message = {
+      id: 'open-policy-message',
+      channel_id: 'open-policy-channel',
+      attachments: [attachment]
+    };
+    const record = { message, delete_data: { time: 1 } };
+    const remounts = [];
+    const plugin = createPlugin({
+      settings,
+      messageRecord: { [message.id]: record },
+      imageCacheServerSimulator: {
+        _resolveImagePath: () => '/cache/data.bin',
+        get: () => null
+      },
+      remountSavedAttachmentPresentationRecords: value => remounts.push(value),
+      nodeModules: {
+        fs: {
+          existsSync: () => true,
+          lstatSync: () => ({ isFile: () => true })
+        },
+        path
+      }
+    });
+    return {
+      plugin,
+      message,
+      attachment,
+      descriptor: plugin.getSavedAttachmentDescriptor(attachment, message),
+      directUrl,
+      remounts,
+      probes: [],
+      opens: []
+    };
+  };
+
+  const localOnly = makeHarness({ cacheAllImages: true, onlyRenderCachedAttachments: true });
+  localOnly.plugin.openSavedMediaLocalPath = async value => {
+    localOnly.opens.push(value);
+    return true;
+  };
+  localOnly.plugin.probeSavedMediaExternalUrl = async () => {
+    localOnly.probes.push('unexpected');
+    return false;
+  };
+  localOnly.plugin.coordinateSavedAttachmentMediaFailure = () => {
+    throw new Error('local-only must not coordinate');
+  };
+  assert.equal(await localOnly.plugin.openSavedAttachmentDescriptor(localOnly.descriptor), true);
+  assert.deepEqual(localOnly.probes, []);
+  assert.deepEqual(localOnly.opens, ['/cache/data.bin']);
+  assert.equal(localOnly.remounts.length, 0);
+
+  const masterOff = makeHarness({ cacheAllImages: false, onlyRenderCachedAttachments: false });
+  masterOff.plugin.probeSavedMediaExternalUrl = async value => {
+    masterOff.probes.push(value);
+    return false;
+  };
+  masterOff.plugin.coordinateSavedAttachmentMediaFailure = () => {
+    throw new Error('master-off must not coordinate');
+  };
+  assert.equal(await masterOff.plugin.openSavedAttachmentDescriptor(masterOff.descriptor), false);
+  assert.deepEqual(masterOff.probes, [masterOff.directUrl]);
+  assert.equal(masterOff.remounts.length, 0);
+
+  const success = makeHarness({ cacheAllImages: true, onlyRenderCachedAttachments: false });
+  success.plugin.probeSavedMediaExternalUrl = async value => {
+    success.probes.push(value);
+    return true;
+  };
+  success.plugin.openSavedMediaExternalUrl = async value => {
+    success.opens.push(value);
+    return true;
+  };
+  success.plugin.coordinateSavedAttachmentMediaFailure = () => {
+    throw new Error('successful probes must not coordinate');
+  };
+  assert.equal(await success.plugin.openSavedAttachmentDescriptor(success.descriptor), true);
+  assert.deepEqual(success.probes, [success.descriptor.remote_urls[0]]);
+  assert.deepEqual(success.opens, [success.descriptor.remote_urls[0]]);
+  assert.equal(success.remounts.length, 0);
 });
 
 test('saved attachment open policy remote-first skips failed direct and opens live proxy candidate', async () => {
@@ -10649,6 +11122,432 @@ test('native saved-image descriptors bind only to the active Logger-owned viewer
   assert.equal(plugin._nativeSavedImageViewerDescriptor, null);
 });
 
+test('Logger-owned native saved viewers rebind exact IMG and VIDEO failures through CDN, proxy, and Blob', () => {
+  const makeHarness = ({ tagName, extension, filename, withBlob = true }) => {
+    const channelId = `owned-viewer-${tagName.toLowerCase()}-channel`;
+    const messageId = `owned-viewer-${tagName.toLowerCase()}-message`;
+    const attachmentId = `owned-viewer-${tagName.toLowerCase()}-attachment`;
+    const directUrl = `https://cdn.discordapp.com/attachments/${channelId}/${filename}`;
+    const proxyUrl = `https://media.discordapp.net/attachments/${channelId}/${filename}`;
+    const blobUrl = `blob:https://discord.com/${attachmentId}`;
+    const message = {
+      id: messageId,
+      channel_id: channelId,
+      content: 'body',
+      attachments: [{
+        id: attachmentId,
+        filename,
+        url: directUrl,
+        proxy_url: proxyUrl
+      }]
+    };
+    const record = { message, delete_data: { time: 1 } };
+    const openKeys = new Set(['native-owned-viewer']);
+    const closeCalls = [];
+    const remounts = [];
+    let source = directUrl;
+    let loadCalls = 0;
+    const target = {
+      tagName,
+      get currentSrc() {
+        return source;
+      },
+      get src() {
+        return source;
+      },
+      set src(value) {
+        source = value;
+      },
+      load() {
+        loadCalls++;
+      },
+      closest(selector) {
+        if (selector === '[data-ml2-attachment-video-host="true"]'
+          || selector === '[data-ml2-attachment-audio-host="true"]') return null;
+        return null;
+      }
+    };
+    let plugin;
+    plugin = createMediaCachePlugin('', {
+      messageRecord: { [messageId]: record },
+      imageCacheServerSimulator: {
+        _resolveImagePath: (attachment, ext, channel, message) => {
+          assert.equal(attachment, attachmentId);
+          assert.equal(ext, extension);
+          assert.equal(channel, channelId);
+          assert.equal(message, messageId);
+          return `/cache/${attachmentId}${extension}`;
+        },
+        get: () => withBlob ? blobUrl : null
+      },
+      remountSavedAttachmentPresentationRecords(value) {
+        remounts.push(value);
+      },
+      tools: {
+        getNativeMediaModal: () => ({ modalKey: 'native-owned-viewer' })
+      },
+      ModalStack: {
+        hasModalOpen: key => openKeys.has(key),
+        closeModal: key => {
+          closeCalls.push(key);
+          openKeys.delete(key);
+          plugin.recordNativeAttachmentMediaViewerClose(key);
+        }
+      }
+    });
+    const descriptor = plugin.getSavedAttachmentDescriptor(
+      message.attachments[0],
+      message,
+      { display_url: directUrl }
+    );
+    plugin._nativeAttachmentMediaViewerOwnership = {
+      key: 'native-owned-viewer',
+      owner: 'logger'
+    };
+    plugin._nativeSavedImageViewerDescriptor = {
+      key: 'native-owned-viewer',
+      descriptor
+    };
+    return {
+      plugin,
+      message,
+      descriptor,
+      target,
+      directUrl,
+      proxyUrl,
+      blobUrl,
+      closeCalls,
+      remounts,
+      get loadCalls() {
+        return loadCalls;
+      }
+    };
+  };
+
+  for (const options of [
+    { tagName: 'IMG', extension: '.png', filename: 'owned-image.png' },
+    { tagName: 'VIDEO', extension: '.mp4', filename: 'owned-video.mp4' }
+  ]) {
+    const harness = makeHarness(options);
+    const canonicalBefore = structuredClone(harness.message);
+
+    harness.plugin.handleSavedAttachmentMediaError({ target: harness.target });
+    assert.equal(harness.target.src, harness.proxyUrl);
+    assert.equal(harness.descriptor.display_url, harness.proxyUrl);
+    assert.equal(harness.descriptor.blob_url, null);
+    assert.equal(harness.closeCalls.length, 0);
+    assert.equal(harness.remounts.length, 1);
+    assert.equal(harness.loadCalls, options.tagName === 'VIDEO' ? 1 : 0);
+
+    harness.plugin.handleSavedAttachmentMediaError({ target: harness.target });
+    assert.equal(harness.target.src, harness.blobUrl);
+    assert.equal(harness.descriptor.display_url, harness.blobUrl);
+    assert.equal(harness.descriptor.blob_url, harness.blobUrl);
+    assert.equal(harness.closeCalls.length, 0);
+    assert.equal(harness.remounts.length, 2);
+    assert.equal(harness.loadCalls, options.tagName === 'VIDEO' ? 2 : 0);
+
+    harness.plugin.handleSavedAttachmentMediaError({ target: harness.target });
+    const terminalPlan = harness.plugin.getSavedAttachmentPresentationPlan(
+      harness.message.attachments[0],
+      harness.message,
+      { allowRemote: true }
+    );
+    assert.equal(terminalPlan.action, 'omit');
+    assert.equal(harness.plugin._failedNativeAttachmentMediaLocalKeys.size, 1);
+    assert.equal(harness.closeCalls.length, 1);
+    assert.equal(harness.remounts.length, 3);
+    assert.equal(harness.loadCalls, options.tagName === 'VIDEO' ? 2 : 0);
+    assert.deepEqual(harness.message, canonicalBefore);
+  }
+});
+
+test('Logger-owned SOURCE errors update the exact VIDEO node and accept canonicalized DOM URLs', () => {
+  const directUrl = 'https://cdn.discordapp.com/attachments/12345001/12345002/clip.mp4';
+  const dottedDirectUrl = 'https://cdn.discordapp.com/attachments/12345001/12345002/./clip.mp4';
+  const proxyUrl = 'https://media.discordapp.net/attachments/12345001/12345002/clip.mp4';
+  const attachment = {
+    id: '12345002',
+    filename: 'clip.mp4',
+    url: directUrl,
+    proxy_url: proxyUrl
+  };
+  const message = {
+    id: '12345003',
+    channel_id: '12345001',
+    content: 'body',
+    attachments: [attachment]
+  };
+  const record = { message, delete_data: { time: 1 } };
+  const canonicalBefore = structuredClone(message);
+  const openKeys = new Set(['source-owned-viewer']);
+  let videoSource = dottedDirectUrl;
+  let loadCalls = 0;
+  const source = {
+    tagName: 'SOURCE',
+    src: dottedDirectUrl,
+    closest(selector) {
+      if (selector === 'video') return video;
+      if (selector.includes('dialog')) return dialog;
+      return null;
+    }
+  };
+  const video = {
+    tagName: 'VIDEO',
+    get currentSrc() {
+      return videoSource;
+    },
+    get src() {
+      return videoSource;
+    },
+    set src(value) {
+      videoSource = value;
+    },
+    querySelectorAll(selector) {
+      return selector === 'source' ? [source] : [];
+    },
+    load() {
+      loadCalls++;
+    }
+  };
+  const dialog = {
+    querySelectorAll(selector) {
+      return selector === 'img, video' ? [video] : [];
+    }
+  };
+  const plugin = createMediaCachePlugin('', {
+    messageRecord: { [message.id]: record },
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => '/cache/source-owned.mp4',
+      get: () => null
+    },
+    tools: {
+      getNativeMediaModal: () => ({ modalKey: 'source-owned-viewer' })
+    },
+    ModalStack: {
+      hasModalOpen: key => openKeys.has(key),
+      closeModal: key => openKeys.delete(key)
+    },
+    remountSavedAttachmentPresentationRecords() {},
+    scheduleLoggerMenuRefresh() {}
+  });
+  const descriptor = plugin.getSavedAttachmentDescriptor(attachment, message, {
+    display_url: directUrl
+  });
+  plugin._nativeAttachmentMediaViewerOwnership = {
+    key: 'source-owned-viewer',
+    owner: 'logger'
+  };
+  plugin._nativeSavedImageViewerDescriptor = {
+    key: 'source-owned-viewer',
+    descriptor
+  };
+
+  plugin.handleSavedAttachmentMediaError({ target: source });
+  assert.equal(videoSource, proxyUrl);
+  assert.equal(source.src, dottedDirectUrl);
+  assert.equal(loadCalls, 1);
+  assert.equal(openKeys.has('source-owned-viewer'), true);
+  assert.deepEqual(message, canonicalBefore);
+});
+
+test('exact restored Blob failures remount to a placeholder in local-only mode and reset cleanly', () => {
+  const directUrl = 'https://cdn.discordapp.com/attachments/12346001/12346002/clip.mp4';
+  const proxyUrl = 'https://media.discordapp.net/attachments/12346001/12346002/clip.mp4';
+  const blobUrl = 'blob://local/blob-row-clip';
+  const attachment = {
+    id: '12346002',
+    filename: 'clip.mp4',
+    url: directUrl,
+    proxy_url: proxyUrl
+  };
+  const message = {
+    id: '12346003',
+    channel_id: '12346001',
+    content: 'body',
+    attachments: [attachment]
+  };
+  const record = { message, delete_data: { time: 1 } };
+  const canonicalBefore = structuredClone(message);
+  let remounts = 0;
+  const plugin = createMediaCachePlugin('', {
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: true },
+    messageRecord: { [message.id]: record },
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => '/cache/blob-row.mp4',
+      get: () => blobUrl,
+      cleanUp() {}
+    },
+    remountSavedAttachmentPresentationRecords: () => { remounts++; },
+    scheduleLoggerMenuRefresh() {}
+  });
+  const row = { id: 'chat-messages-12346001-12346003' };
+  const target = {
+    tagName: 'VIDEO',
+    currentSrc: blobUrl,
+    closest: createNativeMediaClosest(row)
+  };
+
+  plugin.handleSavedAttachmentMediaError({ target });
+  let plan = plugin.getSavedAttachmentPresentationPlan(attachment, message, { allowBlob: true });
+  assert.equal(plan.action, 'omit');
+  assert.equal(plan.unavailableReason, 'local-failed');
+  assert.equal(remounts, 1);
+  assert.equal(plugin._failedNativeAttachmentMediaLocalKeys.size, 1);
+
+  plugin.handleSavedAttachmentMediaError({ target });
+  assert.equal(remounts, 1);
+  const foreignTarget = {
+    tagName: 'VIDEO',
+    currentSrc: 'blob://local/foreign-attachment',
+    closest: createNativeMediaClosest(row)
+  };
+  plugin.handleSavedAttachmentMediaError({ target: foreignTarget });
+  assert.equal(remounts, 1);
+  const ordinaryTarget = {
+    tagName: 'VIDEO',
+    currentSrc: blobUrl,
+    closest: () => null
+  };
+  plugin.handleSavedAttachmentMediaError({ target: ordinaryTarget });
+  assert.equal(remounts, 1);
+  assert.equal(plugin._failedNativeAttachmentMediaLocalKeys.size, 1);
+
+  plugin.resetSavedAttachmentPresentationState();
+  plan = plugin.getSavedAttachmentPresentationPlan(attachment, message, { allowBlob: true });
+  assert.equal(plan.action, 'blob');
+  assert.equal(plan.url, blobUrl);
+  assert.equal(plugin._failedNativeAttachmentMediaLocalKeys.size, 0);
+  assert.equal(plugin._failedNativeAttachmentMediaLocalSourceUrls.size, 0);
+  assert.deepEqual(message, canonicalBefore);
+});
+
+test('Logger-owned native saved viewer closes only its exact key on terminal, duplicate, mismatch, or unsafe failures', () => {
+  const makeHarness = () => {
+    const channelId = 'owned-terminal-channel';
+    const messageId = 'owned-terminal-message';
+    const attachmentId = 'owned-terminal-attachment';
+    const directUrl = `https://cdn.discordapp.com/attachments/${channelId}/terminal.png`;
+    const message = {
+      id: messageId,
+      channel_id: channelId,
+      content: 'body',
+      attachments: [{
+        id: attachmentId,
+        filename: 'terminal.png',
+        url: directUrl
+      }]
+    };
+    const record = { message, delete_data: { time: 1 } };
+    const openKeys = new Set(['native-terminal-viewer']);
+    const closeCalls = [];
+    const remounts = [];
+    let plugin;
+    plugin = createMediaCachePlugin('', {
+      messageRecord: { [messageId]: record },
+      imageCacheServerSimulator: {
+        _resolveImagePath: () => '/cache/terminal.png',
+        get: () => null
+      },
+      remountSavedAttachmentPresentationRecords(value) {
+        remounts.push(value);
+      },
+      tools: {
+        getNativeMediaModal: () => ({ modalKey: 'native-terminal-viewer' })
+      },
+      ModalStack: {
+        hasModalOpen: key => openKeys.has(key),
+        closeModal: key => {
+          closeCalls.push(key);
+          openKeys.delete(key);
+          plugin.recordNativeAttachmentMediaViewerClose(key);
+        }
+      }
+    });
+    const descriptor = plugin.getSavedAttachmentDescriptor(message.attachments[0], message, {
+      display_url: directUrl
+    });
+    plugin._nativeAttachmentMediaViewerOwnership = {
+      key: 'native-terminal-viewer',
+      owner: 'logger'
+    };
+    plugin._nativeSavedImageViewerDescriptor = {
+      key: 'native-terminal-viewer',
+      descriptor
+    };
+    return { plugin, message, descriptor, directUrl, openKeys, closeCalls, remounts };
+  };
+
+  const terminal = makeHarness();
+  const canonicalBefore = structuredClone(terminal.message);
+  terminal.plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: terminal.directUrl,
+      src: terminal.directUrl,
+      closest: selector => selector.startsWith('[data-ml2-attachment-') ? null : null
+    }
+  });
+  assert.deepEqual(terminal.closeCalls, ['native-terminal-viewer']);
+  assert.equal(terminal.openKeys.has('native-terminal-viewer'), false);
+  assert.equal(terminal.plugin._nativeAttachmentMediaViewerOwnership, null);
+  assert.equal(terminal.plugin._nativeSavedImageViewerDescriptor, null);
+  assert.equal(terminal.remounts.length, 1);
+  assert.deepEqual(terminal.message, canonicalBefore);
+
+  // A late duplicate error is now isolated because the exact owned state was cleared.
+  terminal.plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: terminal.directUrl,
+      closest: selector => selector.startsWith('[data-ml2-attachment-') ? null : null
+    }
+  });
+  assert.deepEqual(terminal.closeCalls, ['native-terminal-viewer']);
+  assert.equal(terminal.remounts.length, 1);
+
+  const mismatch = makeHarness();
+  mismatch.plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: 'https://cdn.discordapp.com/attachments/owned-terminal-channel/other.png',
+      closest: selector => selector.startsWith('[data-ml2-attachment-') ? null : null
+    }
+  });
+  assert.deepEqual(mismatch.closeCalls, []);
+  assert.equal(mismatch.remounts.length, 0);
+
+  const ordinary = makeHarness();
+  ordinary.plugin._nativeAttachmentMediaViewerOwnership = {
+    key: 'native-terminal-viewer',
+    owner: 'discord'
+  };
+  ordinary.plugin._nativeSavedImageViewerDescriptor = null;
+  ordinary.plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: ordinary.directUrl,
+      closest: selector => selector.startsWith('[data-ml2-attachment-') ? null : null
+    }
+  });
+  assert.deepEqual(ordinary.closeCalls, []);
+  assert.equal(ordinary.remounts.length, 0);
+
+  const unsafe = makeHarness();
+  unsafe.plugin.coordinateSavedAttachmentMediaFailure = () => ({
+    plan: { action: 'remote', url: 'javascript:alert(1)' }
+  });
+  unsafe.plugin.handleSavedAttachmentMediaError({
+    target: {
+      tagName: 'IMG',
+      currentSrc: unsafe.directUrl,
+      closest: selector => selector.startsWith('[data-ml2-attachment-') ? null : null
+    }
+  });
+  assert.deepEqual(unsafe.closeCalls, ['native-terminal-viewer']);
+  assert.equal(unsafe.plugin._nativeAttachmentMediaViewerOwnership, null);
+});
+
 test('installNativeAttachmentMediaViewerOwnershipTracking is duplicate-safe and fail-safe', () => {
   const plugin = createMediaCachePlugin('');
   const originalAfter = Patcher.after;
@@ -10827,6 +11726,149 @@ test('createModal native IMAGE path scopes viewer ownership and the saved-image 
   assert.equal(pendingDescriptorSamples[pendingDescriptorSamples.length - 1], requestedDescriptor);
   assert.equal(plugin._nativeMediaViewerOpenContextDepth, 2);
   assert.equal(plugin._pendingNativeSavedImageOpenDescriptor, previousPendingDescriptor);
+});
+
+test('createModal saved VIDEO follows the exact coordinator through CDN, proxy, Blob, and placeholder', () => {
+  const directUrl = 'https://cdn.discordapp.com/attachments/modal-video-channel/modal-video/clip.mp4';
+  const proxyUrl = 'https://media.discordapp.net/attachments/modal-video-channel/modal-video/clip.mp4';
+  const blobUrl = 'blob://local/modal-video-clip';
+  const attachment = {
+    id: 'modal-video',
+    filename: 'clip.mp4',
+    url: directUrl,
+    proxy_url: proxyUrl
+  };
+  const message = {
+    id: 'modal-video-message',
+    channel_id: 'modal-video-channel',
+    content: 'body',
+    attachments: [attachment]
+  };
+  const record = { message, delete_data: { time: 1 } };
+  const canonicalBefore = structuredClone(message);
+  const remounts = [];
+  let callbacks = 0;
+  let forumRefreshes = 0;
+  let menuRefreshes = 0;
+  const plugin = createMediaCachePlugin('', {
+    messageRecord: { [message.id]: record },
+    imageCacheServerSimulator: {
+      _resolveImagePath: () => '/cache/clip.mp4',
+      get: () => blobUrl
+    },
+    remountSavedAttachmentPresentationRecords(value) {
+      remounts.push(value);
+    },
+    _messageUpdateRegistry: new Map([[message.id, new Set([() => { callbacks++; }])]]),
+    _forumThreadLogRefreshers: new Map([[message.channel_id, () => { forumRefreshes++; }]]),
+    scheduleLoggerMenuRefresh() {
+      menuRefreshes++;
+    }
+  });
+  const descriptor = plugin.getSavedAttachmentDescriptor(attachment, message, {
+    display_url: directUrl
+  });
+  const contexts = [];
+  const originalCoordinate = plugin.coordinateSavedAttachmentMediaFailure;
+  plugin.coordinateSavedAttachmentMediaFailure = function(context, sourceUrl) {
+    contexts.push({ context, sourceUrl });
+    return originalCoordinate.call(this, context, sourceUrl);
+  };
+
+  let modalRenderer;
+  plugin.tools = {
+    manaModule: { Modal() {} },
+    resolvedModalStuff: { ModalSize: { LARGE: 'large' } },
+    getNativeMediaModal: () => ({})
+  };
+  plugin.ModalStack = {
+    openModal: renderer => {
+      modalRenderer = renderer;
+      return 'saved-video-modal';
+    }
+  };
+
+  const originalUseState = React.useState;
+  const stateValues = [];
+  let stateIndex = 0;
+  React.useState = initialValue => {
+    const index = stateIndex++;
+    if (!(index in stateValues)) {
+      stateValues[index] = typeof initialValue === 'function' ? initialValue() : initialValue;
+    }
+    return [stateValues[index], value => {
+      stateValues[index] = typeof value === 'function' ? value(stateValues[index]) : value;
+    }];
+  };
+
+  try {
+    plugin.createModal({
+      type: 'VIDEO',
+      url: directUrl,
+      ml2SavedAttachmentOpenDescriptor: descriptor
+    }, false, 'saved-video-modal');
+    const modalElement = modalRenderer({});
+    const modalContent = modalElement.props.children[0];
+    const savedVideoElement = modalContent.props.children[0];
+    const renderSavedVideo = () => {
+      stateIndex = 0;
+      return savedVideoElement.type(savedVideoElement.props);
+    };
+
+    let mediaElement = renderSavedVideo();
+    assert.equal(mediaElement.type, 'video');
+    assert.equal(mediaElement.props.src, directUrl);
+    mediaElement.props.onError({ currentTarget: { currentSrc: directUrl, src: directUrl } });
+
+    mediaElement = renderSavedVideo();
+    assert.equal(mediaElement.props.src, proxyUrl);
+    mediaElement.props.onError({ currentTarget: { currentSrc: proxyUrl, src: proxyUrl } });
+
+    mediaElement = renderSavedVideo();
+    assert.equal(mediaElement.props.src, blobUrl);
+    mediaElement.props.onError({ currentTarget: { currentSrc: blobUrl, src: blobUrl } });
+
+    const placeholder = renderSavedVideo();
+    assert.equal(placeholder.type, 'div');
+    assert.equal(placeholder.props.role, 'status');
+    assert.equal(placeholder.props.children[0], '[Deleted: clip.mp4]');
+    assert.deepEqual(contexts.map(entry => entry.sourceUrl), [directUrl, proxyUrl, blobUrl]);
+    assert.equal(contexts.every(entry => entry.context.record === record), true);
+    assert.equal(contexts.every(entry => entry.context.message === message), true);
+    assert.equal(contexts.every(entry => entry.context.attachment === attachment), true);
+    assert.equal(plugin._failedNativeAttachmentMediaLocalKeys.size, 1);
+    assert.equal(remounts.length, 3);
+    assert.equal(callbacks, 3);
+    assert.equal(forumRefreshes, 3);
+    assert.equal(menuRefreshes, 3);
+    assert.deepEqual(message, canonicalBefore);
+    assert.equal(descriptor.display_url, directUrl);
+    assert.equal(descriptor.blob_url, null);
+  } finally {
+    React.useState = originalUseState;
+  }
+
+  const ordinary = createMediaCachePlugin('');
+  let ordinaryRenderer;
+  ordinary.tools = {
+    manaModule: { Modal() {} },
+    resolvedModalStuff: { ModalSize: { LARGE: 'large' } },
+    getNativeMediaModal: () => ({})
+  };
+  ordinary.ModalStack = {
+    openModal: renderer => {
+      ordinaryRenderer = renderer;
+      return 'ordinary-video-modal';
+    }
+  };
+  ordinary.createModal({
+    type: 'VIDEO',
+    url: 'https://cdn.example/ordinary.mp4'
+  }, false, 'ordinary-video-modal');
+  const ordinaryElement = ordinaryRenderer({}).props.children[0].props.children[0];
+  assert.equal(ordinaryElement.type, 'video');
+  assert.equal(ordinaryElement.props.onError, undefined);
+  assert.equal(ordinary._failedNativeAttachmentMediaCandidateKeys?.size, 0);
 });
 
 test('createModal tracks video and fallback-image modal keys in both modal trackers', () => {

@@ -820,8 +820,7 @@ test('date order applies to optional timestamps and forced logger dates', () => 
   assert.match(editHistoryGate, /if \(mediaType !== 'image' && mediaType !== 'video'\)/);
   assert.match(editHistoryGate, /const initialMediaType = presentationPlan\?\.mediaType/);
   assert.match(editHistoryGate, /if \(displayPlan\?\.action !== 'remote'[\s\S]*plugin\.settings\?\.cacheAllImages === false[\s\S]*plugin\.settings\?\.onlyRenderCachedAttachments\)/);
-  assert.match(editHistoryGate, /markSavedAttachmentMediaCandidateFailure\([\s\S]*displayPlan\.url/);
-  assert.match(editHistoryGate, /getSavedAttachmentPresentationPlan\([\s\S]*(currentRecord\?\.message|currentRecord\.message)[\s\S]*allowRemote:\s*true[\s\S]*\}\)/);
+  assert.match(editHistoryGate, /getSavedAttachmentDescriptor\([\s\S]*currentRecord\?\.message[\s\S]*resolveSavedAttachmentMediaFailureContext\([\s\S]*coordinateSavedAttachmentMediaFailure\([\s\S]*displayPlan\.url/);
   assert.match(editHistoryGate, /setDisplayPlan\(\{[\s\S]*action: nextPlan\.action,[\s\S]*mediaType: nextPlan\.mediaType,[\s\S]*url: nextPlan\.url[\s\S]*\}\)/);
   assert.match(editHistoryGate, /url: displayPlan\.url,[\s\S]*placeholder: displayPlan\.url,[\s\S]*original: displayPlan\.url/);
   assert.match(editHistoryGate, /const mediaKey = `\$\{key\}-\$\{presentationPlan\.action\}-\$\{presentationPlan\.url\}`/);
@@ -856,8 +855,7 @@ test('saved live rows render video attachments through Logger-owned React hosts'
   assert.match(videoContent, /'data-ml2-attachment-video-host': 'true'/);
   assert.match(videoContent, /React\.createElement\('video', \{[\s\S]*src: displayPlan\.url[\s\S]*controls: true[\s\S]*preload: 'metadata'/);
   assert.doesNotMatch(videoContent, /['"]img['"]|poster/);
-  assert.match(videoContent, /markSavedAttachmentMediaCandidateFailure\([\s\S]*currentUrl/);
-  assert.match(videoContent, /getSavedAttachmentPresentationPlan\([\s\S]*\{ allowRemote: true \}/);
+  assert.match(videoContent, /getSavedAttachmentDescriptor\(attachment, sourceMessage\)[\s\S]*resolveSavedAttachmentMediaFailureContext\([\s\S]*coordinateSavedAttachmentMediaFailure\([\s\S]*currentUrl/);
   assert.match(videoContent, /nextPlan\.url !== currentUrl/);
   assert.match(videoContent, /setPlaceholderLabel\(getPlanLabel\(nextPlan \|\| displayPlan\)\)/);
   const mediaErrorHandler = source.slice(
@@ -904,10 +902,22 @@ test('saved restored video ownership projects MessageAccessories.render before a
     accessoriesOwner,
     /thisObject\.props = projectedProps;[\s\S]*swapped = thisObject\.props === projectedProps;[\s\S]*finally \{\s*try \{ thisObject\.props = originalProps; \} catch \{\}\s*\}/
   );
-  assert.match(
-    source,
-    /const MessageAccessories = DiscordModules\.MessageAccessories;[\s\S]{0,240}Patcher\.instead\(\s*MessageAccessories\.prototype,\s*'render',[\s\S]{0,220}this\.renderSavedAttachmentMessageAccessories\(\s*thisObject,\s*args,\s*original\s*\)\s*\)/
-  );
+  const accessoriesPatchStart = source.indexOf('  _patchMessageAccessoriesForSavedAttachments(');
+  const accessoriesPatchEnd = source.indexOf('  getLoggerSavedAttachmentPresentationEntries(message, record) {', accessoriesPatchStart);
+  const accessoriesPatch = source.slice(accessoriesPatchStart, accessoriesPatchEnd);
+  assert.ok(accessoriesPatchStart >= 0 && accessoriesPatchEnd > accessoriesPatchStart);
+  assert.match(accessoriesPatch, /Patcher\.instead\(\s*MessageAccessories\.prototype,\s*'render',[\s\S]*this\.renderSavedAttachmentMessageAccessories\(\s*thisObject,\s*args,\s*original\s*\)\s*\)/);
+  assert.match(accessoriesPatch, /Filters\.byPrototypeKeys\('renderEmbeds', 'renderAttachments'\)/);
+  assert.match(accessoriesPatch, /Webpack\.waitForModule\(findModule, waitOptions\)/);
+  assert.match(accessoriesPatch, /searchExports: true,[\s\S]*signal: controller\.signal/);
+  assert.match(accessoriesPatch, /generation !== this\._messageAccessoriesPatchGeneration/);
+  assert.match(accessoriesPatch, /this\.forceUpdateUI\?\.\(\)/);
+  assert.doesNotMatch(accessoriesPatch, /setTimeout|setInterval|requestAnimationFrame/);
+  assert.match(source, /this\.installMessageAccessoriesPatch\(\);/);
+  const stop = source.slice(source.indexOf('  stop() {'), source.indexOf('  checkVersionNewer(current, remote) {'));
+  assert.match(stop, /this\._messageAccessoriesPatchGeneration \+= 1/);
+  assert.match(stop, /if \(this\._messageAccessoriesWaitController\?\.abort\)/);
+  assert.match(stop, /this\._messageAccessoriesPatchInstalled = false/);
   assert.doesNotMatch(
     source,
     /Patcher\.instead\(\s*MessageAccessories\.prototype,\s*'renderAttachments'/
@@ -1938,7 +1948,7 @@ test('populateParent sources logger media rows from saved attachment presentatio
   assert.match(viewer, /const isCached = presentationAction\s*\?[\s\S]*presentationAction === 'blob'/);
   assert.match(viewer, /const linkUrl = plan\.action === 'remote' \? \(plan\.url \|\| attachment\.url \|\| attachment\.proxy_url\)/);
   assert.match(viewer, /const getLoggerAttachmentEntry = \(mediaAttachment\) =>/);
-  assert.match(viewer, /this\.markSavedAttachmentMediaCandidateFailure\([\s\S]*mediaAttachment.url\)/);
+  assert.match(viewer, /this\.getSavedAttachmentDescriptor\(sourceAttachment, sourceMessage\)[\s\S]*this\.resolveSavedAttachmentMediaFailureContext\([\s\S]*this\.coordinateSavedAttachmentMediaFailure\([\s\S]*mediaAttachment.url/);
   assert.match(viewer, /const fallbackToNextLoggerRemotePlan = \(mediaElement,\s*hostElement,\s*mediaAttachment,\s*useCachedRenderer,\s*width,\s*height\)\s*=>/);
   assert.match(viewer, /const appendUnavailableAttachmentPlaceholder = \(label, attachment = null\) =>/);
   assert.match(viewer, /markLoggerAttachmentTarget\(placeholder, attachment\);/);
@@ -1966,12 +1976,150 @@ test('populateParent routes audio through one native host and the shared saved-a
   assert.match(audioBranch, /currentPresentationAction !== 'remote'/);
   assert.match(audioBranch, /this\.settings\.cacheAllImages === false/);
   assert.match(audioBranch, /this\.settings\.onlyRenderCachedAttachments/);
-  assert.match(audioBranch, /markSavedAttachmentMediaCandidateFailure\([\s\S]*sourceAttachment,[\s\S]*sourceMessage,[\s\S]*failedSource/);
-  assert.match(audioBranch, /getSavedAttachmentPresentationPlan\([\s\S]*\{ allowRemote: true \}/);
+  assert.match(audioBranch, /getSavedAttachmentDescriptor\(sourceAttachment, sourceMessage\)[\s\S]*resolveSavedAttachmentMediaFailureContext\([\s\S]*coordinateSavedAttachmentMediaFailure\([\s\S]*failedSource/);
   assert.match(audioBranch, /nextAction === 'remote' \|\| nextAction === 'blob'/);
   assert.match(audioBranch, /nextUrl !== failedSource[\s\S]*nextUrl !== attachment\.url/);
   assert.match(audioBranch, /cleanupLoggerNativeAudioRoots\(audioHost\)[\s\S]*audioHost\.replaceWith\(createUnavailableAttachmentPlaceholder/);
   assert.doesNotMatch(audioBranch, /createModal\(|attemptToUseCachedImage|attemptToUseCachedVideo/);
+});
+
+test('saved direct VIDEO modal and Logger callers pass exact detached descriptors', () => {
+  const modalStart = source.indexOf('  createModal(options, image, name) {');
+  const modalEnd = source.indexOf('    if (image) {', modalStart);
+  const videoModal = source.slice(modalStart, modalEnd);
+  assert.ok(modalStart >= 0 && modalEnd > modalStart);
+  assert.match(videoModal, /const savedVideoDescriptor = options\?\.ml2SavedAttachmentOpenDescriptor;/);
+  assert.match(videoModal, /resolveSavedAttachmentMediaFailureContext\(savedVideoDescriptor\)/);
+  assert.match(videoModal, /coordinateSavedAttachmentMediaFailure\(currentContext, currentSource\)/);
+  assert.match(videoModal, /const \[displaySource, setDisplaySource\] = React\.useState\(initialVideoSource\);/);
+  assert.match(videoModal, /const safe = action === 'remote'[\s\S]*protocol === 'http:' \|\| protocol === 'https:'[\s\S]*protocol === 'blob:'/);
+  assert.match(videoModal, /setPlaceholder\(getFallbackLabel\(terminalPlan\)\)/);
+  assert.match(videoModal, /React\.createElement\('video', \{[\s\S]*onError/);
+  assert.doesNotMatch(videoModal, /setTimeout|setInterval|document\.addEventListener/);
+
+  const editStart = source.indexOf('const EditHistoryMedia =');
+  const editEnd = source.indexOf('EditHistoryMedia.displayName', editStart);
+  const editMedia = source.slice(editStart, editEnd);
+  assert.match(editMedia, /displayPlan\?\.mediaType === 'image'[\s\S]*displayPlan\?\.mediaType === 'video'/);
+  assert.match(editMedia, /getSavedAttachmentDescriptor\(attachment, currentRecord\?\.message, \{[\s\S]*display_url: displayPlan\.url,[\s\S]*blob_url: displayPlan\?\.action === 'blob' \? displayPlan\.url : null/);
+  assert.match(editMedia, /ml2SavedAttachmentOpenDescriptor: savedAttachmentOpenDescriptor/);
+
+  const viewerStart = source.indexOf('populateParent(parent, messages)');
+  const viewerEnd = source.indexOf('sortMessagesByAge(map, useCaptureBatchOrder', viewerStart);
+  const viewer = source.slice(viewerStart, viewerEnd);
+  const cachedStart = viewer.indexOf('const attemptToUseCachedVideo =');
+  const cachedEnd = viewer.indexOf('video.onerror', cachedStart);
+  const cachedVideo = viewer.slice(cachedStart, cachedEnd);
+  assert.match(cachedVideo, /const sourceAttachment = getLoggerAttachmentEntry\(\{[\s\S]*id: attachmentId,[\s\S]*filename[\s\S]*\}\)\?\.attachment;/);
+  assert.match(cachedVideo, /getSavedAttachmentDescriptor\(sourceAttachment, sourceMessage, \{[\s\S]*display_url: videoUrl,[\s\S]*blob_url: videoUrl\.startsWith\('blob:'\) \? videoUrl : null/);
+  assert.match(cachedVideo, /ml2SavedAttachmentOpenDescriptor: savedAttachmentOpenDescriptor/);
+
+  const remoteVideoStart = viewer.indexOf("} else if (this.isVideo(attachment.url)) {");
+  const remoteVideo = viewer.slice(remoteVideoStart, viewer.indexOf('video.onerror', remoteVideoStart));
+  assert.match(remoteVideo, /const sourceAttachment = getLoggerAttachmentEntry\(attachment\)\?\.attachment;/);
+  assert.match(remoteVideo, /getSavedAttachmentDescriptor\(sourceAttachment, sourceMessage, \{[\s\S]*display_url: attachment\.url,[\s\S]*blob_url: attachment\.url\.startsWith\('blob:'\) \? attachment\.url : null/);
+  assert.match(remoteVideo, /ml2SavedAttachmentOpenDescriptor: savedAttachmentOpenDescriptor/);
+});
+
+test('saved direct-attachment remote errors have one coordinator and retain only isolated sticker failure marking', () => {
+  const directFailureCallSites = source.match(/\b(?:plugin|this)\.markSavedAttachmentMediaCandidateFailure\(/g) || [];
+  assert.equal(directFailureCallSites.length, 2);
+  const coordinatorStart = source.indexOf('  coordinateSavedAttachmentMediaFailure(context, sourceUrl) {');
+  const coordinatorEnd = source.indexOf('  _scheduleSavedAttachmentPresentationRecache(channelId) {', coordinatorStart);
+  assert.ok(coordinatorStart >= 0 && coordinatorEnd > coordinatorStart);
+  assert.match(source.slice(coordinatorStart, coordinatorEnd), /this\.markSavedAttachmentMediaCandidateFailure\(/);
+  const nativeErrorStart = source.indexOf('  handleSavedAttachmentMediaError(event = {}) {');
+  const nativeErrorEnd = source.indexOf('  refreshCacheOnlyMessage(message) {', nativeErrorStart);
+  assert.ok(nativeErrorStart >= 0 && nativeErrorEnd > nativeErrorStart);
+  const nativeError = source.slice(nativeErrorStart, nativeErrorEnd);
+  assert.match(nativeError, /for \(const sticker of this\.getMessageStickerItems\(record\.message\)\)/);
+  assert.match(nativeError, /this\.markSavedAttachmentMediaCandidateFailure\(attachment, record\.message, sourceUrl\)/);
+});
+
+test('native saved media failures keep exact ownership, canonical URL matching, and local Blob terminal state', () => {
+  const equivalenceStart = source.indexOf('  areSavedAttachmentMediaUrlsEquivalent(left, right) {');
+  const equivalenceEnd = source.indexOf('  getSavedAttachmentViewerDisplayUrls(descriptor) {', equivalenceStart);
+  const equivalence = source.slice(equivalenceStart, equivalenceEnd);
+  assert.match(equivalence, /if \(left === right\) return true;/);
+  assert.match(equivalence, /const leftUrl = new URL\(left\);[\s\S]*const rightUrl = new URL\(right\);/);
+  assert.match(equivalence, /leftUrl\.protocol !== rightUrl\.protocol/);
+  assert.match(equivalence, /leftUrl\.href === rightUrl\.href/);
+
+  const mediaTargetStart = source.indexOf('  getLoggerOwnedNativeSavedAttachmentViewerMediaTarget(');
+  const mediaTargetEnd = source.indexOf('  getLoggerOwnedNativeSavedImageViewerDescriptor()', mediaTargetStart);
+  const mediaTarget = source.slice(mediaTargetStart, mediaTargetEnd);
+  assert.match(mediaTarget, /tagName !== 'img' && tagName !== 'video'/);
+  assert.match(mediaTarget, /matchesSource\(getNodeSource\(node\)\)/);
+  assert.match(mediaTarget, /querySelectorAll\('source'\)[\s\S]*matchesSource\(getNodeSource\(sourceNode\)\)/);
+  assert.match(mediaTarget, /target\.closest\?\.\('video'\) \|\| target\.parentElement/);
+  assert.match(mediaTarget, /dialog\.querySelectorAll\('img, video'\)/);
+
+  const updateStart = source.indexOf('  updateLoggerOwnedNativeSavedAttachmentViewerMedia(');
+  const updateEnd = source.indexOf('  closeLoggerOwnedNativeSavedAttachmentViewerForMediaFailure()', updateStart);
+  const update = source.slice(updateStart, updateEnd);
+  assert.match(update, /this\.areSavedAttachmentMediaUrlsEquivalent\(nextUrl, sourceUrl\)/);
+  assert.match(update, /target\.src = nextUrl;/);
+  assert.match(update, /this\.areSavedAttachmentMediaUrlsEquivalent\(target\.src, nextUrl\)/);
+
+  const coordinatorStart = source.indexOf('  coordinateSavedAttachmentMediaFailure(context, sourceUrl) {');
+  const coordinatorEnd = source.indexOf('  _scheduleSavedAttachmentPresentationRecache(channelId) {', coordinatorStart);
+  const coordinator = source.slice(coordinatorStart, coordinatorEnd);
+  assert.match(coordinator, /if \(this\.settings\?\.cacheAllImages === false\) return null;/);
+  assert.match(coordinator, /const isBlobSource = parsedSource\.protocol === 'blob:';/);
+  assert.match(coordinator, /getSavedAttachmentPresentationPlan\([\s\S]*\{ allowBlob: true \}/);
+  assert.match(coordinator, /blobPlan\?\.action !== 'blob' \|\| blobPlan\.url !== sourceUrl/);
+  assert.match(coordinator, /_failedNativeAttachmentMediaLocalKeys/);
+  assert.match(coordinator, /_failedNativeAttachmentMediaLocalSourceUrls/);
+  assert.match(coordinator, /this\.settings\?\.onlyRenderCachedAttachments \? \{ allowBlob: true \} : \{ allowRemote: true \}/);
+  assert.match(coordinator, /if \(recordedFailure\) \{[\s\S]*remountSavedAttachmentPresentationRecords\([\s\S]*_refreshSavedAttachmentMediaSurfaces/);
+  assert.match(coordinator, /if \(parsedSource\.protocol !== 'http:' && parsedSource\.protocol !== 'https:'\) return null;/);
+  assert.match(coordinator, /if \(this\.settings\?\.onlyRenderCachedAttachments\) return null;/);
+
+  const planStart = source.indexOf('  getSavedAttachmentPresentationPlan(attachment, message, options = {}) {');
+  const planEnd = source.indexOf('  getSavedAttachmentPresentationPlans(message, options = {}) {', planStart);
+  const plan = source.slice(planStart, planEnd);
+  assert.match(plan, /const isLocalFailure = !!this\._failedNativeAttachmentMediaLocalKeys/);
+  assert.match(plan, /if \(allowRemote\) \{\s*if \(isLocalFailure\) \{[\s\S]*unavailableReason: 'local-failed'/);
+  assert.match(plan, /if \(isLocalFailure\) \{[\s\S]*unavailableReason: 'local-failed'/);
+
+  const nativeErrorStart = source.indexOf('  handleSavedAttachmentMediaError(event = {}) {');
+  const nativeErrorEnd = source.indexOf('  refreshCacheOnlyMessage(message) {', nativeErrorStart);
+  const nativeError = source.slice(nativeErrorStart, nativeErrorEnd);
+  const ownedIndex = nativeError.indexOf('const ownedViewerDescriptor =');
+  const protocolIndex = nativeError.indexOf("if (parsedSource.protocol !== 'http:'");
+  assert.ok(ownedIndex >= 0 && protocolIndex > ownedIndex, 'owned viewer handling must precede protocol filtering');
+  assert.match(nativeError, /getLoggerOwnedNativeSavedAttachmentViewerMediaTarget/);
+  assert.match(nativeError, /coordinateSavedAttachmentMediaFailure\(ownedViewerContext, ownedSourceUrl\)/);
+  assert.match(nativeError, /parsedSource\.protocol !== 'blob:'/);
+  assert.match(nativeError, /closeLoggerOwnedNativeSavedAttachmentViewerForMediaFailure\(\)/);
+
+  const stop = source.slice(source.indexOf('  stop() {'), source.indexOf('  checkVersionNewer(current, remote) {'));
+  const reset = source.slice(source.indexOf('  resetSavedAttachmentPresentationState() {'), source.indexOf('  handleLocalOnlyCachedAttachmentRenderingSetting', source.indexOf('  resetSavedAttachmentPresentationState() {')));
+  assert.match(stop, /_failedNativeAttachmentMediaLocalKeys\?\.clear\?\.\(\)/);
+  assert.match(stop, /_failedNativeAttachmentMediaLocalSourceUrls\?\.clear\?\.\(\)/);
+  assert.match(reset, /_failedNativeAttachmentMediaLocalKeys\?\.clear\?\.\(\)/);
+  assert.match(reset, /_failedNativeAttachmentMediaLocalSourceUrls\?\.clear\?\.\(\)/);
+});
+
+test('saved attachment open routes only active remote probe failures through the exact coordinator', () => {
+  const coordinatorStart = source.indexOf('  coordinateSavedAttachmentMediaFailure(context, sourceUrl) {');
+  const coordinatorEnd = source.indexOf('  _scheduleSavedAttachmentPresentationRecache(channelId) {', coordinatorStart);
+  const coordinator = source.slice(coordinatorStart, coordinatorEnd);
+  assert.doesNotMatch(coordinator, /classificationSources|isImage|isVideo|isAudio/);
+  assert.match(coordinator, /resolveSavedAttachmentMediaFailureContext\(descriptor\)/);
+  assert.match(coordinator, /getSavedAttachmentMediaCandidateFailureKeyForSource\(exactContext\.descriptor, sourceUrl\)/);
+
+  const openStart = source.indexOf('  async openSavedAttachmentDescriptor(descriptor) {');
+  const openEnd = source.indexOf('  createButton(label, callback) {', openStart);
+  const openPolicy = source.slice(openStart, openEnd);
+  const remoteFirstLoopStart = openPolicy.indexOf('for (const remoteCandidate of remoteCandidates)');
+  const remoteFirstLoopEnd = openPolicy.indexOf('return openLocalPath();', remoteFirstLoopStart);
+  const remoteFirstLoop = openPolicy.slice(remoteFirstLoopStart, remoteFirstLoopEnd);
+  assert.match(openPolicy, /if \(isLocalOnly\) \{[\s\S]*return openLocalPath\(\);[\s\S]*if \(!isMasterEnabled\) \{/);
+  assert.match(openPolicy, /if \(!isMasterEnabled\) \{[\s\S]*await this\.probeSavedMediaExternalUrl\(remoteCandidate\)[\s\S]*if \(!isLive\) return notifyUnavailable\(\);/);
+  assert.match(remoteFirstLoop, /if \(!isLive\) \{[\s\S]*if \(hasActiveContext\(\)\) \{[\s\S]*this\.coordinateSavedAttachmentMediaFailure\(descriptor, remoteCandidate\)/);
+  assert.match(remoteFirstLoop, /if \(!isLive\) \{[\s\S]*continue;[\s\S]*const isOpened = await this\.openSavedMediaExternalUrl/);
+  assert.doesNotMatch(openPolicy.slice(0, remoteFirstLoopStart), /coordinateSavedAttachmentMediaFailure/);
 });
 
 test('populateParent keeps native attachment rendering isolated, exact, and per attachment', () => {

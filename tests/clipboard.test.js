@@ -1581,13 +1581,15 @@ test('image-context uses the separately guarded Logger-owned native-viewer descr
     local_path: '/tmp/cache/viewer.png'
   };
   const opened = [];
+  let matchingTarget;
   const plugin = createPlugin({
     unpatches: [],
     messageRecord: {},
     deletedMessageSet: new Map(),
     purgedMessageSet: new Map(),
-    getLoggerOwnedNativeSavedAttachmentViewerDescriptor: () => descriptor,
-    getLoggerOwnedNativeSavedImageViewerDescriptor: () => descriptor,
+    getLoggerOwnedNativeSavedAttachmentViewerDescriptorForTarget: target => (
+      target === matchingTarget ? descriptor : null
+    ),
     openSavedAttachmentDescriptor(value) {
       opened.push(value);
       return Promise.resolve(true);
@@ -1602,9 +1604,9 @@ test('image-context uses the separately guarded Logger-owned native-viewer descr
       ? [{ tagName: 'IMG', currentSrc: descriptor.remote_urls[0] }]
       : []
   };
-  const matchingTarget = createImage({
+  matchingTarget = createImage({
     source: 'https://cdn.example/matched-target.png',
-    closest: selector => selector === '[role=\"dialog\"]' ? matchingDialog : null
+    closest: selector => selector === '[role=\"dialog\"], [aria-modal=\"true\"]' ? matchingDialog : null
   });
   const originalOpenAction = () => {};
   const viewerMenu = [createNativeOpenItem({ action: originalOpenAction })];
@@ -1627,8 +1629,6 @@ test('image-context uses the separately guarded Logger-owned native-viewer descr
   viewerOpenAction();
   assert.deepEqual(opened, [descriptor]);
 
-  plugin.getLoggerOwnedNativeSavedAttachmentViewerDescriptor = () => descriptor;
-  plugin.getLoggerOwnedNativeSavedImageViewerDescriptor = () => descriptor;
   const ordinaryOpenAction = () => {};
   const ordinaryTarget = createImage({
     source: 'https://cdn.example/ordinary.png',
@@ -1643,8 +1643,6 @@ test('image-context uses the separately guarded Logger-owned native-viewer descr
   const ordinaryLoggerSubmenu = flattenMenuItems(ordinaryMenu).find(item => ['mlv2-message-logger', 'mlv2-image-logger'].includes(item.id));
   assert.equal(ordinaryLoggerSubmenu, undefined);
 
-  plugin.getLoggerOwnedNativeSavedAttachmentViewerDescriptor = () => descriptor;
-  plugin.getLoggerOwnedNativeSavedImageViewerDescriptor = () => descriptor;
   const ordinaryMessageAction = () => {};
   const ordinaryMessageMenu = [createNativeOpenItem({ action: ordinaryMessageAction })];
   messageContextPatch(
