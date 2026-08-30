@@ -426,63 +426,499 @@ function getMediaExportMapChecks(value, marker) {
   };
 }
 
-function getMediaExportAlternativeChecks(value, alternatives) {
-  const descriptorInfo = getOwnDescriptors(value);
-  let sourceMatchedCallableCount = 0;
-  let callableExportCount = 0;
-  let nonemptyStringExportCount = 0;
-  let sourceReadFailures = 0;
-  if (!descriptorInfo.descriptors) {
+function getNativeMediaModalProductionChecks(value) {
+  let values;
+  try {
+    values = Object.values(value);
+  } catch {
     return {
-      sourceMatchedCallableCount,
-      callableExportCount,
-      nonemptyStringExportCount,
-      sourceReadFailures,
-      error: descriptorInfo.error
+      startingIndexCallable: false,
+      nonemptyStringModalKey: false,
+      sourceReadComplete: false,
+      valid: false,
+      error: 'selected-module-values-unavailable'
     };
   }
-  const matchingExports = new Set();
-  const markers = alternatives.map(alternative => alternative.marker);
-  const keys = Reflect.ownKeys(descriptorInfo.descriptors);
-  for (const key of keys.slice(0, MAX_OWN_KEYS)) {
-    if (typeof key !== 'string') continue;
-    const descriptor = descriptorInfo.descriptors[key];
-    if (!descriptor?.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) continue;
-    if (typeof descriptor.value === 'string' && descriptor.value.length > 0) nonemptyStringExportCount += 1;
-    if (typeof descriptor.value !== 'function') continue;
-    callableExportCount += 1;
-    const source = getFunctionSourceFlags(descriptor.value, markers);
-    if (!source.readable) {
-      sourceReadFailures += 1;
-      continue;
+  let startingIndexCallable = false;
+  for (const candidate of values) {
+    if (typeof candidate !== 'function') continue;
+    let source;
+    try {
+      source = candidate.toString();
+    } catch {
+      return {
+        startingIndexCallable: false,
+        nonemptyStringModalKey: false,
+        sourceReadComplete: false,
+        valid: false,
+        error: 'selected-opener-source-unavailable'
+      };
     }
-    if (source.flags.some(Boolean)) matchingExports.add(descriptor.value);
+    if (source.includes('startingIndex')) {
+      startingIndexCallable = true;
+      break;
+    }
   }
-  sourceMatchedCallableCount = matchingExports.size;
+  let nonemptyStringModalKey = false;
+  if (startingIndexCallable) {
+    try {
+      nonemptyStringModalKey = Object.values(value).some(candidate =>
+        typeof candidate === 'string' && candidate.length > 0
+      );
+    } catch {
+      return {
+        startingIndexCallable,
+        nonemptyStringModalKey: false,
+        sourceReadComplete: true,
+        valid: false,
+        error: 'selected-module-values-unavailable'
+      };
+    }
+  }
   return {
-    sourceMatchedCallableCount,
-    callableExportCount,
-    nonemptyStringExportCount,
-    sourceReadFailures,
-    truncated: keys.length > MAX_OWN_KEYS,
+    startingIndexCallable,
+    nonemptyStringModalKey,
+    sourceReadComplete: true,
+    valid: startingIndexCallable && nonemptyStringModalKey,
     error: null
   };
 }
 
-function getTrashResolverChecks(value) {
+function getTrashProductionResolverChecks(value) {
   const directCallable = callable(value);
-  const defaultExport = dataRead(value, 'default');
+  if (directCallable) {
+    return {
+      directCallable: true,
+      defaultCallable: false,
+      singleCallableEnumerableExport: false,
+      resolverShape: true,
+      error: null
+    };
+  }
+  const defaultExport = safeRead(value, 'default');
   const defaultCallable = defaultExport.ok && callable(defaultExport.value);
-  const map = getOwnEnumerableCallableExportChecks(value);
-  const singleCallableEnumerableExport = map.callableExportCount === 1;
+  if (defaultCallable) {
+    return {
+      directCallable: false,
+      defaultCallable: true,
+      singleCallableEnumerableExport: false,
+      resolverShape: true,
+      error: null
+    };
+  }
+  if (!defaultExport.ok && defaultExport.error === 'property-getter-failed') {
+    return {
+      directCallable: false,
+      defaultCallable: false,
+      singleCallableEnumerableExport: false,
+      resolverShape: false,
+      error: defaultExport.error
+    };
+  }
+  if (!value || typeof value !== 'object') {
+    return {
+      directCallable: false,
+      defaultCallable: false,
+      singleCallableEnumerableExport: false,
+      resolverShape: false,
+      error: defaultExport.error === 'property-getter-failed' ? defaultExport.error : null
+    };
+  }
+  let values;
+  try {
+    values = Object.values(value);
+  } catch {
+    return {
+      directCallable: false,
+      defaultCallable: false,
+      singleCallableEnumerableExport: false,
+      resolverShape: false,
+      error: 'selected-module-values-unavailable'
+    };
+  }
+  const singleCallableEnumerableExport = values.filter(candidate => typeof candidate === 'function').length === 1;
   return {
     directCallable,
     defaultCallable,
     singleCallableEnumerableExport,
     resolverShape: directCallable || defaultCallable || singleCallableEnumerableExport,
-    error: map.error,
-    sourceReadFailures: map.sourceReadFailures
+    error: defaultExport.error === 'property-getter-failed' ? defaultExport.error : null
   };
+}
+
+function getImageModalProductionChecks(value, pattern) {
+  let values;
+  try {
+    values = Object.values(value);
+  } catch {
+    return { matched: false, sourceReadComplete: false, error: 'selected-module-values-unavailable' };
+  }
+  for (const candidate of values) {
+    try {
+      if (candidate?.toString?.().includes(pattern)) {
+        return { matched: true, sourceReadComplete: true, error: null };
+      }
+    } catch {
+      return { matched: false, sourceReadComplete: false, error: 'selected-image-source-unavailable' };
+    }
+  }
+  return { matched: false, sourceReadComplete: true, error: null };
+}
+
+function getTextProductionChecks(value) {
+  let values;
+  try {
+    values = Object.values(value);
+  } catch {
+    return {
+      firstEnumerableValuePresent: false,
+      firstEnumerableValueCallable: false,
+      error: 'selected-module-values-unavailable'
+    };
+  }
+  return {
+    firstEnumerableValuePresent: values.length > 0,
+    firstEnumerableValueCallable: typeof values[0] === 'function',
+    error: null
+  };
+}
+
+function getUserContextProductionChecks(value) {
+  let values;
+  try {
+    values = Object.values(value);
+  } catch {
+    return { selectedCallableExport: false, sourceReadComplete: false, error: 'selected-module-values-unavailable' };
+  }
+  for (const candidate of values) {
+    try {
+      if (candidate?.toString?.().includes('isGroupDM')
+        && candidate?.toString?.().includes('targetIsUser')) {
+        return { selectedCallableExport: true, sourceReadComplete: true, error: null };
+      }
+    } catch {
+      return { selectedCallableExport: false, sourceReadComplete: false, error: 'selected-export-source-unavailable' };
+    }
+  }
+  return { selectedCallableExport: false, sourceReadComplete: true, error: null };
+}
+
+function getGetSrcProductionChecks(value) {
+  let keys;
+  try {
+    keys = Object.keys(value);
+  } catch {
+    return {
+      selectedSourceCallable: false,
+      selectedSourceMetadata: false,
+      selectedGetSrc: false,
+      selectedPrototypeGetSrcCallable: false,
+      sourceReadComplete: false,
+      error: 'selected-module-keys-unavailable'
+    };
+  }
+  for (const key of keys) {
+    const exportRead = safeRead(value, key);
+    if (!exportRead.ok) {
+      return {
+        selectedSourceCallable: false,
+        selectedSourceMetadata: false,
+        selectedGetSrc: false,
+        selectedPrototypeGetSrcCallable: false,
+        sourceReadComplete: false,
+        error: exportRead.error || 'selected-export-unavailable'
+      };
+    }
+    if (typeof exportRead.value !== 'function') continue;
+    let source;
+    try {
+      source = exportRead.value.toString();
+    } catch {
+      return {
+        selectedSourceCallable: false,
+        selectedSourceMetadata: false,
+        selectedGetSrc: false,
+        selectedPrototypeGetSrcCallable: false,
+        sourceReadComplete: false,
+        error: 'selected-export-source-unavailable'
+      };
+    }
+    const hasSourceMetadata = source.includes('sourceMetadata:');
+    const hasGetSrc = source.includes('getSrc');
+    if (!hasSourceMetadata || !hasGetSrc) continue;
+    const prototypeGetSrc = safeReadPath(exportRead.value, ['prototype', 'getSrc']);
+    return {
+      selectedSourceCallable: true,
+      selectedSourceMetadata: hasSourceMetadata,
+      selectedGetSrc: hasGetSrc,
+      selectedPrototypeGetSrcCallable: prototypeGetSrc.ok && callable(prototypeGetSrc.value),
+      sourceReadComplete: true,
+      error: null
+    };
+  }
+  return {
+    selectedSourceCallable: false,
+    selectedSourceMetadata: false,
+    selectedGetSrc: false,
+    selectedPrototypeGetSrcCallable: false,
+    sourceReadComplete: true,
+    error: null
+  };
+}
+
+function getModalActionsProductionChecks(value) {
+  const openModal = safeRead(value, 'openModal');
+  const hasModalOpen = safeRead(value, 'hasModalOpen');
+  const closeModal = safeRead(value, 'closeModal');
+  const useModalsStore = safeRead(value, 'useModalsStore');
+  const subscribe = safeRead(useModalsStore.value, 'subscribe');
+  return {
+    booleans: {
+      openModal: openModal.ok && callable(openModal.value),
+      hasModalOpen: hasModalOpen.ok && callable(hasModalOpen.value),
+      closeModal: closeModal.ok && callable(closeModal.value),
+      useModalsStore: useModalsStore.ok && useModalsStore.value != null,
+      'useModalsStore.subscribe': subscribe.ok && callable(subscribe.value)
+    },
+    errors: [openModal, hasModalOpen, closeModal, useModalsStore, subscribe]
+      .filter(read => !read.ok)
+      .map(read => read.error)
+      .filter(Boolean)
+  };
+}
+
+function getI18nProductionChecks(value) {
+  let values;
+  let withFormatters = false;
+  const errors = [];
+  try {
+    values = Object.values(value);
+    try {
+      withFormatters = values.some(candidate => candidate != null
+        && Object.getPrototypeOf(candidate)?.withFormatters != null);
+    } catch {
+      errors.push('selected-prototype-withFormatters-unavailable');
+    }
+  } catch {
+    errors.push('selected-module-values-unavailable');
+  }
+  const intlFormat = safeReadPath(value, ['intl', 'format']);
+  const translation = safeRead(value, 't');
+  const translationMarker = safeRead(translation.value, 'C8sXIM');
+  return {
+    booleans: {
+      'prototype.withFormatters': withFormatters,
+      'intl.format': intlFormat.ok && callable(intlFormat.value),
+      t: translation.ok && translation.value != null,
+      't.C8sXIM': translationMarker.ok && translationMarker.value != null
+    },
+    errors: [...errors, intlFormat, translation, translationMarker]
+      .filter(error => typeof error === 'string' || !error.ok)
+      .map(error => typeof error === 'string' ? error : error.error)
+      .filter(Boolean)
+  };
+}
+
+function getMessageContentProductionChecks(value) {
+  const type = safeRead(value, 'type');
+  if (!type.ok) {
+    return {
+      callable: false,
+      readable: false,
+      isCommandType: false,
+      notFirstMessageInForumPost: false,
+      error: type.error
+    };
+  }
+  let source;
+  try {
+    source = type.value?.toString?.();
+  } catch {
+    return {
+      callable: callable(type.value),
+      readable: false,
+      isCommandType: false,
+      notFirstMessageInForumPost: false,
+      error: 'selected-type-source-unavailable'
+    };
+  }
+  if (typeof source !== 'string') {
+    return {
+      callable: callable(type.value),
+      readable: false,
+      isCommandType: false,
+      notFirstMessageInForumPost: false,
+      error: 'selected-type-source-unavailable'
+    };
+  }
+  return {
+    callable: callable(type.value),
+    readable: true,
+    isCommandType: source.includes('.isCommandType()'),
+    notFirstMessageInForumPost: !source.includes('.isFirstMessageInForumPost'),
+    error: null
+  };
+}
+
+function messageContentProductionSelectionFilter(value) {
+  try {
+    return value?.type?.toString()?.includes('.isCommandType()')
+      && !value?.type?.toString()?.includes('.isFirstMessageInForumPost');
+  } catch {
+    return false;
+  }
+}
+
+function getForumUploadProductionChecks(value, markers) {
+  if (!value || typeof value !== 'object') {
+    return {
+      exactlyOneSourceMatchedCallable: false,
+      sourceReadComplete: true,
+      error: null
+    };
+  }
+  let entries;
+  try {
+    entries = Object.entries(value);
+  } catch {
+    return {
+      exactlyOneSourceMatchedCallable: false,
+      sourceReadComplete: false,
+      error: 'selected-module-entries-unavailable'
+    };
+  }
+  let matched = 0;
+  for (const [, candidate] of entries) {
+    if (typeof candidate !== 'function') continue;
+    let source;
+    try {
+      source = candidate.toString();
+    } catch {
+      return {
+        exactlyOneSourceMatchedCallable: false,
+        sourceReadComplete: false,
+        error: 'selected-export-source-unavailable'
+      };
+    }
+    if (!markers.every(marker => source.includes(marker))) continue;
+    matched += 1;
+    if (matched > 1) {
+      return {
+        exactlyOneSourceMatchedCallable: false,
+        sourceReadComplete: true,
+        error: null
+      };
+    }
+  }
+  return {
+    exactlyOneSourceMatchedCallable: matched === 1,
+    sourceReadComplete: true,
+    error: null
+  };
+}
+
+function forumUploadProductionSelectionFilter(value) {
+  return getForumUploadProductionChecks(value, [
+    'castChannelIdAsMessageId',
+    '.isForumPost()',
+    '.ownerId',
+    '.getCount('
+  ]).exactlyOneSourceMatchedCallable;
+}
+
+function getMaskedLinkProductionChecks(value) {
+  const candidates = [value];
+  if (value && (typeof value === 'object' || typeof value === 'function')) {
+    try {
+      candidates.push(...Object.values(value));
+    } catch {
+      return {
+        callableCandidate: false,
+        markedComponent: false,
+        sourceReadable: false,
+        sourceMaskedLink: false,
+        sourceOnAuxClick: false,
+        valid: false,
+        value: null,
+        error: 'selected-module-values-unavailable'
+      };
+    }
+  }
+  for (const candidate of candidates) {
+    try {
+      const sourceCandidate = typeof candidate === 'function'
+        ? candidate
+        : candidate && typeof candidate === 'object'
+          ? candidate.type
+          : null;
+      if (typeof sourceCandidate !== 'function') continue;
+      const source = sourceCandidate.toString();
+      const sourceMaskedLink = source.includes('MASKED_LINK');
+      const sourceOnAuxClick = source.includes('onAuxClick');
+      if (!sourceMaskedLink || !sourceOnAuxClick) continue;
+      const callableCandidate = typeof candidate === 'function';
+      const markedComponent = !callableCandidate && candidate.$$typeof != null;
+      if (!callableCandidate && !markedComponent) continue;
+      return {
+        callableCandidate,
+        markedComponent,
+        sourceReadable: true,
+        sourceMaskedLink,
+        sourceOnAuxClick,
+        valid: true,
+        value: candidate,
+        error: null
+      };
+    } catch {}
+  }
+  return {
+    callableCandidate: false,
+    markedComponent: false,
+    sourceReadable: true,
+    sourceMaskedLink: false,
+    sourceOnAuxClick: false,
+    valid: false,
+    value: null,
+    error: null
+  };
+}
+
+function maskedLinkDescriptorShape(value) {
+  const candidates = [value];
+  if (value && (typeof value === 'object' || typeof value === 'function')) {
+    const descriptors = getOwnDescriptors(value).descriptors;
+    if (!descriptors) return false;
+    for (const key of Reflect.ownKeys(descriptors)) {
+      const descriptor = descriptors[key];
+      if (typeof key !== 'string'
+        || !descriptor?.enumerable
+        || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) continue;
+      candidates.push(descriptor.value);
+    }
+  }
+  for (const candidate of candidates) {
+    let sourceCandidate = candidate;
+    let validComponent = typeof candidate === 'function';
+    if (!validComponent && candidate && typeof candidate === 'object') {
+      const type = dataRead(candidate, 'type');
+      const marker = dataRead(candidate, '$$typeof');
+      sourceCandidate = type.ok ? type.value : null;
+      validComponent = marker.ok && marker.value != null;
+    }
+    if (!validComponent || typeof sourceCandidate !== 'function') continue;
+    const source = getFunctionSourceFlags(sourceCandidate, ['MASKED_LINK', 'onAuxClick']);
+    if (source.callable && source.readable && source.flags.every(Boolean)) return true;
+  }
+  return false;
+}
+
+function i18nProductionSelectionFilter(value) {
+  try {
+    return Object.values(value).some(candidate => candidate != null
+      && Object.getPrototypeOf(candidate)?.withFormatters != null);
+  } catch {
+    return false;
+  }
 }
 
 function hasBetterDiscordLazyEntryShape(value) {
@@ -582,8 +1018,6 @@ function exportPathsFor(value, module) {
 
 function summarizeSelected(value, selection = {}, summaryOptions = {}) {
   const fixedAlternatives = [
-    'defaultRenderLinkComponent',
-    'renderMaskedLinkComponent',
     'native-startingIndex-items-media-viewer',
     'native-numMediaItems-shouldHideMediaOptions',
     'native-MEDIA_VIEWER-OPEN_MODAL-backdropStyle',
@@ -710,7 +1144,9 @@ function coreModuleFilter(keys) {
 }
 
 function getStore(api, key) {
-  const stores = safeRead(api, 'Stores');
+  const webpack = safeRead(api, 'Webpack');
+  if (!webpack.ok) return { value: null, error: webpack.error || 'Webpack-unavailable' };
+  const stores = safeRead(webpack.value, 'Stores');
   if (!stores.ok) return { value: null, error: stores.error || 'Stores-unavailable' };
   const selected = safeRead(stores.value, key);
   return { value: selected.ok ? selected.value : null, error: selected.error };
@@ -883,6 +1319,18 @@ function getPlatformContract() {
   const pluginUpdates = safeReadPath(staticBdApiRead.value, ['PluginUpdates']);
   const scrollX = safeRead(windowObject, 'scrollX');
   const scrollY = safeRead(windowObject, 'scrollY');
+  const fsWriteFileSync = hasCallable(fsModule, 'writeFileSync').ok;
+  const fsUnlinkSync = hasCallable(fsModule, 'unlinkSync').ok;
+  const fsRenameSync = hasCallable(fsModule, 'renameSync').ok;
+  const fsWriteFile = hasCallable(fsModule, 'writeFile').ok;
+  const fsUnlink = hasCallable(fsModule, 'unlink').ok;
+  const fsRename = hasCallable(fsModule, 'rename').ok;
+  const fsPromisesWriteFile = hasCallable(fsPromises.value, 'writeFile').ok;
+  const fsPromisesUnlink = hasCallable(fsPromises.value, 'unlink').ok;
+  const fsPromisesRename = hasCallable(fsPromises.value, 'rename').ok;
+  const atomicSavePath = (fsWriteFileSync && fsUnlinkSync && fsRenameSync)
+    || (fsPromisesWriteFile && fsPromisesUnlink && (fsRenameSync || fsPromisesRename))
+    || (fsWriteFile && fsUnlink && (fsRenameSync || fsRename));
   const required = {
     'electron.shell.openExternal': hasCallable(electronShell.value, 'openExternal').ok,
     'electron.shell.openPath': hasCallable(electronShell.value, 'openPath').ok,
@@ -892,17 +1340,9 @@ function getPlatformContract() {
     'fs.readFileSync': hasCallable(fsModule, 'readFileSync').ok,
     'fs.readdirSync': hasCallable(fsModule, 'readdirSync').ok,
     'fs.realpathSync': hasCallable(fsModule, 'realpathSync').ok,
-    'fs.renameSync': hasCallable(fsModule, 'renameSync').ok,
     'fs.rmdirSync': hasCallable(fsModule, 'rmdirSync').ok,
     'fs.statSync': hasCallable(fsModule, 'statSync').ok,
-    'fs.unlinkSync': hasCallable(fsModule, 'unlinkSync').ok,
-    'fs.writeFileSync': hasCallable(fsModule, 'writeFileSync').ok,
-    'fs.writeFile': hasCallable(fsModule, 'writeFile').ok,
-    'fs.unlink': hasCallable(fsModule, 'unlink').ok,
-    'fs.rename': hasCallable(fsModule, 'rename').ok,
-    'fs.promises.writeFile': hasCallable(fsPromises.value, 'writeFile').ok,
-    'fs.promises.unlink': hasCallable(fsPromises.value, 'unlink').ok,
-    'fs.promises.rename': hasCallable(fsPromises.value, 'rename').ok,
+    'fs.atomicSavePath': atomicSavePath,
     'path.isAbsolute': hasCallable(pathModule, 'isAbsolute').ok,
     'path.join': hasCallable(pathModule, 'join').ok,
     'path.parse': hasCallable(pathModule, 'parse').ok,
@@ -957,7 +1397,16 @@ function getPlatformContract() {
     'BdApi.PluginUpdates.plugins': (() => {
       const plugins = safeRead(pluginUpdates.value, 'plugins');
       return plugins.ok && plugins.value !== null && typeof plugins.value === 'object';
-    })()
+    })(),
+    'fs.renameSync': fsRenameSync,
+    'fs.unlinkSync': fsUnlinkSync,
+    'fs.writeFileSync': fsWriteFileSync,
+    'fs.writeFile': fsWriteFile,
+    'fs.unlink': fsUnlink,
+    'fs.rename': fsRename,
+    'fs.promises.writeFile': fsPromisesWriteFile,
+    'fs.promises.unlink': fsPromisesUnlink,
+    'fs.promises.rename': fsPromisesRename
   };
   const validation = collectValidation(required);
   return {
@@ -1728,40 +2177,35 @@ async function describeOptionalLoadEntryTransition(api, options = {}, loadEntryA
   const loadEntryAvailable = loadEntryRead.ok && callable(loadEntryRead.value);
   const loadEntryRequested = options?.loadEntry === true;
   const beforeAssessment = assessTargets();
+  const before = beforeAssessment.booleans;
+  const beforeBothLoaded = before.nativeDocument && before.nativeAudio;
   let ownerFound = false;
   let ownerExactConsumerShape = false;
   let ownerLazyEntryShape = false;
   let ownerSelectionAvailable = true;
   const errors = [...beforeAssessment.errors];
   let ownerValue = null;
-  if (beforeAssessment.available) {
-    const filtersRead = safeRead(webpack, 'Filters');
-    const byPrototypeKeysRead = safeRead(filtersRead.value, 'byPrototypeKeys');
-    if (!byPrototypeKeysRead.ok || !callable(byPrototypeKeysRead.value)) {
-      ownerSelectionAvailable = false;
-      errors.push('MessageAccessories-filter-unavailable');
-    } else {
-      try {
-        const ownerFilter = byPrototypeKeysRead.value.call(filtersRead.value, 'renderEmbeds', 'renderAttachments');
-        const ownerSelection = selectionFromFilter(webpack, ownerFilter, { searchExports: true });
-        if (ownerSelection.error) {
-          ownerSelectionAvailable = false;
-          errors.push('MessageAccessories-selection-unavailable');
-        }
-        ownerValue = ownerSelection.value;
-        ownerFound = ownerValue != null;
-        ownerExactConsumerShape = ownerFound
-          && callable(ownerValue)
-          && dataPrototypeMethod(ownerValue, 'renderEmbeds').ok
-          && dataPrototypeMethod(ownerValue, 'renderAttachments').ok;
-        ownerLazyEntryShape = ownerFound && hasBetterDiscordLazyEntryShape(ownerValue);
-      } catch {
+  if (beforeAssessment.available && !beforeBothLoaded && loadEntryRequested && !loadEntryAttempted && loadEntryAvailable) {
+    const ownerPredicate = value => callable(value)
+      && dataPrototypeMethod(value, 'renderEmbeds').ok
+      && dataPrototypeMethod(value, 'renderAttachments').ok;
+    try {
+      const ownerSelection = selectionFromFilter(webpack, ownerPredicate, { searchExports: true });
+      if (ownerSelection.error) {
         ownerSelectionAvailable = false;
         errors.push('MessageAccessories-selection-unavailable');
       }
+      ownerValue = ownerSelection.value;
+      ownerFound = ownerValue != null;
+      ownerExactConsumerShape = ownerFound
+        && callable(ownerValue)
+        && dataPrototypeMethod(ownerValue, 'renderEmbeds').ok
+        && dataPrototypeMethod(ownerValue, 'renderAttachments').ok;
+      ownerLazyEntryShape = ownerFound && hasBetterDiscordLazyEntryShape(ownerValue);
+    } catch {
+      ownerSelectionAvailable = false;
+      errors.push('MessageAccessories-selection-unavailable');
     }
-  } else {
-    ownerSelectionAvailable = false;
   }
   const ownerValid = ownerFound && ownerExactConsumerShape && ownerLazyEntryShape;
   const owner = {
@@ -1769,8 +2213,6 @@ async function describeOptionalLoadEntryTransition(api, options = {}, loadEntryA
     exactConsumerShape: ownerExactConsumerShape,
     lazyEntryShape: ownerLazyEntryShape
   };
-  const before = beforeAssessment.booleans;
-  const beforeBothLoaded = before.nativeDocument && before.nativeAudio;
   let after = { nativeDocument: false, nativeAudio: false };
   let afterAssessmentAvailable = true;
   let attempted = false;
@@ -1782,8 +2224,6 @@ async function describeOptionalLoadEntryTransition(api, options = {}, loadEntryA
     afterAssessmentAvailable = false;
   } else if (beforeBothLoaded) {
     after = { ...before };
-    if (!loadEntryAvailable) errors.push('Utils.loadEntry-unavailable');
-    if (!ownerValid) errors.push('MessageAccessories-owner-unavailable-or-invalid');
   } else if (!loadEntryRequested) {
     outcome = 'load-entry-not-requested';
     after = { ...before };
@@ -1874,7 +2314,7 @@ async function describeOptionalLoadEntryTransition(api, options = {}, loadEntryA
   }, errors);
   let status = 'warn';
   if (!beforeAssessment.available || !afterAssessmentAvailable) status = 'fail';
-  else if ((beforeBothLoaded && loadEntryAvailable && ownerValid)
+  else if (beforeBothLoaded
     || (attempted && outcome === 'targets-observed-after-load-entry' && afterBothLoaded)) status = 'pass';
   return {
     status,
@@ -2067,7 +2507,7 @@ function resolveSemanticCssAuditAlternative(api, alternative) {
   let matchedCandidateCount = 0;
   let usableCandidateCount = 0;
   const seenCandidates = new Set();
-  const scanAvailable = typeof api?.getModule === 'function';
+  const scanAvailable = typeof api?.Webpack?.getModule === 'function';
   if (scanAvailable) {
     const findCandidate = (value, module, moduleId) => {
       const identity = cssCandidateIdentity(value, module, moduleId);
@@ -2270,12 +2710,6 @@ function semanticCssContracts() {
       ]
     },
     {
-      name: 'Css.TabBarClasses',
-      alternatives: [
-        { label: 'tab-bar', requestedKeys: ['tabBar'], consumerKeys: ['tabBar'] }
-      ]
-    },
-    {
       name: 'Css.DefaultColorClasses',
       alternatives: [
         { label: 'default-color', requestedKeys: ['defaultColor'], consumerKeys: ['defaultColor'] }
@@ -2300,27 +2734,9 @@ function semanticCssContracts() {
       ]
     },
     {
-      name: 'Css.ContentClasses',
-      alternatives: [
-        { label: 'content-margin-compact-indent', requestedKeys: ['content', 'marginCompactIndent'], consumerKeys: ['content'] }
-      ]
-    },
-    {
-      name: 'Css.ContainerCompactClasses',
-      alternatives: [
-        { label: 'container-compact-bounded', requestedKeys: ['container', 'containerCompactBounded'], consumerKeys: ['container'] }
-      ]
-    },
-    {
       name: 'Css.ErrorPageClasses',
       alternatives: [
         { label: 'error-page', requestedKeys: ['errorPage'], consumerKeys: ['errorPage'] }
-      ]
-    },
-    {
-      name: 'Css.TabItemClasses',
-      alternatives: [
-        { label: 'tab-item-selected-top-pill', requestedKeys: ['item', 'selected', 'topPill'], consumerKeys: ['item', 'selected', 'topPill'] }
       ]
     },
     {
@@ -2464,6 +2880,7 @@ function semanticCssContracts() {
 }
 
 function describeContract(api, contract) {
+  const required = contract.required !== false;
   let selectedResult;
   let selection = {};
   let selectionError = null;
@@ -2503,11 +2920,12 @@ function describeContract(api, contract) {
   if (selectionError) validation.errors.push(selectionError);
   validation.ok = validation.ok && !selectionError;
   const collectionError = matches.errors.length > 0;
-  let status = validation.ok ? 'pass' : 'fail';
-  if (collectionError) status = validation.ok ? 'warn' : 'fail';
+  let status = validation.ok ? 'pass' : required ? 'fail' : 'warn';
+  if (collectionError) status = validation.ok ? 'warn' : required ? 'fail' : 'warn';
   else if (status === 'pass' && matches.loadedMatchCount !== 1) status = 'warn';
   return {
     status,
+    required,
     expectedUniqueness: contract.expectedUniqueness,
     loadedMatchCount: matches.loadedMatchCount,
     loadedCandidates: matches.matches,
@@ -2529,8 +2947,6 @@ function moduleContracts() {
     summaryOptions: { includeOwnKeys: false },
     validate: value => collectValidation(Object.fromEntries(keys.map(key => [key, dataCallable(value, key).ok])))
   });
-  const channelActionsShape = value => dataCallable(value, 'deleteChannel').ok
-    && (dataCallable(value, 'updateChannel').ok || dataCallable(value, 'selectChannel').ok);
   const messageStoreShape = value => ['getMessage', 'getMessages', 'getLastEditableMessage']
     .every(key => dataCallable(value, key).ok);
   const muteModuleShape = value => dataCallable(value, 'isChannelMuted').ok
@@ -2557,9 +2973,9 @@ function moduleContracts() {
   const timestampUtilsShape = value => callable(value)
     && (timestampPrimaryShape(value) || timestampFallbackShape(value));
   const nativeMediaModalAlternatives = [
-    { searches: ['startingIndex', 'items', 'Media Viewer Modal'], marker: 'startingIndex', label: 'native-startingIndex-items-media-viewer' },
-    { searches: ['numMediaItems', 'shouldHideMediaOptions'], marker: 'numMediaItems', label: 'native-numMediaItems-shouldHideMediaOptions' },
-    { searches: ['MEDIA_VIEWER', 'OPEN_MODAL', 'backdropStyle'], marker: 'MEDIA_VIEWER', label: 'native-MEDIA_VIEWER-OPEN_MODAL-backdropStyle' }
+    { searches: ['startingIndex', 'items', 'Media Viewer Modal'], label: 'native-startingIndex-items-media-viewer' },
+    { searches: ['numMediaItems', 'shouldHideMediaOptions'], label: 'native-numMediaItems-shouldHideMediaOptions' },
+    { searches: ['MEDIA_VIEWER', 'OPEN_MODAL', 'backdropStyle'], label: 'native-MEDIA_VIEWER-OPEN_MODAL-backdropStyle' }
   ];
   const imageModalAlternatives = [
     { searches: ['zoomThumbnailPlaceholder'], marker: 'zoomThumbnailPlaceholder', label: 'image-zoomThumbnailPlaceholder' },
@@ -2588,20 +3004,17 @@ function moduleContracts() {
     return { value: null, selection: {}, error: lastError };
   };
   const imageModalValidation = value => {
-    const checks = imageModalAlternatives.map(alternative => getMediaExportMapChecks(value, alternative.marker));
-    const winning = checks.some(check => check.sourceMatchedCallableCount === 1
-      && check.sourceReadFailures === 0
-      && !check.error);
-    const sourceReadComplete = checks.every(check => check.sourceReadFailures === 0 && !check.error);
+    const checks = imageModalAlternatives.map(alternative => getImageModalProductionChecks(value, alternative.marker));
+    const winning = checks.some(check => check.matched);
+    const sourceReadComplete = checks.every(check => check.sourceReadComplete);
     return collectValidation({
       exactlyOneWinningCallable: winning,
       sourceReadComplete
-    }, checks.flatMap(check => [check.error, check.sourceReadFailures ? 'callable-source-read-failed' : null].filter(Boolean)));
+    }, checks.map(check => check.error).filter(Boolean));
   };
   const trashIconValidation = value => {
-    const checks = getTrashResolverChecks(value);
-    const validation = collectValidation({ resolverShape: checks.resolverShape },
-      [checks.error, checks.sourceReadFailures ? 'callable-source-read-failed' : null].filter(Boolean));
+    const checks = getTrashProductionResolverChecks(value);
+    const validation = collectValidation({ resolverShape: checks.resolverShape }, [checks.error].filter(Boolean));
     validation.booleans.directCallable = checks.directCallable;
     validation.booleans.defaultCallable = checks.defaultCallable;
     validation.booleans.singleCallableEnumerableExport = checks.singleCallableEnumerableExport;
@@ -2736,7 +3149,7 @@ function moduleContracts() {
       summaryOptions: { includeOwnKeys: false },
       validate: value => collectValidation({
         selectedObject: value != null && (typeof value === 'object' || typeof value === 'function'),
-        locale: dataPresent(value, 'locale').ok
+        locale: hasPresent(value, 'locale').ok
       })
     },
     store('GuildStore', ['getGuild'], api => getStore(api, 'GuildStore')),
@@ -2752,20 +3165,6 @@ function moduleContracts() {
       match: coreModuleFilter(['isBlocked']),
       summaryOptions: { includeOwnKeys: false },
       validate: value => collectValidation({ isBlocked: dataCallable(value, 'isBlocked').ok })
-    },
-    {
-      name: 'ChannelActions',
-      expectedUniqueness: 'single channel action module with either update or select',
-      select: api => {
-        const primary = callWebpackMethod(api, 'getByKeys', ['deleteChannel', 'updateChannel']);
-        if (primary.value != null || primary.error === 'Webpack.getByKeys-threw') return primary;
-        return callWebpackMethod(api, 'getByKeys', ['deleteChannel', 'selectChannel']);
-      },
-      match: channelActionsShape,
-      validate: value => collectValidation({
-        deleteChannel: dataCallable(value, 'deleteChannel').ok,
-        'updateChannel-or-selectChannel': dataCallable(value, 'updateChannel').ok || dataCallable(value, 'selectChannel').ok
-      })
     },
     {
       name: 'ManaModal',
@@ -2790,7 +3189,7 @@ function moduleContracts() {
       select: api => {
         const module = callWebpackMethod(api, 'getByKeys', ['ConfirmModal']);
         if (module.value == null) return module;
-        const selected = dataRead(module.value, 'ConfirmModal');
+        const selected = safeRead(module.value, 'ConfirmModal');
         return {
           value: selected.ok ? selected.value : null,
           error: selected.ok ? null : selected.error
@@ -2801,6 +3200,7 @@ function moduleContracts() {
     },
     {
       name: 'ManaModalSize',
+      required: false,
       expectedUniqueness: 'single module with all Mana modal sizes',
       select: api => callWebpackMethod(api, 'getByKeys', ['SMALL', 'MEDIUM', 'LARGE', 'DYNAMIC', { searchExports: true }]),
       matchOptions: { searchExports: true },
@@ -2813,66 +3213,62 @@ function moduleContracts() {
       })
     },
     {
-      name: 'ImageModalRenderLinkCandidate',
-      expectedUniqueness: 'single callable render-link repair candidate',
+      name: 'MaskedLink',
+      required: false,
+      expectedUniqueness: 'single masked link component',
       select: api => {
-        const primaryModule = callWebpackMethod(api, 'getByKeys', ['defaultRenderLinkComponent']);
-        if (primaryModule.value != null) {
-          const primary = dataRead(primaryModule.value, 'defaultRenderLinkComponent');
-          if (primary.ok && primary.value != null) {
-            return {
-              value: primary.value,
-              selection: { semanticAlternative: 'defaultRenderLinkComponent' },
-              error: null
-            };
-          }
-        }
-        const fallbackModule = callWebpackMethod(api, 'getByKeys', ['renderMaskedLinkComponent']);
-        if (fallbackModule.value == null) return fallbackModule;
-        const fallback = dataRead(fallbackModule.value, 'renderMaskedLinkComponent');
+        const selected = callWebpackMethod(api, 'getBySource', ['MASKED_LINK', 'onAuxClick', { searchExports: true }]);
+        if (selected.value == null) return selected;
+        const checks = getMaskedLinkProductionChecks(selected.value);
         return {
-          value: fallback.ok ? fallback.value : null,
-          selection: fallback.ok ? { semanticAlternative: 'renderMaskedLinkComponent' } : {},
-          error: fallback.ok ? null : fallback.error
+          value: checks.value,
+          selection: {},
+          error: checks.error
         };
       },
-      match: value => dataCallable(value, 'defaultRenderLinkComponent').ok
-        || dataCallable(value, 'renderMaskedLinkComponent').ok,
-      validate: value => collectValidation({ callable: callable(value) })
+      rootMatch: true,
+      match: maskedLinkDescriptorShape,
+      summaryOptions: { includeOwnKeys: false },
+      validate: value => {
+        const checks = getMaskedLinkProductionChecks(value);
+        return collectValidation({
+          selectedOuterComponent: checks.callableCandidate || checks.markedComponent,
+          sourceReadable: checks.sourceReadable,
+          'source.MASKED_LINK': checks.sourceMaskedLink,
+          'source.onAuxClick': checks.sourceOnAuxClick
+        }, [checks.error].filter(Boolean));
+      }
     },
     {
       name: 'NativeMediaModal',
+      required: false,
       expectedUniqueness: 'single native media modal export map',
-      select: api => selectSourceMapAlternative(api, nativeMediaModalAlternatives, (value, alternative) => {
-        const checks = getMediaExportMapChecks(value, alternative.marker);
+      select: api => selectSourceMapAlternative(api, nativeMediaModalAlternatives, value => {
+        const checks = getNativeMediaModalProductionChecks(value);
         return {
-          valid: checks.sourceMatchedCallableCount === 1
-            && checks.nonemptyStringExportCount > 0
-            && checks.sourceReadFailures === 0
-            && !checks.error
+          valid: checks.valid
         };
       }),
       rootMatch: true,
       match: nativeMediaModalShape,
       summaryOptions: { includeOwnKeys: false },
       validate: value => {
-        const checks = getMediaExportAlternativeChecks(value, nativeMediaModalAlternatives);
+        const checks = getNativeMediaModalProductionChecks(value);
         return collectValidation({
-          exactlyOneSupportedAlternativeCallable: checks.sourceMatchedCallableCount === 1,
-          nonemptyStringModalKey: checks.nonemptyStringExportCount > 0,
-          sourceReadComplete: checks.sourceReadFailures === 0
-        }, [checks.error, checks.sourceReadFailures ? 'callable-source-read-failed' : null].filter(Boolean));
+          startingIndexCallable: checks.startingIndexCallable,
+          nonemptyStringModalKey: checks.nonemptyStringModalKey,
+          sourceReadComplete: checks.sourceReadComplete
+        }, [checks.error].filter(Boolean));
       }
     },
     {
       name: 'ImageModal',
+      required: false,
       expectedUniqueness: 'single image modal export map',
       select: api => selectSourceMapAlternative(api, imageModalAlternatives, (value, alternative) => {
-        const checks = getMediaExportMapChecks(value, alternative.marker);
+        const checks = getImageModalProductionChecks(value, alternative.marker);
         return {
-          valid: checks.sourceMatchedCallableCount === 1
-            && checks.sourceReadFailures === 0
-            && !checks.error
+          valid: checks.matched
         };
       }),
       rootMatch: true,
@@ -2882,6 +3278,7 @@ function moduleContracts() {
     },
     {
       name: 'TrashIconPrimary',
+      required: false,
       expectedUniqueness: 'single primary native trash icon source export',
       select: api => callWebpackMethod(api, 'getBySource', [trashIconPrimarySearch, { searchExports: true }]),
       rootMatch: true,
@@ -2891,6 +3288,7 @@ function moduleContracts() {
     },
     {
       name: 'TrashIconFallback',
+      required: false,
       expectedUniqueness: 'single fallback native trash icon source export',
       select: api => callWebpackMethod(api, 'getBySource', [trashIconFallbackSearch, { searchExports: true }]),
       rootMatch: true,
@@ -2900,6 +3298,7 @@ function moduleContracts() {
     },
     {
       name: 'NativeDocumentMessageClass',
+      required: false,
       expectedUniqueness: 'single native document message class',
       select: api => selectionFromFilter(api.Webpack, nativeDocumentMessageClassShape, { searchExports: true }),
       matchOptions: { searchExports: true },
@@ -2912,6 +3311,7 @@ function moduleContracts() {
     },
     {
       name: 'NativeAudioPlayer',
+      required: false,
       expectedUniqueness: 'single native audio player class',
       select: api => selectionFromFilter(api.Webpack, nativeAudioPlayerShape, { searchExports: true }),
       matchOptions: { searchExports: true },
@@ -2926,16 +3326,17 @@ function moduleContracts() {
     },
     {
       name: 'ForumUploadAsReplyRouteModule',
+      required: false,
       expectedUniqueness: 'single forum upload route module with one source-matched export',
-      select: api => selectionFromFilter(api.Webpack, forumUploadRouteShape, { searchExports: false }),
+      select: api => selectionFromFilter(api.Webpack, forumUploadProductionSelectionFilter, { searchExports: false }),
       rootMatch: true,
       match: forumUploadRouteShape,
       validate: value => {
-        const checks = getOwnEnumerableCallableExportChecks(value, forumUploadRouteMarkers);
+        const checks = getForumUploadProductionChecks(value, forumUploadRouteMarkers);
         return collectValidation({
-          exactlyOneSourceMatchedCallable: checks.sourceMatchedCallableCount === 1,
-          sourceReadComplete: checks.sourceReadFailures === 0
-        }, [checks.error, checks.sourceReadFailures ? 'callable-source-read-failed' : null].filter(Boolean));
+          exactlyOneSourceMatchedCallable: checks.exactlyOneSourceMatchedCallable,
+          sourceReadComplete: checks.sourceReadComplete
+        }, [checks.error].filter(Boolean));
       }
     },
     {
@@ -2964,6 +3365,7 @@ function moduleContracts() {
     },
     {
       name: 'Parser',
+      required: false,
       expectedUniqueness: 'single parser module',
       select: api => callWebpackMethod(api, 'getByKeys', ['parse', 'astParserFor']),
       match: coreModuleFilter(['parse', 'astParserFor']),
@@ -2974,13 +3376,11 @@ function moduleContracts() {
     },
     {
       name: 'ParserNew',
+      required: false,
       expectedUniqueness: 'single parser module with default rules',
       select: api => callWebpackMethod(api, 'getByKeys', ['defaultRules', 'parse']),
       match: value => dataPresent(value, 'defaultRules').ok && dataCallable(value, 'parse').ok,
-      validate: value => collectValidation({
-        defaultRules: dataPresent(value, 'defaultRules').ok,
-        parse: dataCallable(value, 'parse').ok
-      })
+      validate: value => collectValidation({ parse: hasCallable(value, 'parse').ok })
     },
     {
       name: 'GuildUtils',
@@ -3025,11 +3425,21 @@ function moduleContracts() {
     },
     {
       name: 'SystemLocaleUtils',
+      required: false,
       expectedUniqueness: 'single system locale utility module',
       select: api => callWebpackMethod(api, 'getByKeys', ['getSystemLocale', { searchExports: true }]),
       matchOptions: { searchExports: true },
       match: coreModuleFilter(['getSystemLocale']),
-      validate: value => collectValidation({ getSystemLocale: dataCallable(value, 'getSystemLocale').ok })
+      validate: value => {
+        const selectedCallable = callable(value);
+        const selectedMethod = hasCallable(value, 'getSystemLocale').ok;
+        const validation = collectValidation({
+          selectedCallableOrGetSystemLocale: selectedCallable || selectedMethod
+        });
+        validation.booleans.selectedCallable = selectedCallable;
+        validation.booleans.getSystemLocale = selectedMethod;
+        return validation;
+      }
     },
     {
       name: 'RenderUserPopout',
@@ -3048,21 +3458,23 @@ function moduleContracts() {
     },
     {
       name: 'MessageContentComponent',
+      required: false,
       expectedUniqueness: 'single command-aware message content component',
-      select: api => selectionFromFilter(api.Webpack, value => messageContentShape(value)),
+      select: api => selectionFromFilter(api.Webpack, messageContentProductionSelectionFilter),
       match: messageContentShape,
       validate: value => {
-        const source = getDataPropertyFunctionSourceFlags(value, 'type', messageContentMarkers);
+        const source = getMessageContentProductionChecks(value);
         return collectValidation({
           'type.callable': source.callable,
           'type.sourceReadable': source.readable,
-          'type.source.isCommandType': source.flags[0],
-          'type.source.notFirstMessageInForumPost': !source.flags[1]
+          'type.source.isCommandType': source.isCommandType,
+          'type.source.notFirstMessageInForumPost': source.notFirstMessageInForumPost
         });
       }
     },
     {
       name: 'MessageAccessories',
+      required: false,
       expectedUniqueness: 'single message accessories class with embed and attachment renderers',
       select: api => selectionFromFilter(api.Webpack, value => callable(value)
         && dataPrototypeMethod(value, 'renderEmbeds').ok
@@ -3083,19 +3495,17 @@ function moduleContracts() {
     },
     {
       name: 'TextModule',
+      required: false,
       expectedUniqueness: 'single source-matched text export map with callable candidate',
       select: api => callWebpackMethod(api, 'getBySource', ['case"always-white"', { searchExports: true }]),
       rootMatch: true,
       match: textModuleShape,
       validate: value => {
-        const checks = getOwnCallableExportChecks(value);
-        const firstExport = getFirstOwnEnumerableDataExport(value);
+        const checks = getTextProductionChecks(value);
         return collectValidation({
-          boundedOwnDataExports: checks.boundedOwnDataExportCount > 0,
-          callableExportCandidate: checks.callableExportCount > 0,
-          firstEnumerableDataExportPresent: firstExport.present,
-          firstEnumerableDataExportCallable: firstExport.callable
-        }, [checks.error, firstExport.error].filter(Boolean));
+          firstEnumerableValuePresent: checks.firstEnumerableValuePresent,
+          firstEnumerableValueCallable: checks.firstEnumerableValueCallable
+        }, [checks.error].filter(Boolean));
       }
     },
     {
@@ -3105,11 +3515,11 @@ function moduleContracts() {
       rootMatch: true,
       match: userContextMenuShape,
       validate: value => {
-        const checks = getOwnEnumerableCallableExportChecks(value, userContextMenuMarkers);
+        const checks = getUserContextProductionChecks(value);
         return collectValidation({
-          exactlyOneCallableExport: checks.sourceMatchedCallableCount === 1,
-          sourceReadComplete: checks.sourceReadFailures === 0
-        }, [checks.error, checks.sourceReadFailures ? 'callable-source-read-failed' : null].filter(Boolean));
+          selectedCallableExport: checks.selectedCallableExport,
+          sourceReadComplete: checks.sourceReadComplete
+        }, [checks.error].filter(Boolean));
       }
     },
     {
@@ -3158,16 +3568,6 @@ function moduleContracts() {
       })
     },
     {
-      name: 'Endpoints',
-      expectedUniqueness: 'single endpoints/action types module',
-      select: api => callWebpackMethod(api, 'getByKeys', ['Endpoints', 'ActionTypes']),
-      match: value => dataPresent(value, 'Endpoints').ok && dataPresent(value, 'ActionTypes').ok,
-      validate: value => collectValidation({
-        Endpoints: dataPresent(value, 'Endpoints').ok,
-        ActionTypes: dataPresent(value, 'ActionTypes').ok
-      })
-    },
-    {
       name: 'Dispatcher',
       expectedUniqueness: 'single UserStore dispatcher',
       select: api => {
@@ -3190,14 +3590,8 @@ function moduleContracts() {
       },
       match: modalActionsShape,
       validate: value => {
-        const store = dataRead(value, 'useModalsStore');
-        return collectValidation({
-          openModal: dataCallable(value, 'openModal').ok,
-          hasModalOpen: dataCallable(value, 'hasModalOpen').ok,
-          closeModal: dataCallable(value, 'closeModal').ok,
-          useModalsStore: store.ok && store.value != null,
-          'useModalsStore.subscribe': dataCallable(store.value, 'subscribe').ok
-        });
+        const checks = getModalActionsProductionChecks(value);
+        return collectValidation(checks.booleans, checks.errors);
       }
     },
     {
@@ -3231,51 +3625,24 @@ function moduleContracts() {
         return checks.sourceMatchedCallableExports === 1 && checks.sourceMatchedPrototypeGetSrc === 1;
       },
       validate: value => {
-        const checks = getGetSrcCallableExportChecks(value);
+        const checks = getGetSrcProductionChecks(value);
         return collectValidation({
-          'sourceMetadata:': checks.sourceMetadataMatches === 1,
-          getSrc: checks.getSrcMatches === 1,
-          exactlyOneSourceMatchedCallable: checks.sourceMatchedCallableExports === 1,
-          sourceMatchedCallablePrototypeGetSrc: checks.sourceMatchedPrototypeGetSrc === 1,
-          sourceReadComplete: checks.sourceReadFailures === 0
-        }, [checks.error, checks.sourceReadFailures ? 'callable-source-read-failed' : null].filter(Boolean));
+          'sourceMetadata:': checks.selectedSourceMetadata,
+          getSrc: checks.selectedGetSrc,
+          selectedSourceCallable: checks.selectedSourceCallable,
+          selectedSourcePrototypeGetSrc: checks.selectedPrototypeGetSrcCallable,
+          sourceReadComplete: checks.sourceReadComplete
+        }, [checks.error].filter(Boolean));
       }
     },
     {
       name: 'I18nModule',
       expectedUniqueness: 'single internationalization module',
-      select: api => {
-        const filter = value => {
-          const descriptors = getOwnDescriptors(value).descriptors;
-          if (!descriptors) return false;
-          return Reflect.ownKeys(descriptors).some(key => {
-            const descriptor = descriptors[key];
-            if (!Object.prototype.hasOwnProperty.call(descriptor, 'value') || descriptor.value == null) return false;
-            return hasDataPrototypeWithFormatters(descriptor.value).ok;
-          });
-        };
-        return selectionFromFilter(api.Webpack, filter);
-      },
+      select: api => selectionFromFilter(api.Webpack, i18nProductionSelectionFilter),
       match: i18nShape,
       validate: value => {
-        const descriptors = getOwnDescriptors(value).descriptors;
-        let withFormatters = false;
-        if (descriptors) {
-          withFormatters = Reflect.ownKeys(descriptors).some(key => {
-            const descriptor = descriptors[key];
-            if (!Object.prototype.hasOwnProperty.call(descriptor, 'value') || descriptor.value == null) return false;
-            return hasPrototypeWithFormatters(descriptor.value).ok;
-          });
-        }
-        const intlFormat = dataReadPath(value, ['intl', 'format']);
-        const translation = dataRead(value, 't');
-        const translationMarker = dataRead(translation.value, 'C8sXIM');
-        return collectValidation({
-          'prototype.withFormatters': withFormatters,
-          'intl.format': intlFormat.ok && callable(intlFormat.value),
-          t: translation.ok && translation.value != null,
-          't.C8sXIM': translationMarker.ok && translationMarker.value != null
-        }, descriptors ? [] : ['own-descriptors-unavailable']);
+        const checks = getI18nProductionChecks(value);
+        return collectValidation(checks.booleans, checks.errors);
       }
     }
   ];

@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const Module = require('node:module');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
@@ -11,6 +12,103 @@ test('runtime audit uses BetterDiscord-compatible builtin module specifiers', ()
   assert.doesNotMatch(helperSource, /require\(['"]node:/);
   assert.match(helperSource, /require\('fs'\)/);
   assert.match(helperSource, /require\('path'\)/);
+});
+
+test('PlatformCapabilities accepts callback atomic-save fallback without promise fs APIs', async () => {
+  const savedGlobals = saveGlobals(['BdApi', 'document', 'window']);
+  const cachedHelper = require.cache[helperPath];
+  const pluginFolder = fs.mkdtempSync(path.join(os.tmpdir(), 'ml2-platform-audit-'));
+  const realFs = fs;
+  const fallbackFs = Object.create(realFs);
+  Object.defineProperties(fallbackFs, {
+    promises: { configurable: true, value: {} },
+    writeFileSync: { configurable: true, value: undefined },
+    unlinkSync: { configurable: true, value: undefined },
+    rename: { configurable: true, value: undefined }
+  });
+  const originalLoad = Module._load;
+  Module._load = function(request, parent, isMain) {
+    if (request === 'fs') return fallbackFs;
+    if (request === 'electron') return { shell: { openExternal() {}, openPath() {} } };
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  const documentObject = createDocumentMock();
+  const webpack = buildWebpackMock({}, { id: 2, exports: {} });
+  const addon = {
+    instance: {
+      tools: {
+        renderLinkComponent() {
+          return { type: function ValidType() {} };
+        }
+      }
+    }
+  };
+  const api = {
+    Plugins: {
+      folder: pluginFolder,
+      isEnabled() { return true; },
+      get(name) { return name === 'MessageLoggerV2' ? addon : null; }
+    },
+    Webpack: webpack,
+    UI: {},
+    React: {},
+    ReactDOM: {},
+    ReactUtils: {},
+    Components: {},
+    Patcher: {},
+    ContextMenu: {},
+    Utils: {},
+    DOM: {},
+    Hooks: {},
+    Logger: {}
+  };
+  class MockBdApi {
+    constructor() {
+      return api;
+    }
+  }
+  const Url = function URL() {};
+  Url.createObjectURL = () => '';
+  Url.revokeObjectURL = () => {};
+  globalThis.BdApi = MockBdApi;
+  globalThis.document = documentObject;
+  globalThis.window = {
+    document: documentObject,
+    scrollX: 0,
+    scrollY: 0,
+    DiscordNative: { clipboard: { copy() {} }, app: {} },
+    Node: { TEXT_NODE: 3 },
+    URL: Url,
+    MutationObserver: function MutationObserver() {},
+    requestAnimationFrame() {},
+    fetch() {},
+    console,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    addEventListener() {},
+    removeEventListener() {}
+  };
+
+  try {
+    delete require.cache[helperPath];
+    const Audit = require(helperPath);
+    const report = await new Audit().buildReport('platform-fallback', { loadEntry: false, externalAssets: false });
+    const platform = report.contracts.find(({ name }) => name === 'PlatformCapabilities');
+    assert.equal(platform?.status, 'pass');
+    assert.equal(platform?.validation?.booleans?.['fs.atomicSavePath'], true);
+    for (const key of ['fs.promises.writeFile', 'fs.promises.unlink', 'fs.promises.rename']) {
+      assert.equal(Object.hasOwn(platform.validation.booleans, key), false);
+      assert.equal(platform.optionalAvailability[key], false);
+    }
+  } finally {
+    Module._load = originalLoad;
+    delete require.cache[helperPath];
+    if (cachedHelper) require.cache[helperPath] = cachedHelper;
+    restoreGlobals(savedGlobals);
+    fs.rmSync(pluginFolder, { recursive: true, force: true });
+  }
 });
 
 function buildWebpackMock(candidate, moduleRecord, hooks = {}) {
@@ -123,7 +221,8 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
   });
   const moduleRecord = { id: 'secret-module-id', exports: candidate };
   const documentObject = createDocumentMock();
-  const webpackHooks = { throwGetModuleCount: 2 };
+  const webpackHooks = {};
+  let selectedAccessorReads = 0;
   const addon = {
     instance: {
       tools: {
@@ -139,6 +238,253 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     get(name) { return name === 'MessageLoggerV2' ? addon : null; }
   };
   const webpack = buildWebpackMock(candidate, moduleRecord, webpackHooks);
+  const imageModalModule = {};
+  Object.defineProperty(imageModalModule, 'imageExport', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return function ImageModalExport() {
+        return 'zoomThumbnailPlaceholder';
+      };
+    }
+  });
+  const trashPrimaryModule = {};
+  Object.defineProperty(trashPrimaryModule, 'default', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return function TrashPrimaryExport() {};
+    }
+  });
+  const trashFallbackModule = {};
+  Object.defineProperty(trashFallbackModule, 'iconExport', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return function TrashFallbackExport() {};
+    }
+  });
+  const textModule = {};
+  Object.defineProperty(textModule, 'textExport', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return function TextExport() {};
+    }
+  });
+  const userContextMenuModule = {};
+  Object.defineProperty(userContextMenuModule, 'contextExport', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return function UserContextExport() {
+        return 'isGroupDM targetIsUser';
+      };
+    }
+  });
+  userContextMenuModule.additionalContextExport = function AdditionalContextExport() {
+    return 'isGroupDM targetIsUser';
+  };
+  function GetSrcExport() {
+    return 'sourceMetadata: getSrc';
+  }
+  GetSrcExport.prototype.getSrc = function getSrc() {};
+  function AdditionalGetSrcExport() {
+    return 'sourceMetadata: getSrc';
+  }
+  AdditionalGetSrcExport.prototype.getSrc = function getSrc() {};
+  const getSrcModule = {};
+  Object.defineProperty(getSrcModule, 'getSrcExport', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return GetSrcExport;
+    }
+  });
+  getSrcModule.additionalGetSrcExport = AdditionalGetSrcExport;
+  const i18nFormatter = Object.create({ withFormatters: true });
+  const i18nModule = { formatter: i18nFormatter };
+  Object.defineProperty(i18nModule, 'intl', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return { format() {} };
+    }
+  });
+  const translations = {};
+  Object.defineProperty(translations, 'C8sXIM', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return 'edited';
+    }
+  });
+  Object.defineProperty(i18nModule, 't', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return translations;
+    }
+  });
+  const messageContentComponent = {};
+  Object.defineProperty(messageContentComponent, 'type', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return function MessageContentType() {
+        return '.isCommandType()';
+      };
+    }
+  });
+  const forumUploadModule = {};
+  Object.defineProperty(forumUploadModule, 'routeExport', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return function ForumUploadRouteExport() {
+        return 'castChannelIdAsMessageId .isForumPost() .ownerId .getCount(';
+      };
+    }
+  });
+  function NativeMaskedLink() {
+    return 'MASKED_LINK onAuxClick';
+  }
+  const memoComponent = {
+    $$typeof: Symbol.for('react.memo'),
+    type: NativeMaskedLink
+  };
+  const maskedLinkModule = {};
+  Object.defineProperty(maskedLinkModule, 'A', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return memoComponent;
+    }
+  });
+  const originalGetBySource = webpack.getBySource;
+  webpack.getBySource = function(...args) {
+    if (args[0] === 'zoomThumbnailPlaceholder' && args[1]?.searchExports === false) return imageModalModule;
+    if (args[0] === '2.81h8.36a3' && args[1]?.searchExports === true) return trashPrimaryModule;
+    if (args[0] instanceof RegExp) return trashFallbackModule;
+    if (args[0] === 'case"always-white"' && args[1]?.searchExports === true) return textModule;
+    if (args[0] === 'isGroupDM' && args[1] === 'moderationAlertId' && args[2]?.searchExports === true) return userContextMenuModule;
+    if (args[0] === 'sourceMetadata:' && args[1] === 'getSrc' && args[2]?.searchExports === true) return getSrcModule;
+    if (args[0] === 'MASKED_LINK' && args[1] === 'onAuxClick' && args[2]?.searchExports === true) return maskedLinkModule;
+    return originalGetBySource(...args);
+  };
+  const originalGetModule = webpack.getModule;
+  let forumUploadSelectionHandled = false;
+  let messageContentSelectionHandled = false;
+  let i18nSelectionHandled = false;
+  webpack.getModule = function(filter, options) {
+    if (!forumUploadSelectionHandled && options?.searchExports === false) {
+      try {
+        if (filter(forumUploadModule, { exports: forumUploadModule }, 'forum-upload-module-id')) {
+          forumUploadSelectionHandled = true;
+          return forumUploadModule;
+        }
+      } catch {}
+    }
+    if (!i18nSelectionHandled && (!options || options.searchExports === undefined)) {
+      try {
+        if (!messageContentSelectionHandled
+          && filter(messageContentComponent, { exports: messageContentComponent }, 'message-content-module-id')) {
+          messageContentSelectionHandled = true;
+          return messageContentComponent;
+        }
+        if (filter(i18nModule, { exports: i18nModule }, 'i18n-module-id')) {
+          i18nSelectionHandled = true;
+          return i18nModule;
+        }
+      } catch {}
+    }
+    return originalGetModule.call(this, filter, options);
+  };
+  webpack.Stores.UserStore = {
+    getCurrentUser() { return null; },
+    getUser() { return null; },
+    getUsers() { return []; }
+  };
+  const localeStore = {};
+  Object.defineProperty(localeStore, 'locale', {
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return 'en-US';
+    }
+  });
+  webpack.Stores.LocaleStore = localeStore;
+  const confirmModule = {};
+  Object.defineProperty(confirmModule, 'ConfirmModal', {
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return function ConfirmModal() {};
+    }
+  });
+  const parserNew = {};
+  Object.defineProperty(parserNew, 'parse', {
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return function parse() {};
+    }
+  });
+  const systemLocaleUtils = {};
+  Object.defineProperty(systemLocaleUtils, 'getSystemLocale', {
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return function getSystemLocale() { return 'en-US'; };
+    }
+  });
+  const modalStore = {};
+  Object.defineProperty(modalStore, 'subscribe', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return function subscribe() {};
+    }
+  });
+  const modalActionsModule = {};
+  for (const key of ['openModal', 'hasModalOpen', 'closeModal']) {
+    Object.defineProperty(modalActionsModule, key, {
+      configurable: true,
+      enumerable: true,
+      get() {
+        selectedAccessorReads += 1;
+        return function modalAction() {};
+      }
+    });
+  }
+  Object.defineProperty(modalActionsModule, 'useModalsStore', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedAccessorReads += 1;
+      return modalStore;
+    }
+  });
+  webpack.getByKeys = function(...args) {
+    if (args[0] === 'ConfirmModal') return confirmModule;
+    if (args[0] === 'defaultRules' && args[1] === 'parse') return parserNew;
+    if (args[0] === 'getSystemLocale') return systemLocaleUtils;
+    if (args[0] === 'openModal' && args[1] === 'hasModalOpen') return modalActionsModule;
+    return null;
+  };
   const api = {
     Plugins: plugins,
     Webpack: webpack,
@@ -180,14 +526,63 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     const report = await audit.buildReport('https://audit.invalid/?token=secret-label-value', { loadEntry: false, externalAssets: false });
     const serialized = JSON.stringify(report);
     const integration = report.contracts.find(({ name }) => name === 'LoggerIntegration.RenderLinkComponent');
+    const maskedLink = report.contracts.find(({ name }) => name === 'MaskedLink');
+    const transition = report.contracts.find(({ name }) => name === 'Webpack.OptionalLoadEntryTransition');
+    const optionalInvalid = report.contracts.find(({ name }) => name === 'NativeMediaModal');
+    const requiredInvalid = report.contracts.find(({ name }) => name === 'RenderUserPopout');
     const assets = report.contracts.find(({ name }) => name === 'Assets.FixedRenderer');
+    const userStore = report.contracts.find(({ name }) => name === 'UserStore');
+    const clickable = report.contracts.find(({ name }) => name === 'Css.ClickableClasses');
+    const localeStoreContract = report.contracts.find(({ name }) => name === 'LocaleStore');
+    const manaConfirmModal = report.contracts.find(({ name }) => name === 'ManaConfirmModal');
+    const parserNewContract = report.contracts.find(({ name }) => name === 'ParserNew');
+    const systemLocaleContract = report.contracts.find(({ name }) => name === 'SystemLocaleUtils');
+    const modalActionsContract = report.contracts.find(({ name }) => name === 'ModalActions');
+    const i18nContract = report.contracts.find(({ name }) => name === 'I18nModule');
+    const messageContentContract = report.contracts.find(({ name }) => name === 'MessageContentComponent');
+    const forumUploadContract = report.contracts.find(({ name }) => name === 'ForumUploadAsReplyRouteModule');
     const reportPath = path.join(pluginFolder, 'MessageLoggerRuntimeCompatibilityAudit-report.json');
 
-    assert.equal(report.totals.total, 95);
+    assert.equal(report.totals.total, 89);
     assert.equal(report.label, 'custom');
     assert.deepEqual(report.options, { loadEntry: false, externalAssets: false });
     assert.equal(integration?.status, 'pass');
+    assert.equal(maskedLink?.validation?.ok, true);
+    assert.equal(maskedLink?.selected?.type, 'object');
+    assert.equal(transition?.outcome, 'load-entry-not-requested');
+    assert.equal(transition?.validation?.booleans?.targetAssessmentAvailable, true);
+    assert.equal(transition?.owner?.found, false);
+    assert.equal(optionalInvalid?.required, false);
+    assert.equal(optionalInvalid?.validation?.ok, false);
+    assert.equal(optionalInvalid?.status, 'warn');
+    assert.equal(requiredInvalid?.required, true);
+    assert.equal(requiredInvalid?.validation?.ok, false);
+    assert.equal(requiredInvalid?.status, 'fail');
     assert.equal(assets?.status, 'pass');
+    assert.equal(userStore?.selected?.found, true);
+    assert.equal(userStore?.validation?.ok, true);
+    assert.equal(localeStoreContract?.validation?.ok, true);
+    assert.equal(manaConfirmModal?.validation?.ok, true);
+    assert.equal(parserNewContract?.validation?.ok, true);
+    assert.equal(systemLocaleContract?.validation?.ok, true);
+    assert.equal(modalActionsContract?.validation?.ok, true);
+    assert.equal(i18nContract?.validation?.ok, true);
+    assert.equal(messageContentContract?.validation?.ok, true);
+    assert.equal(forumUploadContract?.validation?.ok, true);
+    const imageModal = report.contracts.find(({ name }) => name === 'ImageModal');
+    const trashPrimary = report.contracts.find(({ name }) => name === 'TrashIconPrimary');
+    const trashFallback = report.contracts.find(({ name }) => name === 'TrashIconFallback');
+    const textModuleContract = report.contracts.find(({ name }) => name === 'TextModule');
+    const userContextMenuContract = report.contracts.find(({ name }) => name === 'UserContextMenuModule');
+    const getSrcContract = report.contracts.find(({ name }) => name === 'GetSrcModule');
+    assert.equal(imageModal?.validation?.ok, true);
+    assert.equal(trashPrimary?.validation?.ok, true);
+    assert.equal(trashFallback?.validation?.ok, true);
+    assert.equal(textModuleContract?.validation?.ok, true);
+    assert.equal(userContextMenuContract?.validation?.ok, true);
+    assert.equal(getSrcContract?.validation?.ok, true);
+    assert.ok(selectedAccessorReads > 4);
+    assert.equal(clickable?.alternatives?.[0]?.collectionErrors?.includes('Webpack.getModule-unavailable'), false);
     assert.equal(fs.existsSync(reportPath), false);
     assert.equal(accessorReads, 0);
     assert.equal(webpackHooks.filterFactoryCalls || 0, 0);
@@ -219,20 +614,20 @@ test('DiscordModules lazy-getter inventory is covered by the audit helper', () =
   const cssNames = [
     'ClickableClasses', 'ColorClasses', 'ButtonClasses', 'MessageWrapperClasses',
     'MessageToolbarClasses', 'ContainerClasses', 'ChatContentClasses', 'MarkupClasses',
-    'SpoilerClasses', 'FocusedClasses', 'TabBarClasses', 'DefaultColorClasses',
-    'BotTagClasses', 'ExecutedCommandClasses', 'TitleClasses', 'ContentClasses',
-    'ContainerCompactClasses', 'ErrorPageClasses', 'TabItemClasses', 'TimestampClasses'
+    'SpoilerClasses', 'FocusedClasses', 'DefaultColorClasses',
+    'BotTagClasses', 'ExecutedCommandClasses', 'TitleClasses', 'ErrorPageClasses',
+    'TimestampClasses'
   ];
   const nonCssNames = [
     'UserStore', 'MessageStore', 'ChannelStore', 'GuildChannelStore', 'ImageResolver',
     'SelectedChannelStore', 'SelectedGuildStore', 'LocaleStore', 'GuildStore',
-    'GuildMemberStore', 'RelationshipStore', 'MessageActions', 'ChannelActions',
-    'ModalActions', 'HistoryUtils', 'HttpModule', 'Endpoints', 'TrashIcon',
+    'GuildMemberStore', 'RelationshipStore', 'MessageActions',
+    'ModalActions', 'HistoryUtils', 'HttpModule', 'TrashIcon',
     'TrashIconFallback', 'CUser', 'DiscordUtils', 'TimestampUtils', 'Parser',
     'ParserNew', 'GuildUtils', 'MuteModule', 'Dispatcher', 'ChannelMessages',
     'RenderUserPopout', 'ChannelListModule', 'ManaModule', 'MessageContentComponent',
     'MessageAccessories', 'I18nModule', 'SystemLocaleUtils', 'TextModule',
-    'GetSrcModule', 'UserContextMenuModule'
+    'GetSrcModule', 'UserContextMenuModule', 'MaskedLink'
   ];
   const actualCssNames = lazyGetters
     .map(({ property }) => property)
@@ -243,7 +638,7 @@ test('DiscordModules lazy-getter inventory is covered by the audit helper', () =
   const actualNames = lazyGetters.map(({ property }) => property);
   const expectedNames = [...new Set([...cssNames, ...nonCssNames])];
   assert.deepEqual([...actualNames].sort(), [...expectedNames].sort());
-  assert.equal(actualNames.length, 58);
+  assert.equal(actualNames.length, 53);
   assert.deepEqual([...actualCssNames].sort(), [...cssNames].sort());
   assert.deepEqual([...actualNonCssNames].sort(), [...nonCssNames].sort());
 
@@ -257,9 +652,9 @@ test('DiscordModules lazy-getter inventory is covered by the audit helper', () =
       assert.match(helperSource, new RegExp(`(?:name:\\s*|store\\()'${helperName}'`));
     }
   }
-  assert.match(helperSource, /name: 'ImageModalRenderLinkCandidate'/);
+  assert.match(helperSource, /name: 'MaskedLink'/);
   assert.match(helperSource, /name: 'LoggerIntegration\.RenderLinkComponent'/);
-  assert.equal(lazyGetters.some(({ property }) => property === 'MaskedLink'), false);
+  assert.equal(lazyGetters.some(({ property }) => property === 'MaskedLink'), true);
 });
 
 test('semantic CSS and Logger-owned literals are covered by the audit helper', () => {
@@ -336,9 +731,9 @@ test('semantic CSS and Logger-owned literals are covered by the audit helper', (
 
   assert.match(helperSource, /const ambiguous = selectedUsableCandidateCount !== 1/);
 
-  assert.equal(resolverSignatures.length, 31);
+  assert.equal(resolverSignatures.length, 27);
   assert.equal(classMethodSignatures.length, 23);
-  assert.equal(requestedSignatures.length, 43);
+  assert.equal(requestedSignatures.length, 39);
   for (const signature of [...resolverSignatures, ...classMethodSignatures]) {
     assert.ok(requestedSignatureSet.has(signature), `helper is missing requested key signature ${signature}`);
   }
@@ -548,11 +943,27 @@ test('NativeMediaModal accepts the second ordered source alternative', async () 
   const pluginFolder = fs.mkdtempSync(path.join(os.tmpdir(), 'ml2-native-modal-audit-'));
   const nativeMediaModal = {
     openMediaModal(input) {
+      const { startingIndex, numMediaItems, shouldHideMediaOptions } = input || {};
+      return [startingIndex, numMediaItems, shouldHideMediaOptions];
+    }
+  };
+  let selectedGetterReads = 0;
+  Object.defineProperty(nativeMediaModal, 'modalKey', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      selectedGetterReads += 1;
+      return 'MEDIA_VIEWER';
+    }
+  });
+  const alternativeOnlyMediaModal = {
+    openMediaModal(input) {
       const { numMediaItems, shouldHideMediaOptions } = input || {};
       return [numMediaItems, shouldHideMediaOptions];
     },
     modalKey: 'MEDIA_VIEWER'
   };
+  let selectedModule = nativeMediaModal;
   const moduleRecord = { id: 2, exports: nativeMediaModal };
   const webpack = buildWebpackMock(nativeMediaModal, moduleRecord, { throwGetModuleCount: 2 });
   const sourceLookups = [];
@@ -561,7 +972,7 @@ test('NativeMediaModal accepts the second ordered source alternative', async () 
     if (args[0] === 'numMediaItems'
       && args[1] === 'shouldHideMediaOptions'
       && args[2]?.searchExports === false
-    ) return nativeMediaModal;
+    ) return selectedModule;
     return null;
   };
   const documentObject = createDocumentMock();
@@ -617,13 +1028,24 @@ test('NativeMediaModal accepts the second ordered source alternative', async () 
     const Audit = require(helperPath);
     const report = await new Audit().buildReport('native-modal', { loadEntry: false, externalAssets: false });
     const contract = report.contracts.find(({ name }) => name === 'NativeMediaModal');
+    assert.equal(contract?.required, false);
     assert.equal(contract?.status, 'pass');
     assert.equal(contract?.selected?.semanticAlternative, 'native-numMediaItems-shouldHideMediaOptions');
     assert.equal(contract?.validation?.ok, true);
-    assert.deepEqual(sourceLookups.slice(0, 2).map(args => args.slice(0, 2)), [
+    assert.ok(selectedGetterReads > 0);
+    assert.deepEqual(sourceLookups
+      .filter(args => args[args.length - 1]?.searchExports === false)
+      .slice(0, 2)
+      .map(args => args.slice(0, 2)), [
       ['startingIndex', 'items'],
       ['numMediaItems', 'shouldHideMediaOptions']
     ]);
+    selectedModule = alternativeOnlyMediaModal;
+    const rejectedReport = await new Audit().buildReport('native-modal-rejected', { loadEntry: false, externalAssets: false });
+    const rejectedContract = rejectedReport.contracts.find(({ name }) => name === 'NativeMediaModal');
+    assert.equal(rejectedContract?.required, false);
+    assert.equal(rejectedContract?.status, 'warn');
+    assert.equal(rejectedContract?.validation?.ok, false);
   } finally {
     delete require.cache[helperPath];
     if (cachedHelper) require.cache[helperPath] = cachedHelper;

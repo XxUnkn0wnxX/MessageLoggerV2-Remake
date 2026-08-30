@@ -291,11 +291,41 @@ const DiscordModules = (() => {
     GuildMemberStore: lazyGet('GuildMemberStore', () => Webpack.Stores.GuildMemberStore),
     RelationshipStore: lazyGet('RelationshipStore', () => Webpack.Stores.RelationshipStore ?? Webpack.getByKeys('isBlocked')),
     MessageActions: lazyGet('MessageActions', () => Webpack.getByKeys('sendMessage', 'editMessage', 'deleteMessage')),
-    ChannelActions: lazyGet('ChannelActions', () => Webpack.getByKeys('deleteChannel', 'updateChannel') || Webpack.getByKeys('deleteChannel', 'selectChannel')),
     ModalActions: lazyGet('ModalActions', () => Webpack.getByKeys('openModal', 'hasModalOpen')),
     HistoryUtils: lazyGet('HistoryUtils', () => Webpack.getByKeys('getHistory')),
     HttpModule: lazyGet('HttpModule', () => Webpack.getByKeys('get', 'post', 'put', 'del') || Webpack.getByKeys('get', 'post', 'put', 'delete')),
-    Endpoints: lazyGet('Endpoints', () => Webpack.getByKeys('Endpoints', 'ActionTypes')),
+    MaskedLink: lazyGet('MaskedLink', () => {
+      let module;
+      try {
+        module = Webpack.getBySource('MASKED_LINK', 'onAuxClick', { searchExports: true });
+      } catch {
+        return null;
+      }
+      const candidates = [module];
+      if (module && (typeof module === 'object' || typeof module === 'function')) {
+        try {
+          candidates.push(...Object.values(module));
+        } catch {
+          return null;
+        }
+      }
+      for (const candidate of candidates) {
+        let value;
+        try {
+          value = typeof candidate === 'function'
+            ? candidate
+            : candidate && typeof candidate === 'object'
+              ? candidate.type
+              : null;
+          if (typeof value !== 'function') continue;
+          const source = value.toString();
+          if (!source.includes('MASKED_LINK') || !source.includes('onAuxClick')) continue;
+          if (typeof candidate === 'function') return candidate;
+          if (candidate.$$typeof != null) return candidate;
+        } catch {}
+      }
+      return null;
+    }),
     ClickableClasses: lazyGet('ClickableClasses', () => resolveSemanticCssModule(['clickable'])),
     ColorClasses: lazyGet('ColorClasses', () => resolveSemanticCssModule(['colorDanger', 'colorPremium'])),
     ButtonClasses: lazyGet('ButtonClasses', () => resolveSemanticCssModule(['button', 'colorBrand', 'lookFilled'])),
@@ -308,15 +338,11 @@ const DiscordModules = (() => {
     MarkupClasses: lazyGet('MarkupClasses', () => resolveSemanticCssModule(['markup'])),
     SpoilerClasses: lazyGet('SpoilerClasses', () => resolveSemanticCssModule(['spoilerText', 'hidden']) ?? resolveSemanticCssModule(['spoilerContent', 'hidden'])),
     FocusedClasses: lazyGet('FocusedClasses', () => resolveSemanticCssModule(['focused'])),
-    TabBarClasses: lazyGet('TabBarClasses', () => resolveSemanticCssModule(['tabBar'])),
     DefaultColorClasses: lazyGet('DefaultColorClasses', () => resolveSemanticCssModule(['defaultColor'])),
     BotTagClasses: lazyGet('BotTagClasses', () => resolveSemanticCssModule(['botTag'])),
     ExecutedCommandClasses: lazyGet('ExecutedCommandClasses', () => resolveSemanticCssModule(['executedCommand'])),
     TitleClasses: lazyGet('TitleClasses', () => resolveSemanticCssModule(['title', 'chatContent'])),
-    ContentClasses: lazyGet('ContentClasses', () => resolveSemanticCssModule(['content', 'marginCompactIndent'])),
-    ContainerCompactClasses: lazyGet('ContainerCompactClasses', () => resolveSemanticCssModule(['container', 'containerCompactBounded'])),
     ErrorPageClasses: lazyGet('ErrorPageClasses', () => resolveSemanticCssModule(['errorPage'])),
-    TabItemClasses: lazyGet('TabItemClasses', () => resolveSemanticCssModule(['item', 'selected', 'topPill'])),
     CUser: lazyGet('CUser', () => Webpack.getModule(Filters.byPrototypeKeys('getAvatarSource', 'isLocalBot'))),
     DiscordUtils: lazyGet('DiscordUtils', () => Webpack.getByKeys('bindAll', 'debounce')),
     TimestampUtils: lazyGet('TimestampUtils', () => Webpack.getByKeys('relativeTimeRounding', 'locales') || Webpack.getByKeys('createFromInputFallback')),
@@ -594,6 +620,37 @@ module.exports = class MessageLoggerV2 {
   }
   getVersion() {
     return this.meta.version;
+  }
+  renderMaskedLinkFallback(props = {}) {
+    const input = props && typeof props === 'object' ? props : {};
+    const displayProps = {};
+    if (typeof input.title === 'string') displayProps.title = input.title;
+    if (typeof input.className === 'string') displayProps.className = input.className;
+    if (Number.isFinite(input.tabIndex)) displayProps.tabIndex = input.tabIndex;
+    if (input.style && typeof input.style === 'object' && !Array.isArray(input.style)) {
+      displayProps.style = input.style;
+    }
+    if (typeof input['aria-label'] === 'string') displayProps['aria-label'] = input['aria-label'];
+    const children = input.children ?? input.title;
+    let normalizedHref = null;
+    try {
+      const parsed = new URL(typeof input.href === 'string' ? input.href.trim() : '');
+      if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname) {
+        normalizedHref = parsed.href;
+      }
+    } catch {}
+    if (normalizedHref) {
+      const anchorProps = {
+        ...displayProps,
+        href: normalizedHref,
+        target: '_blank',
+        rel: 'noreferrer noopener'
+      };
+      if (typeof input.onClick === 'function') anchorProps.onClick = input.onClick;
+      if (typeof input.onAuxClick === 'function') anchorProps.onAuxClick = input.onAuxClick;
+      return React.createElement('a', anchorProps, children);
+    }
+    return React.createElement('span', displayProps, children);
   }
   start() {
     if (this.__started || this._startupPending) return;
@@ -1676,11 +1733,6 @@ module.exports = class MessageLoggerV2 {
     this.classes = {
       markup: DiscordModules.MarkupClasses?.markup?.split(/ /g)[0] || '',
       hidden: spoilerModule?.hidden?.split(/ /g)[0] || '',
-      messages: this.safeGetClass(
-        () => `.${DiscordModules.ContainerCompactClasses?.container?.split(/ /g)[0]} > div:not(.${DiscordModules.ContentClasses?.content?.split(/ /g)[0]})`,
-        '.messages-container-fallback',
-        true
-      ),
       avatar: this.safeGetClass(
         () => this.getSingleDiscordClass('header avatar'),
         'avatar-MLV2'
@@ -1702,8 +1754,12 @@ module.exports = class MessageLoggerV2 {
     this._loggerOwnedModalKeys = new Set();
     this._loggerOwnedAttachmentMediaModalKeys = new Set();
     const ImageModal = this.tools.findImageModal() ?? (() => React.createElement("div", undefined, "Image Modal failed!"));
-    const MaskedLink = DiscordModules.MaskedLink || {};
-    const renderLinkComponent = props => React.createElement(MaskedLink, props);
+    const renderLinkComponent = props => {
+      const nativeComponent = DiscordModules.MaskedLink;
+      return nativeComponent
+        ? React.createElement(nativeComponent, props)
+        : this.renderMaskedLinkFallback(props);
+    };
     this.tools.renderLinkComponent = renderLinkComponent;
     this.createModal.imageModal = ImageModal;
     const chatContent = DiscordModules.ChatContentClasses;

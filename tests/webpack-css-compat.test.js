@@ -210,15 +210,11 @@ test('CSS DiscordModules getters use the semantic resolver without changing alte
     ['ChatContentClasses', ['chatContent']],
     ['MarkupClasses', ['markup']],
     ['FocusedClasses', ['focused']],
-    ['TabBarClasses', ['tabBar']],
     ['DefaultColorClasses', ['defaultColor']],
     ['BotTagClasses', ['botTag']],
     ['ExecutedCommandClasses', ['executedCommand']],
     ['TitleClasses', ['title', 'chatContent']],
-    ['ContentClasses', ['content', 'marginCompactIndent']],
-    ['ContainerCompactClasses', ['container', 'containerCompactBounded']],
     ['ErrorPageClasses', ['errorPage']],
-    ['TabItemClasses', ['item', 'selected', 'topPill']]
   ];
   for (const [name, keys] of getters) {
     const keyList = keys.map(key => `'${key}'`).join(', ');

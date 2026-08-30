@@ -2478,3 +2478,85 @@ test('renderer fetch remains confined to fetchMediaNetworkResponse and clipboard
   assert.match(mediaFetcher, /nativeFetch\.call\(netApi,\s*url,\s*\{/);
   assert.match(source, /clipboard\.copyImage\(bytes, 'image\.png'\);/);
 });
+
+test('masked-link fallback normalizes safe URLs and strips unsafe metadata', () => {
+  const plugin = createPlugin();
+  const onClick = () => {};
+  const onAuxClick = () => {};
+  const safe = plugin.renderMaskedLinkFallback({
+    href: 'HTTPS://Example.com/path?q=1',
+    title: 'Open link',
+    children: 'open',
+    className: 'masked-link',
+    tabIndex: 0,
+    style: { color: 'red' },
+    'aria-label': 'Open link',
+    onClick,
+    onAuxClick,
+    trusted: true,
+    messageId: 'message-id',
+    channelId: 'channel-id',
+    shouldConfirm: true,
+    onConfirm: () => {},
+    onCancel: () => {},
+    arbitrary: 'discard'
+  });
+  assert.equal(safe.type, 'a');
+  assert.equal(safe.props.href, 'https://example.com/path?q=1');
+  assert.equal(safe.props.target, '_blank');
+  assert.equal(safe.props.rel, 'noreferrer noopener');
+  assert.equal(safe.props.title, 'Open link');
+  assert.equal(safe.props.className, 'masked-link');
+  assert.equal(safe.props.tabIndex, 0);
+  assert.deepEqual(safe.props.style, { color: 'red' });
+  assert.equal(safe.props['aria-label'], 'Open link');
+  assert.equal(safe.props.onClick, onClick);
+  assert.equal(safe.props.onAuxClick, onAuxClick);
+  assert.equal(safe.props.children[0], 'open');
+  for (const key of ['trusted', 'messageId', 'channelId', 'shouldConfirm', 'onConfirm', 'onCancel', 'arbitrary']) {
+    assert.equal(Object.hasOwn(safe.props, key), false, 'masked-link fallback forwarded ' + key);
+  }
+
+  const unsafe = plugin.renderMaskedLinkFallback({
+    href: 'javascript:alert(1)',
+    children: 'unsafe',
+    onClick,
+    onAuxClick,
+    trusted: true,
+    messageId: 'message-id'
+  });
+  assert.equal(unsafe.type, 'span');
+  assert.equal(unsafe.props.children[0], 'unsafe');
+  assert.equal(Object.hasOwn(unsafe.props, 'href'), false);
+  assert.equal(Object.hasOwn(unsafe.props, 'target'), false);
+  assert.equal(Object.hasOwn(unsafe.props, 'rel'), false);
+  assert.equal(Object.hasOwn(unsafe.props, 'onClick'), false);
+  assert.equal(Object.hasOwn(unsafe.props, 'onAuxClick'), false);
+  assert.equal(Object.hasOwn(unsafe.props, 'trusted'), false);
+  assert.equal(Object.hasOwn(unsafe.props, 'messageId'), false);
+
+  const titled = plugin.renderMaskedLinkFallback({ title: 'fallback title' });
+  assert.equal(titled.type, 'span');
+  assert.equal(titled.props.children[0], 'fallback title');
+});
+
+test('masked-link lookup is semantic, memo-aware, and retried on every render', () => {
+  const lookupStart = source.indexOf("MaskedLink: lazyGet('MaskedLink'");
+  const lookupEnd = source.indexOf("    ClickableClasses:", lookupStart);
+  assert.ok(lookupStart >= 0 && lookupEnd > lookupStart, 'MaskedLink lazy getter was not found');
+  const lookup = source.slice(lookupStart, lookupEnd);
+  assert.match(lookup, /Webpack\.getBySource\('MASKED_LINK', 'onAuxClick', \{ searchExports: true \}\)/);
+  assert.match(lookup, /Object\.values\(module\)/);
+  assert.match(lookup, /candidate\.type/);
+  assert.match(lookup, /candidate\.\$\$typeof != null/);
+  assert.match(lookup, /return candidate;/);
+  assert.match(lookup, /source\.includes\('MASKED_LINK'\)[\s\S]*source\.includes\('onAuxClick'\)/);
+
+  const wrapperStart = source.indexOf('const renderLinkComponent = props => {');
+  const wrapperEnd = source.indexOf('    this.tools.renderLinkComponent = renderLinkComponent;', wrapperStart);
+  assert.ok(wrapperStart >= 0 && wrapperEnd > wrapperStart, 'render-link wrapper was not found');
+  const wrapper = source.slice(wrapperStart, wrapperEnd);
+  assert.match(wrapper, /const nativeComponent = DiscordModules\.MaskedLink/);
+  assert.match(wrapper, /this\.renderMaskedLinkFallback\(props\)/);
+  assert.doesNotMatch(wrapper, /const MaskedLink\s*=\s*DiscordModules\.MaskedLink/);
+});
