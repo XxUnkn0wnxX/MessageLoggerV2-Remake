@@ -1,6 +1,7 @@
 # Deleted Image Cache Rendering Checklist
 
-> Tracked working checklist for a focused change on `develop`.
+> Tracked working checklist and handoff for the remaining MessageLogger
+> media/viewer work on `develop`.
 > Keep it in the repository root while implementation and validation are in
 > progress, include its current evidence in every user-confirmed stage commit,
 > and leave it in the repository root after the current release. Archive it
@@ -8,26 +9,66 @@
 
 ## How to use this file
 
-This file is both the implementation checklist and the handoff record.
+The `## Active remaining roadmap` section is the authoritative forward tracker.
+New sessions read it together with `## Living handoff snapshot` before starting
+work. Unchecked boxes outside the roadmap may be historical or superseded.
+Mark roadmap items complete only after implementation, automated validation,
+focused live acceptance, and the requested commit/push. Keep detailed evidence
+and notes in the existing stage and activity sections; never add them to the
+compact roadmap.
 
-- [ ] A new session must read this complete file before re-scanning source or
-      beginning implementation.
-- [ ] Tick an item only after its evidence exists.
-- [ ] Record commands, results, changed files, failures, and runtime findings.
-- [ ] Update **Exact next action** after every material stage.
-- [ ] Refresh the repository snapshot, session reference, blockers, and exact
-      next action before handing the work to another session.
-- [ ] Keep plugin implementation, tests, and live validation separate.
-- [ ] Do not mark the work complete until the final automated and live gates pass.
+- Read the roadmap and living snapshot before re-scanning source or beginning
+  implementation.
+- Tick an item only after its evidence exists.
+- Record commands, results, changed files, failures, and runtime findings in
+  the detailed sections below.
+- Update **Exact next action** after every material stage.
+- Refresh the repository snapshot, session reference, blockers, and exact next
+  action before handing the work to another session.
+- Keep plugin implementation, tests, and live validation separate.
+- Do not mark the work complete until the final automated and live gates pass.
+
+## Active remaining roadmap
+
+- [x] Accepted foundation: native + Logger-view image/video/audio/TXT/PDF;
+      direct/CDN -> proxy -> cached Blob -> placeholder; external open routing;
+      compatibility audit 87 contracts / 0 failures.
+- [ ] R1 — Full classic embeds, message snapshots, legacy components, and
+      Components V2 viewer work: trace the safe live model/render boundary;
+      implement a MessageLogger-owned read-only renderer with interactions
+      disabled and a safe fallback; never pass archived wire JSON unsafely
+      through `new MessageRecord(raw)`
+      and never overwrite native `embeds`/`components`; deterministic and
+      focused live acceptance.
+- [ ] R2 — Cache All Attachment Types gate: exact master/child eligibility
+      matrix; preserve the established media and Anti-Nuke master write
+      boundary; tests/live.
+- [ ] R3 — Stage 5 Off-to-On hydration: eligible missing saved attachments
+      only; dedupe/skip existing; direct then distinct proxy; preserve
+      size/no-save/cancel/request-share/atomic write; one refresh; tests/live.
+- [ ] R4 — Provisional Anti-Nuke/Ghost-Ping recovery-media hardening and exact
+      Stage 4b acceptance: bounded ancestry/age/count/bytes; promote confirmed;
+      clean unclaimed without deleting shared files; define the exact Stage 4b
+      matrix. Core Anti-Nuke is not presently classified broken.
+- [ ] R5 — Stage 9 safe cache warning identity: useful filename/path/host
+      identity; redact query/fragment/credentials/control chars; no
+      behavior change; tests/live.
+- [ ] R6 — Integrated validation/release: full checks/live matrix; reconcile
+      checklist/TODO; version/changelog only if explicitly requested; branch
+      promotion/reconciliation only with explicit approval.
+- [ ] Parked — optional Stage 4a Reveal File; define its scope before activation.
+- [ ] Parked — multi-instance storage isolation; separate architecture and not
+      a blocker for the active media/viewer path.
+- [ ] Exact active next stage: R1; no code starts in this docs-only update.
 
 ## Living handoff snapshot
 
-- **Last updated:** 2026-08-30
+- **Last updated:** 2026-08-31
 - **Repository:**
   `$HOME/Apps/Dev/BD/BD-Plugins/MessageLoggerV2-Remake`
-- **Current root Codex session ID:**
+- **Historical root Codex session ID:**
   `01a05291-de83-7d30-864b-ada47ac1ac10`
-- **Current root rollout record:**
+- **Historical root rollout record:**
   `$HOME/.codex/sessions/2026/08/30/rollout-2026-08-30T22-08-06-01a05291-de83-7d30-864b-ada47ac1ac10.jsonl`
 - **Previous continuation session ID:**
   `01a022f7-17f8-7b52-8cf3-e0e009dff3b3`
@@ -38,34 +79,16 @@ This file is both the implementation checklist and the handoff record.
 - **Earlier compatibility-handoff rollout:**
   `$HOME/.codex/sessions/2026/08/30/rollout-2026-08-30T16-54-37-01a05172-deb0-71d1-8089-b7186c453a3d.jsonl`
 - **Working branch:** `develop`
-- **Active compatibility add-on:** production commit
-  `670d6de861a032c00e9999147adf99eabb84b9cb` remains published and live. The
-  permanent audit helper now resolves selected stores through BetterDiscord's
-  `Webpack.Stores` Proxy with the public `Webpack.getStore` fallback, derives
-  `Dispatcher` from `UserStore._dispatcher`, and treats only the fallback-
-  backed legacy `Css.ContainerClasses` contract as optional/warn. Generic and
-  cache scans remain descriptor-only. The pre-correction live report plus the
-  focused deterministic regressions are sufficient for acceptance; do not
-  repeat the broad inventory scan or request another live dump without new
-  runtime drift.
-- **Published base before this final pre-embed checkpoint:** local `develop`,
-  `origin/develop`, and the remote branch were all
-  `e6b27c1799976be6561dc3e893acadc20ac06140` (`Complete saved attachment
-  fallback handling`). That commit already owns the shared exact failure
-  coordinator, viewer/modal convergence, saved-attachment open routing, and
-  event-driven late `MessageAccessories.render` patch. Later production and
-  audit checkpoints are recorded separately in this living snapshot and the
-  activity log below.
-- **Current audit-correction checkpoint scope:** this checklist,
-  `docs/archive/handoffs/DISCORD-WEBPACK-ASSET-COMPATIBILITY-HANDOFF.md`,
-  `tools/MessageLoggerRuntimeCompatibilityAudit.plugin.js`, and
-  `tests/runtime-compatibility-audit-coverage.test.js`. No production Logger
-  source, version, changelog, settings documentation, release metadata,
-  embed/Components V2 renderer, branch promotion, or BetterDiscord host source
-  is changed.
+- **Pre-roadmap repository checkpoint:** `develop` and `origin/develop` are
+  clean at `847aa31edb1f89f63a6caf6d30c94e5363b86a01`.
+- **Compatibility audit:** complete and archived at
+  `docs/archive/handoffs/DISCORD-WEBPACK-ASSET-COMPATIBILITY-HANDOFF.md`;
+  final compatibility source through `860186550db2e7fd9e6326fcbff37af7fa703108`;
+  audit 87 contracts: 57 pass, 30 validated warnings, 0 failures, 0 unresolved
+  items, and 0 false positives.
 - **Live parity:** repository and installed BetterDiscord copies of
   `MessageLoggerV2.plugin.js` are byte-identical at SHA-256
-  `c9250059c7ad79abf7483a27a9db3764894c5e5056219a526ff228f4919f1269`.
+  `8c0294a84b0d029ff4e67fc589a3f772695cd58d5f2cd7e315aabd9d3b17032e`.
 - **Current deterministic gate:** the clean baseline and final full
   `npm test` runs pass `667/667`; `npm run test:runtime-audit` passes `7/7`;
   `npm run check` and `git diff --check` pass. An independent review's medium
@@ -132,31 +155,29 @@ This file is both the implementation checklist and the handoff record.
   `embeds`/`components`. The discarded experiment proved `new MessageRecord(raw)`
   is not a safe raw-wire hydration boundary; future work needs a trace-proven
   Discord wire-to-model factory or a fail-closed summary path.
-- **Worker state:** the configured primary `worker` handled the bounded
-  implementation and focused-test slices; no Spark-to-Luna fallback condition
-  was reported. The runtime exposed the worker role but not a concrete model
-  name. The Sol parent integrated and verified every result.
+- **Historical implementation-worker state:** the configured primary `worker`
+  handled the earlier bounded implementation and focused-test slices; no
+  Spark-to-Luna fallback condition was reported for that work. The runtime
+  exposed the worker role but not a concrete model name. The Sol parent
+  integrated and verified every result.
 - **Checklist state:** include this file in every user-confirmed stage commit
   and keep it in the repository root after the current release. Do not archive
   it unless the user explicitly requests that in a later session.
 - **Privacy state:** persistent paths must use `$HOME`. Before any future
   commit, merge, rewrite, or push, scan the tracked tree, staged diff, and
   outgoing range for an expanded macOS home path.
-- **Change-control state:** the user approved the earlier runtime repairs and
-  saved-attachment fallback, then authorized continuation of the bounded
-  four-file audit-helper correction through commit/push on `develop`. No
-  production Logger edit, `main` merge, version/changelog update, release step,
-  other branch operation, warning-identity pass, or embed implementation is
-  authorized.
+- **Change-control state:** compatibility is complete and archived; this
+  docs-only roadmap update does not authorize a production Logger edit,
+  version/changelog update, release step, `main` merge, or other branch
+  operation. Future implementation follows the ordered roadmap and its stated
+  gates.
 
 ### Exact next action
 
-No further runtime-audit implementation or live dump is required. Confirm the
-commit containing this entry and the three companion audit-correction files is
-on `origin/develop`; if it is not, publish that exact four-file commit after the
-recorded final and privacy gates. Then stop. Do not repeat the broad inventory
-scan or resume warning-identity work, Logger-viewer embed/Components V2, Stage
-4a, Stage 4b, Stage 5, release metadata, `main`, or other branch work.
+Commit and push this docs-only roadmap/checkpoint update on `develop` after the
+required automated, diff, and privacy gates. The next implementation session
+starts R1 trace-first from clean published source; no embed code starts today.
+Later work follows roadmap order.
 
 ### Resume procedure
 
@@ -169,16 +190,16 @@ scan or resume warning-identity work, Logger-viewer embed/Components V2, Stage
 6. Recheck `debug.log` for any newer MessageLogger stack and
    separate external cache failures from plugin exceptions.
 7. Compare the checkout with this snapshot and record drift.
-8. Treat the audit-helper correction as complete once its exact four-file
-   commit is confirmed on `origin/develop`; do not rerun the old broad audit.
-   If embed work is later resumed separately, trace the current Discord native
-   model/factory boundary before writing code; do not reconstruct or reapply
-   the deleted unsafe experiment.
+8. Treat compatibility as complete and archived in the handoff through final
+   source `860186550db2e7fd9e6326fcbff37af7fa703108`; do not rerun the old broad
+   audit. If embed work is later resumed separately, trace the current Discord
+   native model/factory boundary before writing code; do not reconstruct or
+   reapply the deleted unsafe experiment.
 9. Update this file after each implementation, test, or live-runtime stage.
 
 ### Session reconstruction references
 
-- The current root session ID is
+- The historical root session ID was
   `01a05291-de83-7d30-864b-ada47ac1ac10`.
 - Its exact rollout is
   `$HOME/.codex/sessions/2026/08/30/rollout-2026-08-30T22-08-06-01a05291-de83-7d30-864b-ada47ac1ac10.jsonl`.
@@ -204,11 +225,12 @@ scan or resume warning-identity work, Logger-viewer embed/Components V2, Stage
 
 ## Plan authority
 
-The user's latest instruction and the **Approved focused contract** below control
-this work. A later explicit user instruction supersedes this checklist and must
-be recorded before implementation continues.
+The user's latest instruction and the **Active remaining roadmap** above control
+forward work. The **Approved focused contract** below records accepted historical
+behavior and constraints. A later explicit user instruction supersedes this
+checklist and must be recorded before implementation continues.
 
-## Current release boundary and paused work
+## Historical / superseded release boundary and paused work
 
 - [x] Restore, verify, and publish the clean `8c2b3b2` saved-attachment policy
       baseline before addressing the immediate runtime errors.
@@ -242,10 +264,11 @@ be recorded before implementation continues.
       wire JSON directly to native renderers or reconstruct the deleted stash.
 
 The historical status and activity entries below remain evidence of completed
-earlier stages. Where they conflict with the living snapshot above, the living
-snapshot and latest explicit user instruction control continuation.
+earlier stages. Where they conflict with the active roadmap, the roadmap and
+latest explicit user instruction control forward work; the living snapshot is
+the factual repository/runtime checkpoint.
 
-## Current status
+## Accepted historical implementation status
 
 - [x] Current Blob, saved-URL, Logger-viewer, and restored-message paths audited.
 - [x] Cache Off/On transition behavior audited.
