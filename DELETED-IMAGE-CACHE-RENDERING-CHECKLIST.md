@@ -22,18 +22,29 @@ This file is both the implementation checklist and the handoff record.
 
 ## Living handoff snapshot
 
-- **Last updated:** 2026-08-21
+- **Last updated:** 2026-08-30
 - **Repository:**
   `$HOME/Apps/Dev/BD/BD-Plugins/MessageLoggerV2-Remake`
 - **Current root Codex session ID:**
-  `01a00f41-b9c3-7841-b0e0-175368f05084`
+  `01a022f7-17f8-7b52-8cf3-e0e009dff3b3`
 - **Current root rollout record:**
-  `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T20-26-00-01a00f41-b9c3-7841-b0e0-175368f05084.jsonl`
-- **Predecessor root session ID:**
-  `01a00d42-4986-7971-94de-11f09f6630d1`
-- **Predecessor rollout record:**
-  `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T11-07-23-01a00d42-4986-7971-94de-11f09f6630d1.jsonl`
+  `$HOME/.codex/sessions/2026/08/21/rollout-2026-08-21T16-16-54-01a022f7-17f8-7b52-8cf3-e0e009dff3b3.jsonl`
+- **Earlier compatibility-handoff session ID:**
+  `01a05172-deb0-71d1-8089-b7186c453a3d`
+- **Earlier compatibility-handoff rollout:**
+  `$HOME/.codex/sessions/2026/08/30/rollout-2026-08-30T16-54-37-01a05172-deb0-71d1-8089-b7186c453a3d.jsonl`
 - **Working branch:** `develop`
+- **Active compatibility add-on:** the production-code boundary shared by
+  local `develop`, `origin/develop`, and remote `refs/heads/develop` before
+  this handoff-only update is
+  `670d6de861a032c00e9999147adf99eabb84b9cb`. The production Discord
+  module/CSS compatibility correction and optional `loadEntry` audit are
+  complete. The permanent audit helper covers all Logger-owned inventory, but
+  its retained one-pass live report still has seven BetterDiscord store-Proxy
+  selection false negatives plus one fallback-backed legacy
+  `containerCozyBounded` contract that must become optional/warn. Continue from
+  `DISCORD-WEBPACK-ASSET-COMPATIBILITY-HANDOFF.md`; do not repeat the broad
+  inventory scan.
 - **Published base before this final pre-embed checkpoint:** local `develop`,
   `origin/develop`, and the remote branch were all
   `e6b27c1799976be6561dc3e893acadc20ac06140` (`Complete saved attachment
@@ -121,12 +132,14 @@ This file is both the implementation checklist and the handoff record.
 
 ### Exact next action
 
-After publishing the commit containing this snapshot, verify local `develop`,
-`origin/develop`, and the remote `refs/heads/develop` are identical and the
-tracked worktree is clean. Then stop. There is no active implementation stage.
-Do not resume Logger-viewer embed/Components V2, Stage 4a, Stage 4b, Stage 5,
-Stage 9, release metadata, or branch promotion until the user explicitly opens
-that scope in a later session.
+In the next session, read
+`DISCORD-WEBPACK-ASSET-COMPATIBILITY-HANDOFF.md` first. Correct the audit
+helper's known selected-store Proxy path and `Dispatcher` selection, then mark
+only the fallback-backed `Css.ContainerClasses` contract optional/warn. Add
+focused deterministic regressions, run the full project gates, and finish the
+audit-helper handoff. Do not repeat the broad inventory scan or resume warning-
+identity work, Logger-viewer embed/Components V2, Stage 4a, Stage 4b, Stage 5,
+release metadata, `main`, or other branch work.
 
 ### Resume procedure
 
@@ -139,20 +152,22 @@ that scope in a later session.
 6. Recheck `debug.log` for any newer MessageLogger stack and
    separate external cache failures from plugin exceptions.
 7. Compare the checkout with this snapshot and record drift.
-8. Continue only from a new explicit user instruction. If embed work resumes,
-   trace the current Discord native model/factory boundary before writing code;
-   do not reconstruct or reapply the deleted unsafe experiment.
+8. Continue the already-authorized audit-helper correction from the exact
+   unresolved list in the compatibility handoff. If embed work is later
+   resumed separately, trace the current Discord native model/factory boundary
+   before writing code; do not reconstruct or reapply the deleted unsafe
+   experiment.
 9. Update this file after each implementation, test, or live-runtime stage.
 
 ### Session reconstruction references
 
 - The current root session ID is
-  `01a00f41-b9c3-7841-b0e0-175368f05084`.
+  `01a022f7-17f8-7b52-8cf3-e0e009dff3b3`.
 - Its exact rollout is
-  `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T20-26-00-01a00f41-b9c3-7841-b0e0-175368f05084.jsonl`.
-- The predecessor root session is
-  `01a00d42-4986-7971-94de-11f09f6630d1`, recorded at
-  `$HOME/.codex/sessions/2026/08/17/rollout-2026-08-17T11-07-23-01a00d42-4986-7971-94de-11f09f6630d1.jsonl`.
+  `$HOME/.codex/sessions/2026/08/21/rollout-2026-08-21T16-16-54-01a022f7-17f8-7b52-8cf3-e0e009dff3b3.jsonl`.
+- The earlier compatibility-handoff session is
+  `01a05172-deb0-71d1-8089-b7186c453a3d`, recorded at
+  `$HOME/.codex/sessions/2026/08/30/rollout-2026-08-30T16-54-37-01a05172-deb0-71d1-8089-b7186c453a3d.jsonl`.
 - This checklist is the self-contained authority for continuation. Read it
   first; consult the rollout only when the reasoning behind an already-recorded
   decision or runtime observation is needed.
@@ -1284,24 +1299,35 @@ behavior, persistence, rendering, or external-open behavior.
       characters, and a hostname-only fallback in deterministic tests.
 - [ ] Confirm ordinary successful caching and request/retry/cancellation paths
       are byte-for-byte behaviorally unchanged apart from diagnostic text.
-- [ ] **Optional Webpack availability cleanup:** inventory Logger's semantic
+- [x] **Optional Webpack availability cleanup:** inventory Logger's semantic
       Discord-module lookups that can remain unresolved because their owning
       lazy entry has not loaded. Use live trace evidence to identify each exact
       owning entry; do not generalize from minified export names or keys.
-- [ ] For each trace-proven entry, keep the existing semantic resolver first.
+      The permanent audit now covers all 53 `DiscordModules` lazy getters and
+      the broader 89-contract Logger/host/runtime inventory. Only the
+      trace-proven `MessageAccessories` owner is used for native document and
+      audio discovery; no speculative owner was added.
+- [x] For each trace-proven entry, keep the existing semantic resolver first.
       If it misses and `BdApi.Utils.loadEntry` exists, allow a guarded,
       deduplicated best-effort load either during Logger startup warm-up or
       immediately before the feature's first use, then retry that same semantic
-      resolver. Never bulk-load arbitrary Discord entries.
-- [ ] If `loadEntry` is unavailable, rejects, returns null/empty, completes
+      resolver. Never bulk-load arbitrary Discord entries. Native document and
+      audio paths retain semantic-first discovery and share only their own
+      guarded in-flight load attempt.
+- [x] If `loadEntry` is unavailable, rejects, returns null/empty, completes
       without revealing the target, or Logger stops before completion, retain
       the feature's current resolver/mount fallback unchanged. Do not cache a
       miss permanently, use stale post-stop results, or suppress a still-valid
-      missing-module warning.
-- [ ] Cover the optional loader path with focused tests for already-resolved,
+      missing-module warning. Generation checks, promise-identity cleanup, and
+      retryable misses preserve that behavior.
+- [x] Cover the optional loader path with focused tests for already-resolved,
       successful load-and-retry, unavailable API, rejection, null/empty result,
       post-load unresolved, shared concurrent request, and stop/restart cases;
       confirm upstream BetterDiscord remains supported without the new API.
+      The compatibility work passed `npm run check`, full `npm test` `667/667`,
+      and `git diff --check` at published commit `670d6de`; the final live audit
+      also reported `Webpack.OptionalLoadEntryTransition` pass with both native
+      targets already loaded and therefore no unnecessary load attempt.
 - [ ] Run the focused media-cache warning tests, `npm run check`, `npm test`, and
       `git diff --check`; sync only the plugin, compare hashes, and inspect the
       hot-reload log before user acceptance.
@@ -3355,3 +3381,43 @@ behavior, persistence, rendering, or external-open behavior.
   `develop`, then explicitly paused Logger-viewer embed/Components V2 work until
   later. Stage 4a, Stage 4b, Stage 5, Stage 9, release metadata, `main`, and all
   other branch work remain untouched and paused.
+
+### 2026-08-30 - Discord compatibility audit continuation checkpoint
+
+- Published production compatibility commits through
+  `670d6de861a032c00e9999147adf99eabb84b9cb` on `develop`. The current Logger
+  and permanent audit helper are byte-identical to their installed BetterDiscord
+  copies at SHA-256
+  `c9250059c7ad79abf7483a27a9db3764894c5e5056219a526ff228f4919f1269`
+  and
+  `01ac8a9c546378e38c8881c22a3d0bfd0972af52b2ec4edfe82cc8f08a031163`
+  respectively.
+- Production now has guarded semantic CSS normalization, exact class-token
+  observer handling, corrected Logger-view group boundaries, a semantic
+  MaskedLink resolver with a safe absolute-HTTP(S) fallback, and the audited
+  optional `BdApi.Utils.loadEntry` behavior. Six dead Logger lookup definitions
+  were removed. No version, changelog, embed renderer, cache policy, or
+  BetterDiscord host source changed.
+- The final automated production gate passed `npm run check`, full `npm test`
+  `667/667`, and `git diff --check`; an independent review returned GO.
+- The user ran the permanent helper's combined `full-audit` exactly once with
+  optional load-entry and external-asset checks enabled. The retained report at
+  `$HOME/Library/Application Support/BetterDiscord/plugins/MessageLoggerRuntimeCompatibilityAudit-report.json`
+  contains `89` contracts: `53` pass, `28` warn, and `8` fail, with no scanner
+  error. Host/platform, common and forum DOM, Logger-owned styles/mounts,
+  Logger link integration, fixed renderer assets, and optional load-entry
+  transition all passed.
+- The audit inventory is complete, but the helper is not yet fully accepted.
+  Seven failures are known selection false negatives caused by descriptor-only
+  access to BetterDiscord's `Webpack.Stores` Proxy: `UserStore`, `MessageStore`,
+  `SelectedChannelStore`, `SelectedGuildStore`, `GuildStore`,
+  `GuildMemberStore`, and the derived `Dispatcher`. The eighth is the absent
+  fallback-backed legacy `containerCozyBounded` CSS shape, which must be
+  optional/warn rather than a required failure.
+- The next session must implement only those helper selection/status fixes and
+  focused regressions before deciding whether one final live dump is needed.
+  Do not redo the broad inventory. Logger-viewer embed/Components V2 and Stage
+  9 warning-identity work remain paused.
+- Active root session ID:
+  `01a022f7-17f8-7b52-8cf3-e0e009dff3b3`; rollout:
+  `$HOME/.codex/sessions/2026/08/21/rollout-2026-08-21T16-16-54-01a022f7-17f8-7b52-8cf3-e0e009dff3b3.jsonl`.
