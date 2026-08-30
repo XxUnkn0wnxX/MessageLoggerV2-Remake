@@ -85,9 +85,12 @@ The installed helper symlink and live report are absent, and BetterDiscord
 removed the helper's enabled-state entry when the symlink was moved. The
 tracked helper remains under `tools/`.
 
-This worktree is still on `develop` and is intentionally uncommitted. No
-version, changelog, BetterDiscord host, Discord restart, branch, commit, push,
-or release action was performed. Publication remains a separate user gate.
+The completed compatibility work is published on `develop` through
+`860186550db2e7fd9e6326fcbff37af7fa703108` (`Remove obsolete Discord
+compatibility contracts`). The final live audit and Clear Log confirmation are
+accepted, so this handoff is closed and archived. No version, changelog,
+BetterDiscord host, Discord restart, `main` promotion, tag, or release action
+was part of that publication.
 
 ## 2026-08-30 helper-correction checkpoint (historical; superseded above)
 

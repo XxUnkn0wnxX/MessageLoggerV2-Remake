@@ -57,7 +57,7 @@ This file is both the implementation checklist and the handoff record.
   audit checkpoints are recorded separately in this living snapshot and the
   activity log below.
 - **Current audit-correction checkpoint scope:** this checklist,
-  `DISCORD-WEBPACK-ASSET-COMPATIBILITY-HANDOFF.md`,
+  `docs/archive/handoffs/DISCORD-WEBPACK-ASSET-COMPATIBILITY-HANDOFF.md`,
   `tools/MessageLoggerRuntimeCompatibilityAudit.plugin.js`, and
   `tests/runtime-compatibility-audit-coverage.test.js`. No production Logger
   source, version, changelog, settings documentation, release metadata,
