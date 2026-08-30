@@ -6,6 +6,13 @@ const test = require('node:test');
 
 const helperPath = path.join(__dirname, '..', 'tools', 'MessageLoggerRuntimeCompatibilityAudit.plugin.js');
 
+test('runtime audit uses BetterDiscord-compatible builtin module specifiers', () => {
+  const helperSource = fs.readFileSync(helperPath, 'utf8');
+  assert.doesNotMatch(helperSource, /require\(['"]node:/);
+  assert.match(helperSource, /require\('fs'\)/);
+  assert.match(helperSource, /require\('path'\)/);
+});
+
 function buildWebpackMock(candidate, moduleRecord, hooks = {}) {
   let getModuleCalls = 0;
   const hostileFilter = () => {

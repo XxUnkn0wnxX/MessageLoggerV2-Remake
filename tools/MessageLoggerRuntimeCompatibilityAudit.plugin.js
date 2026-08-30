@@ -7,8 +7,8 @@
 
 'use strict';
 
-const fs = require('node:fs');
-const path = require('node:path');
+const fs = require('fs');
+const path = require('path');
 
 const PLUGIN_NAME = 'MessageLoggerRuntimeCompatibilityAudit';
 const REPORT_FILE_NAME = `${PLUGIN_NAME}-report.json`;
@@ -853,8 +853,8 @@ function getPlatformContract() {
   let fsModule = null;
   let pathModule = null;
   try { electron = require('electron'); } catch {}
-  try { fsModule = require('node:fs'); } catch {}
-  try { pathModule = require('node:path'); } catch {}
+  try { fsModule = require('fs'); } catch {}
+  try { pathModule = require('path'); } catch {}
 
   const windowRead = safeRead(globalThis, 'window');
   const windowObject = windowRead.ok && windowRead.value != null ? windowRead.value : globalThis;

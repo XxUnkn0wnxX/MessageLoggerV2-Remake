@@ -221,19 +221,26 @@ For the completed CSS compatibility correction:
   repository/live plugin copies remain byte-identical at the SHA-256 recorded
   above.
 
-The follow-up permanent compatibility-audit tool adds five deterministic
+The follow-up permanent compatibility-audit tool adds six deterministic
 coverage tests. Its current pre-commit evidence is:
 
 - `npm run check` passes for both the distributed Logger and the audit helper.
-- `npm run test:runtime-audit` passes `5/5`.
+- `npm run test:runtime-audit` passes `6/6`.
 - The first expanded full run passed every new audit test but one unrelated
   existing media idle-timeout test missed its narrow timing window. That exact
   test passed immediately in isolation, and the unchanged full suite then
   passed `662/662`. After the final native-modal-alternative regression was
-  added, the complete suite passed `663/663`.
+  added, the complete suite passed `663/663`. After correcting the helper's
+  BetterDiscord builtin-module specifiers, the complete suite passed `664/664`.
 - `git diff --check` passes.
 - A final independent read-only review returned GO with no blocking, high, or
   medium finding.
+
+The first copied helper failed before `start()` because BetterDiscord's addon
+loader interpreted Node's `node:fs` specifier as the plugin-relative path
+`/node:fs`. The tracked helper now uses BetterDiscord-compatible `fs` and
+`path` builtin specifiers at every deployable require site, with a regression
+test that rejects future `require("node:...")` usage.
 
 ## User-controlled live acceptance gate
 
