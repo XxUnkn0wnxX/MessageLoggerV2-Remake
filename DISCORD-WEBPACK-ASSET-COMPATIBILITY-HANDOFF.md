@@ -2,13 +2,21 @@
 
 Prepared: 2026-08-30 (Australia/Melbourne)
 
-Active root Codex session ID: `01a022f7-17f8-7b52-8cf3-e0e009dff3b3`
+Active root Codex session ID: `01a05291-de83-7d30-864b-ada47ac1ac10`
 
 Active root rollout:
+`$HOME/.codex/sessions/2026/08/30/rollout-2026-08-30T22-08-06-01a05291-de83-7d30-864b-ada47ac1ac10.jsonl`
+
+Previous continuation session ID: `01a022f7-17f8-7b52-8cf3-e0e009dff3b3`
+
+Previous continuation rollout:
 `$HOME/.codex/sessions/2026/08/21/rollout-2026-08-21T16-16-54-01a022f7-17f8-7b52-8cf3-e0e009dff3b3.jsonl`
 
 Earlier compatibility-handoff session ID:
 `01a05172-deb0-71d1-8089-b7186c453a3d`
+
+Earlier compatibility-handoff rollout:
+`$HOME/.codex/sessions/2026/08/30/rollout-2026-08-30T16-54-37-01a05172-deb0-71d1-8089-b7186c453a3d.jsonl`
 
 ## Purpose
 
@@ -21,26 +29,27 @@ availability cleanup.
 ## 2026-08-30 continuation checkpoint
 
 The production compatibility correction is complete, published, live-synced,
-and clean. The permanent audit helper has complete deterministic inventory
-coverage, but its final live report exposed eight audit-classification defects.
-Do **not** describe the helper as fully accepted until those defects are fixed.
+and clean. The permanent audit helper's eight known classification defects are
+also corrected and deterministically accepted. No production Logger source,
+release metadata, cache/embed behavior, or BetterDiscord host source changed in
+this audit-only continuation.
 
-Production/runtime boundary entering this handoff-only update:
+Repository/runtime boundary entering this correction:
 
 - Branch: `develop`
-- Production-code HEAD shared by local `develop`, `origin/develop`, and remote
-  `refs/heads/develop` before this documentation checkpoint:
+- Production-code commit:
   `670d6de861a032c00e9999147adf99eabb84b9cb`
   (`Fix Discord runtime module compatibility`)
-- Tracked worktree: clean before this handoff-only update
+- Audit-handoff checkpoint shared by local `develop`, `origin/develop`, and
+  remote `refs/heads/develop` before this correction:
+  `832ee3688a196b684b1520318efc06d100935798`
+  (`Record runtime audit continuation checkpoint`)
+- Tracked worktree: clean before this correction
 - `git stash list`: empty
 - Repo/live Logger SHA-256:
   `c9250059c7ad79abf7483a27a9db3764894c5e5056219a526ff228f4919f1269`
-- Repo/live audit-helper SHA-256:
-  `01ac8a9c546378e38c8881c22a3d0bfd0972af52b2ec4edfe82cc8f08a031163`
-- Final completed automated gate for `670d6de`: `npm run check`, full
-  `npm test` `667/667`, and `git diff --check` all passed. An independent
-  final review returned GO after the passive-audit host-filter issue was fixed.
+- Repo/live Logger comparison after audit-helper cleanup: byte-identical
+  (`cmp` exit 0)
 
 The one-pass live audit command was:
 
@@ -51,11 +60,8 @@ await MessageLoggerRuntimeCompatibilityAudit.dump("full-audit", {
 });
 ```
 
-The retained report is:
-
-`$HOME/Library/Application Support/BetterDiscord/plugins/MessageLoggerRuntimeCompatibilityAudit-report.json`
-
-It was generated at `2026-08-30T12:01:27.065Z` and contains `89` contracts:
+The pre-correction report was generated at `2026-08-30T12:01:27.065Z` and
+contains `89` contracts:
 `53` pass, `28` warn, and `8` fail. Its scanner completed over `7834` loaded
 root/candidate identities with no scanner error. It confirmed the host and
 platform capabilities, common and forum DOM surfaces, Logger-owned styles and
@@ -67,50 +73,60 @@ The inventory itself is complete: deterministic coverage maps all `53`
 production `DiscordModules` lazy getters, semantic CSS signatures, generic
 class consumers, Logger-owned classes/attributes, fixed renderer assets, host
 capabilities, and the two guarded optional `loadEntry` consumers. The remaining
-work is audit selection/status correctness, not another production-module
-inventory pass.
+work at report time was audit selection/status correctness, not another
+production-module inventory pass; that bounded work is now complete below.
 
-### Exact unresolved audit-helper work
+### Completed audit-helper correction
 
-Seven required failures are helper selection false negatives:
+- Selected stores now use one guarded `Webpack.Stores[storeName]` read, which
+  intentionally invokes BetterDiscord's Proxy `get` trap only for this known
+  consumer. A missing/throwing Proxy path falls back to the public
+  `Webpack.getStore(storeName)` API, including when `Webpack.Stores` itself is
+  unavailable. Caught errors use fixed audit-owned labels; arbitrary host error
+  messages are not copied into the report.
+- Generic module, candidate, and cache scans remain descriptor-only and do not
+  invoke unknown getters.
+- `Dispatcher` is derived from the selected `UserStore._dispatcher`; it no
+  longer requires an unrelated public module root.
+- `Css.ContainerClasses` is the sole optional CSS contract. Its absent legacy
+  `containerCozyBounded` shape now warns, while every other unresolved CSS
+  contract remains required/failing. No replacement class or resolver
+  broadening was introduced.
 
-- `UserStore`
-- `MessageStore`
-- `SelectedChannelStore`
-- `SelectedGuildStore`
-- `GuildStore`
-- `GuildMemberStore`
-- `Dispatcher`
+Deterministic evidence for the accepted correction:
 
-Their loaded candidate scans found the expected store shapes, and the live
-Logger initialized through those same production stores. The helper's
-`getStore()` currently descriptor-walks BetterDiscord's `Webpack.Stores`
-Proxy. That Proxy intentionally resolves stores through its `get` trap, so the
-descriptor-only path returns no selected store even though the store exists.
-The next session should make **only this known selected-consumer path** perform
-the same guarded `Stores[storeName]` access as production, retain
-`Webpack.getStore(storeName)` as the public fallback, and add a Proxy-backed
-regression. Generic/cache scans must remain descriptor-only. `Dispatcher`
-should validate `UserStore._dispatcher`, not require a separate public module
-root.
+- Baseline full `npm test`: `667/667`.
+- Focused `npm run test:runtime-audit`: `7/7`.
+- `npm run check`: passed.
+- Final full `npm test`: `667/667`.
+- `git diff --check`: passed.
+- An independent read-only review's medium coverage finding for missing and
+  throwing `Webpack.Stores` roots was closed with two public-fallback report
+  variants. Re-review returned GO with no blocking, high, or medium finding;
+  the CSS optionality invariant also closes the earlier low-priority coverage
+  suggestion.
 
-The eighth failure is `Css.ContainerClasses`. Its sole requested key,
-`containerCozyBounded`, is an absent legacy shape already observed in the clean
-CSS trace. Production safely falls back to its nonmatching sentinel, while the
-current chat/observer CSS contracts pass. Classify this exact fallback-backed
-contract as optional/warn when unresolved and add focused status coverage; do
-not invent a replacement class or broaden the resolver.
+The old live report proved the loaded candidate shapes and the rest of the
+89-contract inventory; the focused Proxy/fallback, derived-Dispatcher, error-
+sanitization, and CSS-status regressions prove the corrected classifications.
+That combined evidence is sufficient, so no second live dump or Discord
+restart was requested. After acceptance, the installed audit helper and report
+were removed from the live plugins directory. They were initially moved to:
 
-After those two bounded helper corrections, run the focused runtime-audit
-suite, `npm run check`, full `npm test`, and `git diff --check`; then perform
-privacy scans before commit/push. Do not change `MessageLoggerV2.plugin.js`,
-version, changelog, cache behavior, embeds, or BetterDiscord host source in
-that continuation unless new evidence proves a production defect.
+`$HOME/.Trash/MessageLoggerRuntimeCompatibilityAudit-accepted-2026-08-30/`
 
-Avoid asking the user for another full Discord audit while deterministic fixes
-and tests are still pending. Preserve the existing report as evidence; request
-one final live dump only if the corrected helper still cannot be accepted from
-the existing report plus deterministic validation.
+Final verification found that the Trash destination was absent, so the raw
+report is not recoverable from the live or Trash locations. The old helper
+source remains recoverable from Git history. Their original live paths and the
+report temporary path are also absent. The report's decision-grade facts remain
+summarized in this handoff, and the corrected permanent helper remains tracked
+under `tools/` for future Discord drift.
+
+The commit containing this entry should publish only the audit helper, its
+focused regression file, and the two handoffs to `develop`. No further
+compatibility-audit action remains after that commit is confirmed on
+`origin/develop`; Stage 9 warning identity, Logger-viewer embed/Components V2,
+release metadata, `main`, and all other branch work remain paused.
 
 Repository state when audited:
 
@@ -321,20 +337,26 @@ For the completed CSS compatibility correction:
   repository/live plugin copies remain byte-identical at the SHA-256 recorded
   above.
 
-The follow-up permanent compatibility-audit tool adds six deterministic
-coverage tests. Its current pre-commit evidence is:
+The permanent compatibility-audit tool now has seven deterministic tests. Its
+accepted correction evidence is:
 
 - `npm run check` passes for both the distributed Logger and the audit helper.
-- `npm run test:runtime-audit` passes `6/6`.
-- The first expanded full run passed every new audit test but one unrelated
-  existing media idle-timeout test missed its narrow timing window. That exact
-  test passed immediately in isolation, and the unchanged full suite then
-  passed `662/662`. After the final native-modal-alternative regression was
-  added, the complete suite passed `663/663`. After correcting the helper's
-  BetterDiscord builtin-module specifiers, the complete suite passed `664/664`.
+- `npm run test:runtime-audit` passes `7/7`.
+- Full `npm test` passes `667/667`.
 - `git diff --check` passes.
-- A final independent read-only review returned GO with no blocking, high, or
-  medium finding.
+- An independent read-only review's medium missing/throwing-`Stores` coverage
+  finding was closed with two public-fallback report variants, and re-review
+  returned GO with no blocking, high, or medium finding. The earlier
+  low-priority CSS suggestion was closed by an invariant proving
+  `Css.ContainerClasses` is the only optional CSS contract.
+
+The Proxy-backed store fixture proves guarded selected-store access and the
+public fallback while keeping generic scanning passive. Missing and throwing
+`Webpack.Stores` root variants force every store consumer through the public
+fallback. They also prove the derived `UserStore._dispatcher` path and verify
+that hostile thrown store errors are not serialized. Focused status checks
+prove an unresolved `Css.ContainerClasses` warns and an unresolved required
+CSS contract fails.
 
 The first copied helper failed before `start()` because BetterDiscord's addon
 loader interpreted Node's `node:fs` specifier as the plugin-relative path
@@ -346,10 +368,12 @@ test that rejects future `require("node:...")` usage.
 
 The CSS compatibility correction was committed and pushed on `develop` as
 `9019c074e18f30854db61ce561aa4446b054784b`, live-synced, and accepted. The
-complete module/class/asset audit is the current stage. Do not restart or kill
-Discord.
+complete module/class/asset audit and its bounded helper corrections are also
+accepted. The existing pre-correction live report plus the final deterministic
+regressions were sufficient; no second live dump, plugin sync, or Discord
+restart was needed.
 
-When live validation is authorized, verify at least:
+For any future Discord drift that reopens live validation, verify at least:
 
 - No `Failed to load module` or `Critical Discord modules missing` warning
 - `All patches applied` and `UI force update completed`
@@ -376,7 +400,14 @@ The complete audit uses the tracked manual helper
 one-pass command, report path, privacy contract, and cleanup are documented in
 `docs/runtime-compatibility-audit.md`. Keeping this helper in the repository is
 intentional so its dependency inventory can evolve with MessageLoggerV2 and be
-reused after future Discord or BetterDiscord breakage.
+reused after future Discord or BetterDiscord breakage. After the final report
+and deterministic correction were accepted, the installed helper and report
+were removed from the live plugins directory and initially moved to
+`$HOME/.Trash/MessageLoggerRuntimeCompatibilityAudit-accepted-2026-08-30/`.
+Final verification found that the Trash destination was absent, so the raw
+report is not recoverable from the live or Trash locations; the helper source
+remains recoverable from Git history. Their original live paths and report
+temporary path are also absent; no Discord restart was performed.
 
 ## Hard stops
 

@@ -223,6 +223,8 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
   const documentObject = createDocumentMock();
   const webpackHooks = {};
   let selectedAccessorReads = 0;
+  let storesAccessorReads = 0;
+  let publicStoreLookups = 0;
   const addon = {
     instance: {
       tools: {
@@ -412,10 +414,38 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     }
     return originalGetModule.call(this, filter, options);
   };
-  webpack.Stores.UserStore = {
+  const userStore = {
     getCurrentUser() { return null; },
     getUser() { return null; },
-    getUsers() { return []; }
+    getUsers() { return []; },
+    _dispatcher: {
+      dispatch() {},
+      subscribe() {}
+    }
+  };
+  const messageStore = {
+    getMessage() { return null; },
+    getMessages() { return []; },
+    getLastEditableMessage() { return null; }
+  };
+  const channelStore = {
+    getChannel() { return null; },
+    getDMFromUserId() { return null; }
+  };
+  const selectedChannelStore = {
+    getChannelId() { return 'channel-id'; }
+  };
+  const selectedGuildStore = {
+    getGuildId() { return 'guild-id'; }
+  };
+  const guildStore = {
+    getGuild() { return null; }
+  };
+  const guildMemberStore = {
+    getMember() { return null; }
+  };
+  const relationshipStore = {
+    isBlocked() { return false; }
   };
   const localeStore = {};
   Object.defineProperty(localeStore, 'locale', {
@@ -425,7 +455,47 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
       return 'en-US';
     }
   });
-  webpack.Stores.LocaleStore = localeStore;
+  const guildChannelStore = {
+    getChannels() { return []; },
+    getDefaultChannel() { return null; }
+  };
+  const storesByName = {
+    UserStore: userStore,
+    ChannelStore: channelStore,
+    SelectedChannelStore: selectedChannelStore,
+    SelectedGuildStore: selectedGuildStore,
+    GuildStore: guildStore,
+    GuildMemberStore: guildMemberStore,
+    RelationshipStore: relationshipStore,
+    LocaleStore: localeStore
+  };
+  const publicStoreFallbackMap = {
+    UserStore: userStore,
+    MessageStore: messageStore,
+    ChannelStore: channelStore,
+    SelectedChannelStore: selectedChannelStore,
+    SelectedGuildStore: selectedGuildStore,
+    GuildStore: guildStore,
+    GuildMemberStore: guildMemberStore,
+    LocaleStore: localeStore,
+    RelationshipStore: relationshipStore,
+    GuildChannelStore: guildChannelStore
+  };
+  webpack.Stores = new Proxy({}, {
+    get(_target, property) {
+      storesAccessorReads += 1;
+      if (typeof property === 'symbol') return undefined;
+      if (property === 'MessageStore') {
+        throw new Error('MessageStore access should be proxied through getStore');
+      }
+      if (Object.prototype.hasOwnProperty.call(storesByName, property)) return storesByName[property];
+      return undefined;
+    }
+  });
+  webpack.getStore = name => {
+    publicStoreLookups += 1;
+    return publicStoreFallbackMap[name] || null;
+  };
   const confirmModule = {};
   Object.defineProperty(confirmModule, 'ConfirmModal', {
     enumerable: true,
@@ -524,6 +594,70 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     const Audit = require(helperPath);
     const audit = new Audit();
     const report = await audit.buildReport('https://audit.invalid/?token=secret-label-value', { loadEntry: false, externalAssets: false });
+    const requiredStoreContractsForFallback = [
+      'UserStore',
+      'MessageStore',
+      'ChannelStore',
+      'SelectedChannelStore',
+      'SelectedGuildStore',
+      'LocaleStore',
+      'GuildStore',
+      'GuildMemberStore',
+      'RelationshipStore',
+      'GuildChannelStore',
+      'Dispatcher'
+    ];
+    const assertRequiredStoreContractsPass = (variantReport, label) => {
+      for (const name of requiredStoreContractsForFallback) {
+        const contract = variantReport.contracts.find(({ name: contractName }) => contractName === name);
+        assert.equal(contract?.selected?.found, true, `${label} ${name} selected`);
+        assert.equal(contract?.validation?.ok, true, `${label} ${name} validation`);
+        assert.equal(contract?.status, 'pass', `${label} ${name} status`);
+      }
+    };
+    const buildFallbackReport = async (label, setupStores) => {
+      const lookupsBefore = publicStoreLookups;
+      if (setupStores) setupStores();
+      const variantReport = await audit.buildReport(label, { loadEntry: false, externalAssets: false });
+      const variantSerialized = JSON.stringify(variantReport);
+      assertRequiredStoreContractsPass(variantReport, label);
+      assert.ok(publicStoreLookups > lookupsBefore);
+      return { variantReport, variantSerialized };
+    };
+    const enableStoreMatchingCandidateShape = () => {
+      const fields = {
+        getCurrentUser: { value() { return null; } },
+        getUser: { value() { return null; } },
+        getUsers: { value() { return []; } },
+        _dispatcher: { value: {
+          dispatch() {},
+          subscribe() {}
+        } },
+        isBlocked: { value() { return false; } },
+        locale: { value: 'en-US' },
+        getMessage: { value() { return null; } },
+        getMessages: { value() { return []; } },
+        getLastEditableMessage: { value() { return null; } },
+        getChannels: { value() { return []; } },
+        getDefaultChannel: { value() { return null; } },
+        getChannel: { value() { return null; } },
+        getDMFromUserId: { value() { return null; } },
+        getChannelId: { value() { return 'channel-id'; } },
+        getGuildId: { value() { return 'guild-id'; } },
+        getGuild: { value() { return null; } },
+        getMember: { value() { return null; } }
+      };
+      for (const [key, descriptor] of Object.entries(fields)) {
+        Object.defineProperty(candidate, key, {
+          configurable: true,
+          enumerable: true,
+          writable: true,
+          ...descriptor
+        });
+      }
+    };
+    const storesRootSentinel = 'secret-stores-root-getter-8f5d1f';
+    let storesRootAccessorCalls = 0;
     const serialized = JSON.stringify(report);
     const integration = report.contracts.find(({ name }) => name === 'LoggerIntegration.RenderLinkComponent');
     const maskedLink = report.contracts.find(({ name }) => name === 'MaskedLink');
@@ -531,9 +665,18 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     const optionalInvalid = report.contracts.find(({ name }) => name === 'NativeMediaModal');
     const requiredInvalid = report.contracts.find(({ name }) => name === 'RenderUserPopout');
     const assets = report.contracts.find(({ name }) => name === 'Assets.FixedRenderer');
-    const userStore = report.contracts.find(({ name }) => name === 'UserStore');
+    const userStoreContract = report.contracts.find(({ name }) => name === 'UserStore');
     const clickable = report.contracts.find(({ name }) => name === 'Css.ClickableClasses');
+    const container = report.contracts.find(({ name }) => name === 'Css.ContainerClasses');
     const localeStoreContract = report.contracts.find(({ name }) => name === 'LocaleStore');
+    const messageStoreContract = report.contracts.find(({ name }) => name === 'MessageStore');
+    const channelStoreContract = report.contracts.find(({ name }) => name === 'ChannelStore');
+    const selectedChannelStoreContract = report.contracts.find(({ name }) => name === 'SelectedChannelStore');
+    const selectedGuildStoreContract = report.contracts.find(({ name }) => name === 'SelectedGuildStore');
+    const guildStoreContract = report.contracts.find(({ name }) => name === 'GuildStore');
+    const guildMemberStoreContract = report.contracts.find(({ name }) => name === 'GuildMemberStore');
+    const dispatcherContract = report.contracts.find(({ name }) => name === 'Dispatcher');
+    const guildChannelStoreContract = report.contracts.find(({ name }) => name === 'GuildChannelStore');
     const manaConfirmModal = report.contracts.find(({ name }) => name === 'ManaConfirmModal');
     const parserNewContract = report.contracts.find(({ name }) => name === 'ParserNew');
     const systemLocaleContract = report.contracts.find(({ name }) => name === 'SystemLocaleUtils');
@@ -541,6 +684,7 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     const i18nContract = report.contracts.find(({ name }) => name === 'I18nModule');
     const messageContentContract = report.contracts.find(({ name }) => name === 'MessageContentComponent');
     const forumUploadContract = report.contracts.find(({ name }) => name === 'ForumUploadAsReplyRouteModule');
+    const cssContracts = report.contracts.filter(({ name }) => typeof name === 'string' && name.startsWith('Css.'));
     const reportPath = path.join(pluginFolder, 'MessageLoggerRuntimeCompatibilityAudit-report.json');
 
     assert.equal(report.totals.total, 89);
@@ -558,10 +702,37 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     assert.equal(requiredInvalid?.required, true);
     assert.equal(requiredInvalid?.validation?.ok, false);
     assert.equal(requiredInvalid?.status, 'fail');
+    assert.equal(container?.required, false);
+    assert.equal(container?.validation?.ok, false);
+    assert.equal(container?.status, 'warn');
+    assert.equal(clickable?.required, true);
+    assert.equal(clickable?.validation?.ok, false);
+    assert.equal(clickable?.status, 'fail');
+    assert.deepEqual(
+      cssContracts.filter(({ required }) => required === false).map(({ name }) => name).sort(),
+      ['Css.ContainerClasses']
+    );
     assert.equal(assets?.status, 'pass');
-    assert.equal(userStore?.selected?.found, true);
-    assert.equal(userStore?.validation?.ok, true);
+    assert.equal(userStoreContract?.selected?.found, true);
+    assert.equal(userStoreContract?.validation?.ok, true);
+    assert.equal(messageStoreContract?.selected?.found, true);
+    assert.equal(messageStoreContract?.validation?.ok, true);
+    assert.equal(channelStoreContract?.selected?.found, true);
+    assert.equal(channelStoreContract?.validation?.ok, true);
+    assert.equal(selectedChannelStoreContract?.selected?.found, true);
+    assert.equal(selectedChannelStoreContract?.validation?.ok, true);
+    assert.equal(selectedGuildStoreContract?.selected?.found, true);
+    assert.equal(selectedGuildStoreContract?.validation?.ok, true);
+    assert.equal(guildStoreContract?.selected?.found, true);
+    assert.equal(guildStoreContract?.validation?.ok, true);
+    assert.equal(guildMemberStoreContract?.selected?.found, true);
+    assert.equal(guildMemberStoreContract?.validation?.ok, true);
     assert.equal(localeStoreContract?.validation?.ok, true);
+    assert.equal(guildChannelStoreContract?.selected?.found, true);
+    assert.equal(guildChannelStoreContract?.validation?.ok, true);
+    assert.equal(dispatcherContract?.selected?.found, true);
+    assert.equal(dispatcherContract?.validation?.ok, true);
+    assert.equal(dispatcherContract?.status, 'pass');
     assert.equal(manaConfirmModal?.validation?.ok, true);
     assert.equal(parserNewContract?.validation?.ok, true);
     assert.equal(systemLocaleContract?.validation?.ok, true);
@@ -582,6 +753,9 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     assert.equal(userContextMenuContract?.validation?.ok, true);
     assert.equal(getSrcContract?.validation?.ok, true);
     assert.ok(selectedAccessorReads > 4);
+    assert.ok(storesAccessorReads > 6);
+    assert.equal(publicStoreLookups, 2);
+    assert.doesNotMatch(serialized, /MessageStore access should be proxied through getStore/);
     assert.equal(clickable?.alternatives?.[0]?.collectionErrors?.includes('Webpack.getModule-unavailable'), false);
     assert.equal(fs.existsSync(reportPath), false);
     assert.equal(accessorReads, 0);
@@ -591,6 +765,24 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     assert.doesNotMatch(serialized, new RegExp(pluginFolder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.doesNotMatch(serialized, /classSamples|function ValidType|https:\/\//);
     assert.doesNotMatch(serialized, /load-entry-attempted/);
+
+    await buildFallbackReport('missing-Stores', () => {
+      delete webpack.Stores;
+      enableStoreMatchingCandidateShape();
+    });
+
+    const throwingStoresReport = await buildFallbackReport('throwing-Stores', () => {
+      enableStoreMatchingCandidateShape();
+      Object.defineProperty(webpack, 'Stores', {
+        configurable: true,
+        get() {
+          storesRootAccessorCalls += 1;
+          throw new Error(storesRootSentinel);
+        }
+      });
+    });
+    assert.ok(storesRootAccessorCalls > 0);
+    assert.doesNotMatch(throwingStoresReport.variantSerialized, new RegExp(storesRootSentinel));
   } finally {
     delete require.cache[helperPath];
     if (cachedHelper) require.cache[helperPath] = cachedHelper;

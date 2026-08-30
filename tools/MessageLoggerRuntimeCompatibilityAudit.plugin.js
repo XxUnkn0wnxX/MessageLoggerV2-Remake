@@ -1147,9 +1147,19 @@ function getStore(api, key) {
   const webpack = safeRead(api, 'Webpack');
   if (!webpack.ok) return { value: null, error: webpack.error || 'Webpack-unavailable' };
   const stores = safeRead(webpack.value, 'Stores');
-  if (!stores.ok) return { value: null, error: stores.error || 'Stores-unavailable' };
-  const selected = safeRead(stores.value, key);
-  return { value: selected.ok ? selected.value : null, error: selected.error };
+  let selected = null;
+  let selectedError = stores.ok ? null : 'stores-unavailable';
+  if (stores.ok) {
+    try {
+      selected = stores.value[key];
+    } catch {
+      selectedError = 'stores-proxy-selection-throw';
+    }
+  }
+  if (selected != null) return { value: selected, error: null };
+  const fromWebpackStore = callWebpackMethod(api, 'getStore', [key]);
+  if (fromWebpackStore.value != null) return fromWebpackStore;
+  return { value: null, error: fromWebpackStore.error || selectedError || `Stores.${key}-unavailable` };
 }
 
 function callWebpackMethod(api, method, args) {
@@ -2566,6 +2576,7 @@ function resolveSemanticCssAuditAlternative(api, alternative) {
 }
 
 function describeSemanticCssContract(api, contract) {
+  const required = contract.required !== false;
   const alternatives = [];
   let selected = null;
   for (const alternative of contract.alternatives) {
@@ -2607,10 +2618,11 @@ function describeSemanticCssContract(api, contract) {
   const selectedUsableCandidateCount = selected?.result.usableCandidateCount || 0;
   const ambiguous = selectedUsableCandidateCount !== 1
     || alternatives.some(alternative => alternative.collectionErrors.length > 0);
-  let status = validation.ok ? 'pass' : 'fail';
+  let status = validation.ok ? 'pass' : required ? 'fail' : 'warn';
   if (validation.ok && ambiguous) status = 'warn';
   return {
     status,
+    required,
     expectedUniqueness: 'single semantic CSS module per ordered alternative',
     loadedMatchCount: selectedCandidateCount,
     candidateCount: selectedCandidateCount,
@@ -2680,6 +2692,7 @@ function semanticCssContracts() {
     },
     {
       name: 'Css.ContainerClasses',
+      required: false,
       alternatives: [
         { label: 'container-cozy-bounded', requestedKeys: ['containerCozyBounded'], consumerKeys: ['containerCozyBounded'] }
       ]
@@ -3575,7 +3588,6 @@ function moduleContracts() {
         const dispatcher = dataRead(userStore.value, '_dispatcher');
         return { value: dispatcher.ok ? dispatcher.value : null, error: dispatcher.error };
       },
-      match: coreModuleFilter(['dispatch', 'subscribe']),
       validate: value => collectValidation({ dispatch: dataCallable(value, 'dispatch').ok, subscribe: dataCallable(value, 'subscribe').ok })
     },
     {

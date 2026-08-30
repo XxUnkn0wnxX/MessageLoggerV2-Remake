@@ -26,43 +26,53 @@ This file is both the implementation checklist and the handoff record.
 - **Repository:**
   `$HOME/Apps/Dev/BD/BD-Plugins/MessageLoggerV2-Remake`
 - **Current root Codex session ID:**
-  `01a022f7-17f8-7b52-8cf3-e0e009dff3b3`
+  `01a05291-de83-7d30-864b-ada47ac1ac10`
 - **Current root rollout record:**
+  `$HOME/.codex/sessions/2026/08/30/rollout-2026-08-30T22-08-06-01a05291-de83-7d30-864b-ada47ac1ac10.jsonl`
+- **Previous continuation session ID:**
+  `01a022f7-17f8-7b52-8cf3-e0e009dff3b3`
+- **Previous continuation rollout:**
   `$HOME/.codex/sessions/2026/08/21/rollout-2026-08-21T16-16-54-01a022f7-17f8-7b52-8cf3-e0e009dff3b3.jsonl`
 - **Earlier compatibility-handoff session ID:**
   `01a05172-deb0-71d1-8089-b7186c453a3d`
 - **Earlier compatibility-handoff rollout:**
   `$HOME/.codex/sessions/2026/08/30/rollout-2026-08-30T16-54-37-01a05172-deb0-71d1-8089-b7186c453a3d.jsonl`
 - **Working branch:** `develop`
-- **Active compatibility add-on:** the production-code boundary shared by
-  local `develop`, `origin/develop`, and remote `refs/heads/develop` before
-  this handoff-only update is
-  `670d6de861a032c00e9999147adf99eabb84b9cb`. The production Discord
-  module/CSS compatibility correction and optional `loadEntry` audit are
-  complete. The permanent audit helper covers all Logger-owned inventory, but
-  its retained one-pass live report still has seven BetterDiscord store-Proxy
-  selection false negatives plus one fallback-backed legacy
-  `containerCozyBounded` contract that must become optional/warn. Continue from
-  `DISCORD-WEBPACK-ASSET-COMPATIBILITY-HANDOFF.md`; do not repeat the broad
-  inventory scan.
+- **Active compatibility add-on:** production commit
+  `670d6de861a032c00e9999147adf99eabb84b9cb` remains published and live. The
+  permanent audit helper now resolves selected stores through BetterDiscord's
+  `Webpack.Stores` Proxy with the public `Webpack.getStore` fallback, derives
+  `Dispatcher` from `UserStore._dispatcher`, and treats only the fallback-
+  backed legacy `Css.ContainerClasses` contract as optional/warn. Generic and
+  cache scans remain descriptor-only. The pre-correction live report plus the
+  focused deterministic regressions are sufficient for acceptance; do not
+  repeat the broad inventory scan or request another live dump without new
+  runtime drift.
 - **Published base before this final pre-embed checkpoint:** local `develop`,
   `origin/develop`, and the remote branch were all
   `e6b27c1799976be6561dc3e893acadc20ac06140` (`Complete saved attachment
   fallback handling`). That commit already owns the shared exact failure
   coordinator, viewer/modal convergence, saved-attachment open routing, and
-  event-driven late `MessageAccessories.render` patch. The final checkpoint is
-  the commit containing this snapshot and the three files listed below.
-- **Final checkpoint scope:** this checklist, `MessageLoggerV2.plugin.js`,
-  `tests/media.test.js`, and `tests/source-contracts.test.js`. No version,
-  changelog, settings documentation, release metadata, embed/Components V2
-  renderer, branch promotion, or BetterDiscord host source is changed.
+  event-driven late `MessageAccessories.render` patch. Later production and
+  audit checkpoints are recorded separately in this living snapshot and the
+  activity log below.
+- **Current audit-correction checkpoint scope:** this checklist,
+  `DISCORD-WEBPACK-ASSET-COMPATIBILITY-HANDOFF.md`,
+  `tools/MessageLoggerRuntimeCompatibilityAudit.plugin.js`, and
+  `tests/runtime-compatibility-audit-coverage.test.js`. No production Logger
+  source, version, changelog, settings documentation, release metadata,
+  embed/Components V2 renderer, branch promotion, or BetterDiscord host source
+  is changed.
 - **Live parity:** repository and installed BetterDiscord copies of
   `MessageLoggerV2.plugin.js` are byte-identical at SHA-256
-  `8977f3ce02a896e60fa29cb8e6414d140640747c6080ae4aa901a9d4f863bfb6`.
-- **Current deterministic gate:** `npm run check`, `git diff --check`, focused
-  media/source-contract tests `297/297`, and full `npm test` `638/638` all
-  pass with zero failures. An independent final review found no blocking or
-  high-risk defect.
+  `c9250059c7ad79abf7483a27a9db3764894c5e5056219a526ff228f4919f1269`.
+- **Current deterministic gate:** the clean baseline and final full
+  `npm test` runs pass `667/667`; `npm run test:runtime-audit` passes `7/7`;
+  `npm run check` and `git diff --check` pass. An independent review's medium
+  missing/throwing-`Stores` coverage finding was closed with two report
+  variants, and re-review returned GO with no blocking, high, or medium
+  finding. The earlier low-priority CSS suggestion is also enforced by a
+  focused invariant.
 - **Runtime/live gate:** BetterDiscord hot-reloaded the exact live plugin,
   resolved the native image modal, applied all MessageLogger patches, and
   completed both UI refreshes without a new MessageLogger exception. The user
@@ -100,9 +110,16 @@ This file is both the implementation checklist and the handoff record.
 - **Trace and stash state:** `git stash list` is empty. The user explicitly
   requested deletion of the failed unsafe embed stash, and it must not be
   recreated or treated as a future implementation source. The old embed and
-  document-attachment trace helpers are not linked in BetterDiscord; no helper
-  or generated report is part of this checkpoint. Ignored `tmp/` evidence may
-  remain local-only.
+  document-attachment trace helpers are not linked in BetterDiscord. The
+  accepted runtime-audit helper and its pre-correction report were removed from
+  the live plugins directory and initially moved to
+  `$HOME/.Trash/MessageLoggerRuntimeCompatibilityAudit-accepted-2026-08-30/`.
+  Final verification found that the Trash destination was absent, so the raw
+  report is not recoverable from the live or Trash locations; the helper
+  source remains recoverable from Git history. Their original live paths and
+  report temporary path are also absent. The report's decision-grade facts
+  remain recorded in the compatibility handoff; no Discord restart was
+  performed. Ignored `tmp/` evidence may remain local-only.
 - **Expected cache/network noise:** current 403/404 misses, DNS failures,
   socket resets, request timeouts, certificate failures, and files with no
   inferable extension are remote-cache outcomes rather than Logger renderer or
@@ -115,31 +132,31 @@ This file is both the implementation checklist and the handoff record.
   `embeds`/`components`. The discarded experiment proved `new MessageRecord(raw)`
   is not a safe raw-wire hydration boundary; future work needs a trace-proven
   Discord wire-to-model factory or a fail-closed summary path.
-- **Worker state:** the user reported that Spark usage had reached its current
-  limit, so bounded implementation switched to Luna Extra High for the rest of
-  this session. The Sol parent integrated and reviewed every bounded result.
+- **Worker state:** the configured primary `worker` handled the bounded
+  implementation and focused-test slices; no Spark-to-Luna fallback condition
+  was reported. The runtime exposed the worker role but not a concrete model
+  name. The Sol parent integrated and verified every result.
 - **Checklist state:** include this file in every user-confirmed stage commit
   and keep it in the repository root after the current release. Do not archive
   it unless the user explicitly requests that in a later session.
 - **Privacy state:** persistent paths must use `$HOME`. Before any future
   commit, merge, rewrite, or push, scan the tracked tree, staged diff, and
   outgoing range for an expanded macOS home path.
-- **Change-control state:** the user approved the exact stale-assertion plus two
-  runtime-error repair package, the complete saved-attachment fallback add-on,
-  this handoff refresh, and commit/push of the final four-file checkpoint to
-  `develop`. No `main` merge, version/changelog update, release step, other
-  branch operation, or embed implementation is authorized.
+- **Change-control state:** the user approved the earlier runtime repairs and
+  saved-attachment fallback, then authorized continuation of the bounded
+  four-file audit-helper correction through commit/push on `develop`. No
+  production Logger edit, `main` merge, version/changelog update, release step,
+  other branch operation, warning-identity pass, or embed implementation is
+  authorized.
 
 ### Exact next action
 
-In the next session, read
-`DISCORD-WEBPACK-ASSET-COMPATIBILITY-HANDOFF.md` first. Correct the audit
-helper's known selected-store Proxy path and `Dispatcher` selection, then mark
-only the fallback-backed `Css.ContainerClasses` contract optional/warn. Add
-focused deterministic regressions, run the full project gates, and finish the
-audit-helper handoff. Do not repeat the broad inventory scan or resume warning-
-identity work, Logger-viewer embed/Components V2, Stage 4a, Stage 4b, Stage 5,
-release metadata, `main`, or other branch work.
+No further runtime-audit implementation or live dump is required. Confirm the
+commit containing this entry and the three companion audit-correction files is
+on `origin/develop`; if it is not, publish that exact four-file commit after the
+recorded final and privacy gates. Then stop. Do not repeat the broad inventory
+scan or resume warning-identity work, Logger-viewer embed/Components V2, Stage
+4a, Stage 4b, Stage 5, release metadata, `main`, or other branch work.
 
 ### Resume procedure
 
@@ -152,18 +169,21 @@ release metadata, `main`, or other branch work.
 6. Recheck `debug.log` for any newer MessageLogger stack and
    separate external cache failures from plugin exceptions.
 7. Compare the checkout with this snapshot and record drift.
-8. Continue the already-authorized audit-helper correction from the exact
-   unresolved list in the compatibility handoff. If embed work is later
-   resumed separately, trace the current Discord native model/factory boundary
-   before writing code; do not reconstruct or reapply the deleted unsafe
-   experiment.
+8. Treat the audit-helper correction as complete once its exact four-file
+   commit is confirmed on `origin/develop`; do not rerun the old broad audit.
+   If embed work is later resumed separately, trace the current Discord native
+   model/factory boundary before writing code; do not reconstruct or reapply
+   the deleted unsafe experiment.
 9. Update this file after each implementation, test, or live-runtime stage.
 
 ### Session reconstruction references
 
 - The current root session ID is
-  `01a022f7-17f8-7b52-8cf3-e0e009dff3b3`.
+  `01a05291-de83-7d30-864b-ada47ac1ac10`.
 - Its exact rollout is
+  `$HOME/.codex/sessions/2026/08/30/rollout-2026-08-30T22-08-06-01a05291-de83-7d30-864b-ada47ac1ac10.jsonl`.
+- The previous continuation session is
+  `01a022f7-17f8-7b52-8cf3-e0e009dff3b3`, recorded at
   `$HOME/.codex/sessions/2026/08/21/rollout-2026-08-21T16-16-54-01a022f7-17f8-7b52-8cf3-e0e009dff3b3.jsonl`.
 - The earlier compatibility-handoff session is
   `01a05172-deb0-71d1-8089-b7186c453a3d`, recorded at
@@ -3421,3 +3441,44 @@ behavior, persistence, rendering, or external-open behavior.
 - Active root session ID:
   `01a022f7-17f8-7b52-8cf3-e0e009dff3b3`; rollout:
   `$HOME/.codex/sessions/2026/08/21/rollout-2026-08-21T16-16-54-01a022f7-17f8-7b52-8cf3-e0e009dff3b3.jsonl`.
+
+### 2026-08-30 - Runtime audit helper correction accepted
+
+- Corrected only the permanent audit helper and its deterministic coverage.
+  Selected stores now use guarded `Webpack.Stores[storeName]` Proxy access
+  with the public `Webpack.getStore(storeName)` fallback, including when the
+  Proxy is unavailable or throws. Caught host error messages are not copied
+  into the report, and generic/cache scans remain descriptor-only.
+- `Dispatcher` now validates the selected `UserStore._dispatcher` instead of
+  requiring a separate public module root. `Css.ContainerClasses` is the sole
+  optional CSS contract, so its absent fallback-backed legacy
+  `containerCozyBounded` shape warns while unresolved current CSS contracts
+  continue to fail.
+- The Proxy/fallback, Dispatcher, error-sanitization, and CSS-status regression
+  coverage passes `7/7`. The clean baseline and final full `npm test` runs pass
+  `667/667`; `npm run check` and `git diff --check` pass. An independent
+  review's medium missing/throwing-`Stores` coverage finding was closed with
+  two public-fallback report variants, and re-review returned GO with no
+  blocking, high, or medium finding. The earlier low-priority CSS invariant was
+  also added.
+- The existing `89`-contract live report remains the pre-correction evidence
+  for loaded candidate shapes and the broader inventory. Combined with the
+  deterministic correction, it is sufficient for acceptance; no second live
+  dump, helper sync, or Discord restart was needed.
+- The installed audit helper and report were removed from the live plugins
+  directory and initially moved to
+  `$HOME/.Trash/MessageLoggerRuntimeCompatibilityAudit-accepted-2026-08-30/`.
+  Final verification found that the Trash destination was absent, so the raw
+  report is not recoverable from the live or Trash locations; the helper
+  source remains recoverable from Git history. Their original live paths and
+  report temporary path are also absent. The report's decision-grade facts
+  remain recorded in the compatibility handoff, and the corrected helper
+  remains tracked under `tools/` for future runtime drift.
+- `MessageLoggerV2.plugin.js` was not edited and remains byte-identical to the
+  installed copy at SHA-256
+  `c9250059c7ad79abf7483a27a9db3764894c5e5056219a526ff228f4919f1269`.
+  No version, changelog, cache policy, embed renderer, BetterDiscord host,
+  `main`, or release work was changed or resumed.
+- Active root session ID:
+  `01a05291-de83-7d30-864b-ada47ac1ac10`; rollout:
+  `$HOME/.codex/sessions/2026/08/30/rollout-2026-08-30T22-08-06-01a05291-de83-7d30-864b-ada47ac1ac10.jsonl`.
