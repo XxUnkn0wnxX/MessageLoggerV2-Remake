@@ -165,6 +165,103 @@ const Logger = {
   warn(...args) { return emitStyledConsoleEvent('warn', args); },
   error(...args) { return emitStyledConsoleEvent('error', args); }
 };
+function resolveSemanticCssModule(semanticKeys, webpackOptions) {
+  if (!Array.isArray(semanticKeys) || semanticKeys.length === 0 ||
+    semanticKeys.some(key => typeof key !== 'string' || key.length === 0)) return null;
+  const directLookup = typeof Webpack?.getByKeys === 'function'
+    ? () => webpackOptions === undefined
+      ? Webpack.getByKeys(...semanticKeys)
+      : Webpack.getByKeys(...semanticKeys, webpackOptions)
+    : null;
+  try {
+    const direct = directLookup?.();
+    if (direct != null) return direct;
+  } catch {}
+
+  if (typeof Webpack?.getModule !== 'function') return null;
+  let matchedCandidate = null;
+  let matchedResult = null;
+  const findCandidate = candidate => {
+    const normalized = normalizeSemanticCssModule(candidate, semanticKeys);
+    if (!normalized) return false;
+    matchedCandidate = candidate;
+    matchedResult = normalized;
+    return true;
+  };
+  let candidate;
+  try {
+    candidate = webpackOptions === undefined
+      ? Webpack.getModule(findCandidate)
+      : Webpack.getModule(findCandidate, webpackOptions);
+  } catch {}
+  if (candidate == null) return null;
+  if (candidate === matchedCandidate) return matchedResult;
+  return normalizeSemanticCssModule(candidate, semanticKeys);
+}
+
+function normalizeSemanticCssModule(candidate, semanticKeys) {
+  if (candidate == null || (typeof candidate !== 'object' && typeof candidate !== 'function')) return null;
+  let descriptors;
+  try {
+    descriptors = Object.getOwnPropertyDescriptors(candidate);
+  } catch {
+    return null;
+  }
+  const stringExports = [];
+  const stringValuesByKey = new Map();
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== 'string') continue;
+    const descriptor = descriptors[key];
+    let value;
+    try {
+      value = Object.prototype.hasOwnProperty.call(descriptor, 'value')
+        ? descriptor.value
+        : typeof descriptor.get === 'function'
+          ? descriptor.get.call(candidate)
+          : undefined;
+    } catch {
+      continue;
+    }
+    if (typeof value !== 'string') continue;
+    stringValuesByKey.set(key, value);
+    stringExports.push({
+      value,
+      tokens: value.split(/\s+/).filter(Boolean)
+    });
+  }
+
+  const resolvedValues = new Map();
+  for (const semanticKey of semanticKeys) {
+    if (Object.prototype.hasOwnProperty.call(descriptors, semanticKey)) {
+      const directValue = stringValuesByKey.get(semanticKey);
+      if (typeof directValue !== 'string') return null;
+      resolvedValues.set(semanticKey, directValue);
+      continue;
+    }
+    const tokenPrefix = `${semanticKey}_`;
+    const derived = stringExports.find(exported => exported.tokens.some(token => token.startsWith(tokenPrefix)));
+    if (!derived) return null;
+    resolvedValues.set(semanticKey, derived.value);
+  }
+
+  let normalized;
+  try {
+    normalized = Object.create(Object.getPrototypeOf(candidate));
+    Object.defineProperties(normalized, descriptors);
+    for (const [semanticKey, value] of resolvedValues) {
+      if (Object.prototype.hasOwnProperty.call(descriptors, semanticKey)) continue;
+      Object.defineProperty(normalized, semanticKey, {
+        value,
+        enumerable: true,
+        configurable: true,
+        writable: true
+      });
+    }
+  } catch {
+    return null;
+  }
+  return normalized;
+}
 const DiscordModules = (() => {
   const cache = {};
   const lazyGet = (key, getter) => ({
@@ -199,43 +296,42 @@ const DiscordModules = (() => {
     HistoryUtils: lazyGet('HistoryUtils', () => Webpack.getByKeys('getHistory')),
     HttpModule: lazyGet('HttpModule', () => Webpack.getByKeys('get', 'post', 'put', 'del') || Webpack.getByKeys('get', 'post', 'put', 'delete')),
     Endpoints: lazyGet('Endpoints', () => Webpack.getByKeys('Endpoints', 'ActionTypes')),
-    ClickableClasses: lazyGet('ClickableClasses', () => Webpack.getByKeys('clickable')),
-    ColorClasses: lazyGet('ColorClasses', () => Webpack.getByKeys('colorDanger', 'colorPremium')),
-    ButtonClasses: lazyGet('ButtonClasses', () => Webpack.getByKeys('button', 'colorBrand', 'lookFilled')),
-    MessageWrapperClasses: lazyGet('MessageWrapperClasses', () => Webpack.getByKeys('message', 'cozyMessage') || Webpack.getByKeys('message', 'groupStart')),
-    MessageToolbarClasses: lazyGet('MessageToolbarClasses', () => Webpack.getByKeys('messageListItem', 'buttons')),
+    ClickableClasses: lazyGet('ClickableClasses', () => resolveSemanticCssModule(['clickable'])),
+    ColorClasses: lazyGet('ColorClasses', () => resolveSemanticCssModule(['colorDanger', 'colorPremium'])),
+    ButtonClasses: lazyGet('ButtonClasses', () => resolveSemanticCssModule(['button', 'colorBrand', 'lookFilled'])),
+    MessageWrapperClasses: lazyGet('MessageWrapperClasses', () => resolveSemanticCssModule(['message', 'cozyMessage']) || resolveSemanticCssModule(['message', 'groupStart'])),
+    MessageToolbarClasses: lazyGet('MessageToolbarClasses', () => resolveSemanticCssModule(['messageListItem', 'buttons'])),
     TrashIcon: lazyGet('TrashIcon', () => Webpack.getBySource('2.81h8.36a3', { searchExports: true })),
     TrashIconFallback: lazyGet('TrashIconFallback', () => Webpack.getBySource(/M5\.06 7a1 1 0 0 0-1 1\.06l\.76 12\.13/, { searchExports: true })),
-    ContainerClasses: lazyGet('ContainerClasses', () => Webpack.getByKeys('containerCozyBounded')),
-    ChatContentClasses: lazyGet('ChatContentClasses', () => Webpack.getByKeys('chatContent')),
-    MarkupClasses: lazyGet('MarkupClasses', () => Webpack.getByKeys('markup')),
-    SpoilerClasses: lazyGet('SpoilerClasses', () => Webpack.getByKeys('spoilerText', 'hidden') ?? Webpack.getByKeys('spoilerContent', 'hidden')),
-    FocusedClasses: lazyGet('FocusedClasses', () => Webpack.getByKeys('focused')),
-    TabBarClasses: lazyGet('TabBarClasses', () => Webpack.getByKeys('tabBar')),
-    DefaultColorClasses: lazyGet('DefaultColorClasses', () => Webpack.getByKeys('defaultColor')),
-    BotTagClasses: lazyGet('BotTagClasses', () => Webpack.getByKeys('botTag')),
-    ExecutedCommandClasses: lazyGet('ExecutedCommandClasses', () => Webpack.getByKeys('executedCommand')),
-    TitleClasses: lazyGet('TitleClasses', () => Webpack.getByKeys('title', 'chatContent')),
-    ContentClasses: lazyGet('ContentClasses', () => Webpack.getByKeys('content', 'marginCompactIndent')),
-    ContainerCompactClasses: lazyGet('ContainerCompactClasses', () => Webpack.getByKeys('container', 'containerCompactBounded')),
-    ErrorPageClasses: lazyGet('ErrorPageClasses', () => Webpack.getByKeys('errorPage')),
-    TabItemClasses: lazyGet('TabItemClasses', () => Webpack.getModule(Filters.byKeys('item', 'selected', 'topPill'))),
+    ContainerClasses: lazyGet('ContainerClasses', () => resolveSemanticCssModule(['containerCozyBounded'])),
+    ChatContentClasses: lazyGet('ChatContentClasses', () => resolveSemanticCssModule(['chatContent'])),
+    MarkupClasses: lazyGet('MarkupClasses', () => resolveSemanticCssModule(['markup'])),
+    SpoilerClasses: lazyGet('SpoilerClasses', () => resolveSemanticCssModule(['spoilerText', 'hidden']) ?? resolveSemanticCssModule(['spoilerContent', 'hidden'])),
+    FocusedClasses: lazyGet('FocusedClasses', () => resolveSemanticCssModule(['focused'])),
+    TabBarClasses: lazyGet('TabBarClasses', () => resolveSemanticCssModule(['tabBar'])),
+    DefaultColorClasses: lazyGet('DefaultColorClasses', () => resolveSemanticCssModule(['defaultColor'])),
+    BotTagClasses: lazyGet('BotTagClasses', () => resolveSemanticCssModule(['botTag'])),
+    ExecutedCommandClasses: lazyGet('ExecutedCommandClasses', () => resolveSemanticCssModule(['executedCommand'])),
+    TitleClasses: lazyGet('TitleClasses', () => resolveSemanticCssModule(['title', 'chatContent'])),
+    ContentClasses: lazyGet('ContentClasses', () => resolveSemanticCssModule(['content', 'marginCompactIndent'])),
+    ContainerCompactClasses: lazyGet('ContainerCompactClasses', () => resolveSemanticCssModule(['container', 'containerCompactBounded'])),
+    ErrorPageClasses: lazyGet('ErrorPageClasses', () => resolveSemanticCssModule(['errorPage'])),
+    TabItemClasses: lazyGet('TabItemClasses', () => resolveSemanticCssModule(['item', 'selected', 'topPill'])),
     CUser: lazyGet('CUser', () => Webpack.getModule(Filters.byPrototypeKeys('getAvatarSource', 'isLocalBot'))),
     DiscordUtils: lazyGet('DiscordUtils', () => Webpack.getByKeys('bindAll', 'debounce')),
     TimestampUtils: lazyGet('TimestampUtils', () => Webpack.getByKeys('relativeTimeRounding', 'locales') || Webpack.getByKeys('createFromInputFallback')),
-    TimestampClasses: lazyGet('TimestampClasses', () => Webpack.getByKeys(
+    TimestampClasses: lazyGet('TimestampClasses', () => resolveSemanticCssModule([
       'separator',
       'timestamp',
       'timestampInline',
       'timestampVisibleOnHover',
       'latin24CompactTimeStamp',
-      { searchExports: true }
-    ) || Webpack.getByKeys(
+    ], { searchExports: true }) || resolveSemanticCssModule([
       'separator',
       'timestamp',
       'timestampInline',
-      { searchExports: true }
-    )),
+    ], { searchExports: true })
+    ),
     Parser: lazyGet('Parser', () => Webpack.getByKeys('parse', 'astParserFor')),
     ParserNew: lazyGet('ParserNew', () => Webpack.getByKeys('defaultRules', 'parse')),
     GuildUtils: lazyGet('GuildUtils', () => Webpack.getByKeys('getGuild', 'getGuildCount')),
@@ -1589,12 +1685,12 @@ module.exports = class MessageLoggerV2 {
         () => this.getSingleDiscordClass('header avatar'),
         'avatar-MLV2'
       ),
-      username: Webpack.getByKeys('username')?.username?.split(/ /g)[0] || '',
-      timestamp: Webpack.getByKeys('timestamp')?.timestamp?.split(/ /g)[0] || '',
-      selected: Webpack.getByKeys('selected', 'message')?.selected?.split(/ /g)[0] || '',
-      container: Webpack.getByKeys('container', 'content')?.container?.split(/ /g)[0] || '',
+      username: resolveSemanticCssModule(['username'])?.username?.split(/ /g)[0] || '',
+      timestamp: resolveSemanticCssModule(['timestamp'])?.timestamp?.split(/ /g)[0] || '',
+      selected: resolveSemanticCssModule(['selected', 'message'])?.selected?.split(/ /g)[0] || '',
+      container: resolveSemanticCssModule(['container', 'content'])?.container?.split(/ /g)[0] || '',
       message: DiscordModules.MessageWrapperClasses?.message?.split(/ /g)[0] || '',
-      messageContent: Webpack.getByKeys('messageContent')?.messageContent?.split(/ /g)[0] || ''
+      messageContent: resolveSemanticCssModule(['messageContent'])?.messageContent?.split(/ /g)[0] || ''
     };
     this.muteModule = DiscordModules.MuteModule;
     this.menu = {};
@@ -2468,10 +2564,12 @@ module.exports = class MessageLoggerV2 {
     for (const change of addedNodes) {
       const className = change.className;
       const isString = typeof className === 'string';
-      const matchesChatClass = isString && className.includes(this.observer.chatClass);
-      const matchesChatContentClass = isString && className.includes(this.observer.chatContentClass);
-      const matchesTitleClass = isString && className.includes(this.observer.titleClass);
-      const matchesContainerCozy = isString && className.includes(this.observer.containerCozyClass);
+      const classTokens = isString ? className.split(/\s+/).filter(Boolean) : [];
+      const matchesClass = token => !!token && classTokens.includes(token);
+      const matchesChatClass = matchesClass(this.observer.chatClass);
+      const matchesChatContentClass = matchesClass(this.observer.chatContentClass);
+      const matchesTitleClass = matchesClass(this.observer.titleClass);
+      const matchesContainerCozy = matchesClass(this.observer.containerCozyClass);
       const matchesStyle = change.style?.cssText === 'border-radius: 2px; background-color: rgba(114, 137, 218, 0);';
       if (matchesChatClass) {
         isTitle = true;
@@ -10868,10 +10966,7 @@ module.exports = class MessageLoggerV2 {
   }
   getLoggerNativeAudioClassName() {
     try {
-      const module = Webpack.getModule(
-        exportedValue => typeof exportedValue?.mosaicItemContent === 'string',
-        { searchExports: true }
-      );
+      const module = resolveSemanticCssModule(['mosaicItemContent'], { searchExports: true });
       return typeof module?.mosaicItemContent === 'string' ? module.mosaicItemContent : '';
     } catch {
       return '';
@@ -22452,12 +22547,15 @@ module.exports = class MessageLoggerV2 {
     const ret = ContextMenu.buildMenu(setup);
     return props => ret({ ...props, onClose: _ => { } });
   }
+  resolveSemanticCssModule(semanticKeys, webpackOptions) {
+    return resolveSemanticCssModule(semanticKeys, webpackOptions);
+  }
   getDiscordClass(arg, thrw) {
     try {
       const args = arg.split(' ');
       const cacheKey = args.join(',');
       this._classCache ??= {};
-      const module = this._classCache[cacheKey] ??= Webpack.getByKeys(...args);
+      const module = this._classCache[cacheKey] ??= resolveSemanticCssModule(args);
       if (!module) {
         Logger.warn(`getDiscordClass: No module found for keys: ${args.join(', ')}`);
         return '';
@@ -22484,19 +22582,17 @@ module.exports = class MessageLoggerV2 {
   }
   getTimestampClassesModule() {
     if (this._timestampClassesModule) return this._timestampClassesModule;
-    const module = DiscordModules.TimestampClasses || Webpack.getByKeys(
+    const module = DiscordModules.TimestampClasses || resolveSemanticCssModule([
       'separator',
       'timestamp',
       'timestampInline',
       'timestampVisibleOnHover',
       'latin24CompactTimeStamp',
-      { searchExports: true }
-    ) || Webpack.getByKeys(
+    ], { searchExports: true }) || resolveSemanticCssModule([
       'separator',
       'timestamp',
       'timestampInline',
-      { searchExports: true }
-    );
+    ], { searchExports: true });
     if (module) this._timestampClassesModule = module;
     return module || null;
   }
@@ -23667,12 +23763,17 @@ module.exports = class MessageLoggerV2 {
         this._openUserContextMenu(e, author, channel);
       });
       const timestampEl = element.getElementsByClassName(classes.extra[11])[0];
+      const messageWrapperClass = typeof DiscordModules.MessageWrapperClasses?.message === 'string'
+        ? DiscordModules.MessageWrapperClasses.message.split(/\s+/).find(Boolean) || ''
+        : '';
       const collectGroupMessageIds = () => {
         const messages = [element];
-        let target = element.nextElementSibling;
-        while (target?.classList && !target.classList.contains(DiscordModules.MessageWrapperClasses)) {
-          messages.push(target);
-          target = target.nextElementSibling;
+        if (messageWrapperClass) {
+          let target = element.nextElementSibling;
+          while (target?.classList && !target.classList.contains(messageWrapperClass)) {
+            messages.push(target);
+            target = target.nextElementSibling;
+          }
         }
         if (!messages.length) return [];
         const messageIds = [];
