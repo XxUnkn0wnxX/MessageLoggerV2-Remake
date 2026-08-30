@@ -206,7 +206,6 @@ test('CSS DiscordModules getters use the semantic resolver without changing alte
     ['ColorClasses', ['colorDanger', 'colorPremium']],
     ['ButtonClasses', ['button', 'colorBrand', 'lookFilled']],
     ['MessageToolbarClasses', ['messageListItem', 'buttons']],
-    ['ContainerClasses', ['containerCozyBounded']],
     ['ChatContentClasses', ['chatContent']],
     ['MarkupClasses', ['markup']],
     ['FocusedClasses', ['focused']],
@@ -348,8 +347,7 @@ test('observer ignores empty and substring-only class candidates', () => {
   const originalClasses = {
     chatClass: observerMethod.chatClass,
     chatContentClass: observerMethod.chatContentClass,
-    titleClass: observerMethod.titleClass,
-    containerCozyClass: observerMethod.containerCozyClass
+    titleClass: observerMethod.titleClass
   };
   let selectedChannelCalls = 0;
   plugin.getSelectedTextChannel = () => {
@@ -361,7 +359,6 @@ test('observer ignores empty and substring-only class candidates', () => {
     observerMethod.chatClass = '';
     observerMethod.chatContentClass = '';
     observerMethod.titleClass = '';
-    observerMethod.containerCozyClass = '';
     plugin.observer({ addedNodes: [{ className: 'anything', style: {} }] });
     assert.equal(selectedChannelCalls, 0);
 

@@ -269,15 +269,6 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
       return function TrashFallbackExport() {};
     }
   });
-  const textModule = {};
-  Object.defineProperty(textModule, 'textExport', {
-    configurable: true,
-    enumerable: true,
-    get() {
-      selectedAccessorReads += 1;
-      return function TextExport() {};
-    }
-  });
   const userContextMenuModule = {};
   Object.defineProperty(userContextMenuModule, 'contextExport', {
     configurable: true,
@@ -380,7 +371,6 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     if (args[0] === 'zoomThumbnailPlaceholder' && args[1]?.searchExports === false) return imageModalModule;
     if (args[0] === '2.81h8.36a3' && args[1]?.searchExports === true) return trashPrimaryModule;
     if (args[0] instanceof RegExp) return trashFallbackModule;
-    if (args[0] === 'case"always-white"' && args[1]?.searchExports === true) return textModule;
     if (args[0] === 'isGroupDM' && args[1] === 'moderationAlertId' && args[2]?.searchExports === true) return userContextMenuModule;
     if (args[0] === 'sourceMetadata:' && args[1] === 'getSrc' && args[2]?.searchExports === true) return getSrcModule;
     if (args[0] === 'MASKED_LINK' && args[1] === 'onAuxClick' && args[2]?.searchExports === true) return maskedLinkModule;
@@ -667,7 +657,6 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     const assets = report.contracts.find(({ name }) => name === 'Assets.FixedRenderer');
     const userStoreContract = report.contracts.find(({ name }) => name === 'UserStore');
     const clickable = report.contracts.find(({ name }) => name === 'Css.ClickableClasses');
-    const container = report.contracts.find(({ name }) => name === 'Css.ContainerClasses');
     const localeStoreContract = report.contracts.find(({ name }) => name === 'LocaleStore');
     const messageStoreContract = report.contracts.find(({ name }) => name === 'MessageStore');
     const channelStoreContract = report.contracts.find(({ name }) => name === 'ChannelStore');
@@ -687,7 +676,7 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     const cssContracts = report.contracts.filter(({ name }) => typeof name === 'string' && name.startsWith('Css.'));
     const reportPath = path.join(pluginFolder, 'MessageLoggerRuntimeCompatibilityAudit-report.json');
 
-    assert.equal(report.totals.total, 89);
+    assert.equal(report.totals.total, 87);
     assert.equal(report.label, 'custom');
     assert.deepEqual(report.options, { loadEntry: false, externalAssets: false });
     assert.equal(integration?.status, 'pass');
@@ -702,15 +691,14 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     assert.equal(requiredInvalid?.required, true);
     assert.equal(requiredInvalid?.validation?.ok, false);
     assert.equal(requiredInvalid?.status, 'fail');
-    assert.equal(container?.required, false);
-    assert.equal(container?.validation?.ok, false);
-    assert.equal(container?.status, 'warn');
     assert.equal(clickable?.required, true);
     assert.equal(clickable?.validation?.ok, false);
     assert.equal(clickable?.status, 'fail');
+    assert.equal(report.contracts.some(({ name }) => name === 'Css.ContainerClasses'), false);
+    assert.equal(report.contracts.some(({ name }) => name === 'TextModule'), false);
     assert.deepEqual(
       cssContracts.filter(({ required }) => required === false).map(({ name }) => name).sort(),
-      ['Css.ContainerClasses']
+      []
     );
     assert.equal(assets?.status, 'pass');
     assert.equal(userStoreContract?.selected?.found, true);
@@ -743,13 +731,11 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     const imageModal = report.contracts.find(({ name }) => name === 'ImageModal');
     const trashPrimary = report.contracts.find(({ name }) => name === 'TrashIconPrimary');
     const trashFallback = report.contracts.find(({ name }) => name === 'TrashIconFallback');
-    const textModuleContract = report.contracts.find(({ name }) => name === 'TextModule');
     const userContextMenuContract = report.contracts.find(({ name }) => name === 'UserContextMenuModule');
     const getSrcContract = report.contracts.find(({ name }) => name === 'GetSrcModule');
     assert.equal(imageModal?.validation?.ok, true);
     assert.equal(trashPrimary?.validation?.ok, true);
     assert.equal(trashFallback?.validation?.ok, true);
-    assert.equal(textModuleContract?.validation?.ok, true);
     assert.equal(userContextMenuContract?.validation?.ok, true);
     assert.equal(getSrcContract?.validation?.ok, true);
     assert.ok(selectedAccessorReads > 4);
@@ -805,7 +791,7 @@ test('DiscordModules lazy-getter inventory is covered by the audit helper', () =
 
   const cssNames = [
     'ClickableClasses', 'ColorClasses', 'ButtonClasses', 'MessageWrapperClasses',
-    'MessageToolbarClasses', 'ContainerClasses', 'ChatContentClasses', 'MarkupClasses',
+    'MessageToolbarClasses', 'ChatContentClasses', 'MarkupClasses',
     'SpoilerClasses', 'FocusedClasses', 'DefaultColorClasses',
     'BotTagClasses', 'ExecutedCommandClasses', 'TitleClasses', 'ErrorPageClasses',
     'TimestampClasses'
@@ -818,7 +804,7 @@ test('DiscordModules lazy-getter inventory is covered by the audit helper', () =
     'TrashIconFallback', 'CUser', 'DiscordUtils', 'TimestampUtils', 'Parser',
     'ParserNew', 'GuildUtils', 'MuteModule', 'Dispatcher', 'ChannelMessages',
     'RenderUserPopout', 'ChannelListModule', 'ManaModule', 'MessageContentComponent',
-    'MessageAccessories', 'I18nModule', 'SystemLocaleUtils', 'TextModule',
+    'MessageAccessories', 'I18nModule', 'SystemLocaleUtils',
     'GetSrcModule', 'UserContextMenuModule', 'MaskedLink'
   ];
   const actualCssNames = lazyGetters
@@ -830,7 +816,7 @@ test('DiscordModules lazy-getter inventory is covered by the audit helper', () =
   const actualNames = lazyGetters.map(({ property }) => property);
   const expectedNames = [...new Set([...cssNames, ...nonCssNames])];
   assert.deepEqual([...actualNames].sort(), [...expectedNames].sort());
-  assert.equal(actualNames.length, 53);
+  assert.equal(actualNames.length, 51);
   assert.deepEqual([...actualCssNames].sort(), [...cssNames].sort());
   assert.deepEqual([...actualNonCssNames].sort(), [...nonCssNames].sort());
 
@@ -923,9 +909,9 @@ test('semantic CSS and Logger-owned literals are covered by the audit helper', (
 
   assert.match(helperSource, /const ambiguous = selectedUsableCandidateCount !== 1/);
 
-  assert.equal(resolverSignatures.length, 27);
+  assert.equal(resolverSignatures.length, 26);
   assert.equal(classMethodSignatures.length, 23);
-  assert.equal(requestedSignatures.length, 39);
+  assert.equal(requestedSignatures.length, 38);
   for (const signature of [...resolverSignatures, ...classMethodSignatures]) {
     assert.ok(requestedSignatureSet.has(signature), `helper is missing requested key signature ${signature}`);
   }

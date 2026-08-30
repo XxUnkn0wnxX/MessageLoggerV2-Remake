@@ -1888,6 +1888,11 @@ test('no-save mode persists removals from disk without serializing session addit
   assert.match(rootRemoval, /threadRoot: true/);
   assert.match(capRemoval, /this\.deleteMessageFromRecords\(map\[i\]\)/);
   assert.match(clearLogRemoval, /this\.deleteMessageFromRecords\(id\)/);
+  assert.ok(
+    clearLogRemoval.includes("const confirmMessage = `Are you sure you want to delete all ${type}${filterSuffix}?`;")
+    && clearLogRemoval.includes("const modalChildren = React.createElement('div', { style: { color: 'var(--text-default)' } }, confirmMessage);")
+  );
+  assert.doesNotMatch(clearLogRemoval, /Could not find Text component, using fallback|const textModule|TextModule|React\.createElement\(Text,/);
   assert.match(settingsDocs, /archival removals[^\n]*deletion-only/i);
 });
 

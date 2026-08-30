@@ -333,7 +333,6 @@ const DiscordModules = (() => {
     MessageToolbarClasses: lazyGet('MessageToolbarClasses', () => resolveSemanticCssModule(['messageListItem', 'buttons'])),
     TrashIcon: lazyGet('TrashIcon', () => Webpack.getBySource('2.81h8.36a3', { searchExports: true })),
     TrashIconFallback: lazyGet('TrashIconFallback', () => Webpack.getBySource(/M5\.06 7a1 1 0 0 0-1 1\.06l\.76 12\.13/, { searchExports: true })),
-    ContainerClasses: lazyGet('ContainerClasses', () => resolveSemanticCssModule(['containerCozyBounded'])),
     ChatContentClasses: lazyGet('ChatContentClasses', () => resolveSemanticCssModule(['chatContent'])),
     MarkupClasses: lazyGet('MarkupClasses', () => resolveSemanticCssModule(['markup'])),
     SpoilerClasses: lazyGet('SpoilerClasses', () => resolveSemanticCssModule(['spoilerText', 'hidden']) ?? resolveSemanticCssModule(['spoilerContent', 'hidden'])),
@@ -381,7 +380,6 @@ const DiscordModules = (() => {
     )),
     I18nModule: lazyGet('I18nModule', () => Webpack.getModule(m => Object.values(m).some(x => x != null && Object.getPrototypeOf(x)?.withFormatters != null))),
     SystemLocaleUtils: lazyGet('SystemLocaleUtils', () => Webpack.getByKeys?.('getSystemLocale', { searchExports: true })),
-    TextModule: lazyGet('TextModule', () => Webpack.getBySource('case"always-white"', { searchExports: true })),
     GetSrcModule: lazyGet('GetSrcModule', () => Webpack.getBySource('sourceMetadata:', 'getSrc', { searchExports: true })),
     UserContextMenuModule: lazyGet('UserContextMenuModule', () => Webpack.getBySource('isGroupDM', 'moderationAlertId', { searchExports: true })),
     _cache: { value: cache, writable: false },
@@ -1766,7 +1764,6 @@ module.exports = class MessageLoggerV2 {
     this.observer.chatContentClass = (chatContent?.chatContent || '').split(/ /g)[0];
     this.observer.chatClass = chatContent?.chat?.split(/ /g)[0] || '';
     this.observer.titleClass = chatContent ? DiscordModules.TitleClasses?.title?.split(/ /g)[0] : 'ERROR-CLASSWTF';
-    this.observer.containerCozyClass = this.safeGetClass(() => DiscordModules.ContainerClasses.containerCozyBounded.split(/ /g)[0], 'containerCozyBounded');
     this.deletedChatMessagesCount = {};
     this.editedChatMessagesCount = {};
     this.channelMessages = DiscordModules.ChannelMessages?._channelMessages;
@@ -2625,7 +2622,6 @@ module.exports = class MessageLoggerV2 {
       const matchesChatClass = matchesClass(this.observer.chatClass);
       const matchesChatContentClass = matchesClass(this.observer.chatContentClass);
       const matchesTitleClass = matchesClass(this.observer.titleClass);
-      const matchesContainerCozy = matchesClass(this.observer.containerCozyClass);
       const matchesStyle = change.style?.cssText === 'border-radius: 2px; background-color: rgba(114, 137, 218, 0);';
       if (matchesChatClass) {
         isTitle = true;
@@ -2635,7 +2631,7 @@ module.exports = class MessageLoggerV2 {
       } else if (matchesTitleClass) {
         isTitle = true;
       }
-      if (matchesChatClass || matchesChatContentClass || matchesTitleClass || matchesStyle || matchesContainerCozy) {
+      if (matchesChatClass || matchesChatContentClass || matchesTitleClass || matchesStyle) {
         try {
           if (isChat) {
             this.selectedChannel = this.getSelectedTextChannel();
@@ -25420,12 +25416,7 @@ module.exports = class MessageLoggerV2 {
       }
       this.refilterMessages();
     };
-    const textModule = DiscordModules.TextModule;
-    const Text = textModule ? Object.values(textModule)[0] : null;
     const onClearLog = e => {
-      if (!Text) {
-        Logger.warn('Could not find Text component, using fallback');
-      }
       if (document.getElementById(this.style.filter).parentElement.parentElement.className.includes(this.createTextBox.classes.focused[0])) return;
       let type = this.menu.selectedTab;
       if (type === 'ghostpings') type = 'ghost pings';
@@ -25434,9 +25425,7 @@ module.exports = class MessageLoggerV2 {
       }
       const filterSuffix = this.menu.filter.length ? ' that also match filter' : '';
       const confirmMessage = `Are you sure you want to delete all ${type}${filterSuffix}?`;
-      const modalChildren = Text ?
-        React.createElement(Text, { variant: "text-md/normal", children: [confirmMessage] }) :
-        React.createElement('div', { style: { color: 'var(--text-default)' } }, confirmMessage);
+      const modalChildren = React.createElement('div', { style: { color: 'var(--text-default)' } }, confirmMessage);
       this.createModal({
         header: 'Clear log',
         children: modalChildren,

@@ -3482,3 +3482,35 @@ behavior, persistence, rendering, or external-open behavior.
 - Active root session ID:
   `01a05291-de83-7d30-864b-ada47ac1ac10`; rollout:
   `$HOME/.codex/sessions/2026/08/30/rollout-2026-08-30T22-08-06-01a05291-de83-7d30-864b-ada47ac1ac10.jsonl`.
+
+### 2026-08-30 - Obsolete optional contracts resolved and final audit accepted
+
+- This follow-up supersedes the historical `Css.ContainerClasses` optional-
+  warning status immediately above. The user authorized deciding the two
+  remaining optional consumers rather than retaining dead fallbacks.
+- Removed the stale `TextModule` source lookup and intentionally retained its
+  already-active local Clear Log confirmation body. The user confirmed the
+  dialog renders live after sync and cancelled it successfully.
+- Removed the unused `containerCozyBounded` getter and observer hint. Its
+  previous fallback was a nonmatching sentinel; the current `chat`,
+  `chatContent`, `title`, and exact inline-style observer paths remain.
+- Removed both obsolete contracts from the permanent audit helper. It now maps
+  all `51` Logger lazy getters in an `87`-contract report. Guarded native
+  document/audio `BdApi.Utils.loadEntry(MessageAccessories)` behavior remains
+  unchanged.
+- Baseline and final `npm test` pass `667/667`; focused production coverage
+  passes `104/104`; runtime-audit coverage passes `7/7`; `npm run check` and
+  `git diff --check` pass. Independent review returned GO with no blocking,
+  high, or medium finding.
+- The final live report generated at `2026-08-30T13:10:47.062Z` reports `57`
+  pass, `30` warn, `0` fail, and `87` total across `8469` roots with no scanner
+  error. Every warning has a selected, valid consumer; unresolved and false-
+  positive counts are both zero. Assets pass, and the optional load-entry check
+  reports `targets-already-loaded` without invoking a load.
+- Repo/live Logger copies match SHA-256
+  `8c0294a84b0d029ff4e67fc589a3f772695cd58d5f2cd7e315aabd9d3b17032e`.
+  The report and helper symlink were removed from the live plugins directory
+  and archived under
+  `$HOME/.Trash/MessageLoggerRuntimeCompatibilityAudit-final-clean-2026-08-30-1310/`.
+  No Discord restart, release metadata, commit, push, `main`, or paused
+  cache/embed scope was changed.

@@ -565,24 +565,6 @@ function getImageModalProductionChecks(value, pattern) {
   return { matched: false, sourceReadComplete: true, error: null };
 }
 
-function getTextProductionChecks(value) {
-  let values;
-  try {
-    values = Object.values(value);
-  } catch {
-    return {
-      firstEnumerableValuePresent: false,
-      firstEnumerableValueCallable: false,
-      error: 'selected-module-values-unavailable'
-    };
-  }
-  return {
-    firstEnumerableValuePresent: values.length > 0,
-    firstEnumerableValueCallable: typeof values[0] === 'function',
-    error: null
-  };
-}
-
 function getUserContextProductionChecks(value) {
   let values;
   try {
@@ -930,33 +912,6 @@ function hasBetterDiscordLazyEntryShape(value) {
     return false;
   }
   return /Promise\.all\(\[((?:\w\.e\("?\d+"?\),?)+)\]\)\.then\(\w(?:\.\w)?\.bind\(\w,\s*"?\d+"?\)\)/.test(source);
-}
-
-function getFirstOwnEnumerableDataExport(value) {
-  const descriptorInfo = getOwnDescriptors(value);
-  if (!descriptorInfo.descriptors) {
-    return { present: false, callable: false, type: 'undefined', truncated: false, error: descriptorInfo.error };
-  }
-  const keys = Reflect.ownKeys(descriptorInfo.descriptors);
-  for (const key of keys.slice(0, MAX_OWN_KEYS)) {
-    if (typeof key !== 'string') continue;
-    const descriptor = descriptorInfo.descriptors[key];
-    if (!descriptor?.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) continue;
-    return {
-      present: true,
-      callable: typeof descriptor.value === 'function',
-      type: safeType(descriptor.value),
-      truncated: keys.length > MAX_OWN_KEYS,
-      error: null
-    };
-  }
-  return {
-    present: false,
-    callable: false,
-    type: 'undefined',
-    truncated: keys.length > MAX_OWN_KEYS,
-    error: null
-  };
 }
 
 function getPropertyFunctionSourceFlags(value, key, markers) {
@@ -2691,13 +2646,6 @@ function semanticCssContracts() {
       ]
     },
     {
-      name: 'Css.ContainerClasses',
-      required: false,
-      alternatives: [
-        { label: 'container-cozy-bounded', requestedKeys: ['containerCozyBounded'], consumerKeys: ['containerCozyBounded'] }
-      ]
-    },
-    {
       name: 'Css.ChatContentClasses',
       alternatives: [
         { label: 'chat-content', requestedKeys: ['chatContent'], consumerKeys: ['chatContent', 'chat'] }
@@ -3055,15 +3003,6 @@ function moduleContracts() {
     dataSourceMatches(value, [alternative.marker])
   );
   const trashIconShape = marker => value => dataSourceMatches(value, [marker]);
-  const textModuleShape = value => {
-    const checks = getOwnEnumerableCallableExportChecks(value, ['case"always-white"']);
-    const firstExport = getFirstOwnEnumerableDataExport(value);
-    return checks.sourceMatchedCallableCount > 0
-      && checks.sourceReadFailures === 0
-      && !checks.error
-      && firstExport.present
-      && firstExport.callable;
-  };
   const userContextMenuShape = value => {
     const checks = getOwnEnumerableCallableExportChecks(value, ['isGroupDM', 'moderationAlertId']);
     return checks.sourceMatchedCallableCount === 1
@@ -3504,21 +3443,6 @@ function moduleContracts() {
           'loadEntry.lazyEntryShape': hasBetterDiscordLazyEntryShape(value)
         });
         return validation;
-      }
-    },
-    {
-      name: 'TextModule',
-      required: false,
-      expectedUniqueness: 'single source-matched text export map with callable candidate',
-      select: api => callWebpackMethod(api, 'getBySource', ['case"always-white"', { searchExports: true }]),
-      rootMatch: true,
-      match: textModuleShape,
-      validate: value => {
-        const checks = getTextProductionChecks(value);
-        return collectValidation({
-          firstEnumerableValuePresent: checks.firstEnumerableValuePresent,
-          firstEnumerableValueCallable: checks.firstEnumerableValueCallable
-        }, [checks.error].filter(Boolean));
       }
     },
     {

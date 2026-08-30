@@ -26,7 +26,70 @@ changes. The separate deleted-attachment cache/rendering checklist remains
 paused except for the explicitly authorized Stage 9 optional Webpack-
 availability cleanup.
 
-## 2026-08-30 continuation checkpoint
+## 2026-08-30 obsolete optional-contract resolution (current)
+
+The user authorized resolving the last two optional audit warnings rather than
+leaving dead Logger consumers classified as fallbacks. The corrected pre-change
+live report generated at `2026-08-30T12:45:08.817Z` contained `89` contracts:
+`57` pass, `32` warn, and `0` fail. Its scanner assessed `8433` loaded roots
+without errors. All required contracts validated; the only invalid selections
+were the optional legacy `TextModule` and `Css.ContainerClasses` contracts.
+
+Both obsolete production consumers are now removed instead of being hidden or
+replaced with unverified Discord exports:
+
+- `TextModule` used the stale `case"always-white"` source marker only for the
+  Clear Log confirmation sentence. The current runtime already took its local
+  `<div>` fallback, so that exact rendering is now intentional and the obsolete
+  lookup/warning are gone. The user opened Clear Log after live sync, confirmed
+  the confirmation rendered, and cancelled it successfully.
+- `ContainerClasses.containerCozyBounded` was only an old observer timing hint.
+  Its failed lookup produced the non-DOM `containerCozyBounded-MLV2` sentinel,
+  so it contributed no current-runtime match. The dead getter, observer field,
+  and condition are removed while the validated `chat`, `chatContent`, `title`,
+  and exact inline-style triggers remain unchanged.
+- The two matching audit contracts and Text-only helper functions/fixtures are
+  removed. The audit inventory now maps all `51` production `DiscordModules`
+  lazy getters and contains `87` total contracts.
+- The guarded `BdApi.Utils.loadEntry(MessageAccessories)` paths remain intact
+  for native document-message and audio-player discovery. They run only after a
+  semantic target miss, share concurrent attempts, remain retryable, and reject
+  stale generations after stop/restart.
+
+Accepted deterministic and live evidence:
+
+- Baseline and final full `npm test` runs pass `667/667`.
+- The focused production suites pass `104/104`; the runtime-audit suite passes
+  `7/7`; `npm run check` and `git diff --check` pass.
+- Independent source/diff review returned GO with no blocking, high, or medium
+  finding.
+- The live Logger hot reload completed with `All patches applied` and
+  `UI force update completed`. Repo/live Logger SHA-256 is
+  `8c0294a84b0d029ff4e67fc589a3f772695cd58d5f2cd7e315aabd9d3b17032e`.
+- The final report generated at `2026-08-30T13:10:47.062Z` contains `87`
+  contracts: `57` pass, `30` warn, and `0` fail. Its scanner assessed `8469`
+  roots with `scanner.errors: []`; no contract has failed validation or a
+  validation error. `TextModule` and `Css.ContainerClasses` are absent.
+- All `30` warnings are selected-and-validated supplemental scan-cardinality
+  diagnostics. There are zero unresolved warnings and zero audit false
+  positives. Fixed renderer assets pass.
+- `Webpack.OptionalLoadEntryTransition` passes with `loadEntry` available and
+  `outcome: "targets-already-loaded"`; both native targets were present, so the
+  audit correctly made no speculative load call.
+
+The final report is archived at
+`$HOME/.Trash/MessageLoggerRuntimeCompatibilityAudit-final-clean-2026-08-30-1310/`
+with SHA-256
+`a92fcdcb6a4244cc9ff61702c7ecd88e29756d67e9f4b125cdf89bae5b882758`.
+The installed helper symlink and live report are absent, and BetterDiscord
+removed the helper's enabled-state entry when the symlink was moved. The
+tracked helper remains under `tools/`.
+
+This worktree is still on `develop` and is intentionally uncommitted. No
+version, changelog, BetterDiscord host, Discord restart, branch, commit, push,
+or release action was performed. Publication remains a separate user gate.
+
+## 2026-08-30 helper-correction checkpoint (historical; superseded above)
 
 The production compatibility correction is complete, published, live-synced,
 and clean. The permanent audit helper's eight known classification defects are
