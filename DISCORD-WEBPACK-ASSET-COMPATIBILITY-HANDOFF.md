@@ -16,10 +16,11 @@ Repository state when audited:
 
 - Repository: `$HOME/Apps/Dev/BD/BD-Plugins/MessageLoggerV2-Remake`
 - Branch: `develop`
-- HEAD: `ad503311bf47d3d404acf044408d28270a9e0c0e`
-- Tracked worktree: clean before this compatibility work began
+- HEAD before the permanent audit-tool change:
+  `9019c074e18f30854db61ce561aa4446b054784b`
+- Tracked worktree: clean before the permanent audit-tool work began
 - Repo/live `MessageLoggerV2.plugin.js` SHA-256:
-  `8977f3ce02a896e60fa29cb8e6414d140640747c6080ae4aa901a9d4f863bfb6`
+  `27688c055eebfd31a3133359f7da63a8ae6c4aa15c75c6b6bb6fb2a3e3387a1c`
 - Repo/live plugin comparison: byte-identical (`cmp` exit 0)
 
 ## Executive verdict
@@ -30,14 +31,13 @@ live plugin repeatedly completed initialization after the same renderer update
 that broke BDFDB.
 
 Official Discord assets now include CSS modules whose JavaScript export keys
-are mangled while their string values retain semantic class tokens. Current
-BetterDiscord compensates during early preload by adding semantic aliases to
-recognized class modules. That host polyfill is present in both the local
-`develop` fork and mainstream `upstream/development`, and the clean live trace
-confirmed the aliases. The original audit's claim that the live runtime itself
-lacked the semantic keys was therefore too broad: the raw asset has the
-mismatch, while current BetterDiscord normally repairs it before Logger looks
-it up.
+are mangled while their string values retain semantic class tokens. The clean
+live trace found both the mangled and semantic keys on the same runtime
+`module.exports` object. A later source audit confirmed that BetterDiscord does
+not synthesize those aliases: its Webpack hooks observe and return Discord's
+exports unchanged. The raw asset/live-export difference therefore belongs to
+Discord's runtime module path; the exact Discord loader transformation was not
+available in the host source and remains unproven.
 
 Logger still benefited from a narrow fail-safe for an older host or a class-
 module factory shape the host recognizer misses. The compatibility correction
@@ -150,17 +150,13 @@ Logger CSS contracts, 11 deliberately ambiguous single-key contracts, and four
 missing legacy alternatives. Live module `211182` exposed both the mangled keys
 and the semantic aliases in the same `module.exports` object.
 
-The exact alias source is BetterDiscord's early Webpack preload in
-`$HOME/Apps/Dev/BD/BetterDiscord/src/electron/preload/early/index.ts`. It:
-
-1. recognizes compact class-module factories;
-2. extracts the prefix before `_` from each string export;
-3. defines that semantic prefix as an enumerable alias; and
-4. makes the corresponding mangled key non-enumerable.
-
-The same alias block exists in the local fork's `develop` branch and in
-`upstream/development`. The fork has safer surrounding factory parsing and
-third-party handling, but the alias behavior itself is not fork-only.
+Read-only inspection of the local BetterDiscord `develop` fork and
+`upstream/development` found no CSS-alias mapper. The relevant host paths only
+observe completed module factories, traverse existing exports, and return the
+matched object unchanged. The inspected fork/upstream Webpack differences are
+cache and safe-declaration-read changes, not CSS-export mutation. This rules
+out a BetterDiscord-owned alias polyfill but does not prove the unavailable
+Discord loader/factory step that produced the dual live export.
 
 The four clean-trace misses were old fallback shapes rather than evidence of a
 current used surface failing: `containerCozyBounded`,
@@ -212,7 +208,7 @@ retry-after-miss, unchanged `Components.Button.Colors`, every routed consumer,
 native-audio options, exact observer matching, and safe group-boundary source
 contracts.
 
-At this pre-commit boundary:
+For the completed CSS compatibility correction:
 
 - `node --check MessageLoggerV2.plugin.js` passes.
 - The focused compatibility file passes `20/20`.
@@ -220,15 +216,31 @@ At this pre-commit boundary:
 - `git diff --check` passes.
 - An independent read-only review returned GO with no blocking, high, or medium
   finding.
-- The privacy scan, final status review, commit hash, live hash comparison, and
-  hot-reload evidence must be recorded below before this compatibility stage is
-  called complete.
+- The tracked/staged/outgoing privacy scans passed, commit
+  `9019c074e18f30854db61ce561aa4446b054784b` was pushed to `develop`, and the
+  repository/live plugin copies remain byte-identical at the SHA-256 recorded
+  above.
+
+The follow-up permanent compatibility-audit tool adds five deterministic
+coverage tests. Its current pre-commit evidence is:
+
+- `npm run check` passes for both the distributed Logger and the audit helper.
+- `npm run test:runtime-audit` passes `5/5`.
+- The first expanded full run passed every new audit test but one unrelated
+  existing media idle-timeout test missed its narrow timing window. That exact
+  test passed immediately in isolation, and the unchanged full suite then
+  passed `662/662`. After the final native-modal-alternative regression was
+  added, the complete suite passed `663/663`.
+- `git diff --check` passes.
+- A final independent read-only review returned GO with no blocking, high, or
+  medium finding.
 
 ## User-controlled live acceptance gate
 
-The user authorized a `develop` commit and push followed by live-syncing only
-`MessageLoggerV2.plugin.js`, then continuing into the complete audit. Do not
-restart or kill Discord.
+The CSS compatibility correction was committed and pushed on `develop` as
+`9019c074e18f30854db61ce561aa4446b054784b`, live-synced, and accepted. The
+complete module/class/asset audit is the current stage. Do not restart or kill
+Discord.
 
 When live validation is authorized, verify at least:
 
@@ -247,14 +259,17 @@ startup alone does not prove every CSS-dependent feature.
 
 ## Trace disposition
 
-The existing `MessageLoggerCssExportTrace` helper was used for this CSS stage.
+The existing `MessageLoggerCssExportTrace` helper was used for the CSS stage.
 After its evidence was incorporated here, its live symlink, ignored source, and
-generated report were removed. It is not the helper for the upcoming complete
-module/class/asset audit.
+generated report were removed. It is not linked or needed for the complete
+audit.
 
-That complete audit will use a new, clearly named throwaway helper. Install and
-enable instructions, plus its exact report path, must be given when the helper
-is ready. Remove it and its report after every confirmed audit miss is handled.
+The complete audit uses the tracked manual helper
+`tools/MessageLoggerRuntimeCompatibilityAudit.plugin.js`. Its installation,
+one-pass command, report path, privacy contract, and cleanup are documented in
+`docs/runtime-compatibility-audit.md`. Keeping this helper in the repository is
+intentional so its dependency inventory can evolve with MessageLoggerV2 and be
+reused after future Discord or BetterDiscord breakage.
 
 ## Hard stops
 

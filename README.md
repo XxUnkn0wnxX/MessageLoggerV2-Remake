@@ -60,6 +60,7 @@ The default scope is whitelist-only, although the selected channel and DMs have 
 - [Help and usage](docs/help.md)
 - [Official test matrix](docs/tests.md)
 - [Developer architecture](docs/architecture.md)
+- [Runtime compatibility audit](docs/runtime-compatibility-audit.md)
 - [Project TODO](TODO.md)
 
 The same help pages are available inside Discord from **MessageLoggerV2 Settings > Help** or the question-mark button in the logger window.
