@@ -160,6 +160,7 @@ async function withTempRoot(callback) {
     return await callback(root);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(`${root}_PreCache`, { recursive: true, force: true });
   }
 }
 
