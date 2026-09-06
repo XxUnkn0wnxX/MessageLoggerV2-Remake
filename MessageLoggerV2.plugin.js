@@ -12948,6 +12948,16 @@ module.exports = class MessageLoggerV2 {
     setImmediate(() => {
       const filtered = this.getNativeDeletedAttachmentPresentationMessage(message);
       if (filtered === message) return;
+      if (Array.isArray(filtered.mentions)) {
+        // Native cached messages may contain mention IDs, while MESSAGE_UPDATE consumers expect user objects.
+        filtered.mentions = filtered.mentions.map(mention => {
+          if (typeof mention !== 'string') return mention;
+          const user = this.UserStore?.getUser?.(mention);
+          return user
+            ? this.cleanupUserObject(user)
+            : { id: mention, username: 'Unknown', discriminator: '0000', avatar: null };
+        });
+      }
       this.dispatcher.dispatch({
         type: 'MESSAGE_UPDATE',
         message: filtered,

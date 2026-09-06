@@ -6347,6 +6347,119 @@ test('refreshCacheOnlyMessage dispatches latest blob presentation if cache state
   assert.deepEqual(message, canonicalBefore);
 });
 
+test('refreshCacheOnlyMessage normalizes string mentions while preserving detached message fields', async () => {
+  const dispatches = [];
+  const knownUser = {
+    id: 'known-user',
+    username: 'Known User',
+    discriminator: '1234',
+    avatar: 'known-avatar',
+    bot: false,
+    publicFlags: 42
+  };
+  const objectMention = {
+    id: 'object-user',
+    username: 'Object User',
+    discriminator: '5678',
+    avatar: null,
+    bot: false,
+    flags: 2,
+    public_flags: 7,
+    unknown_mention_field: { preserved: true }
+  };
+  const message = {
+    id: 'mention-known',
+    channel_id: 'mention-channel',
+    content: 'hello',
+    flags: 0,
+    mentions: ['known-user', objectMention],
+    unknown_top_level: { nested: { preserved: true } },
+    attachments: []
+  };
+  const canonicalBefore = structuredClone(message);
+  const knownUserBefore = structuredClone(knownUser);
+  const plugin = createPlugin({
+    dispatcher: {
+      dispatch(action) {
+        dispatches.push(action);
+      }
+    },
+    UserStore: {
+      getUser(id) {
+        return id === 'known-user' ? knownUser : null;
+      }
+    }
+  });
+
+  plugin.refreshCacheOnlyMessage(message);
+
+  await setImmediatePromise();
+
+  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches[0].type, 'MESSAGE_UPDATE');
+  assert.equal(dispatches[0].ML2, true);
+  assert.deepEqual(dispatches[0].message.mentions[0], {
+    id: 'known-user',
+    username: 'Known User',
+    discriminator: '1234',
+    avatar: 'known-avatar',
+    bot: false,
+    public_flags: 42
+  });
+  assert.deepEqual(dispatches[0].message.mentions[1], objectMention);
+  assert.equal(dispatches[0].message.mentions[1].flags, 2);
+  assert.doesNotThrow(() => {
+    for (const mention of dispatches[0].message.mentions) void ('flags' in mention);
+  });
+  assert.deepEqual(dispatches[0].message.unknown_top_level, canonicalBefore.unknown_top_level);
+  assert.deepEqual(message, canonicalBefore);
+  assert.deepEqual(knownUser, knownUserBefore);
+});
+
+test('refreshCacheOnlyMessage uses an unknown-user mention fallback when UserStore cannot resolve an ID', async () => {
+  for (const { label, userStore } of [
+    { label: 'store', userStore: undefined },
+    { label: 'api', userStore: {} },
+    { label: 'missing-user', userStore: { getUser: () => null } }
+  ]) {
+    const dispatches = [];
+    const message = {
+      id: `mention-missing-${label}`,
+      channel_id: 'mention-channel',
+      content: 'hello',
+      mentions: ['missing-user'],
+      unknown_top_level: { preserved: true },
+      attachments: []
+    };
+    const canonicalBefore = structuredClone(message);
+    const plugin = createPlugin({
+      dispatcher: {
+        dispatch(action) {
+          dispatches.push(action);
+        }
+      },
+      UserStore: userStore
+    });
+
+    plugin.refreshCacheOnlyMessage(message);
+
+    await setImmediatePromise();
+
+    assert.equal(dispatches.length, 1);
+    assert.equal(dispatches[0].type, 'MESSAGE_UPDATE');
+    assert.equal(dispatches[0].ML2, true);
+    assert.deepEqual(dispatches[0].message.mentions, [{
+      id: 'missing-user',
+      username: 'Unknown',
+      discriminator: '0000',
+      avatar: null
+    }]);
+    assert.doesNotThrow(() => 'flags' in dispatches[0].message.mentions[0]);
+    assert.deepEqual(dispatches[0].message.unknown_top_level, canonicalBefore.unknown_top_level);
+    assert.deepEqual(message, canonicalBefore);
+  }
+});
+
 test('scheduleSavedAttachmentPresentationRefresh accepts cached audio blobs for remount scheduling', async () => {
   let remountCalls = 0;
   const plugin = createPlugin({
