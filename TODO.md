@@ -7,6 +7,13 @@ Status markers:
 - [ ] Planned or incomplete.
 - [x] Implemented and verified.
 
+## 🔔 Cached Attachment Deletion Toast Toggle
+
+Status: Backlog
+
+- [ ] Add a dedicated toast setting for the **Cached Attachment Deleted** / **Cached Attachments Deleted** notification emitted by `queueCachedFilesDeletedToast()`. Turning it Off must silence both BetterDiscord notifications and custom toasts while keeping **Delete cached files with log records** behavior enabled and remaining independent of **Show trimmer toasts**.
+- [ ] Add deterministic on/off coverage and document the setting.
+
 ## 📎 Cache All Attachment Types Gate
 
 Status: Known limitation in 2.8.2.13; follow-up after the networking release
