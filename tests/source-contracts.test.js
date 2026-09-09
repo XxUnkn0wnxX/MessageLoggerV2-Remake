@@ -1863,8 +1863,8 @@ test('no-save mode persists removals from disk without serializing session addit
     source.indexOf('  removeForumCardFromDom(threadId) {', source.indexOf('deleteMessageFromRecords(id, options = {})'))
   );
   const rootRemoval = source.slice(
-    source.indexOf('deleteForumThreadFromRecords(threadId)'),
-    source.indexOf('  closeForumThreadLogModal(threadId) {', source.indexOf('deleteForumThreadFromRecords(threadId)'))
+    source.indexOf('deleteForumThreadFromRecords(threadId, options = {})'),
+    source.indexOf('  closeForumThreadLogModal(threadId) {', source.indexOf('deleteForumThreadFromRecords(threadId, options = {})'))
   );
   const capRemoval = source.slice(
     source.indexOf('handleMessagesCap()'),
@@ -1886,7 +1886,8 @@ test('no-save mode persists removals from disk without serializing session addit
   assert.match(editRemoval, /queueNoSavePersistedRemoval\(\{ type: 'edit'/);
   assert.match(recordRemoval, /queueNoSavePersistedRemoval\(\{ type: 'record'/);
   assert.match(rootRemoval, /threadRoot: true/);
-  assert.match(capRemoval, /this\.deleteMessageFromRecords\(map\[i\]\)/);
+  assert.match(rootRemoval, /this\.deleteMessageFromRecords\(id, \{\s*\.\.\.options,\s*skipForumThreadCascade: true,\s*skipNoSavePersistedRemoval: true/);
+  assert.match(capRemoval, /this\.deleteMessageFromRecords\(map\[i\], \{ automatic: true \}\)/);
   assert.match(clearLogRemoval, /this\.deleteMessageFromRecords\(id\)/);
   assert.ok(
     clearLogRemoval.includes("const confirmMessage = `Are you sure you want to delete all ${type}${filterSuffix}?`;")

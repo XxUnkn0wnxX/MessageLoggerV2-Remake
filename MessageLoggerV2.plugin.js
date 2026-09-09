@@ -17486,7 +17486,7 @@ module.exports = class MessageLoggerV2 {
       const record = this.messageRecord[id];
       if (!record) return;
       if (!record.delete_data) {
-        this.deleteMessageFromRecords(id);
+        this.deleteMessageFromRecords(id, { automatic: true });
         return;
       }
       if (record.delete_data.hidden) return;
@@ -19016,13 +19016,14 @@ module.exports = class MessageLoggerV2 {
     }
     return ids;
   }
-  deleteForumThreadFromRecords(threadId) {
+  deleteForumThreadFromRecords(threadId, options = {}) {
     if (!threadId) return new Set();
     const ids = this.getForumThreadRecordIds(threadId);
     this.suppressForumThreadId(threadId);
     this.closeForumThreadLogModal(threadId);
     for (const id of ids) {
       this.deleteMessageFromRecords(id, {
+        ...options,
         skipForumThreadCascade: true,
         skipNoSavePersistedRemoval: true
       });
@@ -19212,7 +19213,7 @@ module.exports = class MessageLoggerV2 {
       className: this.style.cachedFilesModal
     }, false, modalKey);
   }
-  deleteCachedFilesForRecord(record) {
+  deleteCachedFilesForRecord(record, options = {}) {
     const message = record?.message;
     if (!message?.id) return 0;
     const messageId = String(message.id);
@@ -19317,7 +19318,7 @@ module.exports = class MessageLoggerV2 {
     if (deleted) {
       const names = Array.from(deletedLabels).join(', ');
       this._logStyledConsoleEvent('CACHE DELETE', `Deleted ${deleted} cached file${deleted === 1 ? '' : 's'} for message ${messageId}: ${names}`);
-      this.queueCachedFilesDeletedToast(deletedLabels);
+      if (!options.automatic) this.queueCachedFilesDeletedToast(deletedLabels);
     }
     return deleted;
   }
@@ -20017,12 +20018,12 @@ module.exports = class MessageLoggerV2 {
     }
     const channelId = record.message.channel_id;
     if (!options.skipForumThreadCascade && record.delete_data?.forum_thread_delete) {
-      return this.deleteForumThreadFromRecords(id);
+      return this.deleteForumThreadFromRecords(id, options);
     }
     // Archived and session media can share cache identities. Keep cache files intact while the
     // archive is detached because unseen archive records cannot participate in reference checks.
     if (this.settings?.deleteCachedFilesWithRecords && !this._archiveDetached) {
-      this.deleteCachedFilesForRecord(record);
+      this.deleteCachedFilesForRecord(record, options);
     }
     for (let i = 0; i < recordMaps.length; i++) {
       const map = recordMaps[i];
@@ -20083,7 +20084,7 @@ module.exports = class MessageLoggerV2 {
         this.sortMessagesByAge(map);
         const toDelete = map.length - this.settings.savedMessagesCap;
         for (let i = map.length - 1, deleted = 0; i >= 0 && deleted != toDelete; i--, deleted++) {
-          this.deleteMessageFromRecords(map[i]);
+          this.deleteMessageFromRecords(map[i], { automatic: true });
         }
         changed = true;
       };

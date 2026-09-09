@@ -70,6 +70,58 @@ function createMediaCachePlugin(cacheDir, overrides = {}) {
   });
 }
 
+function createCachedRecordDeletionPlugin(cacheDir, records, overrides = {}) {
+  const { settings: settingOverrides = {}, ...pluginOverrides } = overrides;
+  const ids = Object.keys(records);
+  const recordsByChannel = {};
+  for (const id of ids) {
+    const channelId = records[id]?.message?.channel_id || 'channel';
+    (recordsByChannel[channelId] ||= []).push(id);
+  }
+  const deletedMessageSet = new Map(
+    Object.entries(recordsByChannel).map(([channelId, channelIds]) => [channelId, new Set(channelIds)])
+  );
+  const notifications = [];
+  const plugin = createPlugin({
+    __started: true,
+    settings: {
+      imageCacheDir: cacheDir,
+      deleteCachedFilesWithRecords: true,
+      showMediaCacheTrimLifecycleToasts: true,
+      ...settingOverrides
+    },
+    nodeModules: { fs, path },
+    imageCacheServerSimulator: {
+      _getBaseCachePath: () => cacheDir,
+      cached: {}
+    },
+    cacheDeletionMessageIds: new Set(),
+    messageRecord: records,
+    messageRecordIds: new Set(ids),
+    deletedMessageRecord: recordsByChannel,
+    editedMessageRecord: {},
+    purgedMessageRecord: {},
+    nukedMessageRecord: {},
+    deletedMessageSet,
+    editedMessageSet: new Map(),
+    purgedMessageSet: new Map(),
+    nukedMessageSet: new Map(),
+    suppressedForumThreadIds: new Set(),
+    cachedMessageRecord: [],
+    cachedMessageIds: new Set(),
+    cachedMessagesMap: new Map(),
+    noTintIds: new Set(),
+    editModifiers: {},
+    queueNoSavePersistedRemoval() {},
+    refreshForumThreadLogModal() {},
+    notifyUser(message, options) {
+      notifications.push({ message, options });
+    },
+    ...pluginOverrides
+  });
+  return { notifications, plugin };
+}
+
 function mockAbortControllerWithSignalCapture() {
   const signal = {
     listeners: new Set(),
@@ -11273,6 +11325,50 @@ test('removing a record deletes only its related cached files', t => {
   assert.equal(fs.existsSync(path.join(cacheDir, 'unrelated (999).png')), true);
 });
 
+test('manual cached-file removal keeps View files while automatic removal deletes and logs without a notice', async t => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-manual-cache-delete-'));
+  t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
+  const manualRecord = {
+    message: {
+      id: '200',
+      channel_id: 'channel',
+      attachments: [{ id: 'manual-attachment', filename: 'manual.png' }]
+    }
+  };
+  const { plugin, notifications } = createCachedRecordDeletionPlugin(cacheDir, { 200: manualRecord });
+  fs.writeFileSync(path.join(cacheDir, 'manual-attachment (200).png'), 'manual');
+
+  plugin.deleteMessageFromRecords('200');
+  await new Promise(resolve => setTimeout(resolve, 180));
+  assert.equal(fs.existsSync(path.join(cacheDir, 'manual-attachment (200).png')), false);
+  assert.equal(notifications.length, 1);
+  assert.match(notifications[0].message, /Deleted cached attachment: manual\.png/);
+  assert.deepEqual(notifications[0].options.actions.map(action => action.label), ['View files']);
+
+  const automaticRecord = {
+    message: {
+      id: '201',
+      channel_id: 'channel',
+      attachments: [{ id: 'automatic-attachment', filename: 'automatic.png' }]
+    }
+  };
+  plugin.messageRecord[201] = automaticRecord;
+  plugin.messageRecordIds.add('201');
+  plugin.deletedMessageRecord.channel = ['201'];
+  plugin.deletedMessageSet.set('channel', new Set(['201']));
+  fs.writeFileSync(path.join(cacheDir, 'automatic-attachment (201).png'), 'automatic');
+
+  plugin.deleteMessageFromRecords('201', { automatic: true });
+  await new Promise(resolve => setTimeout(resolve, 180));
+  assert.equal(fs.existsSync(path.join(cacheDir, 'automatic-attachment (201).png')), false);
+  assert.equal(notifications.length, 1, 'automatic cleanup must not queue an attachment notice');
+  assert.equal(
+    loggerEvents.filter(event => event[0] === 'log' && String(event[1]).includes('Deleted 1 cached file')).length,
+    2,
+    'automatic cleanup must retain CACHE DELETE console logging'
+  );
+});
+
 test('removing a folded thread root deletes media cached under its original starter ID', t => {
   const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-folded-media-test-'));
   t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
@@ -11307,6 +11403,102 @@ test('removing a folded thread root deletes media cached under its original star
   assert.equal(plugin.deleteCachedFilesForRecord(record), 1);
   assert.equal(fs.existsSync(path.join(cacheDir, 'attachment (401).png')), false);
   assert.equal(fs.existsSync(path.join(cacheDir, 'unrelated (999).png')), true);
+});
+
+test('automatic forum cleanup carries its no-notice option through root and child records', t => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-automatic-forum-delete-'));
+  t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
+  const root = {
+    message: {
+      id: '300',
+      channel_id: '300',
+      attachments: [{ id: 'root-attachment', filename: 'root.png' }]
+    },
+    delete_data: { forum_thread_delete: true }
+  };
+  const child = {
+    message: {
+      id: '301',
+      channel_id: '300',
+      attachments: [{ id: 'child-attachment', filename: 'child.png' }]
+    },
+    delete_data: { forum_thread_message_delete: true }
+  };
+  const queueCalls = [];
+  const { plugin, notifications } = createCachedRecordDeletionPlugin(cacheDir, { 300: root, 301: child }, {
+    queueCachedFilesDeletedToast(labels) {
+      queueCalls.push(labels);
+    }
+  });
+  fs.writeFileSync(path.join(cacheDir, 'root-attachment (300).png'), 'root');
+  fs.writeFileSync(path.join(cacheDir, 'child-attachment (301).png'), 'child');
+
+  const removed = plugin.deleteMessageFromRecords('300', { automatic: true });
+
+  assert.deepEqual(new Set(removed), new Set(['300', '301']));
+  assert.equal(fs.existsSync(path.join(cacheDir, 'root-attachment (300).png')), false);
+  assert.equal(fs.existsSync(path.join(cacheDir, 'child-attachment (301).png')), false);
+  assert.deepEqual(queueCalls, []);
+  assert.deepEqual(notifications, []);
+  assert.equal(
+    loggerEvents.filter(event => event[0] === 'log' && String(event[1]).includes('Deleted 1 cached file')).length,
+    2,
+    'automatic forum cleanup must retain one CACHE DELETE log per record'
+  );
+});
+
+test('automatic cap and invalid-record cleanup delete cached files without entering the attachment notice queue', async t => {
+  for (const showMediaCacheTrimLifecycleToasts of [false, true]) {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlv2-automatic-record-delete-'));
+    t.after(() => fs.rmSync(cacheDir, { force: true, recursive: true }));
+    const capRecord = {
+      message: {
+        id: showMediaCacheTrimLifecycleToasts ? '401' : '400',
+        channel_id: 'channel',
+        attachments: [{ id: 'cap-attachment', filename: 'cap.png' }]
+      }
+    };
+    const capQueueCalls = [];
+    const capFixture = createCachedRecordDeletionPlugin(cacheDir, {
+      [capRecord.message.id]: capRecord
+    }, {
+      settings: { savedMessagesCap: 0, showMediaCacheTrimLifecycleToasts },
+      sortMessagesByAge() {},
+      saveData() {},
+      editHistoryAntiSpam: {},
+      queueCachedFilesDeletedToast(labels) {
+        capQueueCalls.push(labels);
+      }
+    });
+    const capFile = path.join(cacheDir, `cap-attachment (${capRecord.message.id}).png`);
+    fs.writeFileSync(capFile, 'cap');
+    capFixture.plugin.handleMessagesCap();
+    assert.equal(fs.existsSync(capFile), false);
+    assert.deepEqual(capQueueCalls, []);
+
+    const invalidRecord = {
+      message: {
+        id: showMediaCacheTrimLifecycleToasts ? '501' : '500',
+        channel_id: 'channel',
+        attachments: [{ id: 'invalid-attachment', filename: 'invalid.png' }]
+      }
+    };
+    const invalidQueueCalls = [];
+    const invalidFixture = createCachedRecordDeletionPlugin(cacheDir, {
+      [invalidRecord.message.id]: invalidRecord
+    }, {
+      settings: { showMediaCacheTrimLifecycleToasts },
+      queueCachedFilesDeletedToast(labels) {
+        invalidQueueCalls.push(labels);
+      }
+    });
+    const invalidFile = path.join(cacheDir, `invalid-attachment (${invalidRecord.message.id}).png`);
+    fs.writeFileSync(invalidFile, 'invalid');
+    invalidFixture.plugin.reAddDeletedMessages([], [invalidRecord.message.id], true, true);
+    await new Promise(resolve => setTimeout(resolve, 180));
+    assert.equal(fs.existsSync(invalidFile), false);
+    assert.deepEqual(invalidQueueCalls, []);
+  }
 });
 
 test('resolveMediaCacheDirectory prefers live cache names over conflicting saved names', t => {
