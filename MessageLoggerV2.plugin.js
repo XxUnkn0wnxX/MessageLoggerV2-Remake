@@ -370,7 +370,10 @@ const DiscordModules = (() => {
         Filters.combine(Filters.byStrings('actionBarInput', 'notice'), Filters.not(Filters.byStrings('caretConfig'))),
         { searchExports: true }
       ),
-      ConfirmModal: Webpack.getByKeys('ConfirmModal')?.ConfirmModal,
+      ConfirmModal: Webpack.getByKeys('ConfirmModal')?.ConfirmModal ?? Webpack.getByStrings(
+        'INLINE_NOTICE_GENERIC_ERROR', 'actionBarInput', 'confirmText', 'cancelText',
+        { searchExports: true }
+      ),
       ModalSize: Webpack.getByKeys('SMALL', 'MEDIUM', 'LARGE', 'DYNAMIC', { searchExports: true }),
     })),
     MessageContentComponent: lazyGet('MessageContentComponent', () => Webpack.getModule(e => e?.type?.toString()?.includes('.isCommandType()') && !e?.type?.toString()?.includes('.isFirstMessageInForumPost'))),

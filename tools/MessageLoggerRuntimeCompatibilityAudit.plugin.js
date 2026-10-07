@@ -2996,6 +2996,13 @@ function moduleContracts() {
     const source = getFunctionSourceFlags(value, manaModalMarkers);
     return source.callable && source.readable && source.flags[0] && source.flags[1] && !source.flags[2];
   };
+  const manaConfirmModalMarkers = ['INLINE_NOTICE_GENERIC_ERROR', 'actionBarInput', 'confirmText', 'cancelText'];
+  const manaConfirmModalShape = value => {
+    if (dataCallable(value, 'ConfirmModal').ok) return true;
+    const source = getFunctionSourceFlags(value, manaConfirmModalMarkers);
+    if (source.callable && source.readable && source.flags.every(Boolean)) return true;
+    return getOwnEnumerableCallableExportChecks(value, manaConfirmModalMarkers).sourceMatchedCallableCount > 0;
+  };
   const nativeMediaModalShape = value => nativeMediaModalAlternatives.some(alternative =>
     dataSourceMatches(value, alternative.searches)
   );
@@ -3140,14 +3147,16 @@ function moduleContracts() {
       expectedUniqueness: 'single callable ConfirmModal export',
       select: api => {
         const module = callWebpackMethod(api, 'getByKeys', ['ConfirmModal']);
-        if (module.value == null) return module;
-        const selected = safeRead(module.value, 'ConfirmModal');
-        return {
-          value: selected.ok ? selected.value : null,
-          error: selected.ok ? null : selected.error
-        };
+        if (module.error) return module;
+        if (module.value != null) {
+          const selected = safeRead(module.value, 'ConfirmModal');
+          if (!selected.ok && selected.error !== 'property-missing') return { value: null, error: selected.error };
+          if (selected.value != null) return { value: selected.value, error: null };
+        }
+        return callWebpackMethod(api, 'getByStrings', [...manaConfirmModalMarkers, { searchExports: true }]);
       },
-      match: value => dataCallable(value, 'ConfirmModal').ok,
+      rootMatch: true,
+      match: manaConfirmModalShape,
       validate: value => collectValidation({ callable: callable(value) })
     },
     {
