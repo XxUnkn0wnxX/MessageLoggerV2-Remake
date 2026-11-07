@@ -4,6 +4,7 @@ const Module = require('node:module');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const helperPath = path.join(__dirname, '..', 'tools', 'MessageLoggerRuntimeCompatibilityAudit.plugin.js');
 
@@ -416,7 +417,8 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
   const messageStore = {
     getMessage() { return null; },
     getMessages() { return []; },
-    getLastEditableMessage() { return null; }
+    getLastEditableMessage() { return null; },
+    emitChange() {}
   };
   const channelStore = {
     getChannel() { return null; },
@@ -676,7 +678,7 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     const cssContracts = report.contracts.filter(({ name }) => typeof name === 'string' && name.startsWith('Css.'));
     const reportPath = path.join(pluginFolder, 'MessageLoggerRuntimeCompatibilityAudit-report.json');
 
-    assert.equal(report.totals.total, 87);
+    assert.equal(report.totals.total, 88);
     assert.equal(report.label, 'custom');
     assert.deepEqual(report.options, { loadEntry: false, externalAssets: false });
     assert.equal(integration?.status, 'pass');
@@ -1068,7 +1070,8 @@ test('direct Webpack discovery remains owned by the approved production methods'
   )].map(match => ({ property: match[1], index: match.index }));
   const methodMarkers = [
     ['getNativeMediaModal', '      getNativeMediaModal() {', ['getBySource', 'getBySource', 'getBySource']],
-    ['findImageModal', '      findImageModal() {', ['getBySource']],
+    ['findImageModal', '      findImageModal() {', ['getBySource', 'getModule']],
+    ['recoverStartupMessageClasses', '  recoverStartupMessageClasses() {', ['getModule', 'getModule', 'waitForModule', 'waitForModule']],
     ['resolveLoggerNativeDocumentMessageClass', '  resolveLoggerNativeDocumentMessageClass(suppliedMessage = null) {', ['getModule']],
     ['resolveLoggerNativeAudioPlayer', '  resolveLoggerNativeAudioPlayer() {', ['getModule']],
     ['installMessageAccessoriesPatch', '  installMessageAccessoriesPatch() {', ['getModule', 'waitForModule', 'waitForModule']],
@@ -1084,7 +1087,8 @@ test('direct Webpack discovery remains owned by the approved production methods'
 
   const mappedContracts = [
     'NativeMediaModal', 'ImageModal', 'NativeDocumentMessageClass',
-    'NativeAudioPlayer', 'MessageAccessories', 'ForumUploadAsReplyRouteModule'
+    'NativeAudioPlayer', 'MessageAccessories', 'ForumUploadAsReplyRouteModule',
+    'Css.MessageWrapperClasses', 'Css.Eager.SelectedMessage'
   ];
   for (const contract of mappedContracts) {
     assert.match(helperSource, new RegExp(`name: '${contract}'`));
@@ -1230,4 +1234,50 @@ test('NativeMediaModal accepts the second ordered source alternative', async () 
     restoreGlobals(savedGlobals);
     fs.rmSync(pluginFolder, { recursive: true, force: true });
   }
+});
+
+
+test('cleanup audit validates inherited cache and store capabilities without invoking accessors', () => {
+  const source = fs.readFileSync(helperPath, 'utf8');
+  const end = source.indexOf('module.exports = class');
+  assert.ok(end > 0);
+  const contracts = vm.runInNewContext(`${source.slice(0, end)}\nmoduleContracts();`, { require });
+  const message = contracts.find(contract => contract.name === 'MessageStore');
+  const channel = contracts.find(contract => contract.name === 'ChannelMessages');
+  class StoreBase { emitChange() {} }
+  const store = Object.assign(new StoreBase(), { getMessage() {}, getMessages() {}, getLastEditableMessage() {} });
+  class CacheBase { has() {} removeMany() {} }
+  class Cache extends CacheBase { static get() {} static commit() {} }
+  Cache._channelMessages = {};
+  assert.equal(message.validate(store).ok, true);
+  assert.equal(channel.validate(Cache).ok, true);
+  assert.strictEqual(message.select({ Webpack: { Stores: { MessageStore: store } } }).value, store);
+  assert.strictEqual(channel.select({ Webpack: { getModule: filter => filter(Cache) ? Cache : null } }).value, Cache);
+  let accessorReads = 0;
+  for (const replacement of ['missing', 'noncallable', 'accessor']) {
+    const target = Object.create(StoreBase.prototype);
+    Object.assign(target, { getMessage() {}, getMessages() {}, getLastEditableMessage() {} });
+    if (replacement === 'missing') Object.setPrototypeOf(target, null);
+    if (replacement === 'noncallable') target.emitChange = 0;
+    if (replacement === 'accessor') Object.defineProperty(target, 'emitChange', { get() { accessorReads++; throw Error('getter'); } });
+    assert.equal(message.validate(target).booleans.emitChange, false);
+    assert.equal(message.validate(target).ok, false);
+  }
+  for (const [key, location, label] of [
+    ['get', 'static', 'get'], ['commit', 'static', 'commit'],
+    ['has', 'prototype', 'prototype.has'], ['removeMany', 'prototype', 'prototype.removeMany']
+  ]) {
+    for (const replacement of ['missing', 'noncallable', 'accessor']) {
+      class Candidate { static get() {} static commit() {} has() {} removeMany() {} }
+      Candidate._channelMessages = {};
+      const target = location === 'static' ? Candidate : Candidate.prototype;
+      if (replacement === 'missing') delete target[key];
+      if (replacement === 'noncallable') target[key] = 0;
+      if (replacement === 'accessor') Object.defineProperty(target, key, { configurable: true, get() { accessorReads++; throw Error('getter'); } });
+      const result = channel.validate(Candidate);
+      assert.equal(result.booleans[label], false, `${label}: ${replacement}`);
+      assert.equal(result.ok, false);
+    }
+  }
+  assert.equal(accessorReads, 0);
 });

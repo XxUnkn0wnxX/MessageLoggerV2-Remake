@@ -1,3 +1,4 @@
+const { installNativeCache, NativeCache } = require('./helpers/native-message-cache');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -15,6 +16,32 @@ const {
   Utils,
   Webpack
 } = require('./helpers/plugin-harness');
+
+
+function installMountedSavedMedia(plugin, records) {
+  plugin.messageRecord ||= {};
+  plugin.deletedMessageRecord ||= {};
+  for (const record of records) {
+    const { id, channel_id: channel } = record.message;
+    plugin.messageRecord[id] = record;
+    (plugin.deletedMessageRecord[channel] ||= []).push(id);
+  }
+  const entries = [...new Set(records.map(record => record.message.channel_id))].map(channel => [channel, {
+    main: records.filter(record => record.message.channel_id === channel).map(record => record.message.id).concat('native')
+  }]);
+  const fixture = installNativeCache(plugin, entries);
+  const original = plugin.cacheChannelMessages;
+  plugin.cacheChannelMessages = channel => {
+    original?.(channel);
+    const old = fixture.caches.get(channel);
+    if (!old) return;
+    fixture.caches.set(channel, new NativeCache(channel, {
+      main: [...new Set([...old.main, ...records.filter(record => record.message.channel_id === channel).map(record => record.message.id)])],
+      before: [...old.before], after: [...old.after], metadata: old.metadata
+    }));
+  };
+  return fixture;
+}
 
 let styledConsoleEvents = [];
 let originalConsoleLog;
@@ -4413,6 +4440,7 @@ test('native attachment media error listener lifecycle installs once, forwards o
     }
   });
 
+  installMountedSavedMedia(plugin, [plugin.messageRecord['601']]);
   try {
     global.document = fakeTarget;
     plugin._installSavedAttachmentMediaErrorListener();
@@ -4426,7 +4454,7 @@ test('native attachment media error listener lifecycle installs once, forwards o
         closest: createNativeMediaClosest({ id: 'chat-messages-601-601' })
       }
     });
-    assert.equal(dispatches.length, 1);
+    assert.equal(dispatches.length, 0);
 
     await setImmediatePromise();
     assert.deepEqual(invalidations, ['601']);
@@ -4493,6 +4521,7 @@ test('native attachment media error remounts one failed remote attachment with c
     }
   });
 
+  installMountedSavedMedia(plugin, [plugin.messageRecord['501']]);
   const message = plugin.messageRecord['501'].message;
   const canonicalBefore = structuredClone(message);
   const remoteRender = plugin.getCacheOnlyMessage(message);
@@ -4510,13 +4539,7 @@ test('native attachment media error remounts one failed remote attachment with c
     }
   });
 
-  assert.equal(dispatches.length, 1);
-  assert.deepEqual(dispatches[0], {
-    type: 'MESSAGE_DELETE',
-    id: '501',
-    channelId: '501',
-    ML2: true
-  });
+  assert.equal(dispatches.length, 0);
   const fallbackRender = plugin.getNativeDeletedAttachmentPresentationMessage(message);
   assert.equal(fallbackRender.attachments.length, 2);
   assert.equal(fallbackRender.attachments[0].url, 'blob://local/cached/image-100');
@@ -4535,7 +4558,7 @@ test('native attachment media error remounts one failed remote attachment with c
     }
   });
 
-  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches.length, 0);
 });
 
 test('native attachment media error retries failed proxy candidates from derived CDN to original URL and then shows blob', async () => {
@@ -4590,6 +4613,7 @@ test('native attachment media error retries failed proxy candidates from derived
     }
   });
 
+  installMountedSavedMedia(plugin, [plugin.messageRecord['601']]);
   const message = plugin.messageRecord['601'].message;
   const canonicalBefore = structuredClone(message);
   const sourceRow = { id: 'chat-messages-601-601' };
@@ -4608,7 +4632,7 @@ test('native attachment media error retries failed proxy candidates from derived
       closest: createNativeMediaClosest(sourceRow)
     }
   });
-  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches.length, 0);
   const afterCdnFailure = plugin.getNativeDeletedAttachmentPresentationMessage(message);
   assert.equal(afterCdnFailure.attachments.length, 1);
   assert.equal(afterCdnFailure.attachments[0].url, proxyUrl);
@@ -4625,7 +4649,7 @@ test('native attachment media error retries failed proxy candidates from derived
       closest: createNativeMediaClosest(sourceRow)
     }
   });
-  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches.length, 0);
 
   plugin.handleSavedAttachmentMediaError({
     target: {
@@ -4634,7 +4658,7 @@ test('native attachment media error retries failed proxy candidates from derived
       closest: createNativeMediaClosest(sourceRow)
     }
   });
-  assert.equal(dispatches.length, 2);
+  assert.equal(dispatches.length, 0);
   await setImmediatePromise();
   assert.deepEqual(invalidations, ['601', '601']);
   assert.deepEqual(cacheRefreshes, ['601', '601']);
@@ -4696,6 +4720,7 @@ test('native audio source error retries CDN then proxy and then shows cached aud
     }
   });
 
+  installMountedSavedMedia(plugin, [plugin.messageRecord['701']]);
   const message = plugin.messageRecord['701'].message;
   const canonicalBefore = structuredClone(message);
   const sourceRow = { id: 'chat-messages-701-701' };
@@ -4714,7 +4739,7 @@ test('native audio source error retries CDN then proxy and then shows cached aud
       closest: createNativeMediaClosest(sourceRow)
     }
   });
-  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches.length, 0);
   plan = plugin.getSavedAttachmentPresentationPlan(message.attachments[0], message, { allowRemote: true });
   assert.equal(plan.mediaType, 'audio');
   assert.equal(plan.action, 'remote');
@@ -4727,7 +4752,7 @@ test('native audio source error retries CDN then proxy and then shows cached aud
       closest: createNativeMediaClosest(sourceRow)
     }
   });
-  assert.equal(dispatches.length, 2);
+  assert.equal(dispatches.length, 0);
   plan = plugin.getSavedAttachmentPresentationPlan(message.attachments[0], message, { allowRemote: true });
   assert.equal(plan.mediaType, 'audio');
   assert.equal(plan.action, 'blob');
@@ -6198,6 +6223,7 @@ test('native attachment media error remounts one failed remote attachment as a p
     }
   });
 
+  installMountedSavedMedia(plugin, [plugin.messageRecord['502']]);
   const message = plugin.messageRecord['502'].message;
   const canonicalBefore = structuredClone(message);
   const messageRow = { id: 'chat-messages-502-502' };
@@ -6212,7 +6238,7 @@ test('native attachment media error remounts one failed remote attachment as a p
     }
   });
 
-  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches.length, 0);
   let fallbackRender = plugin.getNativeDeletedAttachmentPresentationMessage(message);
   assert.equal(fallbackRender.attachments.length, 1);
   assert.equal(fallbackRender.attachments[0].url, proxyUrl);
@@ -6226,19 +6252,7 @@ test('native attachment media error remounts one failed remote attachment as a p
     }
   });
 
-  assert.equal(dispatches.length, 2);
-  assert.deepEqual(dispatches[0], {
-    type: 'MESSAGE_DELETE',
-    id: '502',
-    channelId: '502',
-    ML2: true
-  });
-  assert.deepEqual(dispatches[1], {
-    type: 'MESSAGE_DELETE',
-    id: '502',
-    channelId: '502',
-    ML2: true
-  });
+  assert.equal(dispatches.length, 0);
   fallbackRender = plugin.getNativeDeletedAttachmentPresentationMessage(message);
   assert.equal(fallbackRender.attachments.length, 0);
   assert.equal(fallbackRender.content, '[Deleted: photo.png]');
@@ -6296,6 +6310,7 @@ test('attachment presentation remount coalesces channels and protects Discord-ow
     cacheChannelMessages: id => cacheRefreshes.push(id),
     imageCacheServerSimulator: { get: () => null }
   });
+  installMountedSavedMedia(plugin, [ordinaryOne, ordinaryTwo, threadRoot]);
   plugin.shouldPresentSavedMessage = () => true;
 
   const affectedChannels = plugin.remountSavedAttachmentPresentationRecords([
@@ -6305,15 +6320,12 @@ test('attachment presentation remount coalesces channels and protects Discord-ow
   ]);
 
   assert.equal(affectedChannels, 2);
-  assert.deepEqual(dispatches.slice(0, 2), [
-    { type: 'MESSAGE_DELETE', id: 'ordinary-one', channelId: 'channel', ML2: true },
-    { type: 'MESSAGE_DELETE', id: 'ordinary-two', channelId: 'channel', ML2: true }
-  ]);
-  assert.equal(dispatches[2].type, 'MESSAGE_UPDATE');
-  assert.equal(dispatches[2].ML2, true);
-  assert.equal(dispatches[2].message.id, 'thread');
-  assert.equal(dispatches[2].message.attachments.length, 0);
-  assert.equal(dispatches[2].message.content, 'thread root\n[Not cached: thread.png]');
+  assert.equal(dispatches.some(action => action.type === 'MESSAGE_DELETE'), false);
+  assert.equal(dispatches[0].type, 'MESSAGE_UPDATE');
+  assert.equal(dispatches[0].ML2, true);
+  assert.equal(dispatches[0].message.id, 'thread');
+  assert.equal(dispatches[0].message.attachments.length, 0);
+  assert.equal(dispatches[0].message.content, 'thread root\n[Not cached: thread.png]');
 
   await setImmediatePromise();
   assert.deepEqual([...invalidations].sort(), ['channel', 'thread']);
@@ -12984,4 +12996,92 @@ test('createModal tracks video and fallback-image modal keys in both modal track
   assert.equal(returnedImageKey, undefined);
   assert.deepEqual(trackedModalKeys[1], ['image-opened-key', 'image-modal']);
   assert.deepEqual(trackedAttachmentMediaKeys[1], 'image-opened-key');
+});
+
+test('Logger-only media failures advance fallback across channels without history fetches', () => {
+  const originalFrame = global.requestAnimationFrame;
+  const frames = [];
+  global.requestAnimationFrame = callback => frames.push(callback);
+  const records = ['one', 'two'].map(channel => ({
+    message: { id: `id-${channel}`, channel_id: channel, content: '', attachments: [{
+      id: `media-${channel}`, filename: 'photo.png',
+      url: `https://cdn.discordapp.com/attachments/${channel}/photo.png`,
+      proxy_url: `https://media.discordapp.net/attachments/${channel}/photo.png`
+    }] }, delete_data: {}
+  }));
+  const calls = { history: [], callbacks: 0, menu: 0 };
+  const plugin = createPlugin({
+    messageRecord: Object.fromEntries(records.map(record => [record.message.id, record])),
+    deletedMessageRecord: Object.fromEntries(records.map(record => [record.message.channel_id, [record.message.id]])),
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    tools: { getChannel: () => ({ type: 0 }) },
+    imageCacheServerSimulator: { _resolveImagePath: () => '/cache/image.png', get: () => 'blob://local/image.png' },
+    cacheChannelMessages: channel => calls.history.push(channel), invalidateChannelCache() {},
+    scheduleLoggerMenuRefresh: () => { calls.menu++; },
+    _messageUpdateRegistry: new Map(records.map(record => [record.message.id, new Set([() => { calls.callbacks++; }])]))
+  });
+  const native = installNativeCache(plugin, records.map(record => [record.message.channel_id, { main: ['unrelated'] }]));
+  try {
+    for (const record of records) {
+      const attachment = record.message.attachments[0];
+      const descriptor = plugin.getSavedAttachmentDescriptor(attachment, record.message);
+      const direct = plugin.coordinateSavedAttachmentMediaFailure(descriptor, attachment.url);
+      assert.equal(direct.plan.url, attachment.proxy_url);
+      while (frames.length) frames.shift()();
+      const proxy = plugin.coordinateSavedAttachmentMediaFailure(descriptor, attachment.proxy_url);
+      assert.equal(proxy.plan.action, 'blob');
+      while (frames.length) frames.shift()();
+      const blob = plugin.coordinateSavedAttachmentMediaFailure(descriptor, proxy.plan.url);
+      assert.equal(blob.plan.action, 'omit');
+      while (frames.length) frames.shift()();
+      assert.equal(native.caches.get(record.message.channel_id).has('unrelated'), true);
+    }
+    assert.deepEqual(calls.history, []);
+    assert.equal(calls.callbacks, 6);
+    assert.equal(calls.menu, 6);
+    assert.equal(native.store.changes, 0);
+  } finally { global.requestAnimationFrame = originalFrame; }
+});
+
+test('media failure queues only successful eviction and retains a pending refresh across later misses', () => {
+  const originalFrame = global.requestAnimationFrame;
+  const frames = [];
+  global.requestAnimationFrame = callback => frames.push(callback);
+  const attachment = { id: 'image', filename: 'photo.png', url: 'https://cdn.discordapp.com/attachments/one/photo.png', proxy_url: 'https://media.discordapp.net/attachments/one/photo.png' };
+  const secondAttachment = { id: 'image-two', filename: 'other.png', url: 'https://cdn.discordapp.com/attachments/one/other.png', proxy_url: 'https://media.discordapp.net/attachments/one/other.png' };
+  const record = { message: { id: 'message', channel_id: 'one', content: '', attachments: [attachment, secondAttachment] }, delete_data: {} };
+  const history = [];
+  const plugin = createPlugin({
+    messageRecord: { message: record }, deletedMessageRecord: { one: ['message'] },
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    tools: { getChannel: () => ({ type: 0 }) },
+    imageCacheServerSimulator: { _resolveImagePath: () => '/cache/image.png', get: () => 'blob://local/image.png' },
+    cacheChannelMessages: channel => history.push(channel), invalidateChannelCache() {},
+    scheduleLoggerMenuRefresh() {}
+  });
+  const native = installNativeCache(plugin, [['one', { main: ['message', 'unrelated'] }]]);
+  try {
+    const descriptor = plugin.getSavedAttachmentDescriptor(attachment, record.message);
+    assert.equal(plugin.coordinateSavedAttachmentMediaFailure(descriptor, attachment.url).plan.url, attachment.proxy_url);
+    assert.equal(native.caches.get('one').has('message'), false);
+    assert.equal(native.caches.get('one').has('unrelated'), true);
+    const secondDescriptor = plugin.getSavedAttachmentDescriptor(secondAttachment, record.message);
+    assert.equal(plugin.coordinateSavedAttachmentMediaFailure(secondDescriptor, secondAttachment.url).plan.url, secondAttachment.proxy_url);
+    assert.equal(frames.length, 1);
+    assert.equal(plugin.coordinateSavedAttachmentMediaFailure(secondDescriptor, secondAttachment.url).recordedFailure, false);
+    assert.equal(frames.length, 1);
+    frames.shift()();
+    assert.deepEqual(history, ['one']);
+    native.caches.set('one', new NativeCache('one', { main: ['message', 'unrelated'] }));
+    const restored = plugin.getNativeDeletedAttachmentPresentationMessage(record.message);
+    assert.deepEqual(restored.attachments.map(item => item.url), [attachment.proxy_url, secondAttachment.proxy_url]);
+    assert.equal(native.caches.get('one').has('unrelated'), true);
+    assert.equal(plugin.coordinateSavedAttachmentMediaFailure(descriptor, attachment.proxy_url).plan.action, 'blob');
+    assert.equal(frames.length, 1);
+    assert.equal(plugin.coordinateSavedAttachmentMediaFailure(descriptor, attachment.proxy_url).recordedFailure, false);
+    assert.equal(frames.length, 1);
+    frames.shift()();
+    assert.deepEqual(history, ['one', 'one']);
+    assert.equal(native.caches.get('one').has('unrelated'), true);
+  } finally { global.requestAnimationFrame = originalFrame; }
 });

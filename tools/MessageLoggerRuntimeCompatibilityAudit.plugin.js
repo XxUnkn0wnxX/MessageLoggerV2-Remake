@@ -648,6 +648,89 @@ function getGetSrcProductionChecks(value) {
   };
 }
 
+function findCurrentImageComponent(owner) {
+  if (owner == null || (typeof owner !== 'object' && typeof owner !== 'function')) return null;
+  let keys;
+  try { keys = Reflect.ownKeys(owner); } catch { return null; }
+  for (const key of keys) {
+    try {
+      const candidate = owner[key];
+      if (typeof candidate === 'function'
+        && typeof candidate.prototype?.render === 'function'
+        && typeof candidate.prototype?.getSrc === 'function'
+        && String(candidate).includes('zoomThumbnailPlaceholder')) return candidate;
+    } catch {}
+  }
+  return null;
+}
+
+function normalizeModalActions(owner) {
+  if (owner == null || (typeof owner !== 'object' && typeof owner !== 'function')) return null;
+  const read = (object, key) => {
+    try { return object?.[key]; } catch { return undefined; }
+  };
+  const roles = ['openModal', 'closeModal', 'hasModalOpen', 'useModalsStore'];
+  const validNamed = (role, value) => role === 'useModalsStore'
+    ? typeof read(value, 'subscribe') === 'function'
+    : typeof value === 'function';
+  const keys = {};
+  for (const role of roles) {
+    if (validNamed(role, read(owner, role))) keys[role] = role;
+  }
+  if (roles.every(role => keys[role])) return owner;
+
+  let exports;
+  try { exports = Reflect.ownKeys(owner); } catch { return null; }
+  const matches = Object.fromEntries(roles.map(role => [role, []]));
+  for (const key of exports) {
+    const value = read(owner, key);
+    if (typeof value === 'function') {
+      let source;
+      try { source = String(value); } catch { source = ''; }
+      if (source.includes('?.stackNextByDefault')) matches.openModal.push(key);
+      if (source.includes('.setState') && source.includes('.getState()[') && source.includes('onCloseCallback')) matches.closeModal.push(key);
+      if (/^function(?:\s+[\w$]+)?\([^)]*\)\{return\s+[\w$]+\([\w$]+\.getState\(\),[\w$]+,[\w$]+\)\}$/.test(source)) matches.hasModalOpen.push(key);
+    }
+    if (value != null && (typeof value === 'object' || typeof value === 'function')
+      && ['getState', 'setState', 'subscribe'].every(method => typeof read(value, method) === 'function')) {
+      matches.useModalsStore.push(key);
+    }
+  }
+  for (const role of roles) {
+    if (keys[role]) continue;
+    if (matches[role].length !== 1) return null;
+    keys[role] = matches[role][0];
+  }
+  const adapter = {};
+  for (const role of roles) {
+    Object.defineProperty(adapter, role, {
+      enumerable: true, configurable: true,
+      // Patcher writes and restoration must reach the original namespace used by native callers.
+      get() { return owner[keys[role]]; },
+      set(value) { owner[keys[role]] = value; }
+    });
+  }
+  return adapter;
+}
+
+function resolveModalActions(webpack) {
+  let named;
+  try { named = webpack?.getByKeys?.('openModal', 'hasModalOpen'); } catch {}
+  const normalized = normalizeModalActions(named);
+  if (normalized) return normalized;
+  if (typeof webpack?.getModule !== 'function') return null;
+  let selected = null;
+  try {
+    const owner = webpack.getModule(candidate => {
+      const result = normalizeModalActions(candidate);
+      if (!result) return false;
+      selected = result;
+      return true;
+    }, { searchExports: false, searchDefault: false });
+    return owner == null ? null : selected ?? normalizeModalActions(owner);
+  } catch { return null; }
+}
+
 function getModalActionsProductionChecks(value) {
   const openModal = safeRead(value, 'openModal');
   const hasModalOpen = safeRead(value, 'hasModalOpen');
@@ -2899,6 +2982,123 @@ function describeContract(api, contract) {
   };
 }
 
+function firstCssToken(value) {
+  if (typeof value !== 'string') return null;
+  const token = value.split(/\s+/).find(Boolean) || '';
+  return /^-?[_a-zA-Z][\w-]*$/.test(token) ? token : null;
+}
+
+function describeLoggerIntegrationMessageClasses(api) {
+  const roles = {
+    message: [['message', 'cozyMessage'], ['message', 'groupStart']],
+    selected: [['selected', 'message']]
+  };
+  const errors = [];
+  const pluginsRead = safeRead(api, 'Plugins');
+  const getRead = safeRead(pluginsRead.value, 'get');
+  let addon = null;
+  if (pluginsRead.ok && callable(getRead.value)) {
+    try { addon = getRead.value.call(pluginsRead.value, 'MessageLoggerV2'); }
+    catch { errors.push('plugins-get-threw'); }
+  } else {
+    errors.push(pluginsRead.ok ? 'plugins-get-unavailable' : pluginsRead.error);
+  }
+
+  const instanceRead = dataRead(addon, 'instance');
+  const instance = instanceRead.ok ? instanceRead.value : null;
+  if (!instance) errors.push(addon ? instanceRead.error : 'logger-addon-unavailable');
+  const startedRead = dataRead(instance, '__started');
+  const started = startedRead.ok && startedRead.value === true;
+  if (!started && startedRead.error && instance) errors.push(`logger-start-state-${startedRead.error}`);
+  const classesRead = dataRead(instance, 'classes');
+  const classes = classesRead.ok ? classesRead.value : null;
+  if (started && !classesRead.ok) errors.push(`logger-classes-${classesRead.error}`);
+
+  const classRoles = {};
+  let anyReadyMismatch = false;
+  let anyNativePending = false;
+  for (const [role, alternatives] of Object.entries(roles)) {
+    let nativeToken = null;
+    let nativeLookupError = null;
+    let selectedAlternative = null;
+    for (const requestedKeys of alternatives) {
+      const resolution = resolveSemanticCssAuditAlternative(api, {
+        requestedKeys,
+        consumerKeys: [role]
+      });
+      if (!resolution.selectedValue || !resolution.inspection?.requestedValid) {
+        nativeLookupError = resolution.collectionErrors[0] || resolution.candidateErrors[0] || 'native-css-module-unavailable';
+        continue;
+      }
+      const tokenRead = safeRead(resolution.selectedValue, role);
+      if (tokenRead.ok) nativeToken = firstCssToken(tokenRead.value);
+      else if (tokenRead.error !== 'property-missing') nativeLookupError = tokenRead.error;
+      if (!nativeToken) {
+        const descriptors = getOwnDescriptors(resolution.selectedValue);
+        if (!descriptors.descriptors) nativeLookupError = descriptors.error;
+        else {
+          for (const [key, descriptor] of Object.entries(descriptors.descriptors)) {
+            if (!Object.prototype.hasOwnProperty.call(descriptor, 'value') || typeof descriptor.value !== 'string') continue;
+            nativeToken = descriptor.value.split(/\s+/).find(token => token.startsWith(`${role}_`)) || null;
+            if (nativeToken) break;
+          }
+        }
+      }
+      if (nativeToken) {
+        selectedAlternative = requestedKeys.join('+');
+        nativeLookupError = null;
+        break;
+      }
+    }
+    const actualRead = dataRead(classes, role);
+    const actualToken = actualRead.ok ? firstCssToken(actualRead.value) : null;
+    const nativeReady = nativeToken !== null;
+    const matches = nativeReady && actualToken === nativeToken;
+    if (!nativeReady) anyNativePending = true;
+    else if (started && !matches) anyReadyMismatch = true;
+    if (nativeLookupError) errors.push(`${role}-native-${nativeLookupError}`);
+    if (started && !actualRead.ok) errors.push(`${role}-instance-${actualRead.error}`);
+    classRoles[role] = {
+      nativeReady,
+      nativeToken,
+      selectedAlternative,
+      actualToken,
+      actualReadError: actualRead.ok ? null : actualRead.error,
+      matches: nativeReady ? matches : null
+    };
+  }
+
+  const status = anyReadyMismatch ? 'fail' : (!started || anyNativePending ? 'warn' : 'pass');
+  if (!started && !errors.includes('logger-addon-unavailable')) errors.push('logger-not-started');
+  if (started && anyNativePending) errors.push('native-css-module-not-ready');
+  const validation = collectValidation({
+    addonAvailable: !!addon,
+    instanceAvailable: !!instance,
+    started,
+    messageNativeReady: classRoles.message.nativeReady,
+    selectedNativeReady: classRoles.selected.nativeReady,
+    messageMatches: classRoles.message.matches === true,
+    selectedMatches: classRoles.selected.matches === true
+  }, errors);
+  return {
+    status,
+    expectedUniqueness: 'started Logger instance message/selected class tokens match fresh native semantic CSS tokens',
+    loadedMatchCount: addon ? 1 : 0,
+    selected: {
+      found: !!instance,
+      type: 'logger-instance-class-state',
+      moduleId: null,
+      exportPaths: ['<root>'],
+      ownKeyNames: [],
+      prototypeMethodNames: [],
+      errors: []
+    },
+    state: !addon ? 'logger-unavailable' : !started ? 'logger-not-started' : anyNativePending ? 'native-css-module-not-ready' : 'started',
+    roles: classRoles,
+    validation: { ok: status === 'pass', booleans: validation.booleans, errors: [...new Set(validation.errors)] }
+  };
+}
+
 function moduleContracts() {
   const store = (name, keys, selector, expected = 'single canonical store') => ({
     name,
@@ -2915,15 +3115,6 @@ function moduleContracts() {
   const messageActionsShape = value => [
     'sendMessage', 'editMessage', 'deleteMessage', 'startEditMessage', 'fetchMessages'
   ].every(key => dataCallable(value, key).ok);
-  const modalActionsShape = value => {
-    const store = dataRead(value, 'useModalsStore');
-    return dataCallable(value, 'openModal').ok
-      && dataCallable(value, 'hasModalOpen').ok
-      && dataCallable(value, 'closeModal').ok
-      && store.ok
-      && store.value != null
-      && dataCallable(store.value, 'subscribe').ok;
-  };
   const httpModuleShape = value => dataCallable(value, 'get').ok
     && dataCallable(value, 'post').ok
     && dataCallable(value, 'put').ok
@@ -2966,8 +3157,9 @@ function moduleContracts() {
   };
   const imageModalValidation = value => {
     const checks = imageModalAlternatives.map(alternative => getImageModalProductionChecks(value, alternative.marker));
-    const winning = checks.some(check => check.matched);
-    const sourceReadComplete = checks.every(check => check.sourceReadComplete);
+    const current = typeof value === 'function' && findCurrentImageComponent({ value }) === value;
+    const winning = current || checks.some(check => check.matched);
+    const sourceReadComplete = current || checks.every(check => check.sourceReadComplete);
     return collectValidation({
       exactlyOneWinningCallable: winning,
       sourceReadComplete
@@ -3006,9 +3198,16 @@ function moduleContracts() {
   const nativeMediaModalShape = value => nativeMediaModalAlternatives.some(alternative =>
     dataSourceMatches(value, alternative.searches)
   );
-  const imageModalShape = value => imageModalAlternatives.some(alternative =>
-    dataSourceMatches(value, [alternative.marker])
-  );
+  const imageModalShape = value => {
+    if (imageModalAlternatives.some(alternative => dataSourceMatches(value, [alternative.marker]))) return true;
+    const descriptors = getOwnDescriptors(value).descriptors;
+    if (!descriptors) return false;
+    const dataOnly = Object.create(null);
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if ('value' in descriptors[key]) dataOnly[key] = descriptors[key].value;
+    }
+    return !!findCurrentImageComponent(dataOnly);
+  };
   const trashIconShape = marker => value => dataSourceMatches(value, [marker]);
   const userContextMenuShape = value => {
     const checks = getOwnEnumerableCallableExportChecks(value, ['isGroupDM', 'moderationAlertId']);
@@ -3019,11 +3218,16 @@ function moduleContracts() {
   const nativeDocumentMessageClassShape = value => callable(value)
     && dataPrototypeMethod(value, 'isPoll').ok
     && dataPrototypeMethod(value, 'hasFlag').ok;
-  const nativeAudioPlayerShape = value => callable(value)
-    && dataPrototypeMethod(value, 'renderAudio').ok
-    && dataPrototypeMethod(value, 'renderVideo').ok
-    && dataPrototypeMethod(value, 'renderControls').ok
-    && dataPrototypeMethod(value, 'checkVideoDecodability').ok;
+  const nativeAudioPlayerShape = value => {
+    try {
+      return typeof value === 'function'
+        && typeof value.prototype?.renderAudio === 'function'
+        && typeof value.prototype?.renderVideo === 'function'
+        && typeof value.prototype?.renderControls === 'function'
+        && (typeof value.prototype?.checkVideoDecodability === 'function'
+          || String(value).includes('._analytics.checkVideoDecodability'));
+    } catch { return false; }
+  };
   const forumUploadRouteMarkers = ['castChannelIdAsMessageId', '.isForumPost()', '.ownerId', '.getCount('];
   const forumUploadRouteShape = value => {
     const checks = getOwnEnumerableCallableExportChecks(value, forumUploadRouteMarkers);
@@ -3060,7 +3264,8 @@ function moduleContracts() {
       validate: value => collectValidation({
         getMessage: dataCallable(value, 'getMessage').ok,
         getMessages: dataCallable(value, 'getMessages').ok,
-        getLastEditableMessage: dataCallable(value, 'getLastEditableMessage').ok
+        getLastEditableMessage: dataCallable(value, 'getLastEditableMessage').ok,
+        emitChange: dataCallable(value, 'emitChange').ok
       })
     },
     store('ChannelStore', ['getChannel', 'getDMFromUserId'], api => {
@@ -3226,12 +3431,18 @@ function moduleContracts() {
       name: 'ImageModal',
       required: false,
       expectedUniqueness: 'single image modal export map',
-      select: api => selectSourceMapAlternative(api, imageModalAlternatives, (value, alternative) => {
-        const checks = getImageModalProductionChecks(value, alternative.marker);
-        return {
-          valid: checks.matched
-        };
-      }),
+      select: api => {
+        const legacy = selectSourceMapAlternative(api, imageModalAlternatives, (value, alternative) => ({
+          valid: getImageModalProductionChecks(value, alternative.marker).matched
+        }));
+        if (legacy.value != null) return legacy;
+        let selected = null;
+        const owner = selectionFromFilter(api.Webpack, value => {
+          selected = findCurrentImageComponent(value);
+          return selected != null;
+        }, { searchExports: false, searchDefault: false });
+        return { ...owner, value: owner.value == null ? null : selected };
+      },
       rootMatch: true,
       match: imageModalShape,
       summaryOptions: { includeOwnKeys: false },
@@ -3282,7 +3493,7 @@ function moduleContracts() {
         'prototype.renderAudio': dataPrototypeMethod(value, 'renderAudio').ok,
         'prototype.renderVideo': dataPrototypeMethod(value, 'renderVideo').ok,
         'prototype.renderControls': dataPrototypeMethod(value, 'renderControls').ok,
-        'prototype.checkVideoDecodability': dataPrototypeMethod(value, 'checkVideoDecodability').ok
+        'decodability-method-or-analytics': nativeAudioPlayerShape(value)
       })
     },
     {
@@ -3373,7 +3584,11 @@ function moduleContracts() {
         return collectValidation({
           _channelMessages: mapping.ok && mapping.value != null,
           usableMapping: mapping.ok && mapping.value != null
-            && (typeof mapping.value === 'object' || typeof mapping.value === 'function')
+            && (typeof mapping.value === 'object' || typeof mapping.value === 'function'),
+          get: dataCallable(value, 'get').ok,
+          commit: dataCallable(value, 'commit').ok,
+          'prototype.has': dataPrototypeMethod(value, 'has').ok,
+          'prototype.removeMany': dataPrototypeMethod(value, 'removeMany').ok
         });
       }
     },
@@ -3526,14 +3741,19 @@ function moduleContracts() {
     {
       name: 'ModalActions',
       expectedUniqueness: 'single modal action module with store subscription',
+      rootMatch: true,
       select: api => {
-        try {
-          return { value: api?.Webpack?.getByKeys?.('openModal', 'hasModalOpen'), error: null };
-        } catch {
-          return { value: null, error: 'Webpack.getByKeys-threw' };
-        }
+        return { value: resolveModalActions(api?.Webpack), error: null };
       },
-      match: modalActionsShape,
+      match: value => {
+        let descriptors;
+        try { descriptors = Object.getOwnPropertyDescriptors(value); } catch { return false; }
+        const dataOnly = Object.create(null);
+        for (const key of Reflect.ownKeys(descriptors)) {
+          if ('value' in descriptors[key]) dataOnly[key] = descriptors[key].value;
+        }
+        return !!normalizeModalActions(dataOnly);
+      },
       validate: value => {
         const checks = getModalActionsProductionChecks(value);
         return collectValidation(checks.booleans, checks.errors);
@@ -3752,7 +3972,8 @@ module.exports = class MessageLoggerRuntimeCompatibilityAudit {
       { name: 'Dom.ForumThreadSurfaces', ...describeForumThreadDomContract() },
       { name: 'LoggerOwned.Styles', ...describeLoggerOwnedStyleContract(this.bdApi) },
       { name: 'LoggerOwned.MountMarkers', ...describeLoggerOwnedMountContract() },
-      { name: 'LoggerIntegration.RenderLinkComponent', ...describeLoggerIntegrationRenderLinkComponent(this.bdApi) }
+      { name: 'LoggerIntegration.RenderLinkComponent', ...describeLoggerIntegrationRenderLinkComponent(this.bdApi) },
+      { name: 'LoggerIntegration.MessageClasses', ...describeLoggerIntegrationMessageClasses(this.bdApi) }
     ];
     const assetContract = await assetPromise;
     const transitionContract = await transitionPromise;

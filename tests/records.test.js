@@ -774,13 +774,7 @@ test('stop restores archive presentation state and clears logger-only DOM artifa
   }
 
   assert.deepEqual(invalidated, [threadRecordId]);
-  assert.deepEqual(
-    dispatched.map(event => [event.type, event.id, event.channelId, event.ML2]).sort(),
-    [
-      ['MESSAGE_DELETE', normalMessageId, normalChannelId, true],
-      ['MESSAGE_DELETE', structuralRecordId, structuralRecordId, true]
-    ].sort()
-  );
+  assert.equal(dispatched.some(event => event.type === 'MESSAGE_DELETE'), false);
   assert.deepEqual(structuralRemovals, [structuralRecordId]);
   assert.equal(removed.includes('native-host'), true);
   assert.equal(removed.includes('restored-forum-thread'), true);
@@ -937,7 +931,7 @@ test('hiding and unhiding a forum or thread root cascades and uses routed system
   assert.equal(child.delete_data.hidden, true);
   assert.equal(child.edits_hidden, true);
   assert.equal(plugin.suppressedForumThreadIds.has(rootId), true);
-  assert.equal(dispatches.filter(event => event.type === 'MESSAGE_DELETE').length, 2);
+  assert.equal(dispatches.filter(event => event.type === 'MESSAGE_DELETE').length, 0);
 
   assert.equal(plugin.setSavedThreadHidden(root, false), true);
   assert.equal(root.delete_data.hidden, false);
@@ -1757,23 +1751,13 @@ test('hiding a saved message preserves Discord-owned live thread mounts only', (
 
   assert.equal(plugin.hideSavedDeletedRecord(ordinary), true);
   assert.equal(ordinary.delete_data.hidden, true);
-  assert.deepEqual(dispatches, [{
-    type: 'MESSAGE_DELETE',
-    id: ordinaryId,
-    channelId: ordinaryChannelId,
-    ML2: true
-  }], 'ordinary saved messages retain their synthetic live unmount');
+  assert.equal(dispatches.some(event => event.type === 'MESSAGE_DELETE'), false);
   assert.deepEqual(invalidations, [starterId]);
   assert.deepEqual(cacheRefreshes, [starterId]);
 
   assert.equal(plugin.hideSavedDeletedRecord(ordinaryThreadReply), true);
   assert.equal(ordinaryThreadReply.delete_data.hidden, true);
-  assert.deepEqual(dispatches.at(-1), {
-    type: 'MESSAGE_DELETE',
-    id: ordinaryThreadReplyId,
-    channelId: ordinaryThreadChannelId,
-    ML2: true
-  }, 'channel type alone must not suppress an ordinary thread reply unmount');
+  assert.equal(dispatches.some(event => event.type === 'MESSAGE_DELETE'), false);
   assert.deepEqual(invalidations, [starterId]);
   assert.deepEqual(cacheRefreshes, [starterId]);
 });
@@ -3106,7 +3090,7 @@ test('native Trash consumes only exact indexed saved deletions', () => {
   assert.equal(plugin.noTintIds.has(messageId), false);
   assert.equal(plugin.editModifiers[messageId], undefined);
   assert.equal(getSaves(), 1);
-  assert.deepEqual(dispatches, [{ type: 'MESSAGE_DELETE', id: messageId, channelId, ML2: true }]);
+  assert.equal(dispatches.some(event => event.type === 'MESSAGE_DELETE'), false);
 });
 
 test('permission-independent context Delete is limited to exact indexed saved deletions', () => {
@@ -3300,7 +3284,7 @@ test('Trash removal of a restored forum or thread root cascades through its chil
   assert.equal(plugin.suppressedForumThreadIds.has(rootId), true);
   assert.equal(removedRoot, rootId);
   assert.equal(saves, 1);
-  assert.deepEqual(dispatches.at(-1), { type: 'MESSAGE_DELETE', id: rootId, channelId: rootId, ML2: true });
+  assert.equal(dispatches.some(event => event.type === 'MESSAGE_DELETE'), false);
 });
 
 test('Trash refreshes only a channel cache that was already mounted', () => {

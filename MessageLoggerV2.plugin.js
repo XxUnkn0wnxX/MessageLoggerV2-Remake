@@ -262,6 +262,89 @@ function normalizeSemanticCssModule(candidate, semanticKeys) {
   }
   return normalized;
 }
+function findCurrentImageComponent(owner) {
+  if (owner == null || (typeof owner !== 'object' && typeof owner !== 'function')) return null;
+  let keys;
+  try { keys = Reflect.ownKeys(owner); } catch { return null; }
+  for (const key of keys) {
+    try {
+      const candidate = owner[key];
+      if (typeof candidate === 'function'
+        && typeof candidate.prototype?.render === 'function'
+        && typeof candidate.prototype?.getSrc === 'function'
+        && String(candidate).includes('zoomThumbnailPlaceholder')) return candidate;
+    } catch {}
+  }
+  return null;
+}
+
+function normalizeModalActions(owner) {
+  if (owner == null || (typeof owner !== 'object' && typeof owner !== 'function')) return null;
+  const read = (object, key) => {
+    try { return object?.[key]; } catch { return undefined; }
+  };
+  const roles = ['openModal', 'closeModal', 'hasModalOpen', 'useModalsStore'];
+  const validNamed = (role, value) => role === 'useModalsStore'
+    ? typeof read(value, 'subscribe') === 'function'
+    : typeof value === 'function';
+  const keys = {};
+  for (const role of roles) {
+    if (validNamed(role, read(owner, role))) keys[role] = role;
+  }
+  if (roles.every(role => keys[role])) return owner;
+
+  let exports;
+  try { exports = Reflect.ownKeys(owner); } catch { return null; }
+  const matches = Object.fromEntries(roles.map(role => [role, []]));
+  for (const key of exports) {
+    const value = read(owner, key);
+    if (typeof value === 'function') {
+      let source;
+      try { source = String(value); } catch { source = ''; }
+      if (source.includes('?.stackNextByDefault')) matches.openModal.push(key);
+      if (source.includes('.setState') && source.includes('.getState()[') && source.includes('onCloseCallback')) matches.closeModal.push(key);
+      if (/^function(?:\s+[\w$]+)?\([^)]*\)\{return\s+[\w$]+\([\w$]+\.getState\(\),[\w$]+,[\w$]+\)\}$/.test(source)) matches.hasModalOpen.push(key);
+    }
+    if (value != null && (typeof value === 'object' || typeof value === 'function')
+      && ['getState', 'setState', 'subscribe'].every(method => typeof read(value, method) === 'function')) {
+      matches.useModalsStore.push(key);
+    }
+  }
+  for (const role of roles) {
+    if (keys[role]) continue;
+    if (matches[role].length !== 1) return null;
+    keys[role] = matches[role][0];
+  }
+  const adapter = {};
+  for (const role of roles) {
+    Object.defineProperty(adapter, role, {
+      enumerable: true, configurable: true,
+      // Patcher writes and restoration must reach the original namespace used by native callers.
+      get() { return owner[keys[role]]; },
+      set(value) { owner[keys[role]] = value; }
+    });
+  }
+  return adapter;
+}
+
+function resolveModalActions(webpack) {
+  let named;
+  try { named = webpack?.getByKeys?.('openModal', 'hasModalOpen'); } catch {}
+  const normalized = normalizeModalActions(named);
+  if (normalized) return normalized;
+  if (typeof webpack?.getModule !== 'function') return null;
+  let selected = null;
+  try {
+    const owner = webpack.getModule(candidate => {
+      const result = normalizeModalActions(candidate);
+      if (!result) return false;
+      selected = result;
+      return true;
+    }, { searchExports: false, searchDefault: false });
+    return owner == null ? null : selected ?? normalizeModalActions(owner);
+  } catch { return null; }
+}
+
 const DiscordModules = (() => {
   const cache = {};
   const lazyGet = (key, getter) => ({
@@ -291,7 +374,7 @@ const DiscordModules = (() => {
     GuildMemberStore: lazyGet('GuildMemberStore', () => Webpack.Stores.GuildMemberStore),
     RelationshipStore: lazyGet('RelationshipStore', () => Webpack.Stores.RelationshipStore ?? Webpack.getByKeys('isBlocked')),
     MessageActions: lazyGet('MessageActions', () => Webpack.getByKeys('sendMessage', 'editMessage', 'deleteMessage')),
-    ModalActions: lazyGet('ModalActions', () => Webpack.getByKeys('openModal', 'hasModalOpen')),
+    ModalActions: lazyGet('ModalActions', () => resolveModalActions(Webpack)),
     HistoryUtils: lazyGet('HistoryUtils', () => Webpack.getByKeys('getHistory')),
     HttpModule: lazyGet('HttpModule', () => Webpack.getByKeys('get', 'post', 'put', 'del') || Webpack.getByKeys('get', 'post', 'put', 'delete')),
     MaskedLink: lazyGet('MaskedLink', () => {
@@ -688,6 +771,7 @@ module.exports = class MessageLoggerV2 {
   }
   stop() {
     this._startupGeneration = (this._startupGeneration || 0) + 1;
+    this.cancelStartupMessageClassRecovery();
     this._loggerNativeAudioLoadGeneration = (this._loggerNativeAudioLoadGeneration || 0) + 1;
     this._loggerNativeAudioLoadPromise = null;
     this._loggerNativeAudioPlayer = null;
@@ -1066,6 +1150,81 @@ module.exports = class MessageLoggerV2 {
       Logger.error('Failed to force UI update:', e);
     }
   }
+  cancelStartupMessageClassRecovery() {
+    const state = this._startupMessageClassRecovery;
+    this._startupMessageClassRecovery = null;
+    if (!state) return;
+    for (const controller of Object.values(state.controllers)) {
+      try { controller.abort(); } catch {}
+    }
+  }
+  recoverStartupMessageClasses() {
+    if (!this.__started || !this.classes || this._startupMessageClassRecovery) return;
+    const classes = this.classes;
+    const generation = this._startupGeneration;
+    const state = { controllers: {} };
+    this._startupMessageClassRecovery = state;
+    const current = () => this.__started && this.classes === classes
+      && this._startupGeneration === generation && this._startupMessageClassRecovery === state;
+    const token = value => {
+      if (typeof value !== 'string') return '';
+      const first = value.split(/\s+/).find(Boolean) || '';
+      return /^-?[_a-zA-Z][\w-]*$/.test(first) ? first : '';
+    };
+    const alternatives = {
+      message: [['message', 'cozyMessage'], ['message', 'groupStart']],
+      selected: [['selected', 'message']]
+    };
+    const extract = (candidate, role) => {
+      for (const keys of alternatives[role]) {
+        const normalized = normalizeSemanticCssModule(candidate, keys);
+        if (normalized && keys.every(key => token(normalized[key]))) return token(normalized[role]);
+      }
+      return '';
+    };
+    const accept = (role, candidate) => {
+      if (!current() || classes[role]) return false;
+      const value = extract(candidate, role);
+      if (!value) return false;
+      classes[role] = value;
+      if (role === 'selected') this.updateCSS();
+      return true;
+    };
+    for (const role of ['message', 'selected']) {
+      if (classes[role]) continue;
+      for (const keys of alternatives[role]) {
+        const candidate = resolveSemanticCssModule(keys);
+        if (accept(role, candidate)) break;
+      }
+      if (classes[role]) continue;
+      if (typeof Webpack.getModule === 'function') {
+        try {
+          const candidate = Webpack.getModule(value => !!extract(value, role), { searchExports: false });
+          if (accept(role, candidate)) continue;
+        } catch {}
+      }
+      if (typeof Webpack.waitForModule !== 'function' || typeof globalThis.AbortController !== 'function') continue;
+      const controller = new AbortController();
+      state.controllers[role] = controller;
+      try {
+        const pending = Webpack.waitForModule(value => !!extract(value, role), {
+          searchExports: false, signal: controller.signal
+        });
+        Promise.resolve(pending).then(candidate => {
+          if (!current() || controller.signal.aborted || state.controllers[role] !== controller) return;
+          accept(role, candidate);
+          delete state.controllers[role];
+        }).catch(error => {
+          if (!current() || controller.signal.aborted || state.controllers[role] !== controller) return;
+          delete state.controllers[role];
+          Logger.warn(`Could not recover Discord ${role} class.`, error);
+        });
+      } catch (error) {
+        if (state.controllers[role] === controller) delete state.controllers[role];
+        if (!controller.signal.aborted) Logger.warn(`Could not wait for Discord ${role} class.`, error);
+      }
+    }
+  }
   initialize() {
     if (this.__started) return this.notifyUser(`[${this.getName()}] Tried to start twice.`, {
       title: 'Message Logger Startup Warning',
@@ -1073,6 +1232,7 @@ module.exports = class MessageLoggerV2 {
       timeout: 0
     });
     this.__started = true;
+    this.unpatches = [];
     this._nativeNotificationQueueStopped = false;
     this._nativeNotificationQueue = [];
     this._nativeNotificationActive = null;
@@ -1586,7 +1746,6 @@ module.exports = class MessageLoggerV2 {
       }
     }
     const CUser = DiscordModules.CUser;
-    this.unpatches = [];
     this.unpatches.push(
       Patcher.after(this.UserStore, 'getUser', (_this, args, ret) => {
         if (!ret && !args[1]) {
@@ -1599,7 +1758,6 @@ module.exports = class MessageLoggerV2 {
         }
       })
     );
-    const RenderUserPopout_mod = DiscordModules.RenderUserPopout
     this.tools = {
       getMessage: this.messageStore.getMessage,
       getChannel: this.ChannelStore.getChannel,
@@ -1658,27 +1816,30 @@ module.exports = class MessageLoggerV2 {
       _imageModal: null,
       findImageModal() {
         if (this._imageModal != null) return this._imageModal;
-        try {
-          const patterns = [
-            "zoomThumbnailPlaceholder",
-            ".MEDIA_MODAL_CLOSE,",
-            "renderMobileCloseButton"
-          ];
-          for (const pattern of patterns) {
+        const patterns = ["zoomThumbnailPlaceholder", ".MEDIA_MODAL_CLOSE,", "renderMobileCloseButton"];
+        for (const pattern of patterns) {
+          try {
             const module = Webpack.getBySource(pattern, { searchExports: false });
-            if (module) {
-              const filterFunc = m2 => m2?.toString?.().includes(pattern);
-              const ImageModal = Object.values(module).find(filterFunc);
-              if (ImageModal) {
-                this._imageModal = ImageModal;
-                Logger.log(`Found ImageModal using pattern: ${pattern}`);
-                return this._imageModal;
-              }
+            if (!module) continue;
+            const ImageModal = Object.values(module).find(value => value?.toString?.().includes(pattern));
+            if (ImageModal) {
+              this._imageModal = ImageModal;
+              Logger.log(`Found ImageModal using pattern: ${pattern}`);
+              return ImageModal;
             }
-          }
+          } catch {}
+        }
+        try {
+          let selected = null;
+          const owner = Webpack.getModule(candidate => {
+            const component = findCurrentImageComponent(candidate);
+            if (!component) return false;
+            selected = component;
+            return true;
+          }, { searchExports: false, searchDefault: false });
+          if (owner != null && selected) this._imageModal = selected;
         } catch (e) {
           Logger.error('Error getting image modal', e);
-          this._imageModal = null;
         }
         return this._imageModal;
       },
@@ -1696,7 +1857,12 @@ module.exports = class MessageLoggerV2 {
       popoutStack: [],
       popoutManager: new PopoutManager(),
       showUserPopout(hookTo, user, channelId) {
-        const content = RenderUserPopout_mod(null, { type: 1, author: user, channel_id: channelId || DiscordModules.SelectedChannelStore?.getChannelId() });
+        const RenderUserPopout = DiscordModules.RenderUserPopout;
+        if (typeof RenderUserPopout !== 'function') {
+          Logger.warn('Could not show user popout because the Discord renderer is unavailable.');
+          return;
+        }
+        const content = RenderUserPopout(null, { type: 1, author: user, channel_id: channelId || DiscordModules.SelectedChannelStore?.getChannelId() });
         const newPopout = this.popoutManager.showPopout(hookTo, content, {
           position: 'right',
           align: 'top'
@@ -2083,7 +2249,7 @@ module.exports = class MessageLoggerV2 {
                     html #app-mount .${this.style.deletedAlt} {
                       background-color: ${this.settings.deletedMessageColor ? hexToRgb(this.settings.deletedMessageColor, 0.15) : "rgba(240, 71, 71, 0.15)"} !important;
                     }
-                    html #app-mount .${this.style.deletedAlt}:hover, html #app-mount .${this.style.deletedAlt}.${this.classes.selected} {
+                    html #app-mount .${this.style.deletedAlt}:hover${this.classes.selected ? `, html #app-mount .${this.style.deletedAlt}.${this.classes.selected}` : ''} {
                       background-color: ${this.settings.deletedMessageColor ? hexToRgb(this.settings.deletedMessageColor, 0.1) : "rgba(240, 71, 71, 0.1)"} !important;
                     }
                     .theme-dark .${this.classes.markup}.${this.style.edited} .${this.style.edited} {
@@ -2495,6 +2661,7 @@ module.exports = class MessageLoggerV2 {
       );
     }
     this.updateCSS();
+    this.recoverStartupMessageClasses();
     this.patchMessages();
     this.patchModal();
     this._patchForumUploadAsReplySendMessageForModule(DiscordModules.MessageActions);
@@ -7611,7 +7778,8 @@ module.exports = class MessageLoggerV2 {
             id,
             channelId: String(channelId),
             structuralRoot: !!record.delete_data.forum_thread_delete,
-            survivingThreadMessage: !!record.delete_data.forum_thread_message_delete
+            survivingThreadMessage: !!record.delete_data.forum_thread_message_delete,
+            deletionSnapshot: this.snapshotLoggerDeletion(record, channelId, id)
           });
         }
       }
@@ -7630,7 +7798,8 @@ module.exports = class MessageLoggerV2 {
     const state = previousState || this.captureArchiveLoadPresentationState();
     if (!state) return false;
     const threadBrowserParents = new Set();
-    const seenDispatches = new Set();
+    const deletionSnapshots = [];
+    const refreshedChannels = new Set();
     const removeNode = (node) => {
       if (!node) return;
       try { node.remove?.(); } catch (error) {}
@@ -7687,26 +7856,18 @@ module.exports = class MessageLoggerV2 {
           && (mount.survivingThreadMessage === true || id === channelId);
         if (keepNativeThreadCard) {
           try {
-            this._invalidateAndRecache?.(channelId);
+            if (!refreshedChannels.has(channelId)) {
+              refreshedChannels.add(channelId);
+              this._invalidateAndRecache?.(channelId);
+            }
           } catch (error) {
             Logger.warn(`Could not refresh surviving native thread ${channelId}.`, error);
           }
           continue;
         }
-        const dispatchKey = `${channelId}:${id}`;
-        if (seenDispatches.has(dispatchKey)) continue;
-        seenDispatches.add(dispatchKey);
-        try {
-          this.dispatcher?.dispatch?.({
-            type: 'MESSAGE_DELETE',
-            id,
-            channelId,
-            ML2: true
-          });
-        } catch (error) {
-          Logger.warn(`Could not dispatch Logger cleanup delete for ${id}.`, error);
-        }
+        deletionSnapshots.push(mount.deletionSnapshot);
       }
+      const eviction = this.evictLoggerDeletionSnapshots(deletionSnapshots);
       const removeLoggerNodes = (selector) => {
         let nodes = [];
         try {
@@ -7753,7 +7914,7 @@ module.exports = class MessageLoggerV2 {
       restoreThreadBrowserHeights();
       this.setRestoredDeleteShiftActive?.(false);
       try { ContextMenu.close?.(); } catch (error) {}
-      return true;
+      return eviction.complete;
     } catch (error) {
       Logger.warn('Could not fully clear Logger-owned presentation during disable.', error);
       try { restoreThreadBrowserHeights(); } catch (restoreError) {}
@@ -7796,6 +7957,8 @@ module.exports = class MessageLoggerV2 {
         Array.from(previousState.recordIds || []).filter(id => !currentRecordIds.has(String(id)))
       );
       const staleDeletionMountIds = new Set();
+      const deletionSnapshots = [];
+      const refreshedChannels = new Set();
       for (const mount of previousState.visibleDeletionMounts || []) {
         if (this.shouldPresentSavedMessage(mount.channelId, mount.id)) continue;
         staleDeletionMountIds.add(mount.id);
@@ -7804,21 +7967,16 @@ module.exports = class MessageLoggerV2 {
           && [10, 11, 12].includes(Number(channel?.type))
           && (mount.survivingThreadMessage || mount.id === mount.channelId);
         if (keepsNativeThreadCard) {
-          this._invalidateAndRecache?.(mount.channelId);
-        } else {
-          try {
-            this.dispatcher?.dispatch?.({
-              type: 'MESSAGE_DELETE',
-              id: mount.id,
-              channelId: mount.channelId,
-              ML2: true
-            });
-          } catch (error) {
-            Logger.warn(`Could not evict detached archive message mount ${mount.id}.`, error);
+          if (!refreshedChannels.has(mount.channelId)) {
+            refreshedChannels.add(mount.channelId);
+            this._invalidateAndRecache?.(mount.channelId);
           }
+        } else {
+          deletionSnapshots.push(mount.deletionSnapshot);
         }
         if (mount.structuralRoot) this.removeRestoredForumThreadMountsFromDom(mount.id);
       }
+      const eviction = this.evictLoggerDeletionSnapshots(deletionSnapshots);
       this.removeDetachedArchiveDeleteControls(new Set([
         ...staleDeletionMountIds,
         ...removedRecordIds
@@ -7843,6 +8001,7 @@ module.exports = class MessageLoggerV2 {
       // Context-menu callbacks close over record objects. Installing the overlay replaces
       // canonical ownership even when a session upsert keeps the same message ID.
       try { ContextMenu.close?.(); } catch {}
+      return eviction.complete;
     } catch (error) {
       // Presentation cleanup is best-effort. Archive/session ownership is already installed and
       // must not be rolled back merely because Discord replaced a DOM or Flux surface mid-sweep.
@@ -9969,8 +10128,8 @@ module.exports = class MessageLoggerV2 {
       messageId
     }));
   }
-  reportDeferredMediaCacheFailure(attachmentId, reason) {
-    Logger.error(`Deferred media cache request ${attachmentId} could not be completed.`, reason);
+  reportDeferredMediaCacheFailure(attachmentId, reason, diagnosticId = attachmentId) {
+    Logger.error(`Deferred media cache request ${diagnosticId} could not be completed.`, reason);
     this.notifyUser?.(
       'Saved logger data is safe, but one queued media file could not be cached after its retries completed.',
       {
@@ -10918,7 +11077,8 @@ module.exports = class MessageLoggerV2 {
         && typeof prototype?.renderAudio === 'function'
         && typeof prototype?.renderVideo === 'function'
         && typeof prototype?.renderControls === 'function'
-        && typeof prototype?.checkVideoDecodability === 'function';
+        && (typeof prototype?.checkVideoDecodability === 'function'
+          || String(candidate).includes('._analytics.checkVideoDecodability'));
     } catch {
       return false;
     }
@@ -12553,6 +12713,7 @@ module.exports = class MessageLoggerV2 {
   }
   remountSavedAttachmentPresentationRecords(records) {
     const channelIds = new Set();
+    const deletionSnapshots = [];
     const items = Array.isArray(records) ? records : [records];
     for (const record of items) {
       if (!record?.delete_data) continue;
@@ -12569,6 +12730,7 @@ module.exports = class MessageLoggerV2 {
           || String(message.id) === channelId
         );
       if (keepsDiscordOwnedThreadMount) {
+        channelIds.add(channelId);
         const messageId = String(message.id);
         const getFinalPresentation = sourceMessage => {
           const presentationOptions = this.settings?.cacheAllImages !== false
@@ -12749,15 +12911,11 @@ module.exports = class MessageLoggerV2 {
         }
       } else {
         this._cancelSavedAttachmentPresentationTransition(channelId, String(message.id));
-        this.dispatcher?.dispatch?.({
-          type: 'MESSAGE_DELETE',
-          id: message.id,
-          channelId: channelId,
-          ML2: true
-        });
+        deletionSnapshots.push(this.snapshotLoggerDeletion(record, channelId, message.id));
       }
-      channelIds.add(channelId);
     }
+    const eviction = this.evictLoggerDeletionSnapshots(deletionSnapshots);
+    for (const channelId of eviction.changedChannelIds) channelIds.add(channelId);
     for (const channelId of channelIds) this._scheduleSavedAttachmentPresentationRecache(channelId);
     return channelIds.size;
   }
@@ -13917,22 +14075,19 @@ module.exports = class MessageLoggerV2 {
     if (!record?.delete_data?.forum_thread_delete || !message?.id) return false;
     const threadId = message.id;
     const recordIds = this.getForumThreadRecordIds(threadId);
+    const deletionSnapshots = [];
     for (const id of recordIds) {
       const saved = this.messageRecord[id];
       if (!saved?.message) continue;
       this.setSavedRecordHiddenState(saved, hidden);
       if (hidden && saved.delete_data) {
-        this.dispatcher.dispatch({
-          type: 'MESSAGE_DELETE',
-          id,
-          channelId: saved.message.channel_id,
-          ML2: true
-        });
+        deletionSnapshots.push(this.snapshotLoggerDeletion(saved, saved.message.channel_id, id));
       } else if (saved.edit_history) {
         this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id });
       }
     }
     if (hidden) {
+      this.evictLoggerDeletionSnapshots(deletionSnapshots);
       this.suppressForumThreadId(threadId);
       this.removeForumCardFromDom(threadId);
     } else {
@@ -13962,6 +14117,7 @@ module.exports = class MessageLoggerV2 {
         !!record.delete_data.forum_thread_message_delete
         || String(message.id) === savedChannelId
       );
+    const deletionSnapshot = this.snapshotLoggerDeletion(record, savedChannelId, message.id);
     this.setSavedRecordHiddenState(record, true);
     // Discord owns the mounted React tree for a surviving forum/thread. Sending it a synthetic
     // MESSAGE_DELETE while hiding Logger's saved copy races the native deleted-starter
@@ -13974,12 +14130,7 @@ module.exports = class MessageLoggerV2 {
       this._tintSweep?.();
       this.scheduleForumListRefresh?.();
     } else {
-      this.dispatcher.dispatch({
-        type: 'MESSAGE_DELETE',
-        id: message.id,
-        channelId: message.channel_id,
-        ML2: true
-      });
+      this.evictLoggerDeletionSnapshots([deletionSnapshot]);
     }
     this.saveData();
     this.scheduleLoggerMenuRefresh();
@@ -18817,6 +18968,7 @@ module.exports = class MessageLoggerV2 {
       ? Math.max(0, configuredRetryDelay)
       : MEDIA_CACHE_RETRY_DELAY_MS;
     if (resolvedCacheState === 'precache' && !this.getMediaCachePreCacheDirectory(messageId)) return;
+    const cacheFileId = this.getMediaCacheFileId(attachmentId, attachmentIdx, messageId);
     let response;
     try {
       if (resolvedCacheState === 'confirmed') {
@@ -18834,22 +18986,24 @@ module.exports = class MessageLoggerV2 {
       if (!response.ok) {
         await (response?.release?.() ?? response?.releaseBody?.() ?? Promise.resolve());
         if (response.status === 404 || response.status === 403) {
-          Logger.warn(`Image ${attachmentId} unavailable (${response.status}), skipping cache`);
+          Logger.warn(`Image ${cacheFileId} unavailable (${response.status}), skipping cache`);
           if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
             this.reportDeferredMediaCacheFailure(
               attachmentId,
-              new Error(`Remote media returned HTTP ${response.status}`)
+              new Error(`Remote media returned HTTP ${response.status}`),
+              cacheFileId
             );
           }
           return;
         }
         attempts++;
         if (attempts >= maxAttempts) {
-          Logger.warn(`Failed to get image ${attachmentId} for caching, error code ${response.status}`);
+          Logger.warn(`Failed to get image ${cacheFileId} for caching, error code ${response.status}`);
           if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
             this.reportDeferredMediaCacheFailure(
               attachmentId,
-              new Error(`Remote media returned HTTP ${response.status}`)
+              new Error(`Remote media returned HTTP ${response.status}`),
+              cacheFileId
             );
           }
           return;
@@ -18869,18 +19023,19 @@ module.exports = class MessageLoggerV2 {
       }
       const fileExtension = match[0];
       if (!fileExtension) {
-        Logger.warn(`Could not determine file extension for ${attachmentId}, skipping cache`);
+        Logger.warn(`Could not determine file extension for ${cacheFileId}, skipping cache`);
         if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
           this.reportDeferredMediaCacheFailure(
             attachmentId,
-            new Error('The media file type could not be determined')
+            new Error('The media file type could not be determined'),
+            cacheFileId
           );
         }
         return;
       }
       if (this.cacheDeletionMessageIds?.has?.(messageId)) return;
       if (!this.canCacheMediaLocally(writeEpoch)) return;
-      const fileId = this.getMediaCacheFileId(attachmentId, attachmentIdx, messageId);
+      const fileId = cacheFileId;
       const fs = this.nodeModules.fs;
       const path = this.nodeModules.path;
       const filePath = requestState.cacheState === 'confirmed'
@@ -18904,9 +19059,9 @@ module.exports = class MessageLoggerV2 {
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       attempts++;
       if (attempts >= maxAttempts) {
-        Logger.error(`Failed to cache image ${attachmentId}:`, e.message);
+        Logger.error(`Failed to cache image ${cacheFileId}:`, e.message);
         if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
-          this.reportDeferredMediaCacheFailure(attachmentId, e);
+          this.reportDeferredMediaCacheFailure(attachmentId, e, cacheFileId);
         }
         return;
       }
@@ -19823,6 +19978,63 @@ module.exports = class MessageLoggerV2 {
       host.replaceWith(replacement);
     }
   }
+  snapshotLoggerDeletion(record, channelId, messageId) {
+    const id = String(messageId ?? '');
+    const channel = String(channelId ?? '');
+    if (!id || !channel || this.messageRecord?.[id] !== record
+      || String(record?.message?.channel_id ?? '') !== channel
+      || !this.isIndexedSavedDeletedRecord(record, id)) return null;
+    const snapshot = Object.freeze({ id, channelId: channel });
+    (this._loggerDeletionSnapshots ||= new WeakSet()).add(snapshot);
+    return snapshot;
+  }
+  getLoggerNativeMessageCache() {
+    return DiscordModules.ChannelMessages;
+  }
+  evictLoggerDeletionSnapshots(snapshots) {
+    const groups = new Map();
+    for (const snapshot of snapshots || []) {
+      if (!snapshot || !this._loggerDeletionSnapshots?.has(snapshot)) continue;
+      if (!groups.has(snapshot.channelId)) groups.set(snapshot.channelId, new Set());
+      groups.get(snapshot.channelId).add(snapshot.id);
+    }
+    if (!groups.size) return { complete: true, changed: false, changedChannelIds: [] };
+    const changedChannelIds = [];
+    let changed = false;
+    let complete = true;
+    try {
+      const owner = this.getLoggerNativeMessageCache();
+      const store = this.messageStore;
+      if (typeof owner?.get !== 'function' || typeof owner?.commit !== 'function'
+        || typeof store?.emitChange !== 'function') throw new Error('native message cache capabilities unavailable');
+      try {
+        for (const [channelId, ids] of groups) {
+          const cache = owner.get(channelId);
+          if (cache == null) continue;
+          if (typeof cache.has !== 'function' || typeof cache.removeMany !== 'function') {
+            throw new Error('native channel cache capabilities unavailable');
+          }
+          const present = [...ids].filter(id => cache.has(id));
+          if (!present.length) continue;
+          const next = cache.removeMany(present);
+          if (!next || typeof next !== 'object' || next === cache
+            || next.channelId !== channelId || typeof next.has !== 'function'
+            || present.some(id => next.has(id))) {
+            throw new Error('native cache eviction returned an invalid cache');
+          }
+          owner.commit(next);
+          changed = true;
+          changedChannelIds.push(channelId);
+        }
+      } finally {
+        if (changed) store.emitChange();
+      }
+    } catch (error) {
+      complete = false;
+      Logger.warn('Could not fully evict Logger-owned message presentation.', error);
+    }
+    return { complete, changed, changedChannelIds };
+  }
   isIndexedSavedDeletedRecord(record, messageId) {
     // A message ID by itself is not a sufficient ownership signal: native forum cards also use
     // Discord message/thread IDs. Require the canonical saved IDs and a deletion-category index so
@@ -19876,6 +20088,7 @@ module.exports = class MessageLoggerV2 {
     // Snapshot every UI decision before deleteMessageFromRecords removes the canonical record.
     // Root removal deliberately uses its existing cascade so children, indexes, cached-media
     // cleanup, suppression, and modal state stay consistent with other logger Delete actions.
+    const deletionSnapshot = this.snapshotLoggerDeletion(record, savedChannelId, id);
     const removesThreadRoot = !!record.delete_data.forum_thread_delete;
     const wasMounted = !record.delete_data.hidden;
     const liveSavedChannel = !removesThreadRoot
@@ -19917,10 +20130,8 @@ module.exports = class MessageLoggerV2 {
     if (removesThreadRoot) this.removeForumCardFromDom(id);
     if (shouldRefreshChannelCache) this.cacheChannelMessages(savedChannelId);
 
-    // ML2 marks ordinary synthetic UI cleanup so the dispatch interceptor never logs it as a
-    // new remote deletion. A still-live forum/thread must not receive that immediate Discord
-    // deletion event because it races the native card's React tree. Refetching its message cache
-    // is safe: the original crash occurred before that asynchronous response was applied.
+    // Keep a still-live forum/thread mounted and refresh its native message cache. Ordinary
+    // Logger-owned entries can be removed locally without broadcasting a Discord deletion.
     if (keepsDiscordOwnedThreadMount) {
       if (shouldRefreshLiveThreadCache) {
         this.invalidateChannelCache(savedChannelId);
@@ -19932,12 +20143,7 @@ module.exports = class MessageLoggerV2 {
       this._tintSweep?.();
       this.scheduleForumListRefresh?.();
     } else {
-      this.dispatcher?.dispatch?.({
-        type: 'MESSAGE_DELETE',
-        id,
-        channelId: savedChannelId,
-        ML2: true
-      });
+      this.evictLoggerDeletionSnapshots([deletionSnapshot]);
     }
     this.scheduleLoggerMenuRefresh?.();
     this.refreshForumThreadLogModal?.(savedChannelId);
@@ -24068,16 +24274,7 @@ module.exports = class MessageLoggerV2 {
                 if (invalidatedChannelCache) this.cacheChannelMessages(invalidatedChannelCache);
                 this.saveData();
                 if (record.message.channel_id !== this.selectedChannel?.id) return;
-                if (record.delete_data) {
-                  this.dispatcher.dispatch({
-                    type: 'MESSAGE_DELETE',
-                    id: messageId,
-                    channelId: record.message.channel_id,
-                    ML2: true
-                  });
-                } else {
-                  this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
-                }
+                this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
               }
             },
             {

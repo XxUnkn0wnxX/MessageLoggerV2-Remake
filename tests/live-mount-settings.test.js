@@ -1,3 +1,4 @@
+const { installNativeCache, NativeCache } = require('./helpers/native-message-cache');
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
@@ -792,7 +793,7 @@ test('media cache master toggle remounts selected attachment rows and refreshes 
       threadChannel: {}
     },
     messageRecord: {
-      visible: {
+      '100': {
         message: {
           id: '100',
           channel_id: 'channel',
@@ -810,7 +811,7 @@ test('media cache master toggle remounts selected attachment rows and refreshes 
         },
         delete_data: { hidden: true }
       },
-      purged: {
+      '200': {
         message: {
           id: '200',
           channel_id: 'channel',
@@ -819,7 +820,7 @@ test('media cache master toggle remounts selected attachment rows and refreshes 
         },
         delete_data: { hidden: false }
       },
-      nuked: {
+      '300': {
         message: {
           id: '300',
           channel_id: 'channel',
@@ -829,9 +830,9 @@ test('media cache master toggle remounts selected attachment rows and refreshes 
         delete_data: { hidden: false }
       }
     },
-    deletedMessageRecord: { channel: ['visible', 'hidden'] },
-    purgedMessageRecord: { channel: ['purged'] },
-    nukedMessageRecord: { channel: ['nuked'] },
+    deletedMessageRecord: { channel: ['100', 'hidden'] },
+    purgedMessageRecord: { channel: ['200'] },
+    nukedMessageRecord: { channel: ['300'] },
     getCacheOnlyMessage: message => ({ ...structuredClone(message), content: `${message.content} (cache-only)` }),
     dispatcher: { dispatch: event => calls.dispatches.push(event) },
     invalidateChannelCache: id => calls.invalidations.push(id),
@@ -863,6 +864,7 @@ test('media cache master toggle remounts selected attachment rows and refreshes 
       }
     }
   });
+  const native = installNativeCache(plugin, [['channel', { main: ['100', '200', '300', 'native'] }]]);
   const originalRefreshAttachmentRendering = plugin.refreshAttachmentRendering?.bind(plugin);
   plugin.refreshAttachmentRendering = () => {
     calls.refreshes++;
@@ -889,11 +891,7 @@ test('media cache master toggle remounts selected attachment rows and refreshes 
   );
   assert.deepEqual(calls.cacheRefreshes, ['channel']);
   assert.equal(calls.loggerRefreshes, 1);
-  assert.equal(calls.dispatches.filter(event => event.type === 'MESSAGE_DELETE').length, 3);
-  assert.deepEqual(
-    calls.dispatches.filter(event => event.type === 'MESSAGE_DELETE').map(event => event.id),
-    ['100', '200', '300']
-  );
+  assert.equal(calls.dispatches.filter(event => event.type === 'MESSAGE_DELETE').length, 0);
   assert.equal(calls.dispatches.some(event => event.type === 'MESSAGE_UPDATE'), false);
   assert.equal(calls.dispatches.some(event => event.type === 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT'), true);
   assert.equal(threadRefreshes.filter(name => name === 'channel').length, 1);
@@ -914,6 +912,7 @@ test('media cache master toggle remounts selected attachment rows and refreshes 
   plugin._failedNativeAttachmentMediaKeys.add('another-seeded-failure');
   plugin._failedNativeAttachmentMediaCandidateKeys.add('another-seeded-candidate-failure');
 
+  native.caches.set('channel', new NativeCache('channel', { main: ['100', '200', '300', 'native'] }));
   plugin.settings.cacheAllImages = true;
   plugin.handleMediaCachingSetting(true);
   await new Promise(resolve => setImmediate(resolve));
@@ -934,7 +933,7 @@ test('media cache master toggle remounts selected attachment rows and refreshes 
   );
   assert.deepEqual(calls.cacheRefreshes, ['channel']);
   assert.equal(calls.loggerRefreshes, 1);
-  assert.equal(calls.dispatches.filter(event => event.type === 'MESSAGE_DELETE').length, 3);
+  assert.equal(calls.dispatches.filter(event => event.type === 'MESSAGE_DELETE').length, 0);
   assert.equal(calls.dispatches.some(event => event.type === 'MESSAGE_UPDATE'), false);
   assert.equal(calls.dispatches.some(event => event.type === 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT'), true);
   assert.deepEqual(calls.reportMajorSetting, [
@@ -1132,4 +1131,37 @@ test('media cache local-only setting resets the local state, refreshes attachmen
   assert.equal(plugin._failedNativeAttachmentMediaKeys.size, 0);
   assert.equal(plugin._failedNativeAttachmentMediaCandidateKeys.size, 0);
   assert.equal(plugin._pendingSavedAttachmentPresentationRefreshes.size, 0);
+});
+
+test('media settings refresh fetches the selected channel once for absent or mounted saved media', () => {
+  const originalFrame = global.requestAnimationFrame;
+  const frames = [];
+  global.requestAnimationFrame = callback => frames.push(callback);
+  try {
+    for (const mounted of [false, true]) {
+      const record = { message: { id: 'saved', channel_id: 'channel', content: '', attachments: [{ id: 'media', filename: 'photo.png', url: 'https://cdn.example/photo.png' }] }, delete_data: {} };
+      const fetches = [];
+      const plugin = createPlugin({
+        selectedChannel: { id: 'channel' },
+        messageRecord: { saved: record }, deletedMessageRecord: { channel: ['saved'] },
+        channelMessages: { channel: { ready: true } }, settings: { cacheAllImages: false },
+        tools: { getChannel: () => ({ type: 0 }) },
+        cacheChannelMessages: channel => fetches.push(channel),
+        dispatcher: { dispatch() {} }, scheduleLoggerMenuRefresh() {}
+      });
+      const native = installNativeCache(plugin, [['channel', { main: mounted ? ['saved', 'native'] : ['native'] }]]);
+      plugin.refreshAttachmentRendering();
+      if (mounted) {
+        assert.deepEqual(fetches, []);
+        assert.equal(native.caches.get('channel').has('saved'), false);
+        assert.equal(frames.length, 1);
+      } else {
+        assert.deepEqual(fetches, ['channel']);
+        assert.equal(frames.length, 0);
+      }
+      while (frames.length) frames.shift()();
+      assert.deepEqual(fetches, ['channel']);
+      assert.equal(native.caches.get('channel').has('native'), true);
+    }
+  } finally { global.requestAnimationFrame = originalFrame; }
 });

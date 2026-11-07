@@ -1,3 +1,4 @@
+const { installNativeCache } = require('./helpers/native-message-cache');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -1241,6 +1242,7 @@ test('raw embed-only deleted records render from a clone and detach without touc
     shouldIgnoreSelfMessage() { return false; }
   });
 
+  const native = installNativeCache(plugin, [['channel', { main: ['100', '200', 'native'] }]]);
   const canonicalArchiveRecord = structuredClone(plugin.messageRecord['100']);
   const mountedMessages = [];
   plugin.reAddDeletedMessages(mountedMessages, plugin.deletedMessageRecord.channel, true, true);
@@ -1258,7 +1260,11 @@ test('raw embed-only deleted records render from a clone and detach without touc
   assert.equal(plugin._archiveDetached, true);
   assert.equal(plugin.messageRecord['100'], undefined, 'the archive record is removed from memory');
   assert.ok(plugin.messageRecord['200'], 'the session record remains active');
-  assert.deepEqual(deleteEvents.map(event => event.id), ['100'], 'only the mounted archive deletion is evicted');
+  assert.deepEqual(deleteEvents, []);
+  assert.equal(native.caches.get('channel').has('100'), false);
+  assert.equal(native.caches.get('channel').has('200'), true);
+  assert.equal(native.caches.get('channel').has('native'), true);
+  assert.equal(native.store.changes, 1);
   assert.equal(fs.readFileSync(filePath, 'utf8'), originalBytes, 'detaching never rewrites the saved archive');
 });
 
@@ -1362,6 +1368,7 @@ test('repeated archive detach evicts only archive-owned presentation across ever
       this._forumThreadLogRefreshers?.delete(String(threadId));
     }
   });
+  let native = installNativeCache(plugin, Object.values(runtime.messageRecord).filter(record => record.delete_data).map(record => [String(record.message.channel_id), { main: Object.values(runtime.messageRecord).filter(candidate => candidate.message.channel_id === record.message.channel_id).map(candidate => candidate.message.id).concat('native') }]));
   plugin._forumThreadLogRefreshers = new Map([
     ['200', () => {}],
     ['201', () => {}],
@@ -1392,13 +1399,13 @@ test('repeated archive detach evicts only archive-owned presentation across ever
     assert.equal(fs.readFileSync(filePath, 'utf8'), originalBytes, `${cycle}: archive bytes stay unchanged`);
   };
   const assertCycleCleanup = cycle => {
-    assert.deepEqual(
-      deleteEvents.map(event => event.id).sort(),
-      expectedDeletedMounts,
-      `${cycle}: only former archive live-deletion mounts are evicted`
-    );
-    assert.ok(deleteEvents.every(event => event.type === 'MESSAGE_DELETE' && event.ML2 === true));
-    assert.equal(deleteEvents.some(event => sessionIds.includes(event.id)), false, `${cycle}: session mounts are untouched`);
+    assert.deepEqual(deleteEvents, [], `${cycle}: no global deletes`);
+    for (const id of expectedDeletedMounts) {
+      const record = archive.messageRecord[id];
+      assert.equal(native.caches.get(String(record.message.channel_id)).has(id), false, `${cycle}: ${id} evicted`);
+    }
+    assert.equal(native.caches.get('202').has('202'), true, `${cycle}: native thread preserved`);
+    assert.equal(native.store.changes, 1);
     assert.deepEqual(removedRestoredRoots.sort(), ['200', '201'], `${cycle}: only structural archive clones are removed`);
     assert.deepEqual(closedThreadLogs.sort(), ['200', '201', '202'], `${cycle}: only archive thread-log views close`);
     assert.deepEqual(recachedLiveThreads, ['202'], `${cycle}: a surviving native thread is reconciled without deleting its card`);
@@ -1418,6 +1425,7 @@ test('repeated archive detach evicts only archive-owned presentation across ever
     ['202', () => {}],
     ['902', () => {}]
   ]);
+  native = installNativeCache(plugin, Object.values(runtime.messageRecord).filter(record => record.delete_data).map(record => [String(record.message.channel_id), { main: Object.values(runtime.messageRecord).filter(candidate => candidate.message.channel_id === record.message.channel_id).map(candidate => candidate.message.id).concat('native') }]));
   deleteEvents.length = 0;
   removedRestoredRoots.length = 0;
   closedThreadLogs.length = 0;

@@ -1119,7 +1119,7 @@ test('native and cloned Trash actions remain scoped to indexed logger deletions'
   assert.doesNotMatch(loggerSubmenuRecords, /requestSavedDeletedRecordRemoval\(channelId, messageId, false\)/);
   assert.match(source, /requestSavedDeletedRecordRemoval\(channelId, messageId, immediate = false, immediateSource = 'Shift-click Trash'\)[\s\S]*source: immediateSource/);
   assert.doesNotMatch(source, /restoredDeleteButton[\s\S]{0,1000}innerHTML\s*=\s*['"]<svg/);
-  assert.match(source, /removeSavedDeletedRecordFromLog\(channelId, messageId[\s\S]*deleteMessageFromRecords\(id\)[\s\S]*ML2: true/);
+  assert.match(source, /removeSavedDeletedRecordFromLog\(channelId, messageId[\s\S]*snapshotLoggerDeletion\(record, savedChannelId, id\)[\s\S]*deleteMessageFromRecords\(id\)[\s\S]*evictLoggerDeletionSnapshots/);
 });
 
 test('restored forum and thread previews use native parsed markup', () => {
@@ -1216,7 +1216,7 @@ test('deleted text and background styles retain the configured color with red on
   );
   assert.match(
     deletedStyles,
-    /html #app-mount \.\$\{this\.style\.deletedAlt\}:hover, html #app-mount \.\$\{this\.style\.deletedAlt\}\.\$\{this\.classes\.selected\} \{\s*background-color: \$\{this\.settings\.deletedMessageColor \? hexToRgb\(this\.settings\.deletedMessageColor, 0\.1\) : "rgba\(240, 71, 71, 0\.1\)"\} !important;/
+    /html #app-mount \.\$\{this\.style\.deletedAlt\}:hover\$\{this\.classes\.selected \? `, html #app-mount \.\$\{this\.style\.deletedAlt\}\.\$\{this\.classes\.selected\}` : \'\'\} \{\s*background-color: \$\{this\.settings\.deletedMessageColor \? hexToRgb\(this\.settings\.deletedMessageColor, 0\.1\) : "rgba\(240, 71, 71, 0\.1\)"\} !important;/
   );
   assert.doesNotMatch(
     deletedStyles,
@@ -2334,7 +2334,8 @@ test('plugin stop clears Logger live presentation before unpatching without dele
     source.indexOf('  cleanupArchivePresentationForDisable(previousState = null) {'),
     source.indexOf('  removeRestoredForumThreadMountsFromDom(threadId) {')
   );
-  assert.match(cleanupContext, /type: 'MESSAGE_DELETE'[\s\S]*ML2: true/);
+  assert.match(cleanupContext, /evictLoggerDeletionSnapshots\(deletionSnapshots\)/);
+  assert.doesNotMatch(cleanupContext, /type: 'MESSAGE_DELETE'/);
   assert.match(cleanupContext, /const keepNativeThreadCard = !mount\.structuralRoot[\s\S]*this\._invalidateAndRecache\?\.\(channelId\)/);
   assert.match(cleanupContext, /this\.removeRestoredForumThreadMountsFromDom\?\.\(id\)/);
   for (const attribute of [
