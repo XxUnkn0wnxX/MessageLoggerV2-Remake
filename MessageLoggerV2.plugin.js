@@ -2139,6 +2139,7 @@ module.exports = class MessageLoggerV2 {
     this.style = {};
     this.style.deleted = 'ml2-deleted';
     this.style.deletedAttachmentRenderer = this.obfuscatedClass('ml2-deleted-attachment-renderer');
+    this.style.removedAttachmentPreview = this.obfuscatedClass('ml2-removed-attachment-preview');
     this.style.deletedAlt = this.obfuscatedClass('ml2-deleted-alt');
     this.style.deletedForumText = this.obfuscatedClass('ml2-deleted-forum-text');
     this.style.forumLogPath = this.obfuscatedClass('ml2-forum-log-path');
@@ -2450,6 +2451,12 @@ module.exports = class MessageLoggerV2 {
                         filter: grayscale(100%) !important;
                     }
                     .${this.style.deleted} img:not(.${this.classes.avatar}), .${this.style.deleted} video, .${this.style.deleted} audio, .${this.style.deleted} canvas, .${this.style.deleted} .${this.style.deletedAttachmentRenderer}, .${this.style.deleted} .mention, .${this.style.deleted} .reactions, .${this.style.deleted} a {
+                        transition: filter 0.3s !important;
+                    }
+                    .theme-dark .${this.style.removedAttachmentPreview}:not(:hover) {
+                        filter: grayscale(100%) !important;
+                    }
+                    .${this.style.removedAttachmentPreview} {
                         transition: filter 0.3s !important;
                     }
                     .theme-dark .${this.style.tab} {
@@ -6977,9 +6984,7 @@ module.exports = class MessageLoggerV2 {
     const segments = [];
     const cacheAllImages = this.settings?.cacheAllImages !== false;
     const presentationOptions = cacheAllImages
-      ? this.settings?.onlyRenderCachedAttachments
-        ? { allowBlob: true }
-        : { allowRemote: true }
+      ? { allowBlob: true }
       : {};
     let cursor = 0;
     let match;
@@ -6991,19 +6996,23 @@ module.exports = class MessageLoggerV2 {
       const attachment = this.getRemovedAttachmentFromEditHistoryMarker(
         match[1],
         attachments,
-        attachmentIds
+        null
       );
-      const plan = attachment && this.getSavedAttachmentPresentationPlan(
+      const identity = this.getRemovedAttachmentIdentity(attachment);
+      if (identity && attachmentIds.has(identity)) {
+        cursor = attachmentMarker.lastIndex;
+        continue;
+      }
+      const plan = attachment && !attachment.hidden && this.getSavedAttachmentPresentationPlan(
         attachment,
         message,
         presentationOptions
       );
       if (attachment && plan && (plan.action === 'placeholder' || plan.action === 'omit')) {
-        const identity = this.getRemovedAttachmentIdentity(attachment);
-        if (identity) attachmentIds.add(identity);
         segments.push({
           kind: 'text',
-          value: plan.unavailableLabel || plan.label || match[0]
+          value: cacheAllImages && !this.settings?.onlyRenderCachedAttachments
+            ? match[0] : plan.unavailableLabel || plan.label || match[0]
         });
       } else if (attachment && (plan?.action === 'remote' || plan?.action === 'blob')) {
         const isMediaPlan = plan.mediaType === 'image' || plan.mediaType === 'video';
@@ -11991,7 +12000,7 @@ module.exports = class MessageLoggerV2 {
       const plan = this.getSavedAttachmentPresentationPlan(
         attachment,
         renderMessage,
-        presentationOptions
+        cacheAllImages ? { allowBlob: true } : {}
       );
       if (!plan) continue;
       entries.push({ attachment, plan, removed: true });
@@ -21423,6 +21432,10 @@ module.exports = class MessageLoggerV2 {
             && (!ownedContinuation.current.active || event?.currentTarget?.isConnected === false
               || plugin.__started === false || plugin._startupGeneration !== ownedContinuation.current.generation)) return;
           if (errored) return;
+          if (displayPlan?.action === 'blob') {
+            setErrorFallbackForPlan(displayPlan);
+            return;
+          }
           if (displayPlan?.action !== 'remote' && displayPlan?.action !== 'blob') {
             setErrorFallbackForPlan(displayPlan);
             return;
@@ -21499,11 +21512,15 @@ module.exports = class MessageLoggerV2 {
             displayPlan?.mediaType !== 'video'
           );
         };
+        const removedPreviewClass = !currentRecord?.delete_data && !plugin.settings?.useAlternativeDeletedStyle
+          ? plugin.style?.removedAttachmentPreview : '';
+        const previewClassName = [DiscordModules.ClickableClasses?.clickable, removedPreviewClass].filter(Boolean).join(' ');
         if (displayPlan.mediaType === 'video') {
           return React.createElement(
             'video',
             {
-              className: DiscordModules.ClickableClasses?.clickable || '',
+              className: previewClassName,
+              'data-ml2-removed-preview': 'true',
               src: displayPlan.url,
               controls: true,
               preload: 'metadata',
@@ -21513,7 +21530,9 @@ module.exports = class MessageLoggerV2 {
                 borderRadius: '8px',
                 marginTop: '4px',
                 marginRight: '4px',
-                maxWidth: '100%',
+                maxWidth: 'min(100%, 400px)',
+                maxHeight: '350px',
+                width: 'auto',
                 height: 'auto',
                 background: '#111'
               },
@@ -21525,7 +21544,8 @@ module.exports = class MessageLoggerV2 {
         return React.createElement(
           'img',
           {
-            className: DiscordModules.ClickableClasses?.clickable || '',
+            className: previewClassName,
+            'data-ml2-removed-preview': 'true',
             src: displayPlan.url,
             alt: attachment?.filename || 'removed attachment',
             width: attachment?.width || 256,
@@ -21534,7 +21554,9 @@ module.exports = class MessageLoggerV2 {
               borderRadius: '4px',
               marginTop: '4px',
               marginRight: '4px',
-              maxWidth: '100%',
+              maxWidth: 'min(100%, 400px)',
+              maxHeight: '350px',
+              width: 'auto',
               height: 'auto'
             },
             onClick,
@@ -22014,6 +22036,13 @@ module.exports = class MessageLoggerV2 {
       const messageId = parts.slice(3).join('-');
       const wrapper = getMessageTintTarget(node);
       if (!wrapper || wrapper.tagName !== 'DIV') return;
+      // An edit-only preview can survive a later whole-message deletion. Let the
+      // normal deleted-row tint decision own it as soon as the record is deleted.
+      if (this.getSavedMessage(messageId)?.delete_data && this.style.removedAttachmentPreview) {
+        for (const preview of node.querySelectorAll?.('[data-ml2-removed-preview]') || []) {
+          preview.classList.remove(this.style.removedAttachmentPreview);
+        }
+      }
       const shouldTint = shouldTintMessage(channelId, messageId) && !this.noTintIds.has(messageId);
       if (!shouldTint) {
         clearTintClasses(wrapper);
@@ -24693,11 +24722,28 @@ module.exports = class MessageLoggerV2 {
             return fallbackDiv;
           }
         };
+        const loggerAttachmentPresentationEntries = record
+          ? this.getLoggerSavedAttachmentPresentationEntries(sourceMessage, record)
+          : [];
+        const removedAttachments = record ? this.getRecordRemovedAttachments(record) : [];
+        const admittedRemovedIds = new Set(loggerAttachmentPresentationEntries
+          .filter(entry => entry.removed && entry.plan?.action === 'blob' && !entry.attachment?.hidden)
+          .map(entry => this.getRemovedAttachmentIdentity(entry.attachment)).filter(Boolean));
+        const markedRemovedIds = new Set();
         if (record?.edit_history) {
           markup.classList.add(this.style.edited);
           for (let ii = 0; ii < record.edit_history.length; ii++) {
             const hist = record.edit_history[ii];
-            const editedMarkup = formatContent(hist.content, message.channel_id);
+            const displayContent = typeof hist.content === 'string'
+              ? hist.content.replace(/`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g, (marker, url) => {
+                const attachment = this.getRemovedAttachmentFromEditHistoryMarker(url, removedAttachments, null);
+                const identity = this.getRemovedAttachmentIdentity(attachment);
+                if (!identity) return marker;
+                markedRemovedIds.add(identity);
+                return admittedRemovedIds.has(identity) ? '' : marker;
+              })
+              : hist.content;
+            const editedMarkup = formatContent(displayContent, message.channel_id);
             if (!editedMarkup) continue;
             editedMarkup.insertAdjacentHTML('beforeend', `<time class="${this.getEditedTimestampClasses()}">(${this.translatedEdited})</time>`);
             new this.Tooltip(editedMarkup, 'Edited at ' + (typeof hist.time === 'string' ? hist.time : this.createTimeStamp(hist.time)), { side: 'left' });
@@ -24740,9 +24786,6 @@ module.exports = class MessageLoggerV2 {
           markup.appendChild(line);
           hasPayloadReference = true;
         };
-        const loggerAttachmentPresentationEntries = record
-          ? this.getLoggerSavedAttachmentPresentationEntries(sourceMessage, record)
-          : [];
         const loggerMediaRenderCurrent = [];
         const loggerMediaRenderRemoved = [];
         const currentCachedAttachmentFilename = attachment => attachment?.filename || attachment?.url || attachment?.proxy_url || attachment?.proxyUrl || attachment?.proxyURL;
@@ -24853,7 +24896,14 @@ module.exports = class MessageLoggerV2 {
             }
           }
           for (const entry of currentLoggerAttachmentEntries) appendRemoteCachedFailureMarker(entry, false);
-          for (const entry of removedLoggerAttachmentEntries) appendRemoteCachedFailureMarker(entry, true);
+          for (const entry of removedLoggerAttachmentEntries) {
+            if (entry.plan?.action !== 'blob'
+              && markedRemovedIds.has(this.getRemovedAttachmentIdentity(entry.attachment))) {
+              hasPayloadReference = true;
+              continue;
+            }
+            appendRemoteCachedFailureMarker(entry, true);
+          }
         } else {
           for (const attachment of message.attachments || []) {
             const attachmentSources = [
@@ -24927,6 +24977,14 @@ module.exports = class MessageLoggerV2 {
             }
             return null;
           };
+          const markRemovedPreview = (node, attachment) => {
+            const entry = getLoggerAttachmentEntry(attachment);
+            if (!entry?.removed || !node?.dataset) return;
+            node.dataset.ml2RemovedPreview = 'true';
+            if (!record?.delete_data && !this.settings.useAlternativeDeletedStyle && this.style.removedAttachmentPreview) {
+              node.classList.add(this.style.removedAttachmentPreview);
+            }
+          };
           const coordinateLoggerBlobFailure = (mediaAttachment, failedSource) => {
             if (typeof failedSource !== 'string' || !failedSource.trim()) return null;
             try {
@@ -24934,7 +24992,9 @@ module.exports = class MessageLoggerV2 {
             } catch {
               return null;
             }
-            const sourceAttachment = getLoggerAttachmentEntry(mediaAttachment)?.attachment;
+            const entry = getLoggerAttachmentEntry(mediaAttachment);
+            if (!entry || entry.removed) return null;
+            const sourceAttachment = entry.attachment;
             if (!sourceAttachment) return null;
             try {
               const descriptor = this.getSavedAttachmentDescriptor(sourceAttachment, sourceMessage);
@@ -24952,6 +25012,7 @@ module.exports = class MessageLoggerV2 {
             const img = document.createElement('img');
             markLoggerAttachmentTarget(img, { id: attachmentId });
             img.classList = DiscordModules.ClickableClasses?.clickable || '';
+            markRemovedPreview(img, { id: attachmentId });
             img.messageId = messageId;
             img.idx = attachmentIdx;
             const existingElement = document.getElementById(attachmentId);
@@ -25027,6 +25088,7 @@ module.exports = class MessageLoggerV2 {
             container.style.cursor = 'pointer';
             container.style.width = 'fit-content';
             container.classList = DiscordModules.ClickableClasses?.clickable || '';
+            markRemovedPreview(container, { id: videoId });
             const video = document.createElement('video');
             markLoggerAttachmentTarget(video, { id: videoId });
             video.messageId = messageId;
@@ -25200,6 +25262,7 @@ module.exports = class MessageLoggerV2 {
               const sourceAttachment = loggerAttachmentEntry?.attachment || null;
               const documentHost = document.createElement('div');
               markLoggerAttachmentTarget(documentHost, sourceAttachment || attachment);
+              markRemovedPreview(documentHost, sourceAttachment || attachment);
               contentDiv.appendChild(documentHost);
               let unavailableHandled = false;
               const onDocumentUnavailable = () => {
@@ -25225,6 +25288,7 @@ module.exports = class MessageLoggerV2 {
               const sourceAttachment = loggerAttachmentEntry?.attachment || null;
               const audioAttachment = sourceAttachment || attachment;
               const audioHost = document.createElement('div');
+              markRemovedPreview(audioHost, sourceAttachment || attachment);
               contentDiv.appendChild(audioHost);
               const replaceAudioWithPlaceholder = plan => {
                 this.cleanupLoggerNativeAudioRoots(audioHost);
@@ -25314,7 +25378,8 @@ module.exports = class MessageLoggerV2 {
                 attachment.filename,
                 attachment.width,
                 attachment.height,
-                getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment)
+                getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment),
+                presentationAction === 'blob' ? attachment.url : null
               );
             } else if (isCached) {
               attemptToUseCachedImage(
@@ -25324,7 +25389,8 @@ module.exports = class MessageLoggerV2 {
                 attachment.filename,
                 attachment.width,
                 attachment.height,
-                getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment)
+                getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment),
+                presentationAction === 'blob' ? attachment.url : null
               );
             } else if (this.isVideo(attachment.url)) {
               const { container, video } = createVideoContainer(attachment.id, idx, this.clamp(attachment.width, 200, 400));

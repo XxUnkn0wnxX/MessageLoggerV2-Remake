@@ -2783,37 +2783,12 @@ test('edit-history inline segments keep text for non-media/unmatched and preserv
   const segments = plugin.getEditHistoryContentSegments(content, removedAttachments, message);
   const removedSegments = segments.filter(segment => segment.kind === 'removedAttachment');
 
-  assert.equal(removedSegments.length, 2);
-  assert.equal(removedSegments[0]?.attachment?.id, '111111111111111111');
-  assert.equal(removedSegments[1]?.attachment?.id, '222222222222222222');
-  assert.equal(removedSegments.every(segment => segment.presentationPlan?.action === 'remote'), true);
-  assert.equal(removedSegments[0]?.presentationPlan?.url, 'https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif');
-  assert.equal(removedSegments[1]?.presentationPlan?.url, 'https://cdn.discordapp.com/attachments/channel/222222222222222222/second.webm');
-  assert.equal(removedSegments[0]?.value, '[image:first.gif]');
-  assert.equal(removedSegments[1]?.value, '[attachment:second.webm]');
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('third.pdf')), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('missing.mp4')), true);
+  assert.equal(removedSegments.length, 0);
+  for (const name of ['first.gif', 'second.webm', 'third.pdf', 'missing.mp4']) {
+    assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes(name)), true);
+  }
   assert.deepEqual(removedAttachments, before.removedAttachments);
   assert.deepEqual(message, before.message);
-
-  const firstAttachmentPlan = plugin.getSavedAttachmentPresentationPlan(
-    removedAttachments[0],
-    message,
-    { allowRemote: true }
-  );
-  for (const candidate of firstAttachmentPlan.sources) {
-    assert.equal(
-      plugin.markSavedAttachmentMediaCandidateFailure(removedAttachments[0], message, candidate),
-      true
-    );
-    plugin.getSavedAttachmentPresentationPlan(removedAttachments[0], message, { allowRemote: true });
-  }
-  const exhaustedSegments = plugin.getEditHistoryContentSegments(
-    '`Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif',
-    removedAttachments,
-    message
-  );
-  assert.equal(exhaustedSegments[0]?.value, '[Deleted: first.gif]');
 });
 
 test('edit-history inline segments emit cached Blob plans with exact fallbacks and classify missing local-only attachments', () => {
@@ -2892,7 +2867,8 @@ test('edit-history inline segment planning is per-edit and reused markers stay d
     { id: '222222222222222222', filename: 'second.gif', url: 'https://cdn.discordapp.com/attachments/channel/222222222222222222/second.gif' }
   ];
   const plugin = createPlugin({
-    settings: { antiNukeEnabled: true, reverseOrder: false }
+    settings: { antiNukeEnabled: true, reverseOrder: false },
+    imageCacheServerSimulator: { _resolveImagePath: () => '/cache/file', get: () => 'blob://local/file' }
   });
   const firstEdit = plugin.getEditHistoryContentSegments(
     '`Attachment Deleted: `https://cdn.discordapp.com/attachments/channel/111111111111111111/first.gif',
@@ -2916,7 +2892,7 @@ test('edit-history inline segment planning is per-edit and reused markers stay d
   assert.equal(firstEdit[0]?.attachment?.id, '111111111111111111');
   assert.equal(secondEdit[0]?.attachment?.id, '222222222222222222');
   assert.equal(duplicateInOneEdit.filter(segment => segment.kind === 'removedAttachment').length, 1);
-  assert.equal(duplicateInOneEdit.some(segment => segment.kind === 'text' && segment.value.includes('first.gif')), true);
+  assert.equal(duplicateInOneEdit.some(segment => segment.kind === 'text' && segment.value.includes('first.gif')), false);
 });
 
 test('cache-only rendering omits native attachments when master is off and exposes exact placeholder labels', () => {
@@ -3688,7 +3664,7 @@ test('logger saved-attachment presentation entries keep canonical current order 
   assert.equal(entries.some(entry => entry.removed && entry.attachment.filename === 'removed-dupe-by-url'), false);
   assert.equal(entries.some(entry => entry.removed && entry.attachment.id === '300'), true);
   assert.equal(entries.filter(entry => entry.removed && entry.attachment.id === '301').length, 1);
-  assert.equal(entries.every(entry => entry.plan.action === 'remote'), true);
+  assert.deepEqual(entries.map(entry => entry.plan.action), ['remote', 'remote', 'remote', 'omit', 'omit']);
 });
 
 test('removed ordinary attachment cache admission follows main and all-attachment gates', () => {
@@ -3898,11 +3874,10 @@ test('logger saved-attachment presentation entries prefer remote display and onl
   assert.equal(entries[1].plan.url, 'https://cdn.discordapp.com/attachments/channel/101/proxy-only.gif');
   assert.equal(entries[1].plan.fallbackUrl, 'https://media.discordapp.net/attachments/channel/101/proxy-only.gif');
   assert.equal(entries[2].plan.action, 'omit');
-  assert.equal(entries[3].plan.action, 'remote');
-  assert.equal(entries[3].plan.url, 'https://cdn.discordapp.com/attachments/channel/200/removed.png');
-  assert.equal(entries[3].plan.fallbackUrl, 'https://media.discordapp.net/attachments/channel/200/removed.png');
+  assert.equal(entries[3].plan.action, 'omit');
   assert.deepEqual(imageCacheGets, [
-    'http://localhost:7474/102.txt#channel,102,message'
+    'http://localhost:7474/102.txt#channel,102,message',
+    'http://localhost:7474/200.png#channel,200,message'
   ]);
 });
 
@@ -13084,4 +13059,48 @@ test('media failure queues only successful eviction and retains a pending refres
     assert.deepEqual(history, ['one', 'one']);
     assert.equal(native.caches.get('one').has('unrelated'), true);
   } finally { global.requestAnimationFrame = originalFrame; }
+});
+
+test('removed uploads use cached previews even in remote-first mode while current uploads keep remote policy', () => {
+  const plugin = createPlugin({
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    imageCacheServerSimulator: {
+      cleanUp() {},
+      _resolveImagePath: () => '/cache/item',
+      get(url) { return url.includes('/200.gif#') ? 'blob://local/removed' : null; }
+    }
+  });
+  const current = { id: '100', filename: 'current.png', url: 'https://cdn.discordapp.com/attachments/channel/100/current.png' };
+  const removed = { id: '200', filename: 'removed.gif', url: 'https://cdn.discordapp.com/attachments/channel/200/removed.gif' };
+  const message = { id: 'message', channel_id: 'channel', content: 'surviving text', attachments: [current] };
+  const record = { message, removed_attachments: [removed] };
+  const snapshot = structuredClone(record);
+  const entries = plugin.getLoggerSavedAttachmentPresentationEntries(message, record);
+  assert.equal(entries[0].plan.action, 'remote');
+  assert.equal(entries[1].plan.action, 'blob');
+  assert.equal(entries[1].plan.url, 'blob://local/removed');
+  const marker = '`Attachment Deleted: `' + removed.url;
+  const segments = plugin.getEditHistoryContentSegments(marker, [removed], message);
+  assert.equal(segments[0].presentationPlan?.url, 'blob://local/removed');
+  assert.deepEqual(record, snapshot);
+});
+
+test('removed cached plans admit supported files, preserve current policy and leave unavailable inline markers', () => {
+  const types = [ ['111111111111111111', 'image.gif'], ['222222222222222222', 'movie.mp4'], ['333333333333333333', 'sound.mp3'], ['444444444444444444', 'document.pdf'] ];
+  const attachments = types.map(([id, filename]) => ({ id, filename, url: `https://cdn.discordapp.com/attachments/channel/${id}/${filename}` }));
+  const message = { id: 'm', channel_id: 'channel', content: 'body', attachments: [{ id: 'current', filename: 'current.png', url: 'https://cdn.discordapp.com/attachments/channel/current/current.png' }] };
+  const record = { message, delete_data: { time: 1 }, removed_attachments: attachments };
+  const plugin = createPlugin({ settings: { cacheAllImages: true, onlyRenderCachedAttachments: false }, imageCacheServerSimulator: { _resolveImagePath: () => '/cache/file', get: () => 'blob://local/file' } });
+  assert.deepEqual(plugin.getLoggerSavedAttachmentPresentationEntries(message, record).map(entry => entry.plan.action), ['remote', 'blob', 'blob', 'blob', 'blob']);
+  const markers = attachments.map(a => '`Attachment Deleted: `' + a.url).join(' ');
+  const segments = plugin.getEditHistoryContentSegments(markers, attachments, message);
+  assert.deepEqual(segments.filter(s => s.kind === 'removedAttachment').map(s => s.presentationPlan.mediaType), ['image', 'video']);
+  assert.ok(segments.some(s => s.kind === 'text' && s.value.includes('sound.mp3')));
+  assert.ok(segments.some(s => s.kind === 'text' && s.value.includes('document.pdf')));
+  plugin.imageCacheServerSimulator.get = () => 'data:image/error';
+  assert.equal(plugin.getLoggerSavedAttachmentPresentationEntries(message, record).filter(e => e.removed).every(e => e.plan.action === 'omit'), true);
+  assert.equal(plugin.getEditHistoryContentSegments(markers, attachments, message).filter(s => s.kind === 'removedAttachment').length, 0);
+  attachments[0].hidden = true;
+  plugin.imageCacheServerSimulator.get = () => 'blob://local/file';
+  assert.equal(plugin.getEditHistoryContentSegments(markers, attachments, message).some(s => s.kind === 'removedAttachment' && s.attachment.id === attachments[0].id), false);
 });

@@ -165,6 +165,20 @@ compact roadmap.
   The misleading identity is repaired through the existing cache-file ID, with
   unchanged-byte/request/ID tests, and is now installed. Full R5
   filename/path/host labeling remains parked; cache behavior is unchanged.
+- **Removed-attachment follow-up — implemented; native acceptance pending:**
+  removing an upload while retaining message text exposed an oversized inline
+  history preview: native capture measured a 1560 × 1376 image at approximately
+  1007 × 888, with no height limit. The user approved a narrow presentation rule:
+  historical removed uploads use existing cached previews/file cards, while
+  unavailable media retains text. Suppress only recognized deletion markers
+  represented by a non-hidden cached preview; preserve canonical history and
+  unknown markers. Cover existing image/GIF/video/audio/document handling;
+  inline history retains its existing image/video preview support. Constrain
+  only inline thumbnails, preserve Logger-window sizing and viewer metadata,
+  and reuse deleted-media grayscale/hover without overriding tint controls.
+  Acquisition, retries, storage, current attachments and exclusive tab
+  classification remain unchanged. This is a hotfix feeding into the existing
+  rework, not completion of a parked feature stage. See AT-55 and RT-09.
 - **Historical correction:** older claims that Pins errors were unrelated are
   superseded by the proven Logger synthetic-delete trigger. Historical notes
   saying ordinary-row synthetic deletes remain are also superseded. PersonalPins

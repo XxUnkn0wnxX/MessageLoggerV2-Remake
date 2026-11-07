@@ -2210,6 +2210,10 @@ test('display precedence stays Hidden then Nuked then Ghost Pings then Purged th
     [ids.hiddenNuked]: saved(ids.hiddenNuked, { edited: true, deleted: true, ghost: true, nuked: true, hidden: true }),
     [ids.hiddenEdited]: saved(ids.hiddenEdited, { edited: true, ghost: true, hidden: true })
   };
+  const removedUpload = { id: '111111111111111111', filename: 'removed.gif', url: 'https://cdn.discordapp.com/attachments/channel/111111111111111111/removed.gif' };
+  records[ids.edited].message.content = 'surviving text';
+  records[ids.edited].removed_attachments = [removedUpload];
+  records[ids.edited].edit_history[0].content += ' `Attachment Deleted: `' + removedUpload.url;
   const plugin = createPlugin();
   plugin.installDataPayload({
     messageRecord: records,
@@ -2261,6 +2265,21 @@ test('display precedence stays Hidden then Nuked then Ghost Pings then Purged th
   plugin.saveDeletedMessage(transitioning.message, plugin.deletedMessageRecord);
   transitioning = plugin.messageRecord[ids.edited];
   assert.equal(plugin.getSavedRecordDisplayCategory(transitioning, ids.edited), 'deleted');
+  assert.equal(transitioning.message.content, 'surviving text');
+  assert.deepEqual(transitioning.removed_attachments, [removedUpload]);
+  assert.deepEqual(transitioning.edit_history, originalEdits);
+  plugin.evictLoggerDeletionSnapshots = () => {};
+  plugin._invalidateAndRecache = () => {};
+  plugin.saveData = () => {};
+  plugin.scheduleLoggerMenuRefresh = () => {};
+  plugin.refreshForumThreadLogModal = () => {};
+  plugin.notifyUser = () => {};
+  assert.equal(plugin.hideSavedDeletedRecord(transitioning), true);
+  assert.equal(plugin.getSavedRecordDisplayCategory(transitioning, ids.edited), 'hidden');
+  assert.equal(plugin.unhideSavedDeletedRecord(transitioning), true);
+  assert.equal(plugin.getSavedRecordDisplayCategory(transitioning, ids.edited), 'deleted');
+  assert.deepEqual(transitioning.removed_attachments, [removedUpload]);
+  assert.deepEqual(transitioning.edit_history, originalEdits);
   plugin.saveDeletedMessage(transitioning.message, plugin.purgedMessageRecord);
   transitioning = plugin.messageRecord[ids.edited];
   assert.equal(plugin.getSavedRecordDisplayCategory(transitioning, ids.edited), 'purged');
@@ -2271,6 +2290,8 @@ test('display precedence stays Hidden then Nuked then Ghost Pings then Purged th
   transitioning.delete_data.anti_nuke = true;
   assert.equal(plugin.getSavedRecordDisplayCategory(transitioning, ids.edited), 'nuked');
   assert.deepEqual(transitioning.edit_history, originalEdits);
+  assert.deepEqual(transitioning.removed_attachments, [removedUpload]);
+  assert.equal(transitioning.message.content, 'surviving text');
   assert.equal(plugin.editedMessageSet.get(channelId)?.has(ids.edited) || false, false);
   assert.equal(plugin.deletedMessageSet.get(channelId)?.has(ids.edited) || false, false);
   assert.equal(plugin.purgedMessageSet.get(channelId)?.has(ids.edited) || false, false);

@@ -1702,6 +1702,7 @@ function describeLoggerOwnedStyleContract(api) {
   const styleSeeds = [
     'ml2-deleted',
     'ml2-deleted-attachment-renderer',
+    'ml2-removed-attachment-preview',
     'ml2-deleted-alt',
     'ml2-deleted-forum-text',
     'ml2-forum-log-path',
@@ -1880,6 +1881,7 @@ function describeLoggerOwnedMountContract() {
     'data-ml2-pending-delete-control',
     'data-ml2-plain-forum-author',
     'data-ml2-remove-from-log',
+    'data-ml2-removed-preview',
     'data-ml2-restored-forum-card',
     'data-ml2-restored-forum-thread',
     'data-ml2-restored-thread-browser-card',

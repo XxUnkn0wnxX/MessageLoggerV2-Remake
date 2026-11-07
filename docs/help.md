@@ -105,6 +105,8 @@ Right-click saved messages in the logger or channel view to access applicable ac
 - Copy content or message ID.
 - Open related logs.
 
+For an attachment-only edit, the message stays in **Edited**. With media rendering enabled, historical removed uploads use existing cached previews/file cards without duplicate deletion text; unavailable uploads keep their text entry. Inline image/video previews stay thumbnail-sized, while Logger retains its normal preview sizing. Background caching continues under the existing settings. Deleting the whole message later changes its category while retaining its edit history.
+
 **Hide** preserves the record and moves it to the Hidden tab. Red **Delete** permanently deletes the stored logger record. Direct restored-item and logger-window Delete actions confirm first; **Delete** inside the injected **Message Logger** submenu removes immediately because that submenu is already a logger-only action.
 
 The same permanent-delete flow applies to restored chat messages, logger rows, forum cards, sidebar threads, and thread-browser cards:
@@ -120,7 +122,7 @@ The same permanent-delete flow applies to restored chat messages, logger rows, f
 - Attachment-only messages retain the same hide, remove, and context-menu actions as text messages.
 - Media added later through a forum post's **Add to Post** action is retained from the message update.
 - Image and video attachments render in the Logger viewer when their source or local cache is available. Guarded Discord-native audio, TXT, and PDF presentation is also supported, and each attachment is isolated in mixed batches without duplicate ownership.
-- With **Render & Cache media** On, saved image/video/audio/TXT/PDF presentation is remote-first: CDN -> distinct proxy -> cached local Blob/file after remote presentation fails -> exact-filename placeholder. With **Only render locally cached attachments** On, it uses cached local Blob/file -> exact-filename placeholder and does not present remotely. With **Render & Cache media** Off, no caching occurs and saved direct attachments show classified exact-filename placeholders.
+- With **Render & Cache media** On, current saved image/video/audio/TXT/PDF presentation is remote-first: CDN -> distinct proxy -> cached local Blob/file after remote presentation fails -> exact-filename placeholder. With **Only render locally cached attachments** On, it uses cached local Blob/file -> exact-filename placeholder and does not present remotely. With **Render & Cache media** Off, no caching occurs and saved direct attachments show classified exact-filename placeholders.
 - Embeds show a plain-text reference, while unsupported stickers and other unsupported content remain compact references. **Cache all attachment types** controls whether new ordinary non-image attachments are admitted to caching; it does not disable remote presentation or use of an already-existing supported cache file. The gate remains a deferred limitation, so arbitrary non-image files are not promised to render or cache and may remain CDN-backed or uncached.
 - Restored channel messages retain their saved payload so Discord can render supported content natively.
 
@@ -263,9 +265,10 @@ Enable **Show Hidden tab in logger** under Display settings. Disabling the tab d
 ### Attachments are unavailable
 
 - Remote attachment and sticker URLs can expire or return `403`/`404`. The three relevant modes are:
-  - **Render & Cache media** On: saved image/video/audio/TXT/PDF presentation tries CDN -> distinct proxy -> cached local Blob/file -> exact-filename placeholder after remote presentation fails.
+  - **Render & Cache media** On: current saved image/video/audio/TXT/PDF presentation tries CDN -> distinct proxy -> cached local Blob/file -> exact-filename placeholder after remote presentation fails.
   - **Only render locally cached attachments** On: remote presentation is skipped; an existing cached local Blob/file is used, then an exact-filename placeholder.
   - **Render & Cache media** Off: no new caching or retry work runs, and saved direct attachments show classified exact-filename placeholders. Existing cache files are retained but are not selected for display or local-open fallback while the master remains Off; **Open Attachment** may use only its first permitted remote candidate.
+- Historical removed uploads use existing cached previews/file cards, otherwise their text fallback; they do not start remote presentation requests.
 - **Disable saving data** creates no new local media files even if **Render & Cache media** remains enabled. Eligible logger media requests wait in memory and download only after a successful primary archive save; reload, plugin stop, or disabling media caching discards the queue.
 - **Cache all attachment types** controls admission of new ordinary non-image attachment cache requests, not remote or existing-cache rendering. It remains a deferred limitation: arbitrary non-image files may remain CDN-backed or uncached when On and may still be logged as attachment references when Off; already-expired content cannot be recovered.
 - **Delete cached files with log records** removes related media during permanent record, purge, cap, or thread/forum cleanup. It cannot be undone and reports successful deletion through the console and selected notification mode.
