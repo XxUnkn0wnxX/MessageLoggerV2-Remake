@@ -148,6 +148,18 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 - Hide/unhide changes visibility without deleting records; red Delete actions and Clear Log permanently update records, indexes, restored entries, and optional cached files.
 - Context-menu injections expose scope lists and record actions while preserving Discord and other plugins' native items.
 
+### Planned viewport loading and session reuse
+
+R7 is a planned, unimplemented rendering optimisation. Its scope covers every available tab, filter, and Load More state in the main Logger window, saved thread/forum log windows, and Logger additions rendered inside Discord's native channels, threads, forum conversations, and cards. It applies uniformly to message-row text and supported attachments. Existing acquisition, retry, source-gate, schema, history, Pins, batch, and cap behavior remains in force. Expensive row parsing and mounting should be deferred until rows approach the viewport; this plan does not claim measured speedups or instant remounts.
+
+Within Logger-owned windows, rows already loaded or mounted should remain available across tab and navigation changes and after closing and reopening a window for the current plugin session. Scrolling out of view or navigating must not evict them. A cold start, Logger stop/reload, or relevant setting change that rehydrates records begins a new retained view. Actual record or presentation changes still require targeted refreshes.
+
+For visible rows still being prepared, the design calls for a “Loading saved message” label with animated dots, reduced-motion support, and stable layout. Both text and dots reuse Logger's existing Discord warning accent, `var(--text-warning, var(--status-warning))`, so the colour follows the active theme; do not copy the fixed console-badge orange into the UI. Once preparation finishes, existing terminal rendering and fallback behavior remains authoritative.
+
+Retention has an unresolved lifecycle constraint: Logger row roots can be destroyed by `formatMarkup` and media/control cleanup for removed nodes. Hiding rows alone cannot preserve them. Logger-owned retention therefore needs a unified, explicit row lifetime and suspension path before it can work reliably. Discord owns native conversation views, so retaining their mounted DOM across channel or conversation changes remains design-unresolved. Reusing prepared row state is a possible alternative, subject to acceptance, and is not equivalent to retaining mounted DOM.
+
+Suspended retained views must not perform display-driven retries or hidden playback; existing acquisition and active-view fallback behaviour remain unchanged. R7 must preserve native ownership and canonical-source guards. The existing deferred cold-start issue is unrelated and is not addressed by this proposal. See the [R7 acceptance checklist](../DELETED-IMAGE-CACHE-RENDERING-CHECKLIST.md#r7--viewport-loading-and-session-retention) for the requested scope and acceptance criteria. No setting toggle or R7 implementation currently exists.
+
 ## 🔔 Notifications
 
 - `_showNotification` is the single low-level routing point between BetterDiscord native notifications and the plugin's custom toasts. `_showCustomToast` is an internal renderer and is called only by this router.

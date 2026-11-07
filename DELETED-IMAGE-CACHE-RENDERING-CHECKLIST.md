@@ -56,11 +56,67 @@ compact roadmap.
 - [ ] R6 — Integrated validation/release: full checks/live matrix; reconcile
       checklist/TODO; version/changelog only if explicitly requested; branch
       promotion/reconciliation only with explicit approval.
+- [ ] R7 — Viewport loading and session retention: planned rendering
+      optimisation for the Logger window and Logger additions to native
+      conversations/cards. Load text and attachments together near the viewport;
+      retain activated content for session reuse. Resolve native ownership,
+      implement and validate the acceptance checks below. Not implemented;
+      implementation sequencing remains undecided.
 - [ ] Parked — optional Stage 4a Reveal File; define its scope before activation.
 - [ ] Parked — multi-instance storage isolation; separate architecture and not
       a blocker for the active media/viewer path.
 - [ ] Exact next feature stage: R1. Finish the current compatibility hotfix and
       its native validation first; feature implementation remains deferred.
+
+## Planned optimisation feature
+
+### R7 — Viewport loading and session retention
+
+**Status: requested feature addition; design incomplete, not implemented or
+validated.** This is additional rendering optimisation work, separate from the
+compatibility hotfixes already tested. See the
+[architecture notes](docs/architecture.md#planned-viewport-loading-and-session-reuse).
+
+- [ ] Cover the **main Logger window**, including available tabs, filters,
+      sorting, existing Load More batches and close/reopen. Also cover saved
+      forum/thread log windows and Logger-owned additions in native channels,
+      threads, forum conversations and restored cards. Preserve existing render
+      caps, edit limits and visibility rules.
+- [ ] Treat text, edit history and supported attachments as one row lifecycle.
+      Gate expensive parsing, preview preparation and mounting on approaching
+      that surface's viewport. Text need not wait for media to finish loading.
+      Reserve layout space to preserve scrolling and navigation targets.
+- [ ] Retain already activated content across scrolling, navigation, tab changes
+      and Logger close/reopen for the session. Do not silently substitute
+      unload-on-navigation or eviction. Prove retained DOM/root identity for
+      Logger-owned views, not merely identical output or reused file URLs.
+      Inactive retained views must be noninteractive and suspend playback and
+      display-driven work; background capture remains independent.
+- [ ] Resolve the native ownership boundary before claiming parity: Discord can
+      unmount its channel/thread/forum message tree. Literal native mount
+      retention across navigation remains **design unresolved**. Prepared-state
+      reuse alone is a narrower alternative requiring acceptance, not completion
+      of the requested mounted-content retention.
+- [ ] Reset session rendering state on cold start, Logger stop/reload and
+      relevant rehydrating toggles. Refresh/invalidate affected content on real
+      edits, deletions, visibility or source-policy changes so retained views do
+      not become stale. Dispose all owned text/media/control roots and observers
+      on a real reset; distinguish suspension from disposal.
+- [ ] Use theme-aware loading text, such as **Loading saved message**, with
+      lightweight animated dots while visible work is pending. Text and dots
+      reuse Logger's existing Discord warning accent,
+      `var(--text-warning, var(--status-warning))`, rather than the fixed console
+      badge colour. Respect reduced motion, avoid animated offscreen placeholders,
+      and settle failures through the existing text/file fallback.
+- [ ] Preserve source preference/fallback gates, canonical ownership, generation
+      checks, aggressive acquisition, retry behaviour, saved history, schema and
+      PersonalPins. Measure first-open and revisit work plus retained memory in
+      representative native journeys. Add deterministic lifecycle coverage and
+      native checks for all affected surfaces; no speedup or instant-revisit
+      claim before evidence exists.
+
+This feature does not fix or close the separately deferred cold-start display
+issue. Its acceptance is independent of the remaining hotfix/cache checks.
 
 ## Living handoff snapshot
 
@@ -82,12 +138,14 @@ compact roadmap.
   (owned-media fallback) and `285a69c` (renewed remote sources), followed by
   the inline attachment/layout repairs, `99b6e41` (deletion observer),
   `c4da5ca` (cache kind labels), `4cb6183` (removed-upload source policy), and
-  `a967367` (native menu evidence). The combined source passes **819/819**
-  tests with no skips in 3.426 seconds. None has been pushed.
+  `a967367` (native menu evidence), then `b1655cb` (forum author contrast)
+  and `3788746` (forum layout and expanded probe). The source checkpoint at
+  `3788746` passed **828/828** tests with no skips in 4.727 seconds. None has
+  been pushed. R7 documentation does not add runtime behaviour.
 - **Installed Stable:**
-  `236753e3a9cd98978ee9f81b7b1a26adf3e218cc102addc8fb41312cb0bbac59`,
-  matching the source at `a967367`. Stable was fully closed before installation
-  and then restarted. This includes the source-policy and cache-label repairs;
+  `b1ad98a8680349d6b0a02b32e52d75c36e1d44d85bae27c0d86ff540e022a5fd`,
+  matching the source at `3788746`. Stable was fully closed before installation
+  and then restarted. This includes the source-policy, cache-label and forum repairs;
   version remains `2.8.2.19` and schema remains 1.
 - **Preserved behavior:** modal/audio/image discovery repairs; scoped immutable
   eviction for Logger-owned presentation cleanup; media refresh only for actual
@@ -274,15 +332,15 @@ compact roadmap.
   title and preview resolve to the same active theme colour. The user separately
   checked the restored thread card and confirmed its author was already readable;
   no thread styling change was required.
-- **Restored forum preview layout — implemented; native recheck pending:**
-  the author is now readable, but the restored message preview appears beneath
-  it. The paired native capture identifies retired class selectors in the card
-  builder: the live message row uses flex layout, while the restored row falls
-  back to block layout. The builder now reuses the current native card's
-  structural/text classes and footer placement, preserving the saved author,
-  parsed preview and deletion details. The runtime probe is also being expanded
-  to compare exercised restored-card layout with a native control, since the
-  earlier observational class counts did not validate stylesheet behavior.
+- **Restored forum preview layout — native recheck passed:** the paired native
+  capture identified retired class selectors making the restored preview wrap
+  beneath the author. Commit `3788746` reuses the native card's current
+  structural/text classes and footer placement, preserving saved content.
+  The user confirmed the author and preview now share the intended line.
+  The expanded `Dom.RestoredForumCardLayout` probe failed on the old build and
+  passed all 28 checks after the repair. The tracked audit now has 91 contracts;
+  a fresh full combined-build audit remains pending. This is exercised layout
+  evidence, unlike the earlier observational class counts.
 - **Historical correction:** older claims that Pins errors were unrelated are
   superseded by the proven Logger synthetic-delete trigger. Historical notes
   saying ordinary-row synthetic deletes remain are also superseded. PersonalPins
@@ -328,8 +386,9 @@ Hotfix acceptance (does not complete any parked feature stage):
       matches the readable theme colour of the title and preview. The targeted
       restored-thread contrast check also passed; the separate full thread-media
       matrix remains waived. No PermissionsViewer cause or repair is claimed.
-- [ ] Match the restored forum author/preview row to the current native inline
-      layout, then verify it in the client before resuming media-switch checks.
+- [x] Match the restored forum author/preview row to the current native inline
+      layout. User confirmation and the expanded probe's old-build failure /
+      fixed-build 28-check pass verify the correction on `3788746`.
 - [x] Correct null cache-warning identity; deterministic tests verify unchanged
       cache IDs, bytes, requests, terminal failure behavior and deferred toast.
       Installed with the final native verification gate still open.
