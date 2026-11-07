@@ -77,11 +77,13 @@ compact roadmap.
   cleanup and cache warning identity), `77da772` (native profile layer),
   `4d58406` (installed-layer audit), `323f437` (native dynamic theme), and
   `1e9f56c` (dismissed-profile shortcut), `5982c93` (modal class lifetime),
-  and `838a22a` (clear an open filter in place). The latter passes **745/745**
-  tests with no skips in 3.593 seconds. None has been pushed.
+  and `838a22a` (clear an open filter in place), followed by `beb7ef1`
+  (owned-media fallback) and `285a69c` (renewed remote sources). The current
+  source passes **766/766** tests with no skips in 4.685 seconds. None has
+  been pushed.
 - **Installed Stable:**
-  `8004d8c77055261144dcaf75835d5812bb557b35dfb2d6a54fb08624e9be8402`,
-  matching `838a22a`. Stable was fully closed before installation and then
+  `4bcf885a5e08a2340758e4b62326a486ce9ca537f1b8726992b15444c281352b`,
+  matching `285a69c`. Stable was fully closed before installation and then
   restarted; data/settings/backup/Pins bytes were unchanged during the copy.
   This includes corrected class recovery and cache warning IDs.
 - **Preserved behavior:** modal/audio/image discovery repairs; scoped immutable
@@ -118,13 +120,13 @@ compact roadmap.
   or whole-application provider wrapper was added. Supplying the native
   impression callback would enable tracking for this UI, so that separate
   warning is retained without changing telemetry or OpenAsar blocking.
-- **Current runtime audit:** the installed `838a22a` build's full audit at
-  `2026-11-07T11:12:44.879Z` has **67 passes, 23 warnings and zero failures**
+- **Current runtime audit:** the installed `285a69c` build's full audit at
+  `2026-11-07T11:47:25.475Z` has **67 passes, 23 warnings and zero failures**
   across 90 contracts. All warning entries validate their selected contracts;
   actual message/selected classes, profile layer and theme resolver pass.
   The fresh audit confirms both startup classes recovered in generation 1
-  with no pending class waits. Remaining interactive/lifecycle checks are
-  still required.
+  with no pending class waits. Earlier lifecycle checks passed on `838a22a`;
+  native media acceptance of the combined cache repair remains pending.
 - **Shortcut follow-up:** the user reproduced first-press close/reopen after
   dismissing a Logger profile; a second press closes it. Source review identifies
   a stale popout-stack ID overriding the empty actual manager. Local commit
@@ -150,8 +152,14 @@ compact roadmap.
   passing. The follow-up now derives normal remote exhaustion from the existing
   full-URL failure keys, allowing renewed sources without retrying unchanged
   failed candidates or reusing a failed Blob. It adds no failure ledger or scan
-  through unrelated history. Final aggregate and combined native validation are
-  pending. This does not resume media admission or other parked feature work.
+  through unrelated history. Package B is committed as `285a69c`; the combined
+  source passes **766/766** tests and the installed 90-contract audit has no
+  failures. Native media interaction remains pending. Acquisition/network,
+  request sharing, queues, retries, promotion, write gates, persistence and
+  mode handlers have exact source parity with the pre-media-fix checkpoint.
+  The new continuation is per mount: reopening may retry remote sources, and
+  repaired fallback can reach a proxy previously skipped by the broken path.
+  This does not resume media admission or other parked feature work.
 - **Cache-warning scope:** the current `Image null unavailable (403)` warning
   was reproduced. A missing embed/component source ID does not imply a null URL.
   The misleading identity is repaired through the existing cache-file ID, with
