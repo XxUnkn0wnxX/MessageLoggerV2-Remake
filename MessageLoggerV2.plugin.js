@@ -532,6 +532,48 @@ class PopoutManager {
       return null;
     }
   }
+  findProfileTheme() {
+    if (typeof Webpack.getModules !== 'function' || typeof Webpack.getStore !== 'function') return null;
+    const classify = candidate => {
+      if (typeof candidate !== 'function') return null;
+      let source;
+      try { source = Function.prototype.toString.call(candidate); } catch { return null; }
+      return {
+        provider: ['.useContext(', '.useMemo(', '.Provider', 'primaryColor', 'secondaryColor', 'enabledExperiments', 'reduceAdaptiveTheme']
+          .every(marker => source.includes(marker)),
+        helper: source.includes('theme-') && source.includes('images-')
+      };
+    };
+    try {
+      const candidates = Webpack.getModules(candidate => {
+        const match = classify(candidate);
+        return !!match && (match.provider || match.helper);
+      }, { searchExports: true });
+      const providers = new Set();
+      const helpers = new Set();
+      for (const candidate of candidates || []) {
+        const match = classify(candidate);
+        if (match?.provider) providers.add(candidate);
+        if (match?.helper) helpers.add(candidate);
+      }
+      if (providers.size !== 1 || helpers.size !== 1) return null;
+      const store = Webpack.getStore('ThemeStore');
+      if (typeof store?.addChangeListener !== 'function' || typeof store?.removeChangeListener !== 'function') return null;
+      const provider = [...providers][0];
+      const classHelper = [...helpers][0];
+      const getSnapshot = () => {
+        try {
+          const theme = store.theme;
+          if (typeof theme !== 'string' || !theme.trim()) return null;
+          const classes = classHelper(theme);
+          if (typeof classes !== 'string' || !classes.trim()) return null;
+          return { theme, classes };
+        } catch { return null; }
+      };
+      const initialSnapshot = getSnapshot();
+      return initialSnapshot ? { provider, store, getSnapshot, initialSnapshot } : null;
+    } catch { return null; }
+  }
   showPopout(target, content, options = {}) {
     const {
       position = "right", align = "top"
@@ -555,10 +597,15 @@ class PopoutManager {
         popoutElement,
         React.createElement(bundle.Container, { className: 'mlv2-profile-layer-container' }))
       : popoutElement;
+    const theme = this.findProfileTheme();
+    if (!theme) Logger.warn('Discord profile theme is unavailable; the profile will use its existing appearance.');
+    const themedContents = theme
+      ? React.createElement(ProfileThemeBoundary, { theme }, contents)
+      : contents;
     let root;
     try {
       root = ReactDOM.createRoot(container);
-      root.render(contents);
+      root.render(themedContents);
     } catch (error) {
       try { root?.unmount?.(); } catch {}
       if (!this.popouts.size && this.container === container) {
@@ -587,6 +634,45 @@ class PopoutManager {
     this.popouts.forEach((_, id) => this.closePopout(id));
   }
 }
+const ProfileThemeBoundary = ({ theme, children }) => {
+  const [snapshot, setSnapshot] = React.useState(theme.initialSnapshot);
+  React.useEffect(() => {
+    let active = true;
+    let subscribed = false;
+    let warned = false;
+    const reconcile = () => {
+      if (!active) return;
+      const next = theme.getSnapshot();
+      if (!next) {
+        if (!warned) {
+          warned = true;
+          Logger.warn('Could not update the Discord profile theme; keeping the last valid appearance.');
+        }
+        return;
+      }
+      setSnapshot(previous => previous.theme === next.theme && previous.classes === next.classes ? previous : next);
+    };
+    try {
+      theme.store.addChangeListener(reconcile);
+      subscribed = true;
+      reconcile();
+    } catch {
+      active = false;
+      try { theme.store.removeChangeListener(reconcile); } catch {}
+      subscribed = false;
+      Logger.warn('Could not subscribe to the Discord profile theme.');
+    }
+    return () => {
+      active = false;
+      if (subscribed) {
+        subscribed = false;
+        try { theme.store.removeChangeListener(reconcile); } catch {}
+      }
+    };
+  }, [theme]);
+  return React.createElement(theme.provider, { theme: snapshot.theme },
+    React.createElement('div', { className: snapshot.classes }, children));
+};
 const PopoutComponent = ({
   target,
   position,

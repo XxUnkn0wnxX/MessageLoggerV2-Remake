@@ -106,3 +106,8 @@ The App layer integration check calls the installed profile manager’s read-onl
 resolver and validates its native Provider, Container and Layer roles. An older
 or unstarted instance is deferred; an active resolver returning no valid bundle
 fails. This does not replace native menu positioning, action and dismissal checks.
+
+The profile theme integration check validates the installed resolver’s native
+provider signature, store subscription methods and initial theme/class snapshot.
+It does not mount the provider or change themes. Visual parity and updates while
+the profile is open remain native checks.

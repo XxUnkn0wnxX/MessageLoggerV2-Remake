@@ -3203,6 +3203,131 @@ function describeLoggerIntegrationAppLayerResolver(api) {
   };
 }
 
+function describeLoggerIntegrationProfileThemeResolver(api) {
+  const errors = [];
+  const pluginsRead = safeRead(api, 'Plugins');
+  const getRead = safeRead(pluginsRead.value, 'get');
+  let addon = null;
+  if (pluginsRead.ok && callable(getRead.value)) {
+    try { addon = getRead.value.call(pluginsRead.value, 'MessageLoggerV2'); }
+    catch { errors.push('plugins-get-threw'); }
+  } else {
+    errors.push(pluginsRead.ok ? 'plugins-get-unavailable' : pluginsRead.error);
+  }
+  const instanceRead = dataRead(addon, 'instance');
+  const instance = instanceRead.ok ? instanceRead.value : null;
+  const startedRead = dataRead(instance, '__started');
+  const started = startedRead.ok && startedRead.value === true;
+  const toolsRead = dataRead(instance, 'tools');
+  const managerRead = dataRead(toolsRead.value, 'popoutManager');
+  const resolverRead = dataRead(managerRead.value, 'findProfileTheme');
+  const resolver = resolverRead.ok && callable(resolverRead.value) ? resolverRead.value : null;
+  const base = {
+    expectedUniqueness: 'one callable installed resolver returns a native profile theme provider and stable snapshot contract',
+    loadedMatchCount: addon ? 1 : 0,
+    selected: {
+      found: !!managerRead.value,
+      type: 'logger-popout-manager-profile-theme-resolver',
+      moduleId: null,
+      exportPaths: ['<root>'],
+      ownKeyNames: [],
+      prototypeMethodNames: [],
+      errors: []
+    }
+  };
+  if (!started || !resolver) {
+    if (!addon) errors.push('logger-addon-unavailable');
+    else if (!instance) errors.push(instanceRead.error || 'logger-instance-unavailable');
+    else if (!started) errors.push(startedRead.error || 'logger-not-started');
+    else errors.push(resolverRead.error || 'profile-theme-resolver-unavailable');
+    const validation = collectValidation({ addonAvailable: !!addon, instanceAvailable: !!instance, started, resolverAvailable: !!resolver }, errors);
+    return {
+      ...base,
+      status: 'warn',
+      state: !addon || !instance ? 'logger-unavailable' : !started ? 'logger-not-started' : 'resolver-unavailable',
+      invoked: false,
+      validation: { ok: false, booleans: validation.booleans, errors: [...new Set(validation.errors)] }
+    };
+  }
+
+  let result = null;
+  let resolverThrew = false;
+  try { result = resolverRead.value.call(managerRead.value); }
+  catch { resolverThrew = true; errors.push('profile-theme-resolver-threw'); }
+  const providerRead = dataRead(result, 'provider');
+  const provider = providerRead.ok ? providerRead.value : null;
+  const sourceMarkers = [
+    '.useContext(', '.useMemo(', '.Provider', 'primaryColor', 'secondaryColor',
+    'enabledExperiments', 'reduceAdaptiveTheme'
+  ];
+  const providerSource = getFunctionSourceFlags(provider, sourceMarkers);
+  const providerMarkers = Object.fromEntries(sourceMarkers.map((marker, index) => [marker, providerSource.flags[index] === true]));
+  const storeRead = dataRead(result, 'store');
+  const store = storeRead.ok ? storeRead.value : null;
+  const addListenerRead = dataRead(store, 'addChangeListener');
+  const removeListenerRead = dataRead(store, 'removeChangeListener');
+  const addListenerCallable = addListenerRead.ok && callable(addListenerRead.value);
+  const removeListenerCallable = removeListenerRead.ok && callable(removeListenerRead.value);
+  const getSnapshotRead = dataRead(result, 'getSnapshot');
+  const getSnapshotCallable = getSnapshotRead.ok && callable(getSnapshotRead.value);
+  const initialSnapshotRead = dataRead(result, 'initialSnapshot');
+  const initialSnapshot = initialSnapshotRead.ok ? initialSnapshotRead.value : null;
+  const themeRead = dataRead(initialSnapshot, 'theme');
+  const classesRead = dataRead(initialSnapshot, 'classes');
+  const themeNonempty = themeRead.ok && typeof themeRead.value === 'string' && !!themeRead.value.trim();
+  const classesNonempty = classesRead.ok && typeof classesRead.value === 'string' && !!classesRead.value.trim();
+  const providerMarkersMatch = providerSource.readable && providerSource.flags.every(Boolean);
+  const storeObject = store !== null && (typeof store === 'object' || typeof store === 'function');
+  const storeListenersCallable = storeObject && addListenerCallable && removeListenerCallable;
+
+  if (!providerRead.ok) errors.push(`provider-${providerRead.error}`);
+  else if (!callable(provider)) errors.push('provider-not-callable');
+  if (callable(provider) && !providerSource.readable) errors.push('provider-source-unavailable');
+  else if (callable(provider) && !providerMarkersMatch) errors.push('provider-source-contract-mismatch');
+  if (!storeRead.ok) errors.push(`store-${storeRead.error}`);
+  else if (!storeObject) errors.push('store-not-object');
+  if (!addListenerRead.ok) errors.push(`store-add-listener-${addListenerRead.error}`);
+  else if (!addListenerCallable) errors.push('store-add-listener-not-callable');
+  if (!removeListenerRead.ok) errors.push(`store-remove-listener-${removeListenerRead.error}`);
+  else if (!removeListenerCallable) errors.push('store-remove-listener-not-callable');
+  if (!getSnapshotRead.ok) errors.push(`snapshot-reader-${getSnapshotRead.error}`);
+  else if (!getSnapshotCallable) errors.push('snapshot-reader-not-callable');
+  if (!initialSnapshotRead.ok) errors.push(`initial-snapshot-${initialSnapshotRead.error}`);
+  if (!themeRead.ok) errors.push(`initial-theme-${themeRead.error}`);
+  else if (!themeNonempty) errors.push('initial-theme-empty-or-invalid');
+  if (!classesRead.ok) errors.push(`initial-classes-${classesRead.error}`);
+  else if (!classesNonempty) errors.push('initial-classes-empty-or-invalid');
+
+  const validation = collectValidation({
+    addonAvailable: true,
+    instanceAvailable: true,
+    started: true,
+    resolverAvailable: true,
+    resolverReturnedResult: result !== null && result !== undefined,
+    providerCallable: callable(provider),
+    providerSourceReadable: providerSource.readable,
+    providerSourceContract: providerMarkersMatch,
+    storeObject,
+    storeAddChangeListenerCallable: addListenerCallable,
+    storeRemoveChangeListenerCallable: removeListenerCallable,
+    getSnapshotCallable,
+    initialSnapshotAvailable: !!initialSnapshot,
+    initialThemeNonempty: themeNonempty,
+    initialClassesNonempty: classesNonempty
+  }, errors);
+  return {
+    ...base,
+    status: validation.ok ? 'pass' : 'fail',
+    state: validation.ok ? 'resolved' : resolverThrew ? 'resolver-threw' : result == null ? 'result-unavailable' : 'result-invalid',
+    invoked: true,
+    providerMarkers,
+    storeListenersCallable,
+    getSnapshotCallable,
+    initialSnapshot: { available: !!initialSnapshot, themeNonempty, classesNonempty },
+    validation: { ok: validation.ok, booleans: validation.booleans, errors: [...new Set(validation.errors)] }
+  };
+}
+
 function moduleContracts() {
   const store = (name, keys, selector, expected = 'single canonical store') => ({
     name,
@@ -4078,7 +4203,8 @@ module.exports = class MessageLoggerRuntimeCompatibilityAudit {
       { name: 'LoggerOwned.MountMarkers', ...describeLoggerOwnedMountContract() },
       { name: 'LoggerIntegration.RenderLinkComponent', ...describeLoggerIntegrationRenderLinkComponent(this.bdApi) },
       { name: 'LoggerIntegration.MessageClasses', ...describeLoggerIntegrationMessageClasses(this.bdApi) },
-      { name: 'LoggerIntegration.AppLayerResolver', ...describeLoggerIntegrationAppLayerResolver(this.bdApi) }
+      { name: 'LoggerIntegration.AppLayerResolver', ...describeLoggerIntegrationAppLayerResolver(this.bdApi) },
+      { name: 'LoggerIntegration.ProfileThemeResolver', ...describeLoggerIntegrationProfileThemeResolver(this.bdApi) }
     ];
     const assetContract = await assetPromise;
     const transitionContract = await transitionPromise;

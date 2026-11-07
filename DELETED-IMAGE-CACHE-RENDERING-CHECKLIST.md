@@ -69,7 +69,9 @@ compact roadmap.
 - **Current session:** `01a1b4bc-271d-77a1-b213-6ab542bcd323`.
 - **Scope:** current Logger errors, module lookups and evidenced caching faults
   on `develop`. Preserve unfinished features, saved data, schema and release
-  metadata. R1–R6 remain incomplete. Local commits are authorized; pushing is
+  metadata until the requested final `2.8.2.20` hotfix entry. That entry must
+  state active development and unfinished features. R1–R6 remain incomplete.
+  Local commits are authorized; pushing is
   gated on the user’s UI checks and resolution of the known runtime issues.
 - **Source checkpoints:** local commits `ccabb77` (runtime compatibility, safe
   cleanup and cache warning identity) and `77da772` (native profile layer).
@@ -97,10 +99,16 @@ compact roadmap.
 - **Profile menu:** native tracing proved that the More button opens its state,
   but its Layer receives a null container. The installed repair gives the
   profile a locally owned native App layer and includes its menu in dismissal
-  containment. Layout, actions and lifecycle still need user verification.
-  The audit now checks the actual installed App layer resolver. Profile
+  containment. The user and native trace confirm the menu now renders.
+  Actions, dismissal and theme parity still need final user verification.
+  The audit now checks the actual installed App layer and theme resolvers.
+  The theme repair uses the native provider, class generator and reactive
+  ThemeStore; no fixed theme, palette, selector hash or enum mapping is copied.
+  Its native rollout and dynamic-theme acceptance are pending. Profile
   impression/locale warnings are being attributed separately; no suppression
-  or whole-application provider wrapper was added.
+  or whole-application provider wrapper was added. Supplying the native
+  impression callback would enable tracking for this UI, so that separate
+  warning is retained without changing telemetry or OpenAsar blocking.
 - **Cache-warning scope:** the current `Image null unavailable (403)` warning
   was reproduced. A missing embed/component source ID does not imply a null URL.
   The misleading identity is repaired through the existing cache-file ID, with
@@ -124,7 +132,9 @@ Hotfix acceptance (does not complete any parked feature stage):
       observed history fetches and synthetic deletes.
 - [x] Restore Logger username/avatar profile opening; user supplied native proof.
 - [ ] Complete cold-to-warm class recovery against the actual native CSS owner
-      in the same generation, plus hover/selected presentation checks.
+      in the same generation, plus hover/selected presentation checks. Native
+      recovery now reaches the correct owners in generation 1; visual checks
+      remain pending.
 - [ ] Repair and verify the Logger-profile More menu interaction. Source tests
       and native dependency preflight pass; installed UI acceptance is pending.
 - [ ] Verify disable/re-enable cleanup, Pins preservation, saved history,

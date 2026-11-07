@@ -114,7 +114,9 @@ test('missing bundle preserves profile fallback, and render failure does not lea
   const manager = new runtime.PopoutManager();
   const id = manager.showPopout({}, { type: 'profile' });
   assert.strictEqual(runtime.roots[0].element.type, runtime.PopoutComponent);
-  assert.equal(runtime.warnings.length, 1);
+  assert.equal(runtime.warnings.length, 2);
+  assert.match(runtime.warnings[0], /App layer/);
+  assert.match(runtime.warnings[1], /profile theme/);
   manager.closePopout(id);
   assert.equal(runtime.containers[0].removed, true);
   const broken = setup([], true);

@@ -162,3 +162,7 @@ Run the relevant targeted manual check after a Discord UI update or related plug
 - [`tests/source-contracts.test.js`](../tests/source-contracts.test.js)
 
 The helper exposes only the BetterDiscord APIs needed to load the exported class. Add narrow mocks to each plugin instance instead of turning the helper into a fake Discord client.
+
+Profile theme regressions cover native class generation, subscription timing,
+dynamic updates, stable child identity, failed reads and listener teardown.
+They preserve existing profile/layer behavior and require native theme parity.

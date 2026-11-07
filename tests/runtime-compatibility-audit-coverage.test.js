@@ -678,7 +678,7 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     const cssContracts = report.contracts.filter(({ name }) => typeof name === 'string' && name.startsWith('Css.'));
     const reportPath = path.join(pluginFolder, 'MessageLoggerRuntimeCompatibilityAudit-report.json');
 
-    assert.equal(report.totals.total, 89);
+    assert.equal(report.totals.total, 90);
     assert.equal(report.label, 'custom');
     assert.deepEqual(report.options, { loadEntry: false, externalAssets: false });
     assert.equal(integration?.status, 'pass');
@@ -835,6 +835,7 @@ test('DiscordModules lazy-getter inventory is covered by the audit helper', () =
   assert.match(helperSource, /name: 'MaskedLink'/);
   assert.match(helperSource, /name: 'LoggerIntegration\.RenderLinkComponent'/);
   assert.match(helperSource, /name: 'LoggerIntegration\.AppLayerResolver'/);
+  assert.match(helperSource, /name: 'LoggerIntegration\.ProfileThemeResolver'/);
   assert.equal(lazyGetters.some(({ property }) => property === 'MaskedLink'), true);
 });
 
@@ -1072,6 +1073,7 @@ test('direct Webpack discovery remains owned by the approved production methods'
   const methodMarkers = [
     ['getNativeMediaModal', '      getNativeMediaModal() {', ['getBySource', 'getBySource', 'getBySource']],
     ['findImageModal', '      findImageModal() {', ['getBySource', 'getModule']],
+    ['findProfileTheme', '  findProfileTheme() {', ['getStore', 'getStore']],
     ['recoverStartupMessageClasses', '  recoverStartupMessageClasses() {', ['getModule', 'getModule', 'waitForModule', 'waitForModule']],
     ['resolveLoggerNativeDocumentMessageClass', '  resolveLoggerNativeDocumentMessageClass(suppliedMessage = null) {', ['getModule']],
     ['resolveLoggerNativeAudioPlayer', '  resolveLoggerNativeAudioPlayer() {', ['getModule']],
