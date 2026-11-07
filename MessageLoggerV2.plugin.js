@@ -2258,6 +2258,9 @@ module.exports = class MessageLoggerV2 {
                     html #app-mount .${this.style.restoredForumMeta} {
                       color: var(--text-muted) !important;
                     }
+                    html #app-mount .${this.style.restoredForumCard} [data-ml2-plain-forum-author="true"] {
+                      color: var(--text-muted) !important;
+                    }
                     html #app-mount .${this.style.restoredForumCard}.${this.style.deleted} {
                       background-color: ${this.settings.deletedMessageColor ? hexToRgb(this.settings.deletedMessageColor, 0.12) : "rgba(240, 71, 71, 0.12)"} !important;
                     }
@@ -22968,6 +22971,7 @@ module.exports = class MessageLoggerV2 {
       messageWrap.className = copyClass(sourceCard, '.message_faa96b', 'message_faa96b');
       const author = document.createElement('span');
       author.className = copyClass(sourceCard, '.message_faa96b > span', 'defaultColor__4bd52 text-sm/semibold_cf4812 author_d3eee8');
+      author.setAttribute('data-ml2-plain-forum-author', 'true');
       author.textContent = `${message.author?.username || 'Unknown'}: `;
       const focusBlock = document.createElement('div');
       focusBlock.className = copyClass(sourceCard, '.messageFocusBlock_faa96b', 'messageFocusBlock_faa96b');

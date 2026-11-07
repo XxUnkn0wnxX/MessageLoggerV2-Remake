@@ -1154,6 +1154,8 @@ test('restored forum cards and compact threads mount from visible Deleted or Pur
   assert.doesNotMatch(savedThreadMessages, /shouldIgnoreMessageAuthor|shouldIgnoreSelfMessage/);
   assert.match(source, /canRestoreVisibleThreadRoots[\s\S]*shouldPresentAnySavedDeletion\(\)/);
   assert.match(source, /restoreDeletedForumCards[\s\S]*desiredIds[\s\S]*data-ml2-restored-forum-card[\s\S]*target\.remove\?\.\(\)/);
+  assert.match(source, /html #app-mount \.\$\{this\.style\.restoredForumCard\} \[data-ml2-plain-forum-author="true"\]\s*\{\s*color: var\(--text-muted\) !important;/);
+  assert.match(source, /const author = document\.createElement\('span'\);[\s\S]{0,300}author\.setAttribute\('data-ml2-plain-forum-author', 'true'\);/);
   assert.match(source, /restoreDeletedSidebarThreads[\s\S]*getRestorableCompactThreadRecords\(parent\)/);
   assert.match(source, /restoreDeletedThreadBrowserCards[\s\S]*getRestorableCompactThreadRecords\(parent\)/);
   assert.match(source, /shouldTintMessage = \(channelId, messageId\) => \{[\s\S]*shouldPresentSavedMessage\(channelId, messageId\)/);

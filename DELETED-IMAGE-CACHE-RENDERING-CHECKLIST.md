@@ -206,9 +206,9 @@ compact roadmap.
   create **Show Edit As Message** and **Delete Edit**. Current text and current
   attachments do not select a historical snapshot; preserve that existing text
   behavior and the configured history-render limits. No menu behavior change
-  was needed for this case. Other media interactions and threads/forums remain
-  part of the outstanding native acceptance checks.
-- **Inline file parity follow-up — implemented; native acceptance pending:**
+  was needed for this case. Other media interactions remain part of native
+  acceptance; see the later forum result and ordinary-thread coverage waiver.
+- **Inline file parity follow-up — implemented; source-policy acceptance pending:**
   the multi-file native check confirmed images/videos mount, while audio,
   TXT/PDF and generic cached files remained text despite working in Logger.
   Reuses the existing native audio/document/file-card adapters for these inline
@@ -233,7 +233,10 @@ compact roadmap.
   Main-channel appearance and normal Discord edit/cancel passed. The native
   Show Edit As Message check displays the selected saved TXT version on its own;
   Undo restores the other snapshots, including the PDF entry. These controls pass.
-  Threads and forum posts remain explicit final native checks under RT-09.
+  The later forum media checks passed on the combined installed build. The user
+  explicitly waived a separate ordinary-thread native test on 2026-11-08 based
+  on shared rendering; ordinary threads remain not separately tested. This
+  changes the requested native coverage, not the thread compatibility contract.
 - **Whole-message deletion freeze — native retest passed:**
   deleting an edited message with retained previews exposed a tint-observer loop.
   Live debugging found repeated class notifications for a preview whose class
@@ -243,8 +246,8 @@ compact roadmap.
   modes. Cache acquisition, saved history and deletion categories are unchanged.
   The native retest stayed responsive. Persisted before/after data confirms only
   the deleted fixture moved from Edited to Deleted, preserving its text, seven
-  history entries and six removed attachments. Broader playback and thread/forum
-  acceptance remain open.
+  history entries and six removed attachments. Remaining source-policy and
+  combined-build lifecycle acceptance stay open.
 - **Fresh-launch edit-history mount — explicitly deferred:** entering a channel
   before startup settles can leave inline edits absent until navigating away
   and back. Paired native captures showed saved/indexed history present while
@@ -261,6 +264,12 @@ compact roadmap.
   admission metadata. The label survives retries and deferred/no-save replay;
   HTTP 403/404 remain terminal. Cache identities, acquisition rules, retry budgets,
   notification settings and persisted data are unchanged.
+- **Restored forum author contrast — implemented; visual recheck pending:**
+  the native capture found the author using old fallback classes and inheriting
+  a dark colour, while the title/body correctly used the active `--text-muted`.
+  Logger now marks the restored author at construction and applies that same
+  dynamic text colour only within its owned restored card. Native live authors,
+  role colours elsewhere, card content, cache and saved data are unchanged.
 - **Historical correction:** older claims that Pins errors were unrelated are
   superseded by the proven Logger synthetic-delete trigger. Historical notes
   saying ordinary-row synthetic deletes remain are also superseded. PersonalPins
@@ -293,11 +302,18 @@ Hotfix acceptance (does not complete any parked feature stage):
 - [x] Verify disable/re-enable cleanup, Pins preservation and saved history
       on `838a22a`: user history check passed, Pins bytes unchanged, zero
       synthetic deletes and no request burst.
-- [ ] Complete relevant media and native-thread checks. The user reports
+- [ ] Complete the remaining media source-policy and lifecycle checks. The user reports
       404 resource errors; attribution and current fallback handling are under
       review. Preserve aggressive acquisition, alternate URLs, retry/recovery,
       existing cache modes and saved files; do not add a blanket dead-file
       blacklist or advance parked feature stages.
+- [x] Forum media checks passed on the combined installed build. Separate
+      ordinary-thread native testing was explicitly waived; do not report it
+      as a native pass. Remaining source-policy and lifecycle checks stay open.
+- [ ] Verify the scoped author-colour repair on a restored deleted-forum card
+      in the native client. Computed-style evidence identified the inherited dark
+      colour; the dynamic-theme repair and scoped source checks are implemented.
+      No PermissionsViewer cause or repair is claimed.
 - [x] Correct null cache-warning identity; deterministic tests verify unchanged
       cache IDs, bytes, requests, terminal failure behavior and deferred toast.
       Installed with the final native verification gate still open.
@@ -418,9 +434,9 @@ Hotfix acceptance (does not complete any parked feature stage):
 
 ### Exact next action
 
-Continue native media acceptance on the installed build: thread/forum attachment
-edits, historical controls and whole-message deletion, followed by the remaining
-source-policy/lifecycle checks and a fresh warmed compatibility audit. Keep the
+Continue the remaining source-policy/lifecycle checks on the installed build,
+then run a fresh warmed compatibility audit. Forum media checks passed; the user
+waived a separate ordinary-thread native check. Keep the
 intermittent cold-start display bug explicitly deferred; do not restart its
 investigation or count it as fixed. Publication remains gated on all other agreed
 checks and the requested GitHub migration/CI. The next feature stage remains R1
