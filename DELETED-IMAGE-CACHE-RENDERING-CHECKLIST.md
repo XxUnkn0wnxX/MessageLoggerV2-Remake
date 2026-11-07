@@ -91,7 +91,7 @@ The combined source gate is required before installation; native checks below
 remain open until the corresponding Discord behavior is verified.
 
 - [ ] Cover the **main Logger window**, including available tabs, filters,
-      sorting, existing Load More batches and close/reopen. Also cover saved
+      sorting, automatic batch admission and close/reopen. Also cover saved
       forum/thread log windows and Logger-owned additions in native channels,
       threads, forum conversations, restored cards and deleted sidebar entries. A cold boot
       in DMs must defer server sidebar rendering until its server is viewed;
@@ -107,6 +107,11 @@ remain open until the corresponding Discord behavior is verified.
       currently visible rows before background batches. Avoid loading an unseen
       backlog merely because a view opens. Text need not wait for media to finish loading.
       Reserve layout space to preserve scrolling and navigation targets.
+- [ ] Replace the manual Load More button with a non-clickable status bar that
+      automatically adds the next render-cap batch as the user approaches it.
+      Fill large viewports progressively; cancel pending admission when its view
+      parks/closes/refilters, preserve expanded counts during media fallback, and
+      keep zero-cap behavior. Apply to main and saved thread/forum Logger windows.
 - [ ] Retain already activated content across scrolling, navigation, tab changes
       and Logger close/reopen for the session. Do not silently substitute
       unload-on-navigation or eviction. Prove retained DOM/root identity for

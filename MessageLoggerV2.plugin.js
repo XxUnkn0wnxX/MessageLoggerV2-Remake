@@ -6486,7 +6486,7 @@ module.exports = class MessageLoggerV2 {
           },
           {
             name: 'Menu message render cap',
-            note: 'Messages shown before Load More.',
+            note: 'Messages added per automatic batch. Set to 0 to show all messages.',
             id: 'renderCap',
             type: 'textbox',
             validator: 'number',
@@ -25763,6 +25763,7 @@ module.exports = class MessageLoggerV2 {
     const nativeRows = new WeakMap();
     const nativeOccurrences = new Map();
     const queue = new Set();
+    const resetCleanups = new Set();
     const owners = new WeakMap();
     const frame = callback => typeof requestAnimationFrame === 'function'
       ? requestAnimationFrame(callback) : setTimeout(callback, 0);
@@ -26541,6 +26542,8 @@ module.exports = class MessageLoggerV2 {
       },
       reset() {
         if (closed) return;
+        for (const cleanup of [...resetCleanups]) cleanup();
+        resetCleanups.clear();
         generation++;
         framePending = false;
         reconcilePending = false;
@@ -26560,10 +26563,16 @@ module.exports = class MessageLoggerV2 {
         if (plugin._viewportSession === session) plugin._viewportSession = null;
       }
     };
+    session.onReset = cleanup => {
+      if (closed) { cleanup(); return () => {}; }
+      resetCleanups.add(cleanup);
+      return () => resetCleanups.delete(cleanup);
+    };
     this._viewportSession = session;
     return session;
   }
   parkLoggerViewportView(view) {
+    view?.stopAutoAdmission?.();
     if (!view?.leases) return;
     for (const [entry, token] of view.leases) this._viewportSession?.park(entry, token);
     view.leases.clear();
@@ -27547,26 +27556,94 @@ module.exports = class MessageLoggerV2 {
     let i = 0;
     const getShown = () => view?.independent ? view.shownMessages : this.menu.shownMessages;
     const setShown = value => { if (view?.independent) view.shownMessages = value; else this.menu.shownMessages = value; };
+    view?.stopAutoAdmission?.();
+    let sentinel = null;
+    let observer = null;
+    let stopped = false;
+    let pending = false;
+    let removeResetCleanup = null;
+    const scheduleFrame = callback => typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame(callback) : setTimeout(callback, 0);
+    const stopAutoAdmission = () => {
+      if (stopped) return;
+      stopped = true;
+      observer?.disconnect();
+      globalThis.removeEventListener?.('scroll', checkFallback, true);
+      globalThis.removeEventListener?.('resize', checkFallback);
+      removeResetCleanup?.();
+      if (view?.stopAutoAdmission === stopAutoAdmission) view.stopAutoAdmission = null;
+    };
+    const scheduleMore = target => {
+      if (stopped || pending || target !== sentinel || parent.isConnected === false || view?.closed) return;
+      pending = true;
+      target.textContent = `MLV2: Oi, speedy! Loading the next batch ... (${i} / ${messages.length})`;
+      scheduleFrame(() => {
+        pending = false;
+        if (stopped || target !== sentinel || parent.isConnected === false || view?.closed) return;
+        observer?.unobserve(target);
+        target.remove();
+        sentinel = null;
+        addMore();
+      });
+    };
+    const checkFallback = () => {
+      if (stopped || !sentinel || parent.isConnected === false) return;
+      const rect = sentinel.getBoundingClientRect?.();
+      if (!rect || !Number.isFinite(rect.top) || !Number.isFinite(rect.bottom)
+        || rect.bottom <= rect.top || rect.width === 0) return;
+      let top = 0, bottom = globalThis.innerHeight || document.documentElement?.clientHeight;
+      if (!Number.isFinite(bottom) || bottom <= 0) return;
+      for (let node = sentinel.parentElement; node; node = node.parentElement) {
+        const overflow = typeof globalThis.getComputedStyle === 'function' ? globalThis.getComputedStyle(node)?.overflowY : '';
+        if (!/(auto|scroll|overlay|hidden|clip)/.test(overflow || '')) continue;
+        const bounds = node.getBoundingClientRect?.();
+        if (Number.isFinite(bounds?.top) && Number.isFinite(bounds?.bottom)) {
+          top = Math.max(top, bounds.top);
+          bottom = Math.min(bottom, bounds.bottom);
+        }
+      }
+      if (bottom > top && rect.bottom >= top - 200 && rect.top <= bottom + 200) scheduleMore(sentinel);
+    };
+    if (view) view.stopAutoAdmission = stopAutoAdmission;
+    if (view) removeResetCleanup = this.getViewportSession().onReset(stopAutoAdmission);
     const addMore = () => {
-      for (let added = 0; i < messages.length && (added < this.settings.renderCap || (getShown() != -1 && i < getShown())); i++, added++) populate(i);
-      handleMoreMessages();
+      for (let added = 0; i < messages.length && (!this.settings.renderCap || added < this.settings.renderCap || (getShown() != -1 && i < getShown())); i++, added++) populate(i);
       setShown(i);
+      handleMoreMessages();
     };
     const handleMoreMessages = () => {
       if (i < messages.length) {
-        const div = document.createElement('div');
-        const moreButton = this.createButton('LOAD MORE', function () {
-          this.parentElement.remove();
-          addMore();
-        });
-        moreButton.style.width = '100%';
-        moreButton.style.marginBottom = '20px';
-        div.appendChild(moreButton);
-        parent.appendChild(div);
+        sentinel = document.createElement('div');
+        sentinel.textContent = `MLV2: Showing ${i} of ${messages.length} messages`;
+        sentinel.style.color = 'var(--text-warning, var(--status-warning))';
+        sentinel.style.backgroundColor = 'var(--background-secondary, #2b2d31)';
+        sentinel.style.fontWeight = '700';
+        sentinel.style.borderRadius = '6px';
+        sentinel.style.padding = '8px 12px';
+        sentinel.style.margin = '8px 0';
+        sentinel.style.textAlign = 'center';
+        sentinel.style.overflowAnchor = 'none';
+        sentinel.setAttribute?.('role', 'status');
+        parent.appendChild(sentinel);
+        if (typeof IntersectionObserver === 'function') {
+          observer ||= new IntersectionObserver(entries => {
+            for (const entry of entries) if (entry.target === sentinel && entry.isIntersecting) scheduleMore(entry.target);
+          }, { rootMargin: '200px 0px' });
+          observer.observe(sentinel);
+        } else {
+          globalThis.addEventListener?.('scroll', checkFallback, { capture: true, passive: true });
+          globalThis.addEventListener?.('resize', checkFallback);
+          scheduleFrame(checkFallback);
+        }
+      } else {
+        stopAutoAdmission();
       }
     };
     if (this.settings.renderCap) addMore();
-    else for (; i < messages.length; i++) populate(i);
+    else {
+      for (; i < messages.length; i++) populate(i);
+      stopAutoAdmission();
+    }
     if (!messages.length) {
       const strong = document.createElement('strong');
       strong.className = this.multiClasses.defaultColor;

@@ -37,6 +37,7 @@ class Element {
   get parentElement() { return this.parentNode; }
   get firstChild() { return this.children[0] || null; }
   get childElementCount() { return this.children.length; }
+  setAttribute(name, value) { (this.attributes ||= {})[name] = String(value); }
   addEventListener() {}
   insertAdjacentHTML() {}
 }
@@ -412,13 +413,13 @@ test('time deadline yields after one expensive build', () => {
   } finally { global.performance = originalPerformance; env.restore(); }
 });
 
-function loggerFixture() {
-  const env = setup();
-  const records = Object.fromEntries(['a', 'b', 'c', 'd'].map(id => [id, {
+function loggerFixture({ ids = ['a', 'b', 'c', 'd'], observer = true } = {}) {
+  const env = setup({ observer });
+  const records = Object.fromEntries(ids.map(id => [id, {
     message: { id, channel_id: 'channel', content: `text ${id}`, attachments: [], embeds: [] }
   }]));
   const parent = new Element();
-  let filtered = ['a', 'b', 'c', 'd'];
+  let filtered = ids;
   const built = [];
   const plugin = createPlugin({
     settings: { renderCap: 2, cacheAllImages: true, onlyRenderCachedAttachments: false },
@@ -499,7 +500,8 @@ test('owned Logger admits cap batches, activates later visibility in either dire
     f.env.tick();
     assert.deepEqual(f.built, ['b', 'a']);
     const savedHost = slots[1].children[0];
-    f.parent.children[2].children[0].click();
+    f.env.observers.at(-1).visible(f.parent.children[2]);
+    f.env.tick();
     assert.equal(f.parent.children.length, 4);
     f.env.observers[0].visible(f.parent.children[3]);
     f.env.tick();
@@ -517,6 +519,8 @@ test('owned Logger admits cap batches, activates later visibility in either dire
 test('saved-thread admission is independent from the main Logger count', () => {
   const f = loggerFixture();
   try {
+    f.plugin.refilterMessages();
+    const mainBar = f.parent.children[2];
     f.plugin.menu.shownMessages = 4;
     const view = { surfaceKey: 'thread:test', independent: true, shownMessages: -1, leases: new Map() };
     const root = new Element();
@@ -524,9 +528,11 @@ test('saved-thread admission is independent from the main Logger count', () => {
     assert.equal(view.shownMessages, 2);
     assert.equal(f.plugin.menu.shownMessages, 4);
     assert.equal(root.children.length, 3);
-    root.children[2].children[0].click();
+    f.env.observers.at(-1).visible(root.children[2]);
+    f.env.tick();
     assert.equal(view.shownMessages, 4);
     assert.equal(f.plugin.menu.shownMessages, 4);
+    assert.equal(f.parent.children[2], mainBar, 'another view does not admit the Logger batch');
     f.plugin.parkLoggerViewportView(view);
     assert.equal(view.leases.size, 0);
   } finally { f.env.restore(); }
@@ -728,4 +734,154 @@ test('dirty parked row remains cold until revisited viewport, even if values tog
     assert.deepEqual(f.built, ['a', 'b', 'a']);
     assert.equal(unchanged.children[0], unchangedGroup);
   } finally { f.env.restore(); }
+});
+
+
+test('automatic batch bar fills progressively without hydrating offscreen rows', () => {
+  const f = loggerFixture({ ids: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] });
+  try {
+    f.plugin.refilterMessages();
+    let bar = f.parent.children[2];
+    const admission = f.env.observers[1];
+    assert.equal(bar.textContent, 'MLV2: Showing 2 of 7 messages');
+    assert.equal(bar.style.color, 'var(--text-warning, var(--status-warning))');
+    assert.equal(bar.children.length, 0);
+    assert.equal(bar.attributes.role, 'status');
+    assert.equal(bar.click, undefined);
+    assert.deepEqual(f.built, []);
+    admission.visible(bar);
+    assert.equal(bar.textContent, 'MLV2: Oi, speedy! Loading the next batch ... (2 / 7)');
+    assert.equal(f.parent.children.length, 3, 'admission waits for a frame');
+    f.env.tick();
+    assert.equal(f.plugin.menu.shownMessages, 4);
+    const next = f.parent.children[4];
+    assert.notEqual(next, bar);
+    admission.visible(bar);
+    f.env.tick();
+    assert.equal(f.plugin.menu.shownMessages, 4, 'stale sentinel cannot expand');
+    admission.visible(next);
+    f.env.tick();
+    assert.equal(f.plugin.menu.shownMessages, 6);
+    bar = f.parent.children[6];
+    admission.visible(bar);
+    f.env.tick();
+    assert.equal(f.plugin.menu.shownMessages, 7);
+    assert.equal(f.parent.children.length, 7);
+    assert.deepEqual(f.built, [], 'batch admission does not hydrate cold rows');
+  } finally { f.plugin._viewportSession?.reset(); f.env.restore(); }
+});
+
+test('queued automatic admission honors a live change to an unlimited render cap', () => {
+  const f = loggerFixture({ ids: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] });
+  try {
+    f.plugin.refilterMessages();
+    const admission = f.env.observers[1];
+    admission.visible(f.parent.children[2]);
+    f.plugin.settings.renderCap = 0;
+    f.env.tick();
+    assert.equal(f.plugin.menu.shownMessages, 7);
+    assert.equal(f.parent.children.length, 7);
+    assert.equal(admission.targets.size, 0);
+    assert.deepEqual(f.built, [], 'unlimited admission still defers heavy row rendering');
+    f.env.tick();
+    assert.equal(f.env.frames.length, 0, 'the completed view cannot schedule an empty batch loop');
+  } finally { f.plugin._viewportSession?.reset(); f.env.restore(); }
+});
+
+test('automatic batch callbacks are cancelled by park, refilter and session reset', () => {
+  for (const action of ['park', 'refilter', 'reset']) {
+    const f = loggerFixture();
+    try {
+      f.plugin.refilterMessages();
+      const bar = f.parent.children[2], admission = f.env.observers[1];
+      admission.visible(bar);
+      if (action === 'park') f.plugin.parkLoggerViewportView(f.plugin._loggerViewportView);
+      if (action === 'refilter') f.plugin.refilterMessages();
+      if (action === 'reset') f.plugin._viewportSession.reset();
+      f.env.tick();
+      assert.equal(f.plugin.menu.shownMessages, 2, action);
+      admission.visible(bar);
+      f.env.tick();
+      assert.equal(f.plugin.menu.shownMessages, 2, action);
+      assert.equal(admission.targets.size, 0, action);
+    } finally { f.plugin._viewportSession?.reset(); f.env.restore(); }
+  }
+});
+
+test('legacy scroll fallback fills only when the status bar reaches the viewport', () => {
+  const f = loggerFixture({ ids: ['a', 'b', 'c', 'd', 'e'], observer: false });
+  const old = { addEventListener: global.addEventListener, removeEventListener: global.removeEventListener,
+    innerHeight: global.innerHeight, getComputedStyle: global.getComputedStyle };
+  const handlers = new Map();
+  let top = 1200, height = 20, clipped = false;
+  global.innerHeight = 500;
+  global.getComputedStyle = node => ({ overflowY: node === f.parent && clipped ? 'hidden' : 'visible' });
+  global.addEventListener = (type, callback) => handlers.set(type, callback);
+  global.removeEventListener = (type, callback) => { if (handlers.get(type) === callback) handlers.delete(type); };
+  global.document.createElement = tag => { const node = new Element(tag); node.getBoundingClientRect = () => ({ top, bottom: top + height, height }); return node; };
+  f.parent.getBoundingClientRect = () => ({ top: 700, bottom: 800 });
+  try {
+    f.plugin.refilterMessages();
+    f.env.tick();
+    assert.equal(f.plugin.menu.shownMessages, 2);
+    assert.equal(f.built.length, 2);
+    top = 450;
+    height = 0;
+    handlers.get('scroll')();
+    f.env.tick();
+    assert.equal(f.plugin.menu.shownMessages, 2, 'a hidden zero-area bar stays cold');
+    height = 20;
+    clipped = true;
+    handlers.get('scroll')();
+    f.env.tick();
+    assert.equal(f.plugin.menu.shownMessages, 2, 'an empty ancestor/window intersection stays cold');
+    clipped = false;
+    handlers.get('scroll')();
+    f.env.tick();
+    assert.equal(f.plugin.menu.shownMessages, 4);
+    f.env.tick();
+    f.env.tick();
+    assert.equal(f.plugin.menu.shownMessages, 5);
+    assert.equal(handlers.size, 0);
+  } finally {
+    f.plugin.parkLoggerViewportView(f.plugin._loggerViewportView);
+    f.env.restore();
+    for (const [key, value] of Object.entries(old)) { if (value === undefined) delete global[key]; else global[key] = value; }
+  }
+});
+
+
+test('legacy automatic admission is cancelled on session reset', () => {
+  const f = loggerFixture({ observer: false });
+  const old = { addEventListener: global.addEventListener, removeEventListener: global.removeEventListener,
+    innerHeight: global.innerHeight, getComputedStyle: global.getComputedStyle };
+  const handlers = new Map();
+  global.innerHeight = 500;
+  global.getComputedStyle = () => ({ overflowY: 'visible' });
+  global.addEventListener = (type, callback) => handlers.set(type, callback);
+  global.removeEventListener = (type, callback) => { if (handlers.get(type) === callback) handlers.delete(type); };
+  global.document.createElement = tag => { const node = new Element(tag); node.getBoundingClientRect = () => ({ top: 450, bottom: 470, height: 20 }); return node; };
+  try {
+    f.plugin.refilterMessages();
+    f.env.tick();
+    assert.equal(f.plugin.menu.shownMessages, 2);
+    f.plugin._viewportSession.reset();
+    f.env.tick();
+    assert.equal(f.plugin.menu.shownMessages, 2);
+    assert.equal(handlers.size, 0);
+  } finally {
+    f.env.restore();
+    for (const [key, value] of Object.entries(old)) { if (value === undefined) delete global[key]; else global[key] = value; }
+  }
+});
+
+test('zero render cap registers all rows with no automatic batch bar', () => {
+  const f = loggerFixture();
+  try {
+    f.plugin.settings.renderCap = 0;
+    f.plugin.refilterMessages();
+    assert.equal(f.parent.children.length, 4);
+    assert.equal(f.env.observers.length, 1);
+    assert.deepEqual(f.built, []);
+  } finally { f.plugin._viewportSession?.reset(); f.env.restore(); }
 });

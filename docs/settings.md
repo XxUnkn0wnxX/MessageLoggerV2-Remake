@@ -242,9 +242,9 @@ Anti-Nuke records are archival because their parent channel no longer exists, so
 | --- | --- | --- |
 | Cached messages cap | `1000` | Maximum sent messages retained in the working cache. |
 | Saved messages cap | `1000` | Separate maximum for deleted, edited, purged, and nuked records. |
-| Menu message render cap | `50` | Number rendered before **Load More** appears. |
+| Menu message render cap | `50` | Rows added per automatic batch as the status bar approaches the viewport. `0` disables batching. |
 
-Caps are enforced periodically. Increasing a cap does not restore records that were already removed.
+Storage caps are enforced periodically. Increasing a cap does not restore records that were already removed.
 
 Message-history caching and hierarchical media storage are core behavior with no separate toggles.
 

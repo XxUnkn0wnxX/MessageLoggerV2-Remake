@@ -155,7 +155,7 @@ test('local-cache completion preserves retained views and still refreshes a lega
 });
 
 
-test('media fallback preserves real Load More expansion and scroll across Logger tabs', () => {
+test('media fallback preserves automatic batch expansion and scroll across Logger tabs', () => {
   for (const selectedTab of ['purged', 'deleted', 'edited', 'nuked', 'ghostpings']) {
     const h = setup();
     try {
@@ -171,8 +171,10 @@ test('media fallback preserves real Load More expansion and scroll across Logger
       h.plugin.menu.selectedTab = selectedTab;
       h.plugin.menu.shownMessages = -1;
       h.plugin.refilterMessages();
-      h.root.children[2].children[0].click();
-      h.root.children[4].children[0].click();
+      h.observers.at(-1).show(h.root.children[2]);
+      h.tick();
+      h.observers.at(-1).show(h.root.children[4]);
+      h.tick();
       assert.equal(h.plugin.menu.shownMessages, 6);
       assert.equal(h.root.children.length, 7);
       const slots = h.root.children.slice(0, 6), more = h.root.children[6];
