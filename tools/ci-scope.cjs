@@ -10,6 +10,8 @@ const SHA = /^[0-9a-f]{40}$/i;
 function fileNeedsTests(file) {
   const path = file.replaceAll('\\', '/');
 
+  if (/^\.github\/(?:ISSUE_TEMPLATE|PULL_REQUEST_TEMPLATE)\/[^/]+\.md$/i.test(path)
+    || /^\.github\/PULL_REQUEST_TEMPLATE\.md$/i.test(path)) return false;
   if (path.startsWith('.github/')) return true;
   if (path.startsWith('tests/') || path.startsWith('tools/')) return true;
   if (path.startsWith('docs/')) {
@@ -27,16 +29,25 @@ function selectScope(eventName, event, files) {
     return { run: true, reason: 'Manual dispatch runs the full test suite.' };
   }
 
-  if (!Array.isArray(files)) {
-    return { run: true, reason: 'Changed-file range is unavailable; running tests conservatively.' };
+  if (eventName === 'push') {
+    const ref = event && typeof event.ref === 'string' ? event.ref : '';
+    if (ref && ref !== 'refs/heads/develop') {
+      return { run: false, reason: 'Push is outside the develop branch CI scope.' };
+    }
+    if (!ref) {
+      return { run: true, reason: 'Push branch is unavailable; running tests conservatively.' };
+    }
   }
 
-  const ref = event && typeof event.ref === 'string' ? event.ref : '';
-  if (eventName === 'push' && ref !== 'refs/heads/develop') {
-    const workflowChanged = files.some((file) => file.startsWith('.github/'));
-    return workflowChanged
-      ? { run: true, reason: 'Workflow configuration changed; running tests.' }
-      : { run: false, reason: 'Non-develop push has no workflow changes; pull requests validate code changes.' };
+  if (eventName === 'pull_request') {
+    const baseRef = event && event.pull_request && event.pull_request.base && event.pull_request.base.ref;
+    if (typeof baseRef === 'string' && baseRef !== 'develop') {
+      return { run: false, reason: 'Pull request does not target develop; skipping this workflow scope.' };
+    }
+  }
+
+  if (!Array.isArray(files)) {
+    return { run: true, reason: 'Changed-file range is unavailable; running tests conservatively.' };
   }
 
   const codeChanged = files.some(fileNeedsTests);

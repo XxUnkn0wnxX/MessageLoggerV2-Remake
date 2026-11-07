@@ -10,10 +10,11 @@ const test = require('node:test');
 const { changedFiles, selectScope } = require('../tools/ci-scope.cjs');
 
 const sha = (digit) => digit.repeat(40);
+const developPr = { pull_request: { base: { ref: 'develop' } } };
 
 test('PR scope includes all cumulative changes and still tests code alongside docs', () => {
   const files = ['docs/release.md', 'MessageLoggerV2.plugin.js'];
-  assert.deepEqual(selectScope('pull_request', {}, files), {
+  assert.deepEqual(selectScope('pull_request', developPr, files), {
     run: true,
     reason: 'Code, tests, tooling, or workflow files changed; running tests.',
   });
@@ -21,26 +22,37 @@ test('PR scope includes all cumulative changes and still tests code alongside do
 
 test('docs-only PR changes finish successfully without the test workload', () => {
   const files = ['docs/tests.md', 'README.md', 'LICENSE'];
-  assert.equal(selectScope('pull_request', {}, files).run, false);
+  assert.equal(selectScope('pull_request', developPr, files).run, false);
 });
 
 test('only known documentation extensions are excluded from test scope', () => {
-  assert.equal(selectScope('pull_request', {}, ['DELETED-IMAGE-CACHE-RENDERING-CHECKLIST.md']).run, false);
-  assert.equal(selectScope('pull_request', {}, ['README.js']).run, true);
-  assert.equal(selectScope('pull_request', {}, ['docs/probe.js']).run, true);
-  assert.equal(selectScope('pull_request', {}, ['docs/image.png']).run, false);
+  assert.equal(selectScope('pull_request', developPr, ['DELETED-IMAGE-CACHE-RENDERING-CHECKLIST.md']).run, false);
+  assert.equal(selectScope('pull_request', developPr, ['README.js']).run, true);
+  assert.equal(selectScope('pull_request', developPr, ['docs/probe.js']).run, true);
+  assert.equal(selectScope('pull_request', developPr, ['docs/image.png']).run, false);
+  assert.equal(selectScope('pull_request', developPr, ['.github/ISSUE_TEMPLATE/bug_report.md']).run, false);
+  assert.equal(selectScope('pull_request', developPr, ['.github/ISSUE_TEMPLATE/config.yml']).run, true);
+  assert.equal(selectScope('pull_request', developPr, ['.github/PULL_REQUEST_TEMPLATE.md']).run, false);
 });
 
 test('tests, tools, unknown paths, and workflow changes always require tests', () => {
   for (const file of ['tests/README.md', 'tools/notes.md', 'unknown/config.txt', '.github/workflows/ci.yml']) {
-    assert.equal(selectScope('pull_request', {}, [file]).run, true, file);
+    assert.equal(selectScope('pull_request', developPr, [file]).run, true, file);
   }
+  assert.equal(selectScope('pull_request', developPr, ['package.json']).run, true);
 });
 
-test('feature pushes test workflow changes but leave ordinary code for the PR', () => {
+test('non-develop pushes stay out of scope even when workflows change', () => {
   const event = { ref: 'refs/heads/feature/example' };
   assert.equal(selectScope('push', event, ['MessageLoggerV2.plugin.js']).run, false);
-  assert.equal(selectScope('push', event, ['.github/workflows/ci.yml']).run, true);
+  assert.equal(selectScope('push', event, ['.github/workflows/ci.yml']).run, false);
+});
+
+test('non-develop PR bases stay out of scope even when workflows change or diff is unavailable', () => {
+  const event = { pull_request: { base: { ref: 'release' } } };
+  assert.equal(selectScope('pull_request', event, ['MessageLoggerV2.plugin.js']).run, false);
+  assert.equal(selectScope('pull_request', event, ['.github/workflows/ci.yml']).run, false);
+  assert.equal(selectScope('pull_request', event, null).run, false);
 });
 
 test('develop pushes test code and skip docs-only changes; manual runs are always full', () => {
@@ -48,12 +60,14 @@ test('develop pushes test code and skip docs-only changes; manual runs are alway
   assert.equal(selectScope('push', develop, ['docs/release.md']).run, false);
   assert.equal(selectScope('push', develop, ['tools/ci-scope.cjs']).run, true);
   assert.equal(selectScope('workflow_dispatch', {}, []).run, true);
+  assert.equal(selectScope('workflow_dispatch', { ref: 'refs/heads/feature/example' }, []).run, true);
 });
 
 test('unknown and unavailable change ranges conservatively run tests', () => {
-  assert.equal(selectScope('pull_request', {}, null).run, true);
+  assert.equal(selectScope('pull_request', developPr, null).run, true);
   assert.deepEqual(changedFiles('push', { before: sha('0'), after: sha('1') }), null);
   assert.deepEqual(changedFiles('pull_request', { pull_request: { base: { sha: 'bad' }, head: { sha: sha('1') } } }), null);
+  assert.equal(selectScope('push', { ref: 'refs/heads/develop' }, null).run, true);
 });
 
 test('Git ranges exclude base-only PR changes, include push changes, and retain rename deletions', (t) => {
@@ -100,21 +114,21 @@ test('Git ranges exclude base-only PR changes, include push changes, and retain 
   const [root, develop, feature] = refs;
 
   const prFiles = changedFiles('pull_request', {
-    pull_request: { base: { sha: develop }, head: { sha: feature } },
+    pull_request: { base: { ref: 'develop', sha: develop }, head: { sha: feature } },
   }, repo);
   assert.deepEqual(prFiles.sort(), ['docs/plugin.md', 'plugin.js']);
   assert.equal(prFiles.includes('base-only.js'), false, 'three-dot range excludes base-only changes');
-  assert.equal(selectScope('pull_request', {}, prFiles).run, true, 'source deletion keeps a move into docs in test scope');
+  assert.equal(selectScope('pull_request', developPr, prFiles).run, true, 'source deletion keeps a move into docs in test scope');
 
-  const pushFiles = changedFiles('push', { before: root, after: develop }, repo);
+  const pushFiles = changedFiles('push', { ref: 'refs/heads/develop', before: root, after: develop }, repo);
   assert.deepEqual(pushFiles, ['base-only.js'], 'two-dot range includes the pushed change');
   assert.equal(selectScope('push', { ref: 'refs/heads/develop' }, pushFiles).run, true);
 });
 
 test('Git diff failure conservatively selects tests', () => {
   const files = changedFiles('pull_request', {
-    pull_request: { base: { sha: sha('a') }, head: { sha: sha('b') } },
+    pull_request: { base: { ref: 'develop', sha: sha('a') }, head: { sha: sha('b') } },
   }, '/missing-repository');
   assert.equal(files, null);
-  assert.equal(selectScope('pull_request', {}, files).run, true);
+  assert.equal(selectScope('pull_request', developPr, files).run, true);
 });

@@ -45,11 +45,11 @@ npm run test:runtime-audit
 
 ## Continuous integration
 
-The GitHub Actions workflow uses the same `npm test` entry point for pull requests,
-code changes pushed to `develop`, workflow changes, and manual runs. It keeps one
-stable `Tests` job. Documentation-only changes finish successfully without running
-the test workload; ordinary feature-branch code pushes are checked through their
-pull request. Missing or unreadable change ranges run the suite conservatively.
+The GitHub Actions workflow uses the same `npm test` entry point for pull requests
+targeting `develop`, pushes to `develop`, and manual runs. It keeps one stable `Tests`
+job. Documentation-only changes finish successfully without running the test
+workload. Missing or unreadable change ranges in an in-scope event run the suite
+conservatively.
 
 The suite has no package dependencies, so CI needs no install step or dependency
 cache. `tests/ci-scope.test.js` checks the change-selection rules. Authoring and

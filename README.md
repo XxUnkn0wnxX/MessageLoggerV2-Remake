@@ -1,5 +1,7 @@
 # 📝 MessageLoggerV2 Remake
 
+[![CI tests on develop](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/workflows/ci.yml/badge.svg?branch=develop&event=push)](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/workflows/ci.yml?query=branch%3Adevelop)
+
 > [!WARNING]
 > **Active development:** rework and native Discord testing are still in progress. Unfinished features and known limitations remain. **develop** is the working/default branch; **main** currently contains only a holding README.
 
