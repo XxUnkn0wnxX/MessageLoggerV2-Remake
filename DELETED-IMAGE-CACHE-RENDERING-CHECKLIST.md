@@ -73,7 +73,10 @@ compact roadmap.
 
 ### R7 — Viewport loading and session retention
 
-**Status: implementation and scroll corrections require native acceptance.**
+**Status: implemented; restored-history attachment tint follow-up open.**
+The [2026-11-08 acceptance receipt](#2026-11-08--consolidated-local-acceptance)
+supersedes the pending statuses in the historical checkpoints below. Broader
+per-surface rows remain open where their full native coverage was not established.
 Shared viewport scheduling, retained Logger/native roots, restored-card placement,
 probe suspension/resumption and classified diagnostics are integrated. The user
 requested one complete build before the authorised closed-client install and
@@ -118,8 +121,8 @@ the source correction is installed. The latest native check adds one display req
 - [x] R7.10 implementation and focused gate: bounded same-session media-Off catch-up reuses the existing deferred-media/cache path, with both media and saving gates, successful-save ordering, current child restrictions, cancellation and `DEBUG CACHE` summaries. All 11 focused catch-up tests passed; native acceptance remains pending.
 - [x] Media-Off suppression/catch-up gate and closed-client installation: 986/986 tests passed (no skips or failures; 6.93 seconds), and build `9efcb95` was installed with data/settings/private-helper preservation verified. Native acceptance then exposed generated blank lines in text-only history; the spacing correction is now installed as `2098ad2` and visible in the channel capture. The unchanged-text attachment-removal history correction is now installed as `51ef560` and user-confirmed with media Off in channel and Logger.
 - [x] Final media-Off history behavior in channel and Logger: the user confirms attachment-only rows are hidden and genuine text edits remain. Channel media-On restoration also passes.
-- [ ] Logger media-On snapshot placement: each removed preview or fallback must appear with its corresponding edit in canonical order. The shared row builder captures a per-marker destination, including asynchronous failures. Build `3ef72ee` passed 983/983 locally and in GitHub Actions and is installed; native placement acceptance remains pending.
-- [ ] Focused native Off/On confirmation in chat and Logger; confirm media-only
+- [x] Logger media-On snapshot placement: each removed preview or fallback appears with its corresponding edit in canonical order. The shared row builder captures a per-marker destination, including asynchronous failures. User-confirmed through final local check 2; deterministic coverage includes fallback placement.
+- [x] Focused native Off/On confirmation in chat and Logger; confirm media-only
       edits and unchanged-text attachment-removal edits vanish, genuine text edits remain, embeds disappear, and media returns.
 
 - [ ] Cover the **main Logger window**, including available tabs, filters,
@@ -3983,3 +3986,48 @@ The user confirms local checks 1 (spacing), 2 (media off/on and edit placement),
 A native capture shows an already-hidden edited record still in Discord’s message store after deletion, without tint. The delete handler retained it using the global display switch instead of the canonical record’s visibility. The correction applies the existing per-record gate to single deletes and releases only hidden IDs from mixed purges, preserving saved data and the original event. The new regression reproduces the failure before the fix.
 
 Both permanent legacy controls were audited. Aggressive message caching was already correctly locked. The new cached-images control had an `enableWith` dependency that overrides its explicit disabled flag in both supported BetterDiscord builders; that dependency is removed, preserving the forced-On normalization and callback. Ordinary dependent controls remain unchanged. Local validation passes **989/989**, with no failures or skips. The focused native sequence, locked-state confirmation and final warmed compatibility capture remain open; earlier checks need no repeat.
+
+### 2026-11-08 — Consolidated local acceptance
+
+The user confirms these local checks pass: Logger row spacing; media Off/On
+suppression and snapshot placement; source gates; same-session recovery and saving
+gates; hide/edit/delete restoration; locked controls; and menu/debug behavior.
+Restored deleted TXT styling is also confirmed on installed source `d88ac57`.
+Its shared retained-content bridge keeps native file cards outside message-text
+selectors while preserving the actual text identity, callbacks and deletion tooltip.
+
+JavaScript syntax validation and **990/990 local tests** pass, with no failures,
+skips or cancellations. [GitHub CI for the installed source](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/runs/42415571848)
+also passes **990/990**. Closed-client installation preserved settings, saved
+records, backups and the existing private audit helper; source/live hashes match.
+
+The final runtime audit at `2026-11-07T21:27:23.233Z` reports **67 passes,
+24 warnings and zero failures** across 91 contracts. Twenty-two warnings have
+valid selected consumer contracts despite discovery ambiguity; the optional
+load-entry transition was not requested, and no paired forum cards were visible.
+The scanner visited 8,356 roots without errors; its truncation flag limits the
+reported module-ID list, not the scan. Earlier forum-layout evidence remains
+separate; this capture does not re-test that layout.
+
+Further testing reopened attachment tint acceptance: after hiding edits, deleting
+the remaining live message and unhiding it, only the first native file container
+receives greyscale. Later Markdown/code previews remain coloured, and Markdown
+body text inherits the red message tint on hover. The correction must cover all
+deleted attachment previews in live conversations, including removal history on
+still-live messages, and keep attachment content outside the message-text tint
+rule. Logger's viewer retains full-colour previews; alternative whole-row
+background tint remains available in live conversations. Prior TXT layout
+acceptance and the zero-failure compatibility audit remain valid; this new visual
+check is open. It does not establish every broader surface/performance row above.
+
+The focused correction reconciles every matching native accessories container
+within the live message row and excludes attachment content from the message-text
+tint selectors. Regression coverage fails on the original first-container behavior
+and passes with the fix, including later mounts, stale markers, no-op updates,
+no-tint/visibility/alternative-style transitions and the Logger-viewer boundary.
+Native greyscale and Markdown-hover confirmation remain pending installation.
+
+The intermittent early cold-start display issue
+remains explicitly deferred, and the ordinary-thread full-format matrix remains
+waived rather than passed. No speedup claim is made. The user is performing
+additional exploratory checks; old-host rebase and site work remain parked.

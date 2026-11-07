@@ -81,6 +81,144 @@ function fakeNode(tag) {
   Object.defineProperty(node, 'classList', { get: () => classes, set: value => { tokens.clear(); String(value).split(/\s+/).filter(Boolean).forEach(token => tokens.add(token)); } });
   return node;
 }
+
+test('deleted tint marks every exact message accessories root and clears them on hide or alternate tint', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'MessageLoggerV2.plugin.js'), 'utf8');
+  const markerStart = source.indexOf('const clearDeletedAttachmentRendererMarkers =');
+  const markerEnd = source.indexOf('    const clearForumTextTint', markerStart);
+  const tintStart = source.indexOf('const tintMessageNode = (node) => {', markerEnd);
+  const tintEnd = source.indexOf('    const findLowestCommonAncestor', tintStart);
+  assert.ok(markerStart >= 0 && markerEnd > markerStart && tintStart > markerEnd && tintEnd > tintStart);
+
+  const wrapper = fakeNode('div');
+  wrapper.nodeType = 1;
+  const marked = new Map();
+  const descendants = root => {
+    const result = [];
+    const visit = parent => parent.children.forEach(child => { result.push(child); visit(child); });
+    visit(root);
+    return result;
+  };
+  wrapper.querySelectorAll = selector => descendants(wrapper).filter(node => {
+    if (selector === '[id]') return !!node.id;
+    if (selector === '.deleted-renderer') return node.classList.contains('deleted-renderer');
+    return false;
+  });
+  wrapper.contains = node => {
+    while (node) {
+      if (node === wrapper) return true;
+      node = node.parentElement;
+    }
+    return false;
+  };
+  const makeAccessories = id => {
+    const node = fakeNode('div');
+    node.nodeType = 1;
+    node.id = id;
+    const counts = { add: 0, remove: 0 };
+    const add = node.classList.add, remove = node.classList.remove;
+    node.classList.add = (...classes) => {
+      counts.add += classes.length;
+      add(...classes);
+    };
+    node.classList.remove = (...classes) => {
+      counts.remove += classes.length;
+      remove(...classes);
+    };
+    marked.set(node, counts);
+    wrapper.appendChild(node);
+    return node;
+  };
+  const messageRoot = fakeNode('div');
+  messageRoot.id = 'chat-messages-channel-message';
+  messageRoot.querySelectorAll = selector => selector === '[data-ml2-removed-preview]' ? [preview] : [];
+  const first = makeAccessories('message-accessories-message');
+  const second = makeAccessories('message-accessories-message');
+  const wrongMessage = makeAccessories('message-accessories-other');
+  const preview = fakeNode('div');
+  preview.dataset.ml2RemovedPreview = 'true';
+  preview.classList.add('removed-preview');
+  const record = { delete_data: null };
+  const plugin = {
+    style: { deleted: 'deleted', deletedAlt: 'deleted-alt', deletedAttachmentRenderer: 'deleted-renderer', removedAttachmentPreview: 'removed-preview' },
+    settings: { useAlternativeDeletedStyle: false },
+    noTintIds: new Set(),
+    getSavedMessage: () => record
+  };
+  const visibility = { value: false };
+  const helperCode = source.slice(markerStart, markerEnd);
+  const tintCode = source.slice(tintStart, tintEnd);
+  const helpers = vm.runInNewContext(`(function () {
+    const clearTintClasses = target => {
+      let changed = false;
+      for (const className of [this.style.deleted, this.style.deletedAlt]) {
+        if (target.classList.contains(className)) {
+          target.classList.remove(className);
+          changed = true;
+        }
+      }
+      return changed;
+    };
+    const addTintClass = target => target.classList.add(this.settings.useAlternativeDeletedStyle ? this.style.deletedAlt : this.style.deleted);
+    const shouldTintMessage = () => visibility.value;
+    const getMessageTintTarget = () => wrapper;
+    ${helperCode}
+    ${tintCode}
+    return {tintMessageNode, syncDeletedAttachmentRendererMarker, clearDeletedAttachmentRendererMarkers};
+  }).call(plugin)`, {plugin, wrapper, visibility});
+  const tint = () => helpers.tintMessageNode(messageRoot);
+  const hasMarker = node => node.classList.contains('deleted-renderer');
+
+  tint();
+  assert.equal(preview.classList.contains('removed-preview'), true, 'live edit keeps its removed-attachment preview tint');
+  assert.equal(hasMarker(first) || hasMarker(second), false);
+
+  record.delete_data = { time: 1 };
+  wrongMessage.classList.add('deleted-renderer');
+  visibility.value = true;
+  tint();
+  assert.equal(preview.classList.contains('removed-preview'), false, 'whole-message deletion clears the edit-only preview tint');
+  assert.equal(hasMarker(first), true);
+  assert.equal(hasMarker(second), true, 'all matching history roots receive grayscale ownership');
+  assert.equal(hasMarker(wrongMessage), false, 'a stale root for another message is cleared');
+  const loggerStyleRow = fakeNode('div');
+  loggerStyleRow.messageId = 'message';
+  loggerStyleRow.dataset.ml2LoggerMessageStart = 'true';
+  const firstBeforeLoggerRow = {...marked.get(first)}, secondBeforeLoggerRow = {...marked.get(second)};
+  helpers.tintMessageNode(loggerStyleRow);
+  assert.deepEqual(marked.get(first), firstBeforeLoggerRow, 'Logger-owned rows are outside native deleted-message tint');
+  assert.deepEqual(marked.get(second), secondBeforeLoggerRow);
+
+  const later = makeAccessories('message-accessories-message');
+  tint();
+  assert.equal(hasMarker(later), true, 'a later mounted history root is marked');
+  tint();
+  assert.deepEqual(marked.get(first), { add: 1, remove: 0 }, 'reconciliation leaves already-correct roots untouched');
+  assert.deepEqual(marked.get(second), { add: 1, remove: 0 });
+  assert.deepEqual(marked.get(later), { add: 1, remove: 0 });
+  assert.equal(helpers.clearDeletedAttachmentRendererMarkers(wrapper, first), true, 'the clear helper still accepts one retained root');
+  assert.equal(hasMarker(first), true);
+  assert.equal(hasMarker(second) || hasMarker(later), false);
+  tint();
+  assert.equal([first, second, later].every(hasMarker), true);
+
+  plugin.noTintIds.add('message');
+  tint();
+  assert.equal([first, second, later].some(hasMarker), false, 'noTint removes every marker');
+  plugin.noTintIds.delete('message');
+  tint();
+  assert.equal([first, second, later].every(hasMarker), true, 'unhiding restores every marker');
+  visibility.value = false;
+  tint();
+  assert.equal([first, second, later].some(hasMarker), false, 'hidden deletions clear every marker');
+  visibility.value = true;
+  tint();
+  assert.equal([first, second, later].every(hasMarker), true, 'restored visibility marks every root again');
+  plugin.settings.useAlternativeDeletedStyle = true;
+  tint();
+  assert.equal([first, second, later].some(hasMarker), false, 'alternative deleted style clears renderer markers');
+});
+
 function renderLogger(kind, cached = true, localOnly = false) {
   const data = fixture(kind, cached, localOnly);
   const { plugin, record, entry } = data;

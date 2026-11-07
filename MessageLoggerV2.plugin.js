@@ -1206,7 +1206,8 @@ module.exports = class MessageLoggerV2 {
         type: 'fixed',
         items: [
           'Fixed freezes during rapid scrolling and tab switching, unwanted scroll resets, file-preview styling in edits and deleted restores, and restored forum-card layout. Clicking the active Logger tab returns to the top.',
-          'Deleting a message with hidden edits now removes its live row while preserving the hidden record. Required legacy cache controls stay locked on.'
+          'Deleting a message with hidden edits now removes its live row while preserving the hidden record. Required legacy cache controls stay locked on.',
+          'Deleted-message grayscale now covers every matching file history root, while Markdown attachments retain their native text colour on hover.'
         ]
       },
       {
@@ -2274,6 +2275,7 @@ module.exports = class MessageLoggerV2 {
     this.stringHeldCaptive = this.randomString();
     this.updateCSS = () => {
       const nextStyleKey = this.settings.obfuscateCSSClasses ? this.stringHeldCaptive : 'ML2-CSS';
+      const deletedAttachmentTextExclusion = `:not([data-ml2-removed-preview] *, [id^="message-accessories-"] *, .${this.style.deletedAttachmentRenderer} *)`;
       // Remove every possible key before adding the current sheet. This also keeps a failed
       // or deferred class-mode restart from leaving both literal and randomized sheets active.
       for (const styleKey of new Set([this.style.css, this.stringHeldCaptive, 'ML2-CSS'])) {
@@ -2288,8 +2290,8 @@ module.exports = class MessageLoggerV2 {
                       inset: 0;
                       pointer-events: none;
                     }
-                    .${this.style.deleted} .${this.classes.markup}:not([class*="markdownContainer"]),
-                    .${this.style.deleted} .${this.classes.markup}:not([class*="markdownContainer"]) .hljs {
+                    .${this.style.deleted} .${this.classes.markup}:not([class*="markdownContainer"])${deletedAttachmentTextExclusion},
+                    .${this.style.deleted} .${this.classes.markup}:not([class*="markdownContainer"]) .hljs${deletedAttachmentTextExclusion} {
                         color: ${this.settings.deletedMessageColor || "#f04747"} !important;
                     }
                     html #app-mount [data-item-id].${this.style.deleted} {
@@ -22949,7 +22951,8 @@ module.exports = class MessageLoggerV2 {
       markedNodes.push(...Array.from(root.querySelectorAll?.(`.${marker}`) || []));
       let changed = false;
       for (const node of markedNodes) {
-        if (node === keep || !node?.classList?.contains?.(marker)) continue;
+        if ((keep instanceof Set ? keep.has(node) : node === keep)
+          || !node?.classList?.contains?.(marker)) continue;
         node.classList.remove(marker);
         changed = true;
       }
@@ -22962,15 +22965,17 @@ module.exports = class MessageLoggerV2 {
         return clearDeletedAttachmentRendererMarkers(wrapper);
       }
       const targetId = `message-accessories-${messageId}`;
-      const target = Array.from(wrapper.querySelectorAll?.('[id]') || [])
-        .find(node => node?.id === targetId);
-      if (!target || target === wrapper || !wrapper.contains?.(target)) {
+      const targets = Array.from(wrapper.querySelectorAll?.('[id]') || [])
+        .filter(node => node !== wrapper && node?.id === targetId && wrapper.contains?.(node));
+      if (!targets.length) {
         return clearDeletedAttachmentRendererMarkers(wrapper);
       }
-      let changed = clearDeletedAttachmentRendererMarkers(wrapper, target);
-      if (!target.classList.contains(marker)) {
-        target.classList.add(marker);
-        changed = true;
+      let changed = clearDeletedAttachmentRendererMarkers(wrapper, new Set(targets));
+      for (const target of targets) {
+        if (!target.classList.contains(marker)) {
+          target.classList.add(marker);
+          changed = true;
+        }
       }
       return changed;
     };

@@ -168,7 +168,7 @@ The Logger session retains its owned DOM and React roots across scrolling, navig
 
 Native bridges preserve Discord's original text anchor/ref and message accessory envelope while the retained root owns saved history and content. Deleted content uses the same neutral layout and text-anchor placement as edit history: file cards stay outside native Markdown classes and the message-content identifier, including after deletion, unhide and warm remount. Actual text keeps its native formatting, identity and deletion tooltip. Restored forum/thread-browser cards use same-tag shell swaps that preserve native ancestry. Other Discord chrome stays native. Existing source policy, acquisition/retries, schema, history, Pins, batch behavior, and rendering caps remain unchanged; retention does not introduce display-driven retries or hidden playback, and native ownership and canonical-source guards remain in force.
 
-The new native DOM behavior still needs live Discord acceptance. The intermittent startup missing-history issue is deferred and is not fixed by R7. See the [R7 acceptance checklist](../DELETED-IMAGE-CACHE-RENDERING-CHECKLIST.md#r7--viewport-loading-and-session-retention).
+The consolidated local checks and newly reopened attachment-tint follow-up are recorded in the [acceptance receipt and coverage limits](../DELETED-IMAGE-CACHE-RENDERING-CHECKLIST.md#2026-11-08--consolidated-local-acceptance). This does not certify every native surface or a performance improvement. The intermittent startup missing-history issue remains deferred and is not fixed by R7; broader per-surface requirements remain in the [R7 acceptance checklist](../DELETED-IMAGE-CACHE-RENDERING-CHECKLIST.md#r7--viewport-loading-and-session-retention).
 
 ## 🔔 Notifications
 

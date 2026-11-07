@@ -1198,7 +1198,7 @@ test('deleted markdown tint excludes Components V2 markdown containers', () => {
   );
   assert.match(
     deletedTint,
-    /\.\$\{this\.style\.deleted\} \.\$\{this\.classes\.markup\}:not\(\[class\*="markdownContainer"\]\),\s*\.\$\{this\.style\.deleted\} \.\$\{this\.classes\.markup\}:not\(\[class\*="markdownContainer"\]\) \.hljs \{\s*color: \$\{this\.settings\.deletedMessageColor \|\| "#f04747"\} !important;\s*\}/
+    /\.\$\{this\.style\.deleted\} \.\$\{this\.classes\.markup\}:not\(\[class\*="markdownContainer"\]\)\$\{deletedAttachmentTextExclusion\},\s*\.\$\{this\.style\.deleted\} \.\$\{this\.classes\.markup\}:not\(\[class\*="markdownContainer"\]\) \.hljs\$\{deletedAttachmentTextExclusion\} \{\s*color: \$\{this\.settings\.deletedMessageColor \|\| "#f04747"\} !important;\s*\}/
   );
   assert.equal(
     deletedTint.includes('.${this.style.deleted} .${this.classes.markup},'),
@@ -1246,6 +1246,18 @@ test('deleted attachment renderer tint stays exact-row owned and renderer-driven
     /deletedAttachmentRenderer[\s\S]*color: \$\{this\.settings\.deletedMessageColor/
   );
   assert.doesNotMatch(deletedTint, /deletedAlt[\s\S]*deletedAttachmentRenderer/);
+  const deletedTextTint = source.slice(
+    source.indexOf('const deletedAttachmentTextExclusion ='),
+    source.indexOf('html #app-mount [data-item-id].' + String.fromCharCode(36) + '{this.style.deleted}')
+  );
+  const templateTick = String.fromCharCode(96);
+  assert.ok(deletedTextTint.includes(
+    'const deletedAttachmentTextExclusion = ' + templateTick
+      + ':not([data-ml2-removed-preview] *, [id^="message-accessories-"] *, .${this.style.deletedAttachmentRenderer} *)'
+      + templateTick + ';'
+  ));
+  assert.ok(deletedTextTint.includes('classes.markup}:not([class*="markdownContainer"])${deletedAttachmentTextExclusion},'));
+  assert.ok(deletedTextTint.includes('.hljs${deletedAttachmentTextExclusion}'));
 
   const mediaTint = source.slice(
     source.indexOf('.theme-dark .${this.style.deleted}:not(:hover) img:not'),
@@ -1265,9 +1277,9 @@ test('deleted attachment renderer tint stays exact-row owned and renderer-driven
     source.indexOf('const findLowestCommonAncestor =')
   );
   assert.match(tintOwnership, /targetId = `message-accessories-\$\{messageId\}`/);
-  assert.match(tintOwnership, /querySelectorAll\?\.\('\[id\]'\)[\s\S]*node\?\.id === targetId[\s\S]*wrapper\.contains\?\.\(target\)/);
-  assert.match(tintOwnership, /clearDeletedAttachmentRendererMarkers\(wrapper, target\)/);
-  assert.match(tintOwnership, /node === keep \|\| !node\?\.classList\?\.contains\?\.\(marker\)/);
+  assert.match(tintOwnership, /const targets = Array\.from\(wrapper\.querySelectorAll\?\.\('\[id\]'\)[\s\S]*\.filter\(node => node !== wrapper && node\?\.id === targetId && wrapper\.contains\?\.\(node\)\)/);
+  assert.match(tintOwnership, /clearDeletedAttachmentRendererMarkers\(wrapper, new Set\(targets\)\)/);
+  assert.match(tintOwnership, /keep instanceof Set \? keep\.has\(node\) : node === keep/);
   assert.match(tintOwnership, /!marker \|\| !shouldTint \|\| this\.settings\.useAlternativeDeletedStyle/);
   assert.doesNotMatch(tintOwnership, /isImage|isVideo|isAudio|filename|content_type|\.mp4|\.pdf/);
 
