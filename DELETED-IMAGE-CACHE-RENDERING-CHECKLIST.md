@@ -56,24 +56,24 @@ compact roadmap.
 - [ ] R6 — Integrated validation/release: full checks/live matrix; reconcile
       checklist/TODO; version/changelog only if explicitly requested; branch
       promotion/reconciliation only with explicit approval.
-- [ ] R7 — Viewport loading and session retention: implemented rendering
+- [x] R7 — Viewport loading and session retention: implemented rendering
       optimisation for the Logger window and Logger additions to native
       conversations/cards. Load text and attachments together near the viewport;
-      retain activated content for session reuse. Resolve native ownership,
-      implement and validate the acceptance checks below. Implementation now
-      explicitly requested before finishing Logger; validation remains open.
+      retain activated content for session reuse. Native ownership, automated
+      validation and the agreed consolidated local checks are accepted; see the
+      receipt below for deferred and untested coverage.
 - [ ] Parked — optional Stage 4a Reveal File; define its scope before activation.
 - [ ] Parked — multi-instance storage isolation; separate architecture and not
       a blocker for the active media/viewer path.
-- [ ] Exact next feature stage: R7, explicitly activated before Logger
-      completion. Keep R1–R5 deferred; finish the current compatibility hotfix
-      and remaining native acceptance before publication.
+- [ ] Exact next feature stage: R1, only when separately resumed. The current
+      compatibility/rendering rework and agreed R7 checks are accepted; keep
+      the remaining roadmap features deferred.
 
-## Planned optimisation feature
+## Implemented optimisation feature
 
 ### R7 — Viewport loading and session retention
 
-**Status: implemented; thread-browser empty-preview follow-up open.**
+**Status: accepted for the agreed local checks; documented coverage limits remain.**
 The [2026-11-08 acceptance receipt](#2026-11-08--consolidated-local-acceptance)
 supersedes the pending statuses in the historical checkpoints below. Broader
 per-surface rows remain open where their full native coverage was not established.
@@ -192,7 +192,24 @@ issue. Its acceptance is independent of the remaining hotfix/cache checks.
 
 ## Living handoff snapshot
 
-### Current media-gate and private GitHub migration checkpoint — 2026-11-08
+### Current accepted rework checkpoint — 2026-11-08
+
+Installed source `f42bfde` (version **2.8.2.20**) passes **991/991 local tests**
+and [exact-source CI](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/runs/42418244705), with zero failures, skips or cancellations. The user confirms
+the final Threads-dialog visual check passes. Its after capture shows two
+connected, tinted deleted cards alongside the unchanged native **No recent
+messages** card. Prior forum-card, media, layout, lifecycle and tint passes remain
+accepted. See the [consolidated receipt](#2026-11-08--consolidated-local-acceptance)
+for evidence provenance and coverage limits.
+
+GitHub is public, `develop` remains the default/source/updater branch, and
+`main` remains README-only. The separate old-host redirect migration preserves
+source history on GitHub and in a local recovery bundle. No further native test
+is required for this rework stage; site work and later roadmap features remain
+separate. The early cold-start exception is deferred, and the ordinary-thread
+full-format matrix is waived rather than passed.
+
+### Previous media-gate and private GitHub migration checkpoint — 2026-11-08
 
 - **Paused after the requested installation:** `3ef72ee` (`2.8.2.20`) places Logger previews and fallbacks with their corresponding snapshots, preserving edit order and isolating file cards from text markup. Local **983/983** passed in **6.61 seconds**; [exact-revision GitHub CI](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/runs/42407934199) passed **983/983** in **7.52 seconds**, with no failures or skips. Closed-client installation preserved data/settings/backup/PersonalPins/private-helper state and reopened Stable. The user will perform the remaining local acceptance checks; do not mark this new native layout passed yet.
 
@@ -594,34 +611,28 @@ Hotfix acceptance (does not complete any parked feature stage):
 
 ### Exact next action
 
-Private GitHub migration, develop-only CI and both branch badges are complete.
-Paused at the user’s request after installing the verified Logger snapshot
-layout correction. Await their local checks of snapshot/file/fallback order,
-media/source toggles, bounded catch-up under both saving gates, retained-view
-lifecycle and the final warmed compatibility capture. Off behavior already
-passed in channel and Logger; the previous On channel check passed. The new
-Logger layout and remaining lifecycle/catch-up cases are not yet native passes. Forum media checks passed; the user
-waived a separate ordinary-thread native check. Keep the
-intermittent cold-start display bug explicitly deferred; do not restart its
-investigation or count it as fixed. Public release remains gated on the remaining agreed checks. The explicitly
-authorized private GitHub checkpoints may be published during this validation. The next feature stage remains R1
-when the user separately resumes feature work; later features retain the roadmap
-order.
+The agreed compatibility/rendering rework is accepted on `f42bfde`; no further
+local visual check is pending. GitHub publication is public with `develop` as
+default. The old-host README redirect migration follows its separate exact-ref,
+recovery and CI record. Site work and PermissionsViewer are
+separate tasks. R1 remains the next feature stage only when the user resumes it;
+later features retain roadmap order. Keep the intermittent cold-start display
+bug explicitly deferred and the ordinary-thread full-format matrix waived.
 
 ### Resume procedure
 
 1. Read the repository `AGENTS.md` and this complete checklist.
 2. Source `~/.zshrc`; confirm `/usr/local/bin/git` is selected.
 3. Confirm repository path, branch, HEAD, status, and live-plugin hash.
-4. Preserve unrelated user changes; do not reset, clean, switch, merge, or push.
-5. Expect the uncommitted compatibility changes described above; preserve them.
-   Check stash and live-helper state against the current compatibility handoff
-   instead of assuming the historical clean/helper-free state still applies.
+4. Preserve unrelated user changes and verify authorization before changing
+   live files or remote refs.
+5. Compare the actual checkout and helper state with the accepted checkpoint;
+   older snapshots below are historical, not current instructions.
 6. Recheck `debug.log` for any newer MessageLogger stack and
    separate external cache failures from plugin exceptions.
 7. Compare the checkout with this snapshot and record drift.
 8. Treat the August compatibility acceptance as historical. Complete the current
-   hotfix and its fresh native gates before resuming features. R1 still requires
+   acceptance receipt before resuming features. R1 still requires
    a current Discord model/factory trace; do not reconstruct or reapply the
    discarded unsafe embed experiment.
 9. Update this file after each implementation, test, or live-runtime stage.
@@ -4030,11 +4041,15 @@ expected title and subtext layout but no message-preview element. Discovery
 previously required that optional element, so eligible deleted threads remained
 visible in the sidebar while their browser cards were missing. The correction
 uses the native title/subtext shell, with a composed discovery/restoration
-regression for the sole remaining empty-preview card. The focused native visual
-check is pending; prior tint, forum-card and other local passes remain accepted.
+regression for the sole remaining empty-preview card. Installed source `f42bfde`
+passes **991/991 local tests** and [exact-source CI](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/runs/42418244705). The user confirms the final visual check passes.
+The after capture at `2026-11-07T21:59:07.025Z` shows **two connected deleted
+thread cards**, each with the deletion class and native 72-pixel height, alongside
+the unchanged native empty-preview card. Forum-card discovery is unchanged; its
+earlier pass remains valid. The agreed local rework acceptance is complete.
 
 The intermittent early cold-start display issue
 remains explicitly deferred, and the ordinary-thread full-format matrix remains
 waived rather than passed. No speedup claim is made. GitHub publication is now public with `develop` as default. The authorized
-old-host README redirect/history migration awaits the thread-browser follow-up;
+old-host README redirect/history migration is a separate gated publication step;
 site work remains outside this rework.
