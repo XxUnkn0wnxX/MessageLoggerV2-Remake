@@ -2146,6 +2146,7 @@ module.exports = class MessageLoggerV2 {
     this.style.jumpAvailableAuthor = this.obfuscatedClass('ml2-jump-available-author');
     this.style.edited = this.obfuscatedClass('ml2-edited');
     this.style.editedCompact = this.obfuscatedClass('ml2-edited-compact');
+    this.style.editHistoryLayout = this.obfuscatedClass('ml2-edit-history-layout');
     this.style.tab = this.obfuscatedClass('ml2-tab');
     this.style.tabSelected = this.obfuscatedClass('ml2-tab-selected');
     this.style.textIndent = this.obfuscatedClass('ml2-help-text-indent');
@@ -2442,6 +2443,12 @@ module.exports = class MessageLoggerV2 {
                         filter: brightness(70%);
                     }
                     .theme-light .${this.classes.markup}.${this.style.edited} .${this.style.edited} {
+                        opacity: 0.5;
+                    }
+                    .theme-dark .${this.style.editHistoryLayout} > .${this.style.edited} {
+                        filter: brightness(70%);
+                    }
+                    .theme-light .${this.style.editHistoryLayout} > .${this.style.edited} {
                         opacity: 0.5;
                     }
                     .${this.style.editedCompact} {
@@ -21428,11 +21435,10 @@ module.exports = class MessageLoggerV2 {
         && failedFor.generation === generation && failedFor.url === url) return fallback;
       const previewClass = !record?.delete_data && !plugin.settings?.useAlternativeDeletedStyle
         ? plugin.style?.removedAttachmentPreview : '';
-      return React.createElement('span', {
+      return React.createElement('div', {
         ref: hostRef,
         className: previewClass || '',
-        'data-ml2-removed-preview': 'true',
-        style: { display: 'inline-block' }
+        'data-ml2-removed-preview': 'true'
       });
     };
     EditHistoryNativeAttachment.displayName = 'EditHistoryNativeAttachment';
@@ -21674,10 +21680,12 @@ module.exports = class MessageLoggerV2 {
           fallback
         });
       };
+      const selectedEditSegments = new Map();
       const parseEditHistoryContent = (content, editNum) => {
         if (typeof content !== 'string') return parseContent(content);
         const removedAttachments = plugin.getRecordRemovedAttachments(currentRecord);
-        const segments = plugin.getEditHistoryContentSegments(content, removedAttachments, currentRecord.message);
+        const segments = selectedEditSegments.get(editNum)
+          || plugin.getEditHistoryContentSegments(content, removedAttachments, currentRecord.message);
         if (!Array.isArray(segments)) return parseContent(content);
         if (!segments.length) return parseContent(content);
         const children = [];
@@ -21748,6 +21756,88 @@ module.exports = class MessageLoggerV2 {
         );
       const modifier = plugin.editModifiers?.[messageId];
       const modifiedEdit = modifier && currentRecord.edit_history[modifier.editNum];
+      const selectedEdits = [];
+      if (modifiedEdit) {
+        selectedEdits.push({ edit: modifiedEdit, editNum: modifier.editNum });
+      } else {
+        let first = 0;
+        let last = currentRecord.edit_history.length;
+        if (plugin.settings.maxShownEdits && last > plugin.settings.maxShownEdits) {
+          if (plugin.settings.hideNewerEditsFirst) last = plugin.settings.maxShownEdits;
+          else first = last - plugin.settings.maxShownEdits;
+        }
+        for (let index = first; index < last; index++) {
+          if (currentRecord.edit_history[index]) selectedEdits.push({ edit: currentRecord.edit_history[index], editNum: index });
+        }
+      }
+      const removedAttachments = plugin.getRecordRemovedAttachments(currentRecord);
+      let hasNativeCard = false;
+      for (const { edit, editNum } of selectedEdits) {
+        const segments = plugin.getEditHistoryContentSegments(edit.content, removedAttachments, currentRecord.message);
+        selectedEditSegments.set(editNum, segments);
+        if (segments.some(segment => segment.kind === 'removedAttachment'
+          && segment.presentationPlan?.action === 'blob'
+          && ['audio', 'attachment'].includes(segment.presentationPlan?.mediaType))) hasNativeCard = true;
+      }
+      if (hasNativeCard) {
+        const originalClass = originalElement.props.className;
+        const makeTextGroup = (children, key, anchor = false) => anchor
+          ? React.cloneElement(originalElement, { key }, children)
+          : React.createElement('div', { key, className: originalClass }, children);
+        const editedRows = selectedEdits.map(({ edit, editNum }) => {
+          const groups = [];
+          let text = [];
+          let anchorUsed = false;
+          let groupIndex = 0;
+          const flushText = () => {
+            if (!text.length) return;
+            const anchor = !!modifiedEdit && !anchorUsed;
+            groups.push(makeTextGroup(text, `${editNum}-text-${groupIndex++}`, anchor));
+            if (anchor) anchorUsed = true;
+            text = [];
+          };
+          for (const [index, segment] of selectedEditSegments.get(editNum).entries()) {
+            const native = segment.kind === 'removedAttachment'
+              && segment.presentationPlan?.action === 'blob'
+              && ['audio', 'attachment'].includes(segment.presentationPlan?.mediaType);
+            if (native) {
+              flushText();
+              const fallback = React.createElement('span', { className: originalClass }, parseContent(segment.value || ''));
+              groups.push(React.createElement('div', { key: `${editNum}-card-${index}` },
+                renderEditHistoryAttachment(segment.attachment, `${editNum}-media-${index}`, fallback, segment.presentationPlan)));
+            } else if (segment.kind === 'removedAttachment') {
+              const fallback = parseContent(segment.value || '');
+              text.push(renderEditHistoryAttachment(segment.attachment, `${editNum}-media-${index}`,
+                fallback, segment.presentationPlan) || React.createElement(
+                React.Fragment, { key: `${editNum}-media-${index}-fallback` }, fallback
+              ));
+            } else {
+              text.push(parseContent(segment.value || ''));
+            }
+          }
+          if (!(modifiedEdit && modifier.noSuffix)) {
+            text.push(React.createElement(SuffixEdited, { key: `${editNum}-suffix`, timestamp: plugin.tools.createMomentObject(edit.time) }));
+          }
+          flushText();
+          if (modifiedEdit && !anchorUsed) groups.push(makeTextGroup(null, `${editNum}-anchor`, true));
+          return React.createElement(plugin.Tooltip, {
+            key: `edit-${editNum}`, text: 'Edited: ' + plugin.createTimeStamp(edit.time), position: 'left', hideOnClick: true
+          }, tooltipProps => React.createElement('div', {
+            ...tooltipProps,
+            className: [compact && !modifiedEdit ? plugin.style.editedCompact : '', modifiedEdit ? '' : plugin.style.edited].filter(Boolean).join(' '),
+            editNum
+          }, groups));
+        });
+        let current = null;
+        if (!modifiedEdit) {
+          const oContent = Array.isArray(originalChildren[0]) ? originalChildren[0] : originalChildren[1];
+          const currentContent = currentRecord.delete_data?.time
+            ? React.createElement(DeletedContentTooltip, { plugin, deletedAt: currentRecord.delete_data.time, block: true }, oContent)
+            : oContent;
+          current = React.cloneElement(originalElement, {}, currentContent);
+        }
+        return React.createElement('div', { className: [plugin.style.editHistoryLayout, plugin.style.edited].filter(Boolean).join(' ') }, editedRows, current);
+      }
       if (modifiedEdit) {
         return renderEdited(createEditedMessage(
           modifiedEdit,
@@ -26308,17 +26398,22 @@ module.exports = class MessageLoggerV2 {
             );
           } else {
             let target = options.editTarget;
-            while (target?.className && !target.className.includes(this.style.edited)) {
+            let legacyFallback = null;
+            while (target) {
+              const className = typeof target.className === 'string' ? target.className : '';
+              if (this.style.edited && (target.classList?.contains?.(this.style.edited)
+                || className.split(/\s+/).includes(this.style.edited))) break;
+              if (!legacyFallback && !target.className) legacyFallback = target;
               target = target.parentElement;
             }
-            if (target) {
+            if (target || legacyFallback) {
               if (!this.editModifiers[messageId]) {
                 addElement(
                   'Hide Edits',
                   () => this.hideSavedEdits(record)
                 );
               }
-              const editNum = target.getAttribute('editNum');
+              const editNum = target?.getAttribute?.('editNum');
               if (this.editModifiers[messageId]) {
                 addElement(
                   `${this.editModifiers[messageId].noSuffix ? 'Show' : 'Hide'} (edited) Tag`,

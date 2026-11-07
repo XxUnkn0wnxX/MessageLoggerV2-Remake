@@ -578,6 +578,8 @@ test('native inline adapters use the selected Blob and canonical source while ke
     try {
       const before = structuredClone(h.record);
       const rendered = h.render();
+      assert.equal(rendered.type, 'div');
+      assert.equal(rendered.props.style?.display, undefined);
       assert.equal(rendered.props['data-ml2-removed-preview'], 'true');
       assert.equal(rendered.props.className, 'removed');
       assert.equal(h.mounts.length, 1);
@@ -607,7 +609,7 @@ test('native inline failures restore the marker and dispose only their own host'
       h.render();
       const { host, onError } = h.mounts[0];
       if (mediaType === 'audio') onError({}, 'blob://old');
-      assert.equal(h.render().type, 'span');
+      assert.equal(h.render().type, 'div');
       onError({}, 'blob://local/selected');
       assert.equal(host.isConnected, false);
       assert.equal(h.render(), 'original marker');
@@ -633,17 +635,17 @@ test('native inline stale callbacks and deferred cleanup cannot affect replaceme
     h.flush();
     assert.deepEqual(h.cleanups, [old.host]);
     assert.equal(replacement.host.isConnected, true);
-    assert.equal(h.render().type, 'span');
+    assert.equal(h.render().type, 'div');
     h.plugin.__started = false;
     replacement.onError({}, replacement.url);
-    assert.equal(h.render().type, 'span');
+    assert.equal(h.render().type, 'div');
     h.plugin.__started = true;
     h.record.removed_attachments = [];
     replacement.onError({}, replacement.url);
-    assert.equal(h.render().type, 'span');
+    assert.equal(h.render().type, 'div');
     h.unmount(); h.flush();
     replacement.onError({}, replacement.url);
-    assert.equal(h.render().type, 'span');
+    assert.equal(h.render().type, 'div');
   } finally { h.restore(); }
 });
 
@@ -784,7 +786,7 @@ test('native inline ownership recognizes proxyURL and ignores changed canonical 
     assert.equal(h.mounts.length, 1);
     h.record.removed_attachments[0].proxyURL = 'https://media.discordapp.net/replaced';
     h.mounts[0].onError('messageAccessoriesUnavailable');
-    assert.equal(h.render().type, 'span');
+    assert.equal(h.render().type, 'div');
   } finally { h.unmount(); h.flush(); h.restore(); }
 });
 

@@ -194,6 +194,14 @@ compact roadmap.
   Renderer failures retain the saved marker and emit a bounded, deduplicated
   Debug notice through the existing console/toast settings. AT-29 documents
   that routing; AT-55 and RT-09 retain the native media acceptance gates.
+- **Inline file style isolation — implemented; native acceptance pending:**
+  native testing confirmed cards inherited message-code formatting because they
+  were nested inside message text. The fix separates native file cards from that
+  scope while preserving the original current-text element, edit order, limits,
+  tooltips, modifiers, tint and fallback behavior. Logger-window rendering stays
+  unchanged. The reported missing Markdown attachment was the sixth edit under
+  a five-edit limit; changing that setting restored it without a code change.
+  Threads and forum posts remain explicit final native checks under RT-09.
 - **Historical correction:** older claims that Pins errors were unrelated are
   superseded by the proven Logger synthetic-delete trigger. Historical notes
   saying ordinary-row synthetic deletes remain are also superseded. PersonalPins

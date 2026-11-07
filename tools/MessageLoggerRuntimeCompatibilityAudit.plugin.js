@@ -1709,6 +1709,7 @@ function describeLoggerOwnedStyleContract(api) {
     'ml2-jump-available-author',
     'ml2-edited',
     'ml2-edited-compact',
+    'ml2-edit-history-layout',
     'ml2-tab',
     'ml2-tab-selected',
     'ml2-help-text-indent',

@@ -105,7 +105,7 @@ Right-click saved messages in the logger or channel view to access applicable ac
 - Copy content or message ID.
 - Open related logs.
 
-For an attachment-only edit, the message stays in **Edited**. With media rendering enabled, historical removed uploads use existing cached previews/file cards without duplicate deletion text; unavailable uploads keep their text entry. Inline image/video previews stay thumbnail-sized; supported audio and files reuse the existing native players/file cards. Logger retains its normal preview sizing. Background caching continues under the existing settings. Deleting the whole message later changes its category while retaining its edit history.
+For an attachment-only edit, the message stays in **Edited**. With media rendering enabled, historical removed uploads use existing cached previews/file cards without duplicate deletion text; unavailable uploads keep their text entry. Inline image/video previews stay thumbnail-sized; supported audio and files reuse the existing native players/file cards. Logger retains its normal preview sizing. Native file previews retain their own code formatting. The configured **Max number of shown edits** still controls which inline historical attachments are visible; Logger retains the saved history. Background caching continues under the existing settings. Deleting the whole message later changes its category while retaining its edit history.
 
 **Hide** preserves the record and moves it to the Hidden tab. Red **Delete** permanently deletes the stored logger record. Direct restored-item and logger-window Delete actions confirm first; **Delete** inside the injected **Message Logger** submenu removes immediately because that submenu is already a logger-only action.
 

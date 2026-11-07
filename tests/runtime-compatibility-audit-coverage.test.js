@@ -921,8 +921,8 @@ test('semantic CSS and Logger-owned literals are covered by the audit helper', (
   }
 
   const seeds = [...productionSource.matchAll(/obfuscatedClass\(\s*'([^']+)'\s*\)/g)].map(([, seed]) => seed);
-  assert.equal(seeds.length, 67);
-  assert.equal(new Set(seeds).size, 67);
+  assert.equal(seeds.length, 68);
+  assert.equal(new Set(seeds).size, 68);
   for (const seed of seeds) assert.ok(helperSource.includes(seed), `helper is missing CSS seed ${seed}`);
   assert.ok(helperSource.includes('ml2-deleted'));
   assert.ok(helperSource.includes('mlv2-toast-progress'));

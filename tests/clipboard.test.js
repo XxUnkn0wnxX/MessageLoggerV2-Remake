@@ -1771,3 +1771,69 @@ test('Logger viewer adds one raw external-open config only for an exact saved at
     videoRecord
   ), true);
 });
+
+test('message menu locates an edit through unclassed native-card fallback wrappers', () => {
+  const patches = installContextMenuPatchCapture();
+  installContextMenuBuilder();
+  const record = createRecord({ deleted: false });
+  record.edit_history = [{ content: 'first' }, { content: 'second' }, { content: 'third' }];
+  const actions = [];
+  const plugin = createPlugin({
+    unpatches: [], messageRecord: { [MESSAGE_ID]: record }, editModifiers: {}, style: { edited: 'edited' },
+    settings: { contextmenuSubmenuName: '' },
+    dispatcher: { dispatch: event => actions.push(event) },
+    deleteEditedMessageFromRecord: (id, index) => actions.push({ id, index }),
+    shouldAddPermissionIndependentContextDelete: () => false
+  });
+  plugin.patchContextMenus();
+  const row = { className: { baseVal: 'edited' }, classList: { contains: token => token === 'edited' }, getAttribute: name => name === 'editNum' ? '2' : null, parentElement: null };
+  const wrapper = { className: '', parentElement: row };
+  const target = { className: 'markup_native messageContent_native', parentElement: wrapper };
+  const menu = [];
+  const originalFind = Utils.findInTree;
+  Utils.findInTree = () => ({ children: menu });
+  try {
+    patches.message({ props: { children: menu } }, { message: { id: MESSAGE_ID }, channel: { id: CHANNEL_ID }, target });
+    const submenu = flattenMenuItems(menu).find(item => item.id === 'mlv2-message-logger');
+    assert.ok(submenu);
+    const show = submenu.items.find(item => item.label === 'Show Edit As Message');
+    const remove = submenu.items.find(item => item.label === 'Delete Edit');
+    assert.ok(show);
+    assert.ok(remove);
+    show.action();
+    assert.equal(plugin.editModifiers[MESSAGE_ID].editNum, '2');
+    remove.action();
+    assert.deepEqual(actions.find(action => action.index !== undefined), { id: MESSAGE_ID, index: 2 });
+  } finally { Utils.findInTree = originalFind; }
+});
+
+test('message menu keeps record-level edit actions for unclassed targets outside history', () => {
+  const patches = installContextMenuPatchCapture();
+  installContextMenuBuilder();
+  const record = createRecord({ deleted: false });
+  record.edit_history = [{ content: 'edited' }];
+  const plugin = createPlugin({
+    unpatches: [], messageRecord: { [MESSAGE_ID]: record }, editModifiers: {}, style: { edited: 'edited' },
+    settings: { contextmenuSubmenuName: '' }, dispatcher: { dispatch() {} },
+    shouldAddPermissionIndependentContextDelete: () => false
+  });
+  plugin.patchContextMenus();
+  const target = { className: '', parentElement: null, getAttribute: () => '7' };
+  const originalFind = Utils.findInTree;
+  try {
+    const makeItems = () => {
+      const menu = [];
+      Utils.findInTree = () => ({ children: menu });
+      patches.message({ props: { children: menu } }, { message: { id: MESSAGE_ID }, channel: { id: CHANNEL_ID }, target });
+      return flattenMenuItems(menu).find(item => item.id === 'mlv2-message-logger').items;
+    };
+    let items = makeItems();
+    assert.ok(items.some(item => item.label === 'Hide Edits'));
+    assert.equal(items.some(item => item.label === 'Show Edit As Message' || item.label === 'Delete Edit'), false);
+    plugin.editModifiers[MESSAGE_ID] = { editNum: 0, noSuffix: false };
+    items = makeItems();
+    assert.ok(items.some(item => item.label === 'Hide (edited) Tag'));
+    assert.ok(items.some(item => item.label === 'Undo Show As Message'));
+    assert.equal(items.some(item => item.label === 'Delete Edit'), false);
+  } finally { Utils.findInTree = originalFind; }
+});
