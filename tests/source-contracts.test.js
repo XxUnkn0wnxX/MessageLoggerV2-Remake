@@ -2097,7 +2097,8 @@ test('native saved media failures keep exact ownership, canonical URL matching, 
   const planEnd = source.indexOf('  getSavedAttachmentPresentationPlans(message, options = {}) {', planStart);
   const plan = source.slice(planStart, planEnd);
   assert.match(plan, /const isLocalFailure = !!this\._failedNativeAttachmentMediaLocalKeys/);
-  assert.match(plan, /if \(allowRemote\) \{\s*if \(isLocalFailure\) \{[\s\S]*unavailableReason: 'local-failed'/);
+  // Failed local bytes stay excluded without vetoing a renewed remote candidate.
+  assert.match(plan, /const getCachedBlobUrl = \(\) => \{\s*if \(isLocalFailure\) return null;/);
   assert.match(plan, /if \(isLocalFailure\) \{[\s\S]*unavailableReason: 'local-failed'/);
 
   const nativeErrorStart = source.indexOf('  handleSavedAttachmentMediaError(event = {}) {');

@@ -11575,6 +11575,7 @@ module.exports = class MessageLoggerV2 {
       return createPlan('placeholder', { unavailableReason: 'policy' });
     }
     const getCachedBlobUrl = () => {
+      if (isLocalFailure) return null;
       if (!descriptor.attachment_id || !descriptor.message_id || !descriptor.channel_id
         || !descriptor.local_path
       ) return null;
@@ -11585,13 +11586,8 @@ module.exports = class MessageLoggerV2 {
         : null;
     };
     if (allowRemote) {
-      if (isLocalFailure) {
-        return createPlan('omit', {
-          unavailableReason: 'local-failed',
-          unavailableLabel: deletedLabel
-        });
-      }
       if (isRemoteFailure) {
+        if (isLocalFailure) return createPlan('omit', { unavailableReason: 'local-failed', unavailableLabel: deletedLabel });
         const cachedBlobUrl = getCachedBlobUrl();
         if (cachedBlobUrl) {
           return createPlan('blob', {
@@ -11627,10 +11623,7 @@ module.exports = class MessageLoggerV2 {
           .find(entry => !this._failedNativeAttachmentMediaCandidateKeys?.has?.(entry.failureKey))
         : null;
       if (allCandidatesFailed) {
-        if (!this._failedNativeAttachmentMediaKeys?.has?.(mediaFailureKey)) {
-          this._failedNativeAttachmentMediaKeys = this._failedNativeAttachmentMediaKeys || new Set();
-          this._failedNativeAttachmentMediaKeys.add(mediaFailureKey);
-        }
+        if (isLocalFailure) return createPlan('omit', { unavailableReason: 'local-failed', unavailableLabel: deletedLabel });
         const cachedBlobUrl = getCachedBlobUrl();
         if (cachedBlobUrl) {
           return createPlan('blob', {
@@ -11644,6 +11637,7 @@ module.exports = class MessageLoggerV2 {
         });
       }
       if (!nextAvailableCandidate) {
+        if (isLocalFailure) return createPlan('omit', { unavailableReason: 'local-failed', unavailableLabel: deletedLabel });
         const cachedBlobUrl = getCachedBlobUrl();
         if (cachedBlobUrl) return createPlan('blob', { url: cachedBlobUrl });
         return createPlan('omit', { unavailableReason: 'no-candidate' });

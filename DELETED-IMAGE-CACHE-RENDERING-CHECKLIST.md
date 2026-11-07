@@ -146,9 +146,12 @@ compact roadmap.
   video, audio and supported-sticker sources through their advertised candidates
   and existing Blob/filename fallback. Canonical membership, strict native
   resolver restrictions, acquisition, retries, schema and saved records remain
-  unchanged. Focused checks pass; installation/native validation and the separate
-  changed-URL display-state follow-up are still pending. This does not resume
-  media admission or other parked feature work.
+  unchanged. Package A is committed as `beb7ef1` with **761/761** tests
+  passing. The follow-up now derives normal remote exhaustion from the existing
+  full-URL failure keys, allowing renewed sources without retrying unchanged
+  failed candidates or reusing a failed Blob. It adds no failure ledger or scan
+  through unrelated history. Final aggregate and combined native validation are
+  pending. This does not resume media admission or other parked feature work.
 - **Cache-warning scope:** the current `Image null unavailable (403)` warning
   was reproduced. A missing embed/component source ID does not imply a null URL.
   The misleading identity is repaired through the existing cache-file ID, with
