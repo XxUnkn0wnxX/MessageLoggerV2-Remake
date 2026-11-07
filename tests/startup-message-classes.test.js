@@ -49,10 +49,10 @@ test('warm semantic classes resolve independently without waiting or overwriting
   plugin.recoverStartupMessageClasses();
   assert.equal(plugin.classes.message, 'message_ab');
   assert.equal(plugin.classes.selected, 'selected_ab');
-  assert.equal(cssCount(), 1);
+  assert.equal(cssCount(), 2, 'CSS refreshes as each recovered class becomes available');
   assert.equal(waits.length, 0);
   plugin.recoverStartupMessageClasses();
-  assert.equal(cssCount(), 1);
+  assert.equal(cssCount(), 2);
   const second = setup([wrapper, selected]);
   second.plugin.classes = { message: 'existing_message', selected: 'existing_selected' };
   second.plugin.recoverStartupMessageClasses();
@@ -82,7 +82,23 @@ test('late waits filter malformed candidates and complete independently', async 
   messageWait.resolve(wrapper);
   await flush();
   assert.equal(plugin.classes.message, 'message_ab');
+  assert.equal(cssCount(), 2, 'late message-class recovery refreshes the stylesheet too');
+});
+
+test('message class resolving before selected also refreshes the stylesheet in both stages', async () => {
+  const { plugin, waits, cssCount } = setup();
+  plugin.recoverStartupMessageClasses();
+
+  waits[0].resolve(wrapper);
+  await flush();
+  assert.equal(plugin.classes.message, 'message_ab');
+  assert.equal(plugin.classes.selected, '');
   assert.equal(cssCount(), 1);
+
+  waits[1].resolve(selected);
+  await flush();
+  assert.equal(plugin.classes.selected, 'selected_ab');
+  assert.equal(cssCount(), 2);
 });
 
 test('stop aborts waits and stale results cannot affect a restarted instance', async () => {
@@ -103,7 +119,7 @@ test('stop aborts waits and stale results cannot affect a restarted instance', a
   waits[2].resolve(wrapper); waits[3].resolve(selected);
   await flush();
   assert.deepEqual(plugin.classes, { message: 'message_ab', selected: 'selected_ab' });
-  assert.equal(cssCount(), 1);
+  assert.equal(cssCount(), 2);
 });
 
 test('stylesheet keeps hover selector valid before and after selected class arrives', () => {
@@ -112,13 +128,19 @@ test('stylesheet keeps hover selector valid before and after selected class arri
   assert.ok(start >= 0 && end > start);
   const assignment = source.slice(start, end);
   let css = '';
-  const context = { style: { deletedAlt: 'deleted-alt' }, classes: { selected: '' }, settings: {}, stringHeldCaptive: 'scratch' };
+  const context = {
+    style: { deletedAlt: 'deleted-alt', removedAttachmentPreview: 'removed-preview' },
+    classes: { selected: '', message: 'message_ab' }, settings: {}, stringHeldCaptive: 'scratch'
+  };
   vm.runInNewContext(`(function() { ${assignment} }).call(context);`, {
     context, DOM: { removeStyle() {}, addStyle(_key, value) { css = value; } }, hexToRgb() { return 'rgb'; }
   });
   context.updateCSS();
   assert.match(css, /html #app-mount \.deleted-alt:hover \{/);
   assert.doesNotMatch(css, /\.deleted-alt\.\s*\{/);
+  assert.match(css, /\.theme-dark \.removed-preview:not\(:hover\) \{\s*filter: grayscale\(100%\) !important;/);
+  assert.match(css, /\.message_ab:hover \.removed-preview \{\s*filter: none !important;/);
+  assert.match(css, /\.removed-preview \{\s*transition: filter 0\.3s !important;/);
   context.classes.selected = 'selected_ab';
   context.updateCSS();
   assert.match(css, /html #app-mount \.deleted-alt:hover, html #app-mount \.deleted-alt\.selected_ab \{/);
@@ -194,16 +216,16 @@ test('unrelated named enum is skipped in immediate and late scans; raw and defau
   first.plugin.recoverStartupMessageClasses();
   assert.equal(first.plugin.classes.message, 'message_ab');
   assert.equal(first.plugin.classes.selected, '');
-  assert.equal(first.cssCount(), 0);
+  assert.equal(first.cssCount(), 1);
   assert.equal(first.waits.length, 1);
   assert.equal(first.waits[0].deliver(enumOwner), null);
   await flush();
   assert.equal(first.plugin.classes.selected, '');
-  assert.equal(first.cssCount(), 0);
+  assert.equal(first.cssCount(), 1);
   assert.strictEqual(first.waits[0].deliver({ __esModule: true, default: selected }), selected);
   await flush();
   assert.equal(first.plugin.classes.selected, 'selected_ab');
-  assert.equal(first.cssCount(), 1);
+  assert.equal(first.cssCount(), 2);
 
   const second = setup([enumOwner, { A: selected }]);
   second.plugin.recoverStartupMessageClasses();
@@ -213,5 +235,5 @@ test('unrelated named enum is skipped in immediate and late scans; raw and defau
   assert.strictEqual(second.waits[0].deliver(wrapper), wrapper);
   await flush();
   assert.equal(second.plugin.classes.message, 'message_ab');
-  assert.equal(second.cssCount(), 1);
+  assert.equal(second.cssCount(), 2);
 });

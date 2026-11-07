@@ -1367,7 +1367,7 @@ module.exports = class MessageLoggerV2 {
       const value = extract(candidate, role);
       if (!value) return false;
       classes[role] = value;
-      if (role === 'selected') this.updateCSS();
+      if (role === 'message' || role === 'selected') this.updateCSS();
       return true;
     };
     for (const role of ['message', 'selected']) {
@@ -2456,6 +2456,9 @@ module.exports = class MessageLoggerV2 {
                     .theme-dark .${this.style.removedAttachmentPreview}:not(:hover) {
                         filter: grayscale(100%) !important;
                     }
+                    ${this.classes.message ? `.${this.classes.message}:hover .${this.style.removedAttachmentPreview} {
+                        filter: none !important;
+                    }` : ''}
                     .${this.style.removedAttachmentPreview} {
                         transition: filter 0.3s !important;
                     }

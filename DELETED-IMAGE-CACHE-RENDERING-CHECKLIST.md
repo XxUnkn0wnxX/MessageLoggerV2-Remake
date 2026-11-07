@@ -178,7 +178,10 @@ compact roadmap.
   and reuse deleted-media grayscale/hover without overriding tint controls.
   Acquisition, retries, storage, current attachments and exclusive tab
   classification remain unchanged. This is a hotfix feeding into the existing
-  rework, not completion of a parked feature stage. See AT-55 and RT-09.
+  rework, not completion of a parked feature stage. Native capture now confirms
+  cached Blob selection and a 396.8 × 350 thumbnail for the same image. A
+  follow-up makes colour restore on message-row hover; edit-history dimming
+  remains. Broader media/category acceptance is still open. See AT-55 and RT-09.
 - **Historical correction:** older claims that Pins errors were unrelated are
   superseded by the proven Logger synthetic-delete trigger. Historical notes
   saying ordinary-row synthetic deletes remain are also superseded. PersonalPins
