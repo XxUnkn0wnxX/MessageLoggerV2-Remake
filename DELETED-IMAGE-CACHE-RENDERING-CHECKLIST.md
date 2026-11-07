@@ -75,8 +75,9 @@ compact roadmap.
   gated on the user’s UI checks and resolution of the known runtime issues.
 - **Source checkpoints:** local commits `ccabb77` (runtime compatibility, safe
   cleanup and cache warning identity), `77da772` (native profile layer),
-  `4d58406` (installed-layer audit) and `323f437` (native dynamic theme).
-  The latest passes **738/738** tests with no skips. None has been pushed.
+  `4d58406` (installed-layer audit), `323f437` (native dynamic theme), and
+  `1e9f56c` (dismissed-profile shortcut). The modal class-lifetime follow-up
+  also passes **744/744** tests with no skips. None has been pushed.
 - **Installed Stable:**
   `f45fe4648129a10127b5c8e183239dec7f1ac05be9ee4507091ef5adf8eb11dd`,
   matching `323f437`. Stable was fully closed before installation and then
@@ -108,7 +109,8 @@ compact roadmap.
   ThemeStore; no fixed theme, palette, selector hash or enum mapping is copied.
   Settings closes the profile during theme changes, so continuously mounted
   theme switching has deterministic coverage but no live acceptance. Profile
-  impression/locale warnings are being attributed separately; no suppression
+  impression warnings are documented separately; locale warnings are traced
+  to PermissionsViewer and also occur on normal-channel/bot profiles. No suppression
   or whole-application provider wrapper was added. Supplying the native
   impression callback would enable tracking for this UI, so that separate
   warning is retained without changing telemetry or OpenAsar blocking.
@@ -119,8 +121,13 @@ compact roadmap.
   This does not replace the remaining interactive/lifecycle checks.
 - **Shortcut follow-up:** the user reproduced first-press close/reopen after
   dismissing a Logger profile; a second press closes it. Source review identifies
-  a stale popout-stack ID overriding the empty actual manager. A bounded fix and
-  regression check are in progress; native retesting is still required.
+  a stale popout-stack ID overriding the empty actual manager. Local commit
+  `1e9f56c` corrects the check; **740/740** tests pass. Native retesting is required.
+  The same reproduction also exposed a native modal class rewrite that removes
+  Logger's root class, losing its author tint and dimensions while the stylesheet
+  remains present. An owned-root class boundary now covers classed nonempty
+  element-array dialogs, with scoped restoration and cleanup; legacy child
+  shapes retain their previous handling. Native rollout/retesting is pending.
 - **Cache-warning scope:** the current `Image null unavailable (403)` warning
   was reproduced. A missing embed/component source ID does not imply a null URL.
   The misleading identity is repaired through the existing cache-file ID, with

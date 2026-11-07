@@ -483,6 +483,45 @@ const DiscordModules = (() => {
     }
   });
 })();
+const ModalClassBoundary = ({ className, children }) => {
+  const marker = React.useRef(null);
+  React.useLayoutEffect(() => {
+    const tokens = [...new Set(String(className).split(/\s+/).filter(Boolean))];
+    const root = marker.current?.closest?.('[data-mana-component="modal"]');
+    if (!root?.classList) {
+      Logger.warn('Could not locate the owning Discord modal for Logger classes.');
+      return;
+    }
+    let active = true;
+    const owned = tokens.filter(token => !root.classList.contains(token));
+    const restore = () => {
+      if (!active) return;
+      const missing = tokens.filter(token => !root.classList.contains(token));
+      if (missing.length) root.classList.add(...missing);
+    };
+    restore();
+    let observer = null;
+    if (typeof globalThis.MutationObserver === 'function') {
+      try {
+        observer = new MutationObserver(restore);
+        observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+      } catch {
+        observer?.disconnect?.();
+        observer = null;
+        Logger.warn('Could not observe the owning Discord modal for Logger classes.');
+      }
+    } else {
+      Logger.warn('Could not observe the owning Discord modal for Logger classes.');
+    }
+    return () => {
+      active = false;
+      observer?.disconnect?.();
+      if (owned.length) root.classList.remove(...owned);
+    };
+  }, [className]);
+  return React.createElement(React.Fragment, null, children,
+    React.createElement('span', { ref: marker, hidden: true, 'aria-hidden': true }));
+};
 class PopoutManager {
   constructor() {
     this.popouts = new Map();
@@ -18553,6 +18592,11 @@ module.exports = class MessageLoggerV2 {
       return;
     }
     if (options.ml2Data) {
+      let bridgeClassName = '';
+      try { bridgeClassName = options.className ? String(options.className) : ''; } catch {}
+      const useClassBoundary = !!bridgeClassName.split(/\s+/).filter(Boolean).length
+        && Array.isArray(options.children) && options.children.length > 0
+        && typeof React.isValidElement === 'function' && options.children.every(React.isValidElement);
       const modalKey = ModalActions.openModal(props => {
         const actions = [];
         if (options.confirmText) {
@@ -18575,11 +18619,13 @@ module.exports = class MessageLoggerV2 {
           title: options.header,
           actions,
           actionBarInput: false,
-          children: options.children,
+          children: useClassBoundary
+            ? React.createElement(ModalClassBoundary, { className: bridgeClassName }, options.children)
+            : options.children,
         });
       }, { modalKey: name });
       this.trackLoggerOwnedModalKey(modalKey, name);
-      if (options.className) {
+      if (options.className && !useClassBoundary) {
         requestAnimationFrame(() => {
           const containers = document.querySelectorAll('[data-mana-component="modal"]');
           const container = containers[containers.length - 1];
