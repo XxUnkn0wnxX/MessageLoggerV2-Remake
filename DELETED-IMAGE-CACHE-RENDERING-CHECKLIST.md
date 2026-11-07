@@ -182,6 +182,18 @@ compact roadmap.
   cached Blob selection and a 396.8 × 350 thumbnail for the same image. A
   follow-up makes colour restore on message-row hover; edit-history dimming
   remains. Broader media/category acceptance is still open. See AT-55 and RT-09.
+- **Inline file parity follow-up — implemented; native acceptance pending:**
+  the multi-file native check confirmed images/videos mount, while audio,
+  TXT/PDF and generic cached files remained text despite working in Logger.
+  Reuses the existing native audio/document/file-card adapters for these inline
+  removed uploads, with owned lifecycle cleanup and unchanged fallback/cache
+  policy. This supersedes the preceding image/video-only inline boundary,
+  without adding renderers or advancing parked R1–R6 features. Full-deletion
+  verification follows this fix, as requested. Stale initial effects and late
+  callbacks are guarded; detached hosts receive targeted deferred cleanup.
+  Renderer failures retain the saved marker and emit a bounded, deduplicated
+  Debug notice through the existing console/toast settings. AT-29 documents
+  that routing; AT-55 and RT-09 retain the native media acceptance gates.
 - **Historical correction:** older claims that Pins errors were unrelated are
   superseded by the proven Logger synthetic-delete trigger. Historical notes
   saying ordinary-row synthetic deletes remain are also superseded. PersonalPins

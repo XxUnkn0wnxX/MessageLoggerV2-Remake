@@ -103,7 +103,7 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 
 ## 🎬 Media settings
 
-When media rendering is enabled, historical removed uploads have a separate display rule: use an existing cached preview or file card, otherwise retain the attachment-removal text. A displayed cached representation replaces its duplicate deletion marker. This does not disable background caching or change the CDN/local policy for current attachments. Inline history supports image/video previews; Logger also retains its existing audio and document/file-card renderers.
+When media rendering is enabled, historical removed uploads have a separate display rule: use an existing cached preview or file card, otherwise retain the attachment-removal text. A displayed cached representation replaces its duplicate deletion marker. This does not disable background caching or change the CDN/local policy for current attachments. Inline history and Logger reuse the existing supported audio and document/file-card renderers; inline image/video previews remain thumbnail-sized.
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
@@ -266,9 +266,9 @@ The Debug category title and all three setting labels use Discord's native warni
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Enable debug logging | Off | Writes automatic-backup lifecycle events, edit-spam diagnostics, deleted/edited channel-entry counter increases, the legacy-routing notice, and—when its child is enabled—detailed media-request diagnostics to the console. Counter output includes the new total, increase, server, and channel; edit-spam output shows each username's current/threshold counter, cooldown start, 10-second warning, final reset, and early settings reset without printing user IDs. |
+| Enable debug logging | Off | Writes automatic-backup lifecycle events, edit-spam diagnostics, deleted/edited channel-entry counter increases, the legacy-routing notice, inline cached audio/file renderer failures, and—when its child is enabled—detailed media-request diagnostics to the console. Counter output includes the new total, increase, server, and channel; edit-spam output shows each username's current/threshold counter, cooldown start, 10-second warning, final reset, and early settings reset without printing user IDs. Inline renderer failures report only the media kind and a fixed reason, once per kind/reason during each plugin start. |
 | Show detailed media-network diagnostics | Off | When enabled with **Enable debug logging**, writes one console-only lifecycle for each media-network attempt: request ID, method, full URL, native/legacy route, response status, received bytes, elapsed time, and terminal outcome. Its saved value remains On while greyed under a disabled master, but it is ineffective until console debug logging is enabled again. It never emits toasts or changes request behavior. Full URLs can contain signed tokens or other query data, so treat console exports as sensitive. |
-| Show debug messages as toasts | Off | Sends backup, edit-spam, channel-entry counter, and the activation-scoped legacy-routing notice through the selected BetterDiscord-notification or custom-toast mode. Detailed per-request media diagnostics are deliberately excluded because they can be noisy. Debug alerts are warning-colored, expire without pausing on hover, and dismiss on a left- or right-click. This control is only active when console debug logging is enabled. |
+| Show debug messages as toasts | Off | Sends backup, edit-spam, channel-entry counter, the activation-scoped legacy-routing notice, and deduplicated inline cached audio/file renderer failures through the selected BetterDiscord-notification or custom-toast mode. Detailed per-request media diagnostics are deliberately excluded because they can be noisy. Debug alerts are warning-colored, expire without pausing on hover, and dismiss on a left- or right-click. This control is only active when console debug logging is enabled. |
 
 **Settings that can generate Debug output when the relevant event occurs:**
 
@@ -281,6 +281,7 @@ The Debug category title and all three setting labels use Discord's native warni
 - **Show amount of new edited messages when entering a channel**: every enabled Edited counter increase.
 - **Force legacy media fetching** and automatic native-compatibility fallback: report `Networking: media routing is using the old Discord renderer fetch() method.` once per legacy-routing activation to each enabled Debug output. An output enabled later—or re-enabling the debug master with its child still on—receives its one pending notice; requests, retries, and files do not repeat it.
 - **Show detailed media-network diagnostics**: while the main console Debug switch is also enabled, report each media attempt and its single terminal result to the console only. This never follows the toast setting.
+- **Inline removed-attachment rendering**: if a cached audio player or file renderer fails and returns to its saved deletion marker, report the media kind and a fixed failure reason to enabled Debug outputs. Repeats of the same kind/reason are suppressed until Logger starts again. Ordinary missing-cache, hidden, or cache-master-Off cases are silent; these notices contain no message IDs, filenames, URLs, file paths, or raw exception text.
 
 Debug output does not change backup timing, persistence, counter behavior, edit blocking, media routing, or normal error reporting.
 

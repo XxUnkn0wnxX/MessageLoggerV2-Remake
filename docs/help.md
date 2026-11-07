@@ -105,7 +105,7 @@ Right-click saved messages in the logger or channel view to access applicable ac
 - Copy content or message ID.
 - Open related logs.
 
-For an attachment-only edit, the message stays in **Edited**. With media rendering enabled, historical removed uploads use existing cached previews/file cards without duplicate deletion text; unavailable uploads keep their text entry. Inline image/video previews stay thumbnail-sized, while Logger retains its normal preview sizing. Background caching continues under the existing settings. Deleting the whole message later changes its category while retaining its edit history.
+For an attachment-only edit, the message stays in **Edited**. With media rendering enabled, historical removed uploads use existing cached previews/file cards without duplicate deletion text; unavailable uploads keep their text entry. Inline image/video previews stay thumbnail-sized; supported audio and files reuse the existing native players/file cards. Logger retains its normal preview sizing. Background caching continues under the existing settings. Deleting the whole message later changes its category while retaining its edit history.
 
 **Hide** preserves the record and moves it to the Hidden tab. Red **Delete** permanently deletes the stored logger record. Direct restored-item and logger-window Delete actions confirm first; **Delete** inside the injected **Message Logger** submenu removes immediately because that submenu is already a logger-only action.
 
@@ -232,7 +232,7 @@ Changing **Obfuscate CSS classes** restarts MessageLogger by temporarily disabli
 - Current MessageLoggerV2 forks can still read the core fields. Metadata an older fork removed cannot be recreated and remains blank.
 - Migration reports progress and success through the selected notification mode. On failure, the primary and backup remain available and the alert directs you to the console.
 - A missing or invalid primary is rebuilt from a valid normalized backup. The backup remains untouched; newer schemas fail closed instead of being downgraded.
-- **Debug** can report backup queueing, reschedules, cancellations, starts, retries, and completions. It also reports edit-spam counters by username, cooldown start, 10 seconds remaining, final reset, and early settings resets. Toast diagnostics are master-linked to **Enable debug logging**; when that switch is off, no debug output is routed anywhere. Edit-spam debug text never prints user IDs.
+- **Debug** can report backup queueing, reschedules, cancellations, starts, retries, and completions. It also reports edit-spam counters by username, cooldown start, 10 seconds remaining, final reset, and early settings resets. Inline cached audio/file renderer failures produce one notice per media kind and fixed reason per plugin start; ordinary missing-cache or hidden cases stay silent. These notices contain no message IDs, filenames, URLs, paths, or raw exception text. Toast diagnostics are master-linked to **Enable debug logging**; when that switch is off, no debug output is routed anywhere. Edit-spam debug text never prints user IDs. Detailed per-request media diagnostics remain console-only.
 - Startup salvages common config comma/bracket damage, preserves valid settings, saves the exact damaged text as `MessageLoggerV2.config.corrupt-backup.json`, and never treats an existing repaired config as a first install.
 
 ### High-impact setting feedback

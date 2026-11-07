@@ -7014,11 +7014,12 @@ module.exports = class MessageLoggerV2 {
       if (attachment && plan && (plan.action === 'placeholder' || plan.action === 'omit')) {
         segments.push({
           kind: 'text',
-          value: cacheAllImages && !this.settings?.onlyRenderCachedAttachments
+          value: plan.mediaType === 'audio' || plan.mediaType === 'attachment'
+            || (cacheAllImages && !this.settings?.onlyRenderCachedAttachments)
             ? match[0] : plan.unavailableLabel || plan.label || match[0]
         });
       } else if (attachment && (plan?.action === 'remote' || plan?.action === 'blob')) {
-        const isMediaPlan = plan.mediaType === 'image' || plan.mediaType === 'video';
+        const isMediaPlan = ['image', 'video', 'audio', 'attachment'].includes(plan.mediaType);
         if (isMediaPlan) {
           const identity = this.getRemovedAttachmentIdentity(attachment);
           if (identity) attachmentIds.add(identity);
@@ -7026,7 +7027,8 @@ module.exports = class MessageLoggerV2 {
             kind: 'removedAttachment',
             attachment,
             presentationPlan: plan,
-            value: plan.label || match[0]
+            value: plan.mediaType === 'audio' || plan.mediaType === 'attachment'
+              ? match[0] : plan.label || match[0]
           });
         } else {
           segments.push({ kind: 'text', value: match[0] });
@@ -21354,6 +21356,86 @@ module.exports = class MessageLoggerV2 {
       return React.createElement(React.Fragment, {}, nativeContent, ...loggerVideoContent);
     };
     SavedAttachmentPresentationContent.displayName = 'SavedAttachmentPresentationContent';
+    const inlineNativeFailureReports = new Set();
+    const EditHistoryNativeAttachment = ({ plugin, record, attachment, mediaType, url, fallback }) => {
+      const hostRef = React.useRef(null);
+      const [failedFor, setFailedFor] = React.useState(null);
+      const generation = plugin._startupGeneration;
+      const sourceMessage = record?.message;
+      const messageId = String(sourceMessage?.id || '');
+      const attachmentId = plugin.getRemovedAttachmentIdentity(attachment);
+      const attachmentUrl = attachment?.url || '';
+      const attachmentProxyUrl = attachment?.proxy_url || attachment?.proxyUrl || attachment?.proxyURL || '';
+      React.useEffect(() => {
+        const outer = hostRef.current;
+        if (!outer) return;
+        const inner = document.createElement('div');
+        outer.appendChild(inner);
+        let active = true;
+        const dispose = () => {
+          if (!active) return;
+          active = false;
+          inner.remove();
+          const cleanup = () => {
+            if (mediaType === 'audio') plugin.cleanupLoggerNativeAudioRoots(inner);
+            else plugin.cleanupLoggerNativeDocumentRoots(inner);
+          };
+          if (typeof queueMicrotask === 'function') queueMicrotask(cleanup);
+          else Promise.resolve().then(cleanup);
+        };
+        const isCurrent = () => active && outer.isConnected !== false && inner.isConnected !== false
+          && plugin.__started === true && plugin._startupGeneration === generation
+          && plugin.settings?.cacheAllImages !== false && !record.edits_hidden && !record.delete_data?.hidden
+          && plugin.messageRecord?.[messageId] === record && record.message === sourceMessage
+          && plugin.getRecordRemovedAttachments(record).some(item =>
+            !item.hidden && plugin.getRemovedAttachmentIdentity(item) === attachmentId
+            && (item.url || '') === attachmentUrl
+            && (item.proxy_url || item.proxyUrl || item.proxyURL || '') === attachmentProxyUrl);
+        const onUnavailable = (event, failedSource) => {
+          if (!isCurrent() || (typeof failedSource === 'string' && failedSource && failedSource !== url)) return;
+          if (plugin.settings?.debugLogging) {
+            const knownReasons = ['channelUnavailable', 'nativeDocumentMessageClassUnavailable',
+              'messageAccessoriesUnavailable', 'reactCreateRootUnavailable', 'reactErrorBoundaryUnavailable'];
+            const reason = mediaType === 'audio' ? 'cachedPlaybackFailure'
+              : knownReasons.includes(event) ? event : 'renderFailure';
+            const reportKey = `${mediaType}:${reason}`;
+            if (!inlineNativeFailureReports.has(reportKey)) {
+              inlineNativeFailureReports.add(reportKey);
+              plugin.reportDebugEvent(`Inline cached ${mediaType} fallback: ${reason}`);
+            }
+          }
+          dispose();
+          setFailedFor({ record, sourceMessage, generation, url });
+        };
+        if (!isCurrent()) {
+          dispose();
+          return dispose;
+        }
+        try {
+          if (mediaType === 'audio') {
+            plugin.mountLoggerNativeAudio(inner, url, attachment, sourceMessage, onUnavailable);
+          } else {
+            const displayAttachment = { ...attachment, url, proxy_url: url };
+            const displayMessage = { ...sourceMessage, attachments: [displayAttachment] };
+            plugin.mountLoggerNativeDocument(inner, displayMessage, displayAttachment, sourceMessage, onUnavailable);
+          }
+        } catch {
+          onUnavailable();
+        }
+        return dispose;
+      }, [plugin, record, sourceMessage, messageId, attachmentId, attachmentUrl, attachmentProxyUrl, mediaType, url, generation]);
+      if (failedFor && failedFor.record === record && failedFor.sourceMessage === sourceMessage
+        && failedFor.generation === generation && failedFor.url === url) return fallback;
+      const previewClass = !record?.delete_data && !plugin.settings?.useAlternativeDeletedStyle
+        ? plugin.style?.removedAttachmentPreview : '';
+      return React.createElement('span', {
+        ref: hostRef,
+        className: previewClass || '',
+        'data-ml2-removed-preview': 'true',
+        style: { display: 'inline-block' }
+      });
+    };
+    EditHistoryNativeAttachment.displayName = 'EditHistoryNativeAttachment';
     const EditHistoryContent = ({ plugin, messageId, originalElement, compact }) => {
       const [, forceUpdate] = Hooks.useForceUpdate();
       React.useEffect(() => {
@@ -21577,10 +21659,14 @@ module.exports = class MessageLoggerV2 {
         if (typeof presentationPlan?.url !== 'string' || !presentationPlan.url) {
           return null;
         }
-        if (mediaType !== 'image' && mediaType !== 'video') {
-          return null;
-        }
         const mediaKey = `${key}-${presentationPlan.action}-${presentationPlan.url}`;
+        if ((mediaType === 'audio' || mediaType === 'attachment') && presentationPlan.action === 'blob') {
+          return React.createElement(EditHistoryNativeAttachment, {
+            key: mediaKey, plugin, record: currentRecord, attachment, mediaType,
+            url: presentationPlan.url, fallback
+          });
+        }
+        if (mediaType !== 'image' && mediaType !== 'video') return null;
         return React.createElement(EditHistoryMedia, {
           key: mediaKey,
           attachment,

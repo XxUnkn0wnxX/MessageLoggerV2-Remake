@@ -524,3 +524,280 @@ test('Logger retains empty-content rows with recognized removed markers when cac
     } finally { global.document = previousDocument; }
   }
 });
+
+function createInlineNativeHarness(mediaType = 'audio', failureReports = new Set()) {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'MessageLoggerV2.plugin.js'), 'utf8');
+  const start = source.indexOf('const EditHistoryNativeAttachment =');
+  const end = source.indexOf("EditHistoryNativeAttachment.displayName = 'EditHistoryNativeAttachment';", start);
+  assert.ok(start >= 0 && end > start);
+  const extension = mediaType === 'audio' ? 'mp3' : 'pdf';
+  const attachment = { id: '111111111111111111', filename: `file.${extension}`, url: `https://cdn.discordapp.com/attachments/c/111111111111111111/file.${extension}` };
+  const message = { id: 'm', channel_id: 'c', content: 'body', attachments: [] };
+  const record = { message, removed_attachments: [attachment] };
+  const plugin = createPlugin({ __started: true, _startupGeneration: 1, messageRecord: { m: record }, settings: {}, style: { removedAttachmentPreview: 'removed' } });
+  const previousDocument = global.document;
+  const microtasks = [], mounts = [], cleanups = [];
+  const outer = fakeNode('span'); outer.isConnected = true;
+  const document = { createElement: tag => { const node = fakeNode(tag); node.isConnected = true; return node; } };
+  const originalRemove = outer.appendChild;
+  outer.appendChild = child => { originalRemove.call(outer, child); const remove = child.remove; child.remove = () => { remove.call(child); child.isConnected = false; }; return child; };
+  Object.assign(plugin, {
+    mountLoggerNativeAudio: (host, url, attachment, source, onError) => { mounts.push({ host, url, attachment, source, onError }); return { native: false }; },
+    mountLoggerNativeDocument: (host, display, attachment, source, onError) => { mounts.push({ host, display, attachment, source, onError }); return { native: false, pending: true }; },
+    cleanupLoggerNativeAudioRoots: host => cleanups.push(host), cleanupLoggerNativeDocumentRoots: host => cleanups.push(host)
+  });
+  const state = [], refs = []; let stateIndex, refIndex, effectIndex, effects = [], pending = [], stateWrites = 0;
+  const React = {
+    useRef(initial) { const i = refIndex++; return refs[i] ||= { current: initial }; },
+    useState(initial) { const i = stateIndex++; if (!(i in state)) state[i] = initial; return [state[i], value => { stateWrites++; state[i] = value; }]; },
+    useEffect(effect, deps) { const i = effectIndex++; const prior = effects[i]; if (!prior || deps.some((v, j) => !Object.is(v, prior.deps[j]))) pending.push(() => { prior?.cleanup?.(); effects[i] = { deps, cleanup: effect() }; }); },
+    createElement(type, props) { return { type, props }; }
+  };
+  const component = vm.runInNewContext(`${source.slice(start, end)}\nEditHistoryNativeAttachment;`, { React, document, structuredClone, inlineNativeFailureReports: failureReports, queueMicrotask: fn => microtasks.push(fn) });
+  let props = { plugin, record, attachment, mediaType, url: 'blob://local/selected', fallback: 'original marker' };
+  return {
+    plugin, record, attachment, message, mounts, cleanups, outer, props, document,
+    get stateWrites() { return stateWrites; },
+    render(newProps = {}, deferEffects = false) {
+      props = { ...props, ...newProps }; stateIndex = 0; refIndex = 0; effectIndex = 0; pending = [];
+      const result = component(props);
+      if (result?.props?.ref) result.props.ref.current = outer;
+      if (!deferEffects) for (const run of pending) run();
+      return result;
+    },
+    runEffects() { for (const run of pending) run(); pending = []; },
+    unmount() { for (const effect of effects) effect?.cleanup?.(); },
+    flush() { while (microtasks.length) microtasks.shift()(); },
+    restore() { global.document = previousDocument; }
+  };
+}
+
+test('native inline adapters use the selected Blob and canonical source while keeping detached file payloads', () => {
+  for (const mediaType of ['audio', 'attachment']) {
+    const h = createInlineNativeHarness(mediaType);
+    try {
+      const before = structuredClone(h.record);
+      const rendered = h.render();
+      assert.equal(rendered.props['data-ml2-removed-preview'], 'true');
+      assert.equal(rendered.props.className, 'removed');
+      assert.equal(h.mounts.length, 1);
+      const mount = h.mounts[0];
+      assert.equal(mount.source, h.message);
+      if (mediaType === 'audio') {
+        assert.equal(mount.url, 'blob://local/selected');
+        assert.equal(mount.attachment, h.attachment);
+      } else {
+        assert.notEqual(mount.display, h.message);
+        assert.notEqual(mount.attachment, h.attachment);
+        assert.equal(mount.attachment.url, 'blob://local/selected');
+        assert.equal(mount.attachment.proxy_url, 'blob://local/selected');
+        assert.equal(mount.display.attachments[0], mount.attachment);
+      }
+      h.render({ attachment: { ...h.attachment } });
+      assert.equal(h.mounts.length, 1, 'a new plan/attachment object does not remount');
+      assert.deepEqual(h.record, before);
+    } finally { h.unmount(); h.flush(); h.restore(); }
+  }
+});
+
+test('native inline failures restore the marker and dispose only their own host', () => {
+  for (const mediaType of ['audio', 'attachment']) {
+    const h = createInlineNativeHarness(mediaType);
+    try {
+      h.render();
+      const { host, onError } = h.mounts[0];
+      if (mediaType === 'audio') onError({}, 'blob://old');
+      assert.equal(h.render().type, 'span');
+      onError({}, 'blob://local/selected');
+      assert.equal(host.isConnected, false);
+      assert.equal(h.render(), 'original marker');
+      assert.deepEqual(h.cleanups, []);
+      h.flush();
+      assert.deepEqual(h.cleanups, [host]);
+      h.unmount(); h.flush();
+      assert.deepEqual(h.cleanups, [host]);
+    } finally { h.restore(); }
+  }
+});
+
+test('native inline stale callbacks and deferred cleanup cannot affect replacement hosts', () => {
+  const h = createInlineNativeHarness('audio');
+  try {
+    h.render();
+    const old = h.mounts[0];
+    h.plugin._startupGeneration++;
+    h.render();
+    const replacement = h.mounts[1];
+    assert.equal(old.host.isConnected, false);
+    old.onError({}, old.url);
+    h.flush();
+    assert.deepEqual(h.cleanups, [old.host]);
+    assert.equal(replacement.host.isConnected, true);
+    assert.equal(h.render().type, 'span');
+    h.plugin.__started = false;
+    replacement.onError({}, replacement.url);
+    assert.equal(h.render().type, 'span');
+    h.plugin.__started = true;
+    h.record.removed_attachments = [];
+    replacement.onError({}, replacement.url);
+    assert.equal(h.render().type, 'span');
+    h.unmount(); h.flush();
+    replacement.onError({}, replacement.url);
+    assert.equal(h.render().type, 'span');
+  } finally { h.restore(); }
+});
+
+test('inline dispatch sends only cached audio and files to the stable native adapter', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'MessageLoggerV2.plugin.js'), 'utf8');
+  const start = source.indexOf('const renderEditHistoryAttachment =');
+  const end = source.indexOf('      const parseEditHistoryContent =', start);
+  assert.ok(start >= 0 && end > start);
+  const Native = function Native() {}, Media = function Media() {};
+  const plugin = {}, currentRecord = { message: {} };
+  const render = vm.runInNewContext(`${source.slice(start, end)}\nrenderEditHistoryAttachment;`, {
+    React: { createElement: (type, props) => ({ type, props }) },
+    plugin, currentRecord, EditHistoryNativeAttachment: Native, EditHistoryMedia: Media
+  });
+  const attachment = { id: 'a' };
+  for (const mediaType of ['audio', 'attachment']) {
+    const result = render(attachment, 'key', 'marker', { action: 'blob', mediaType, url: 'blob://selected' });
+    assert.equal(result.type, Native);
+    assert.equal(result.props.record, currentRecord);
+    assert.equal(result.props.url, 'blob://selected');
+    assert.equal(result.props.fallback, 'marker');
+    assert.equal(render(attachment, 'key', 'marker', { action: 'remote', mediaType, url: 'https://remote' }), null);
+  }
+  assert.equal(render(attachment, 'key', 'marker', { action: 'blob', mediaType: 'image', url: 'blob://selected' }).type, Media);
+});
+
+test('native inline synchronous renderer rejection restores its original marker', () => {
+  const h = createInlineNativeHarness('attachment');
+  try {
+    h.plugin.mountLoggerNativeDocument = () => { throw Error('unavailable'); };
+    h.render();
+    assert.equal(h.outer.children.length, 0);
+    assert.equal(h.render(), 'original marker');
+    h.flush();
+    assert.equal(h.cleanups.length, 1);
+  } finally { h.unmount(); h.flush(); h.restore(); }
+});
+
+test('detached inline hosts suppress actual lazy audio and document retries', async () => {
+  for (const mediaType of ['audio', 'attachment']) {
+    const h = createInlineNativeHarness(mediaType);
+    try {
+      global.document = h.document;
+      let resolveLoad, mountCount = 0;
+      const pending = new Promise(resolve => { resolveLoad = resolve; });
+      const proto = Object.getPrototypeOf(h.plugin);
+      if (mediaType === 'audio') {
+        h.plugin.resolveLoggerNativeAudioPlayer = () => null;
+        h.plugin.ensureLoggerNativeAudioPlayer = () => pending;
+        h.plugin.cleanupLoggerNativeAudioRoots = proto.cleanupLoggerNativeAudioRoots.bind(h.plugin);
+        h.plugin.mountLoggerNativeAudio = (...args) => { mountCount++; return proto.mountLoggerNativeAudio.apply(h.plugin, args); };
+      } else {
+        h.plugin.tools = { getChannel: () => ({ id: 'c' }) };
+        h.plugin.resolveLoggerNativeDocumentMessageClass = () => null;
+        h.plugin.ensureLoggerNativeDocumentMessageClass = () => pending;
+        h.plugin.cleanupLoggerNativeDocumentRoots = proto.cleanupLoggerNativeDocumentRoots.bind(h.plugin);
+        h.plugin.mountLoggerNativeDocument = (...args) => { mountCount++; return proto.mountLoggerNativeDocument.apply(h.plugin, args); };
+      }
+      h.render();
+      const inner = h.outer.children[0];
+      assert.equal(mountCount, 1);
+      h.unmount();
+      assert.equal(inner.isConnected, false);
+      resolveLoad(function Ready() {});
+      await Promise.resolve();
+      await Promise.resolve();
+      assert.equal(mountCount, 1, `${mediaType} must not retry a detached host`);
+      h.flush();
+      const roots = mediaType === 'audio' ? h.plugin._loggerNativeAudioRoots : h.plugin._loggerNativeDocumentRoots;
+      assert.equal(roots.has(inner), false);
+    } finally { h.restore(); }
+  }
+});
+
+test('inline native failure diagnostics follow debug console and toast settings and deduplicate', () => {
+  const events = [], notifications = [];
+  const run = (enabled, toasts, reason, reportsForSession) => {
+    const h = createInlineNativeHarness('attachment', reportsForSession);
+    h.plugin.settings.debugLogging = enabled;
+    h.plugin.settings.debugToasts = toasts;
+    h.plugin._logStyledConsoleEvent = (category, message) => events.push({ category, message });
+    h.plugin.notifyUser = (message, options) => notifications.push({ message, options });
+    try { h.render(); h.mounts[0].onError(reason); assert.equal(h.render(), 'original marker'); }
+    finally { h.unmount(); h.flush(); h.restore(); }
+  };
+  run(false, true, 'messageAccessoriesUnavailable', new Set());
+  assert.equal(events.length, 0);
+  assert.equal(notifications.length, 0);
+  run(true, false, 'messageAccessoriesUnavailable', new Set());
+  assert.equal(events.length, 1);
+  assert.equal(notifications.length, 0);
+  const reports = new Set();
+  run(true, true, 'messageAccessoriesUnavailable', reports);
+  run(true, true, 'messageAccessoriesUnavailable', reports);
+  assert.equal(events.length, 2);
+  assert.equal(notifications.length, 1);
+  assert.equal(events[1].message, 'Inline cached attachment fallback: messageAccessoriesUnavailable');
+  assert.equal(notifications[0].message, events[1].message);
+  run(true, true, Error('secret id filename https://private.invalid'), reports);
+  assert.equal(events[2].message, 'Inline cached attachment fallback: renderFailure');
+  run(true, true, 'messageAccessoriesUnavailable', new Set());
+  assert.equal(events.length, 4, 'a new patch session has a fresh deduplication set');
+  assert.equal(notifications.length, 3);
+  assert.ok(events.every(event => !/secret|filename|https:/i.test(event.message)));
+});
+
+test('delayed native inline effects never mount after their owner becomes invalid', () => {
+  for (const mediaType of ['audio', 'attachment']) {
+    for (const invalidate of [
+      h => { h.plugin.__started = false; },
+      h => { h.plugin._startupGeneration++; },
+      h => { h.plugin.settings.cacheAllImages = false; },
+      h => { h.plugin.messageRecord.m = { ...h.record }; },
+      h => { h.record.removed_attachments = []; },
+      h => { h.record.edits_hidden = true; }
+    ]) {
+      const h = createInlineNativeHarness(mediaType);
+      try {
+        h.render({}, true);
+        invalidate(h);
+        h.runEffects();
+        assert.equal(h.mounts.length, 0);
+        assert.equal(h.outer.children.length, 0);
+        assert.equal(h.stateWrites, 0);
+        h.flush();
+        assert.equal(h.mounts.length, 0);
+        assert.equal(h.cleanups.length, 1);
+      } finally { h.unmount(); h.flush(); h.restore(); }
+    }
+  }
+});
+
+test('native inline ownership recognizes proxyURL and ignores changed canonical proxy', () => {
+  const h = createInlineNativeHarness('attachment');
+  try {
+    h.attachment.proxyURL = 'https://media.discordapp.net/original';
+    h.render();
+    assert.equal(h.mounts.length, 1);
+    h.record.removed_attachments[0].proxyURL = 'https://media.discordapp.net/replaced';
+    h.mounts[0].onError('messageAccessoriesUnavailable');
+    assert.equal(h.render().type, 'span');
+  } finally { h.unmount(); h.flush(); h.restore(); }
+});
+
+test('inline document projection accepts unrelated non-cloneable message fields', () => {
+  const h = createInlineNativeHarness('attachment');
+  try {
+    h.message.unrelatedMethod = () => 'unchanged';
+    h.render();
+    assert.equal(h.mounts.length, 1);
+    assert.notEqual(h.mounts[0].display, h.message);
+    assert.notEqual(h.mounts[0].attachment, h.attachment);
+    assert.equal(h.mounts[0].display.unrelatedMethod, h.message.unrelatedMethod);
+    assert.equal(h.message.attachments.length, 0);
+    assert.equal(h.attachment.url.startsWith('https:'), true);
+  } finally { h.unmount(); h.flush(); h.restore(); }
+});

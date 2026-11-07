@@ -2737,7 +2737,7 @@ test('edit-history inline segments replace matched markers with exact placeholde
   assert.equal(segments.filter(segment => segment.kind === 'removedAttachment').length, 0);
   assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[Not cached: first.gif]'), true);
   assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[Not cached: second.mp4]'), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[Not cached: third.pdf]'), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('third.pdf')), true);
   assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('missing.txt')), true);
   assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('cdn.discordapp.com/attachments/channel/111111111111111111/first.gif')), false);
   assert.deepEqual(removedAttachments, before.removedAttachments);
@@ -2854,7 +2854,7 @@ test('edit-history inline segments emit cached Blob plans with exact fallbacks a
   assert.equal(removedSegments[0]?.value, '[image:first.gif]');
   assert.equal(removedSegments[1]?.value, '[attachment:second.mp4]');
   assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[Not cached: missing.gif]'), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[Not cached: third.pdf]'), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('third.pdf')), true);
   assert.equal(requestLog.length >= 1, true);
   assert.equal(requestLog.every(url => !url.startsWith('http://cdn.discordapp.com') && !url.startsWith('https://media.discordapp.net')), true);
   assert.deepEqual(removedAttachments, before.removedAttachments);
@@ -13094,9 +13094,9 @@ test('removed cached plans admit supported files, preserve current policy and le
   assert.deepEqual(plugin.getLoggerSavedAttachmentPresentationEntries(message, record).map(entry => entry.plan.action), ['remote', 'blob', 'blob', 'blob', 'blob']);
   const markers = attachments.map(a => '`Attachment Deleted: `' + a.url).join(' ');
   const segments = plugin.getEditHistoryContentSegments(markers, attachments, message);
-  assert.deepEqual(segments.filter(s => s.kind === 'removedAttachment').map(s => s.presentationPlan.mediaType), ['image', 'video']);
-  assert.ok(segments.some(s => s.kind === 'text' && s.value.includes('sound.mp3')));
-  assert.ok(segments.some(s => s.kind === 'text' && s.value.includes('document.pdf')));
+  assert.deepEqual(segments.filter(s => s.kind === 'removedAttachment').map(s => s.presentationPlan.mediaType), ['image', 'video', 'audio', 'attachment']);
+  assert.equal(segments.find(s => s.presentationPlan?.mediaType === 'audio').value, '`Attachment Deleted: `' + attachments[2].url);
+  assert.equal(segments.find(s => s.presentationPlan?.mediaType === 'attachment').value, '`Attachment Deleted: `' + attachments[3].url);
   plugin.imageCacheServerSimulator.get = () => 'data:image/error';
   assert.equal(plugin.getLoggerSavedAttachmentPresentationEntries(message, record).filter(e => e.removed).every(e => e.plan.action === 'omit'), true);
   assert.equal(plugin.getEditHistoryContentSegments(markers, attachments, message).filter(s => s.kind === 'removedAttachment').length, 0);
