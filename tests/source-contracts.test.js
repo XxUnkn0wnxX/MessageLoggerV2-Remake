@@ -20,10 +20,12 @@ function readDefaultSettings() {
   return JSON.parse(JSON.stringify(vm.runInNewContext(`(${expression})`)));
 }
 
-test('plugin metadata and updater remain pointed at the maintained main branch', () => {
-  assert.match(source, /@version 2\.8\.2\.20/);
-  assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
-  assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
+test('plugin metadata and updater use the maintained GitHub develop branch', () => {
+  const metadata = source.slice(0, source.indexOf('*/') + 2);
+  assert.match(metadata, /@version 2\.8\.2\.20/);
+  assert.ok(metadata.includes('@source https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/blob/develop/MessageLoggerV2.plugin.js'));
+  assert.ok(metadata.includes('@updateUrl https://raw.githubusercontent.com/XxUnkn0wnxX/MessageLoggerV2-Remake/develop/MessageLoggerV2.plugin.js'));
+  assert.equal(source.match(/^const REPO_MAIN_URL = "([^"]+)";/m)?.[1], 'https://raw.githubusercontent.com/XxUnkn0wnxX/MessageLoggerV2-Remake/develop/');
   const changesBlock = source.match(/  getChanges\(\) \{([\s\S]*?)\n  \}\n  async checkNewUpdate/);
   assert.ok(changesBlock, 'getChanges block was not found');
   const changes = createPlugin().getChanges();

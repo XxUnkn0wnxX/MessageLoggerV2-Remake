@@ -1,5 +1,10 @@
 # 📝 MessageLoggerV2 Remake
 
+> [!WARNING]
+> **Active development:** rework and native Discord testing are still in progress. Unfinished features and known limitations remain. **develop** is the working/default branch; **main** currently contains only a holding README.
+
+This is a maintained fork of [NightBirde’s MessageLoggerV2-Remake](https://git.slowb.ro/NightBirde/MessageLoggerV2-Remake), retaining credit for the earlier work by Lighty, Davilarek, NightBirde, and other contributors.
+
 A maintained BetterDiscord message logger for deleted, edited, purged, nuked, and ghost-pinged messages.
 
 This fork also restores logged forum posts and channel threads, preserves their metadata, and provides controls for hiding or permanently removing related records.
@@ -47,7 +52,9 @@ This fork also restores logged forum posts and channel threads, preserves their 
 
 ## 📦 Install
 
-1. Download [MessageLoggerV2.plugin.js](MessageLoggerV2.plugin.js).
+The repository is temporarily private. Download through a GitHub account with access; unauthenticated automatic update checks cannot retrieve private builds.
+
+1. Download [MessageLoggerV2.plugin.js from develop](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/blob/develop/MessageLoggerV2.plugin.js).
 2. Place it in the BetterDiscord plugins folder.
 3. Enable **MessageLoggerV2** in BetterDiscord settings.
 4. Right-click a server, channel, DM, or thread to configure the **Message Logger** whitelist and blacklist.

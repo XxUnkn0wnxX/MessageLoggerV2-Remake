@@ -5,10 +5,10 @@
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
  * @invite e66JbKte2P
- * @source https://git.slowb.ro/XxUnkn0wnxX/MessageLoggerV2-Remake/src/branch/main/MessageLoggerV2.plugin.js
- * @updateUrl https://git.slowb.ro/XxUnkn0wnxX/MessageLoggerV2-Remake/raw/branch/main/MessageLoggerV2.plugin.js
+ * @source https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/blob/develop/MessageLoggerV2.plugin.js
+ * @updateUrl https://raw.githubusercontent.com/XxUnkn0wnxX/MessageLoggerV2-Remake/develop/MessageLoggerV2.plugin.js
  */
-const REPO_MAIN_URL = "https://git.slowb.ro/XxUnkn0wnxX/MessageLoggerV2-Remake/raw/branch/main/";
+const REPO_MAIN_URL = "https://raw.githubusercontent.com/XxUnkn0wnxX/MessageLoggerV2-Remake/develop/";
 const DISCORD_EPOCH = 14200704e5;
 // Persisted data is canonicalized to this additive schema. Older forks can ignore the
 // marker and enhanced fields while this fork can detect files rewritten without them.
@@ -7161,12 +7161,17 @@ module.exports = class MessageLoggerV2 {
     }
     return null;
   }
+  projectMediaOffEditHistoryContent(content) {
+    if (this.settings?.cacheAllImages !== false || typeof content !== 'string') return content;
+    return content.replace(/\n(?:`Attachment Deleted: `https?:\/\/[^\s\r\n]+\n)+$/, '');
+  }
   isSuppressedMediaOnlyEditHistory(content) {
     if (this.settings?.cacheAllImages !== false || typeof content !== 'string') return false;
     const marker = /`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g;
-    return !content.replace(marker, '').trim();
+    return !this.projectMediaOffEditHistoryContent(content).replace(marker, '').trim();
   }
   getEditHistoryContentSegments(content, removedAttachments, message) {
+    content = this.projectMediaOffEditHistoryContent(content);
     if (typeof content !== 'string') return [{ kind: 'text', value: String(content) }];
     const attachments = Array.isArray(removedAttachments)
       ? removedAttachments
@@ -26769,7 +26774,7 @@ module.exports = class MessageLoggerV2 {
             const hist = record.edit_history[ii];
             if (this.isSuppressedMediaOnlyEditHistory(hist?.content)) continue;
             const displayContent = typeof hist.content === 'string'
-              ? hist.content.replace(/`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g, (marker, url) => {
+              ? this.projectMediaOffEditHistoryContent(hist.content).replace(/`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g, (marker, url) => {
                 if (this.settings?.cacheAllImages === false) return '';
                 const attachment = this.getRemovedAttachmentFromEditHistoryMarker(url, removedAttachments, null);
                 const identity = this.getRemovedAttachmentIdentity(attachment);

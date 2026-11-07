@@ -116,7 +116,7 @@ the source correction is committed, while installation and focused native toggle
       batch outcomes and deduplicated failure-only toast behavior.
 - [x] Media-Off rendering source gate: `e0746d1`, 965/965 tests passed; native installation and acceptance remain pending.
 - [x] R7.10 implementation and focused gate: bounded same-session media-Off catch-up reuses the existing deferred-media/cache path, with both media and saving gates, successful-save ordering, current child restrictions, cancellation and `DEBUG CACHE` summaries. All 11 focused catch-up tests passed; native acceptance remains pending.
-- [ ] Final combined automated gate and closed-client installation of media-Off suppression and catch-up. The local gate passed 986/986 tests (no skips or failures; 6.93 seconds); installation is next.
+- [x] Media-Off suppression/catch-up gate and closed-client installation: 986/986 tests passed (no skips or failures; 6.93 seconds), and build `9efcb95` was installed with data/settings/private-helper preservation verified. Native acceptance then exposed generated blank lines in text-only history; that follow-up remains open.
 - [ ] Focused native Off/On confirmation in chat and Logger; confirm media-only
       edits vanish, text-bearing edits remain, embeds disappear, and media returns.
 
@@ -187,12 +187,12 @@ issue. Its acceptance is independent of the remaining hotfix/cache checks.
 
 ## Living handoff snapshot
 
-### Current R7.9 / R7.10 checkpoint — 2026-11-08
+### Current media-gate and private GitHub migration checkpoint — 2026-11-08
 
 - Media-Off suppression is committed locally as `e0746d1`; version `2.8.2.20` includes the requested hotfix/hydration/debug changelog and development notice. The full source gate passed **965/965** tests in **6.61 seconds**.
-- Discord still runs the accepted `64961c9` build. The new source has not been installed or pushed; settings, archive, cached files and the private audit helper remain intact.
+- Discord runs installed build `9efcb95` (`2.8.2.20`). Installation preserved settings, archive, cached files and the private audit helper. Native capture confirmed generated blank lines in media-Off edit history: affected rows were 66px versus the ordinary 22px control. A shared display-only separator correction is implemented; the combined local gate passed 987/987 tests in 10.25 seconds with no failures or skips. Hosted CI, the next install and native acceptance remain pending.
 - The requested bounded same-session media-Off catch-up is implemented and reviewed, reusing the existing deferred-media/cache path and preserving both master gates and successful-save ordering. The 11 focused tests also cover clearing queued live requests. This is the only added acquisition scope; no archive-wide download scan or persistent queue.
-- The independent CI preparation is complete: one stable Tests job, conservative change selection, Node 26, and the existing dependency-free npm test command. The combined local gate passed 986/986 tests in 6.93 seconds with no skips or failures. Install this build, then complete focused native Off/On and catch-up checks before GitHub migration and the actual hosted CI run.
+- The user now authorizes migration and iterative publication to a **private GitHub repository** before all native checks are complete. Keep **develop** as default and **main** as a README-only holding branch; retain NightBirde attribution and an active-development warning. The full migration and successful exact-head CI must precede the next install. All slowb site/history changes remain deferred until Logger is ready.
 
 ### Compatibility baseline before R7 — 2026-11-08
 
@@ -583,14 +583,15 @@ Hotfix acceptance (does not complete any parked feature stage):
 
 ### Exact next action
 
-Install the locally validated combined
-media-Off/catch-up build at the authorized closed-client boundary. Verify native
+Finish private GitHub migration, validate and publish the spacing-corrected build,
+and require successful CI on that develop commit before the next authorized
+closed-client install. Verify native
 Off/On suppression/restoration and the two media/saving gates, then run the final
 warmed compatibility audit. Forum media checks passed; the user
 waived a separate ordinary-thread native check. Keep the
 intermittent cold-start display bug explicitly deferred; do not restart its
-investigation or count it as fixed. Publication remains gated on all other agreed
-checks and the requested GitHub migration/CI. The next feature stage remains R1
+investigation or count it as fixed. Public release remains gated on the remaining agreed checks. The explicitly
+authorized private GitHub checkpoints may be published during this validation. The next feature stage remains R1
 when the user separately resumes feature work; later features retain the roadmap
 order.
 

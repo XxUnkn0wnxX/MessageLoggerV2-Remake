@@ -3,6 +3,18 @@ const assert = require('node:assert/strict');
 const { createPlugin } = require('./helpers/plugin-harness');
 
 const freeze = value => { if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.freeze(value); Object.values(value).forEach(freeze); } return value; };
+
+function fakeNode(tag) {
+  const classes = new Set();
+  const node = {
+    tagName: tag.toUpperCase(), children: [], dataset: {}, style: {}, parentElement: null,
+    classList: { add: (...values) => values.forEach(value => classes.add(value)), remove() {} },
+    appendChild(child) { this.children.push(child); child.parentElement = this; return child; },
+    insertAdjacentHTML() {}, querySelectorAll() { return []; }, addEventListener() {}
+  };
+  return node;
+}
+
 test('saved media Off projects nested snapshot and component media without changing canonical data or On projection', () => {
   const thumbnail = { type: 11, id: 11, media: { url: 'https://cdn.example/thumbnail.png' } };
   const message = freeze({ id: 'm', channel_id: 'c', content: 'actual text', flags: 32768,
@@ -57,4 +69,89 @@ test('ordinary native messages remain unchanged outside saved-record presentatio
   assert.strictEqual(plugin.getNativeDeletedAttachmentPresentationMessageForMessageContent(message), message);
   assert.equal(message.embeds.length, 1);
   assert.equal(message.components.length, 1);
+});
+
+test('media Off removes only the generated trailing edit block on both rendering surfaces', () => {
+  const record = {
+    message: { id: 'm', channel_id: 'c', content: 'live content', attachments: [], embeds: [], components: [] },
+    edit_history: [], removed_attachments: []
+  };
+  const plugin = createPlugin({
+    messageRecord: { m: record },
+    settings: { cacheAllImages: false, newSaveAllFileTypes: false, renderCap: 0 }
+  });
+  const beforeGenerated = structuredClone(record);
+  const oldAttachments = Array.from({ length: 4 }, (_, index) => ({
+    id: `removed-${index}`,
+    url: `https://cdn.example/removed-${index}.txt`
+  }));
+  const generated = plugin._getChangedAttachments(oldAttachments, [], 'm', 'c', null).content;
+  assert.equal((generated.match(/`Attachment Deleted: `/g) || []).length, 4);
+  assert.deepEqual(record, beforeGenerated);
+
+  const markerOnly = `\n${generated}`;
+  const original = 'text before four removals';
+  const trailingLf = 'text with a genuine trailing LF\n';
+  const trailingCrlf = 'text with a genuine trailing CRLF\r\n';
+  const generatedSuffix = text => `${text}\n${generated}`;
+  const inline = 'before `Attachment Deleted: `https://example.com/inline.png middle after';
+  const leadingMarker = '`Attachment Deleted: `https://example.com/legacy.png\nKeep this text';
+
+  for (const [source, expected] of [
+    [generatedSuffix(original), original],
+    [generatedSuffix(trailingLf), trailingLf],
+    [generatedSuffix(trailingCrlf), trailingCrlf]
+  ]) {
+    assert.equal(plugin.projectMediaOffEditHistoryContent(source), expected);
+    assert.equal(plugin.getEditHistoryContentSegments(source, [], record.message).map(segment => segment.value).join(''), expected);
+  }
+  assert.equal(plugin.projectMediaOffEditHistoryContent(markerOnly), '');
+  assert.equal(plugin.isSuppressedMediaOnlyEditHistory(markerOnly), true);
+  assert.equal(plugin.getEditHistoryContentSegments(inline, [], record.message).map(segment => segment.value).join(''), 'before  middle after');
+  assert.equal(plugin.projectMediaOffEditHistoryContent(leadingMarker), leadingMarker);
+  assert.equal(plugin.getEditHistoryContentSegments(leadingMarker, [], record.message).map(segment => segment.value).join(''), '\nKeep this text');
+
+  record.edit_history = [
+    { content: generatedSuffix(original), time: '123' },
+    { content: markerOnly, time: '456' },
+    { content: generatedSuffix(trailingLf), time: '789' },
+    { content: generatedSuffix(trailingCrlf), time: '987' },
+    { content: leadingMarker, time: '111' }
+  ];
+  const before = structuredClone(record);
+  const expectedVisible = [original, trailingLf, trailingCrlf, '\nKeep this text'];
+  const formatted = [];
+  const tooltipLabels = [];
+  const root = fakeNode('div');
+  const group = fakeNode('div');
+  const markup = fakeNode('div');
+  group.appendChild(markup);
+  group.getElementsByClassName = name => name === 'markup' ? [markup] : [];
+  const oldDocument = global.document;
+  global.document = {
+    createElement: fakeNode,
+    createTextNode: text => ({ textContent: text }),
+    getElementById: () => null
+  };
+  Object.assign(plugin, {
+    style: { edited: 'edited' }, classes: { markup: 'markup' }, multiClasses: { markup: 'markup' },
+    menu: { shownMessages: -1 }, getSavedMessage: () => record, createMessageGroup: () => group,
+    getSingleDiscordClass: () => 'missing', formatMarkup: text => { formatted.push(text); return fakeNode('div'); },
+    Tooltip: function (_node, label) { tooltipLabels.push(label); }, getEditedTimestampClasses: () => '', createTimeStamp: () => '', translatedEdited: 'edited'
+  });
+  try {
+    plugin.populateParent(root, ['m']);
+    assert.deepEqual(formatted.slice(0, expectedVisible.length), expectedVisible);
+    assert.deepEqual(markup.children.filter(node => node.edit !== undefined).map(node => node.edit), [0, 2, 3, 4]);
+    assert.deepEqual(tooltipLabels, ['Edited at 123', 'Edited at 789', 'Edited at 987', 'Edited at 111']);
+    assert.deepEqual(record, before);
+
+    plugin.settings.cacheAllImages = true;
+    const onProjection = generatedSuffix(original);
+    assert.equal(plugin.projectMediaOffEditHistoryContent(onProjection), onProjection);
+    assert.equal(plugin.getEditHistoryContentSegments(onProjection, [], record.message).map(segment => segment.value).join(''), onProjection);
+    assert.deepEqual(record, before);
+  } finally {
+    global.document = oldDocument;
+  }
 });
