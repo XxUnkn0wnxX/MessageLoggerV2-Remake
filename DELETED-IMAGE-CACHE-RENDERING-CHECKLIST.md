@@ -90,6 +90,18 @@ restored cards, parked requests, stale callbacks and classified debug activity.
 The combined source gate is required before installation; native checks below
 remain open until the corresponding Discord behavior is verified.
 
+**Native stability checkpoint — 2026-11-08:** the user reports the installed
+`64961c9` build is stable. A complete 25-second trace records four Deleted ↔ Edited
+transitions during queued hydration, each returning the destination to the top.
+Clicking the active Edited tab moves from 4,062 pixels to the top without new
+builds or changing its 80 admitted rows. Sampled unchanged child/root objects
+survive tab returns; 18 additional builds are accounted for by logged media
+updates. No session disposal/reset or capture error occurs in this run.
+Brief loading pauses are explicitly acceptable to the user; sustained lockups
+are not. This is a bounded main-window pass, not proof of every surface or of
+the final queued rows draining after the capture ends. Media-switch acceptance
+on the lazy-loading build and the final lifecycle audit remain open.
+
 - [ ] Cover the **main Logger window**, including available tabs, filters,
       sorting, automatic batch admission and close/reopen. Also cover saved
       forum/thread log windows and Logger-owned additions in native channels,
