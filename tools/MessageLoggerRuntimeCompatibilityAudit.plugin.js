@@ -3099,6 +3099,110 @@ function describeLoggerIntegrationMessageClasses(api) {
   };
 }
 
+function describeLoggerIntegrationAppLayerResolver(api) {
+  const errors = [];
+  const pluginsRead = safeRead(api, 'Plugins');
+  const getRead = safeRead(pluginsRead.value, 'get');
+  let addon = null;
+  if (pluginsRead.ok && callable(getRead.value)) {
+    try { addon = getRead.value.call(pluginsRead.value, 'MessageLoggerV2'); }
+    catch { errors.push('plugins-get-threw'); }
+  } else {
+    errors.push(pluginsRead.ok ? 'plugins-get-unavailable' : pluginsRead.error);
+  }
+  const instanceRead = dataRead(addon, 'instance');
+  const instance = instanceRead.ok ? instanceRead.value : null;
+  const startedRead = dataRead(instance, '__started');
+  const started = startedRead.ok && startedRead.value === true;
+  const toolsRead = dataRead(instance, 'tools');
+  const managerRead = dataRead(toolsRead.value, 'popoutManager');
+  const resolverRead = dataRead(managerRead.value, 'findAppLayerBundle');
+  const resolver = resolverRead.ok && callable(resolverRead.value) ? resolverRead.value : null;
+
+  const base = {
+    expectedUniqueness: 'one callable installed resolver returns the native Provider, Container and Layer roles',
+    loadedMatchCount: addon ? 1 : 0,
+    selected: {
+      found: !!managerRead.value,
+      type: 'logger-popout-manager-app-layer-resolver',
+      moduleId: null,
+      exportPaths: ['<root>'],
+      ownKeyNames: [],
+      prototypeMethodNames: [],
+      errors: []
+    }
+  };
+  if (!started || !resolver) {
+    if (!addon) errors.push('logger-addon-unavailable');
+    else if (!instance) errors.push(instanceRead.error || 'logger-instance-unavailable');
+    else if (!started) errors.push(startedRead.error || 'logger-not-started');
+    else errors.push(resolverRead.error || 'app-layer-resolver-unavailable');
+    const validation = collectValidation({ addonAvailable: !!addon, instanceAvailable: !!instance, started, resolverAvailable: !!resolver }, errors);
+    return {
+      ...base,
+      status: 'warn',
+      state: !addon || !instance ? 'logger-unavailable' : !started ? 'logger-not-started' : 'resolver-unavailable',
+      invoked: false,
+      roles: {},
+      validation: { ok: false, booleans: validation.booleans, errors: [...new Set(validation.errors)] }
+    };
+  }
+
+  let bundle = null;
+  let resolverThrew = false;
+  try { bundle = resolver.call(managerRead.value); }
+  catch { resolverThrew = true; errors.push('app-layer-resolver-threw'); }
+  const expectedNames = {
+    Provider: 'AppLayerProvider',
+    Container: 'AppLayerContainer',
+    Layer: 'AppLayer'
+  };
+  const roles = {};
+  const identities = new Set();
+  for (const [role, displayName] of Object.entries(expectedNames)) {
+    const roleRead = dataRead(bundle, role);
+    const component = roleRead.ok ? roleRead.value : null;
+    const callableRole = callable(component);
+    const nameRead = callableRole ? dataRead(component, 'displayName') : { ok: false, error: 'role-not-callable' };
+    const displayNameMatches = nameRead.ok && nameRead.value === displayName;
+    if (callableRole) identities.add(component);
+    roles[role] = {
+      callable: callableRole,
+      displayNameMatches,
+      readError: !roleRead.ok ? roleRead.error : !callableRole ? 'role-not-callable' : !nameRead.ok ? nameRead.error : null
+    };
+    if (!roleRead.ok) errors.push(`${role}-role-${roleRead.error}`);
+    else if (!callableRole) errors.push(`${role}-role-not-callable`);
+    else if (!nameRead.ok) errors.push(`${role}-display-name-${nameRead.error}`);
+    else if (!displayNameMatches) errors.push(`${role}-display-name-mismatch`);
+  }
+  const distinctRoles = identities.size === 3;
+  if (bundle == null && !resolverThrew) errors.push('app-layer-resolver-returned-no-bundle');
+  if (!distinctRoles && bundle != null) errors.push('app-layer-roles-not-distinct');
+  const validation = collectValidation({
+    addonAvailable: true,
+    instanceAvailable: true,
+    started: true,
+    resolverAvailable: true,
+    resolverReturnedBundle: bundle !== null && bundle !== undefined,
+    providerCallable: roles.Provider.callable,
+    providerDisplayName: roles.Provider.displayNameMatches,
+    containerCallable: roles.Container.callable,
+    containerDisplayName: roles.Container.displayNameMatches,
+    layerCallable: roles.Layer.callable,
+    layerDisplayName: roles.Layer.displayNameMatches,
+    rolesDistinct: distinctRoles
+  }, errors);
+  return {
+    ...base,
+    status: validation.ok ? 'pass' : 'fail',
+    state: validation.ok ? 'resolved' : resolverThrew ? 'resolver-threw' : bundle == null ? 'bundle-unavailable' : 'bundle-invalid',
+    invoked: true,
+    roles,
+    validation: { ok: validation.ok, booleans: validation.booleans, errors: [...new Set(validation.errors)] }
+  };
+}
+
 function moduleContracts() {
   const store = (name, keys, selector, expected = 'single canonical store') => ({
     name,
@@ -3973,7 +4077,8 @@ module.exports = class MessageLoggerRuntimeCompatibilityAudit {
       { name: 'LoggerOwned.Styles', ...describeLoggerOwnedStyleContract(this.bdApi) },
       { name: 'LoggerOwned.MountMarkers', ...describeLoggerOwnedMountContract() },
       { name: 'LoggerIntegration.RenderLinkComponent', ...describeLoggerIntegrationRenderLinkComponent(this.bdApi) },
-      { name: 'LoggerIntegration.MessageClasses', ...describeLoggerIntegrationMessageClasses(this.bdApi) }
+      { name: 'LoggerIntegration.MessageClasses', ...describeLoggerIntegrationMessageClasses(this.bdApi) },
+      { name: 'LoggerIntegration.AppLayerResolver', ...describeLoggerIntegrationAppLayerResolver(this.bdApi) }
     ];
     const assetContract = await assetPromise;
     const transitionContract = await transitionPromise;

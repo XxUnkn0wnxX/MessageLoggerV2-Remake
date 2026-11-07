@@ -1,3 +1,10 @@
+> **Later compatibility finding — 2026-11-07:** This accepted checkpoint is
+> historical. Logger-generated presentation deletes are now proven to trigger
+> the PersonalPins interaction, superseding earlier unrelated-error attribution.
+> The current uncommitted hotfix and outstanding native acceptance are recorded
+> in the [living checkpoint](../../../DELETED-IMAGE-CACHE-RENDERING-CHECKLIST.md).
+> The accepted feature foundation remains; unfinished roadmap items stay open.
+
 # Discord Webpack/Asset Compatibility Handoff
 
 Prepared: 2026-08-30 (Australia/Melbourne)

@@ -96,3 +96,13 @@ whenever MessageLoggerV2 gains or removes a runtime dependency.
 Use runtime failures as trace evidence. Update the exact lookup or fallback in
 MessageLoggerV2, add deterministic coverage where possible, and rerun the
 official test suite before syncing the plugin live.
+
+The message-cache checks include non-creating lookup, immutable-removal and commit
+methods plus the inherited MessageStore change notification used by presentation
+cleanup. A passing capability report does not prove visible unmounting, plugin
+coexistence, or request behavior; those still require the relevant live checks.
+
+The App layer integration check calls the installed profile manager’s read-only
+resolver and validates its native Provider, Container and Layer roles. An older
+or unstarted instance is deferred; an active resolver returning no valid bundle
+fails. This does not replace native menu positioning, action and dismissal checks.

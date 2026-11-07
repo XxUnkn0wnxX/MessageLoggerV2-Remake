@@ -59,9 +59,84 @@ compact roadmap.
 - [ ] Parked — optional Stage 4a Reveal File; define its scope before activation.
 - [ ] Parked — multi-instance storage isolation; separate architecture and not
       a blocker for the active media/viewer path.
-- [ ] Exact active next stage: R1; no code starts in this docs-only update.
+- [ ] Exact next feature stage: R1. Finish the current compatibility hotfix and
+      its native validation first; feature implementation remains deferred.
 
 ## Living handoff snapshot
+
+### Current compatibility checkpoint — 2026-11-07
+
+- **Current session:** `01a1b4bc-271d-77a1-b213-6ab542bcd323`.
+- **Scope:** current Logger errors, module lookups and evidenced caching faults
+  on `develop`. Preserve unfinished features, saved data, schema and release
+  metadata. R1–R6 remain incomplete. Local commits are authorized; pushing is
+  gated on the user’s UI checks and resolution of the known runtime issues.
+- **Source checkpoints:** local commits `ccabb77` (runtime compatibility, safe
+  cleanup and cache warning identity) and `77da772` (native profile layer).
+  The latter passes **727/727** tests with no skips. Neither has been pushed.
+- **Installed Stable:**
+  `f0c9e074030705e45ba73ac117d5e5201e77382024e27ea09c77a6bea3fbd6ae`,
+  matching `77da772`. Stable was fully closed before installation and then
+  restarted; data/settings/backup/Pins bytes were unchanged during the copy.
+  This includes corrected class recovery and cache warning IDs.
+- **Preserved behavior:** modal/audio/image discovery repairs; scoped immutable
+  eviction for Logger-owned presentation cleanup; media refresh only for actual
+  ordinary evictions; native-thread branches, saved media fallback, selected-channel
+  settings refresh, cache/data ownership and all unfinished feature contracts.
+- **Native findings:** old Logger emitted false deletion events during cleanup,
+  triggering Pins errors; no actual pin loss observed. Old window trace proved
+  82 history fetches across 31 channels in 5.855 seconds from absent-entry media
+  failures. The first fixed window capture recorded zero history fetches and
+  zero synthetic deletes. Native cleanup/Pins lifecycle acceptance remains open.
+- **Startup consumer findings:** a warmed lookup audit passed while Logger kept
+  a null user-popout renderer and empty message/selected classes. Action-time
+  popout lookup is now user-verified. Two bounded, cancellable CSS waits recover
+  missing classes. Native testing exposed an unrelated named enum export being
+  accepted as selected CSS; the latest tested source now preserves the original
+  root/default search scope. Actual class comparison is added to the audit.
+- **Profile menu:** native tracing proved that the More button opens its state,
+  but its Layer receives a null container. The installed repair gives the
+  profile a locally owned native App layer and includes its menu in dismissal
+  containment. Layout, actions and lifecycle still need user verification.
+  The audit now checks the actual installed App layer resolver. Profile
+  impression/locale warnings are being attributed separately; no suppression
+  or whole-application provider wrapper was added.
+- **Cache-warning scope:** the current `Image null unavailable (403)` warning
+  was reproduced. A missing embed/component source ID does not imply a null URL.
+  The misleading identity is repaired through the existing cache-file ID, with
+  unchanged-byte/request/ID tests, and is now installed. Full R5
+  filename/path/host labeling remains parked; cache behavior is unchanged.
+- **Historical correction:** older claims that Pins errors were unrelated are
+  superseded by the proven Logger synthetic-delete trigger. Historical notes
+  saying ordinary-row synthetic deletes remain are also superseded. PersonalPins
+  source is unchanged; its saved config still matches the retained baseline.
+- **Evidence:** authoritative compatibility records and all new traces/backups
+  remain under `$HOME/Apps/Dev/BD/.tmp/startup-20261107/`. Historical local
+  feature handoffs remain references, not current recovery commands.
+
+Hotfix acceptance (does not complete any parked feature stage):
+
+- [x] Modal startup/partial-start repair: deterministic checks and user's basic
+      native verification passed.
+- [x] Attribute false delete events and window history amplification; implement
+      bounded source fixes and preserve protected behavior in regressions.
+- [x] Reproduce the Logger-window trigger on the first fixed build with zero
+      observed history fetches and synthetic deletes.
+- [x] Restore Logger username/avatar profile opening; user supplied native proof.
+- [ ] Complete cold-to-warm class recovery against the actual native CSS owner
+      in the same generation, plus hover/selected presentation checks.
+- [ ] Repair and verify the Logger-profile More menu interaction. Source tests
+      and native dependency preflight pass; installed UI acceptance is pending.
+- [ ] Verify disable/re-enable cleanup, Pins preservation, saved history,
+      relevant media and native-thread behavior on the final hotfix.
+- [x] Correct null cache-warning identity; deterministic tests verify unchanged
+      cache IDs, bytes, requests, terminal failure behavior and deferred toast.
+      Installed with the final native verification gate still open.
+- [ ] Reconcile final evidence, remove live temporary helpers, and leave the
+      remaining feature roadmap parked. Push only after the user’s UI results
+      and runtime acceptance are complete.
+
+### Previous accepted feature checkpoint — 2026-08-31
 
 - **Last updated:** 2026-08-31
 - **Repository:**
@@ -174,10 +249,12 @@ compact roadmap.
 
 ### Exact next action
 
-Commit and push this docs-only roadmap/checkpoint update on `develop` after the
-required automated, diff, and privacy gates. The next implementation session
-starts R1 trace-first from clean published source; no embed code starts today.
-Later work follows roadmap order.
+Resume the bounded compatibility hotfix from its current handoff. Deployment
+and startup verification are complete; inspect the fresh warmed audit and
+Logger-window trace, including actual instance state for unresolved cold-start
+lookups. Then verify native cleanup, Pins coexistence, media and thread
+behavior. Publication requires the user's instruction. The next feature stage remains R1 when the user separately
+resumes feature work; later features retain the roadmap order.
 
 ### Resume procedure
 
@@ -185,16 +262,16 @@ Later work follows roadmap order.
 2. Source `~/.zshrc`; confirm `/usr/local/bin/git` is selected.
 3. Confirm repository path, branch, HEAD, status, and live-plugin hash.
 4. Preserve unrelated user changes; do not reset, clean, switch, merge, or push.
-5. Confirm the tracked worktree is clean, `git stash list` remains empty, and no
-   old embed/attachment trace helper is linked live.
+5. Expect the uncommitted compatibility changes described above; preserve them.
+   Check stash and live-helper state against the current compatibility handoff
+   instead of assuming the historical clean/helper-free state still applies.
 6. Recheck `debug.log` for any newer MessageLogger stack and
    separate external cache failures from plugin exceptions.
 7. Compare the checkout with this snapshot and record drift.
-8. Treat compatibility as complete and archived in the handoff through final
-   source `860186550db2e7fd9e6326fcbff37af7fa703108`; do not rerun the old broad
-   audit. If embed work is later resumed separately, trace the current Discord
-   native model/factory boundary before writing code; do not reconstruct or
-   reapply the deleted unsafe experiment.
+8. Treat the August compatibility acceptance as historical. Complete the current
+   hotfix and its fresh native gates before resuming features. R1 still requires
+   a current Discord model/factory trace; do not reconstruct or reapply the
+   discarded unsafe embed experiment.
 9. Update this file after each implementation, test, or live-runtime stage.
 
 ### Session reconstruction references
