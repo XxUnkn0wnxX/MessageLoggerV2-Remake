@@ -192,14 +192,16 @@ issue. Its acceptance is independent of the remaining hotfix/cache checks.
 
 ## Living handoff snapshot
 
-### Current checkpoint — native sizing verified; trailing spacing follow-up — 2026-11-08
+### Current checkpoint — rework accepted and migration complete — 2026-11-08
 
-The agreed rework below has passed. A native capture of `796f322` confirms that
-the Threads pop-up now grows from 400 to 433 pixels for the restored cards,
-preserving its native minimum and maximum. The final small follow-up retains
-the last card's native bottom margin, which otherwise collapses outside the
-measured content. Its final visual check remains pending. The user explicitly
-authorized completing the old-host rewrite before this spacing follow-up.
+The agreed rework below has passed. Native captures confirm that the Threads
+pop-up grows for restored cards while preserving its native minimum and maximum.
+Installed `76f22cc` also preserves the final card's native bottom margin: the
+dialog grows from 433 to 441 pixels, leaving an 8-pixel gap. The user completed
+the final capture and confirmed that Logger work is finished. This source passes
+**992/992 local tests** and [exact-source CI](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/runs/42420934326),
+with zero failures, skips or cancellations. Temporary live diagnostic probes and
+their report files have been retired; private acceptance evidence is retained.
 
 The earlier accepted source `f42bfde` (version **2.8.2.20**) passes **991/991 local tests**
 and [exact-source CI](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/runs/42418244705), with zero failures, skips or cancellations. The user confirms
@@ -211,9 +213,9 @@ for evidence provenance and coverage limits.
 
 GitHub is public, `develop` remains the default/source/updater branch, and
 `main` remains README-only. Both old-host branches now contain only the GitHub
-redirect README, without direct download links. Original source history remains
-on GitHub and in a local recovery bundle. Only the trailing-spacing visual check
-remains; site work and later roadmap features remain
+redirect README, without direct download, issue or development-branch links.
+Original source history remains on GitHub and in a local recovery bundle.
+Site work and later roadmap features remain
 separate. The early cold-start exception is deferred, and the ordinary-thread
 full-format matrix is waived rather than passed.
 
@@ -4061,6 +4063,7 @@ remains explicitly deferred, and the ordinary-thread full-format matrix remains
 waived rather than passed. No speedup claim is made. GitHub publication is now public with `develop` as default. The authorized
 old-host README redirect/history migration has now completed with guarded updates
 to both branches and preserved recovery history. A subsequent native sizing
-capture of `796f322` confirms native expansion; the small final bottom-spacing
-follow-up retains the existing theme's card margin. Site work remains outside
-this rework.
+capture of `796f322` confirms native expansion; the final capture of `76f22cc`
+confirms an 8-pixel bottom gap using the existing theme's card margin, with native
+height limits unchanged. The user confirms this rework is finished. Site work
+remains outside this rework.
