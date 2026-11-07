@@ -539,6 +539,32 @@ test('saved-thread admission is independent from the main Logger count', () => {
   } finally { f.env.restore(); }
 });
 
+test('Logger row host isolates native group spacing and repairs parked rows on resume', () => {
+  const f = loggerFixture({ ids: ['a'] });
+  try {
+    const repaired = [];
+    f.plugin.applyLoggerMessageGroupClasses = root => repaired.push(root);
+    const view = { surfaceKey: 'logger-spacing', leases: new Map() };
+    const parent = new Element();
+    f.plugin.populateParent(parent, ['a'], view);
+    const slot = parent.children[0];
+    f.env.observers.at(-1).visible(slot);
+    f.env.tick();
+    const entry = [...view.leases.keys()][0];
+    const host = entry.host;
+    const group = host.children[0];
+    assert.equal(host.style.display, 'flow-root');
+
+    repaired.length = 0;
+    f.plugin.parkLoggerViewportView(view);
+    const resumedParent = new Element();
+    f.plugin.populateParent(resumedParent, ['a'], view);
+    assert.ok(repaired.includes(host), 'reattaching a retained Logger row reapplies native wrapper classes');
+    assert.equal(host.children[0], group, 'class repair preserves the rendered row');
+    assert.deepEqual(f.built, ['a'], 'returning to the row does not rebuild its media');
+  } finally { f.plugin._viewportSession?.reset(); f.env.restore(); }
+});
+
 test('owned image error waits while parked and rejects an obsolete canonical source', () => {
   const f = loggerFixture();
   try {

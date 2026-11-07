@@ -10,6 +10,7 @@ const wrapper = { a: 'message_ab other', b: 'cozyMessage_ab' };
 const selected = { a: 'selected_ab', b: 'message_ab' };
 function setup(available = []) {
   resetHarness();
+  const oldDocument = global.document;
   const waits = [];
   Webpack.getByKeys = () => null;
   const matchModule = (exports, filter, options = {}) => {
@@ -40,7 +41,8 @@ function setup(available = []) {
   };
   let cssCount = 0;
   const plugin = createPlugin({ __started: true, _startupGeneration: 1, classes: { message: '', selected: '' }, updateCSS: () => { cssCount++; } });
-  return { plugin, waits, cssCount: () => cssCount };
+  return { plugin, waits, cssCount: () => cssCount,
+    restore() { if (oldDocument === undefined) delete global.document; else global.document = oldDocument; } };
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
@@ -83,6 +85,28 @@ test('late waits filter malformed candidates and complete independently', async 
   await flush();
   assert.equal(plugin.classes.message, 'message_ab');
   assert.equal(cssCount(), 2, 'late message-class recovery refreshes the stylesheet too');
+});
+
+test('late native wrapper recovery repairs mounted Logger groups without replacing them', async () => {
+  const { plugin, waits, restore } = setup();
+  const group = {
+    dataset: { ml2LoggerMessageStart: 'true' },
+    classes: new Set(['cached-zalgo']), mutations: 0,
+    classList: {
+      contains(name) { return group.classes.has(name); },
+      add(...names) { group.mutations++; names.forEach(name => group.classes.add(name)); }
+    }
+  };
+  global.document = { querySelectorAll: selector => selector === '[data-ml2-logger-message-start]' ? [group] : [] };
+  try {
+    plugin.recoverStartupMessageClasses();
+    const nativeWrapper = { message: 'message_native', cozyMessage: 'cozy_native', groupStart: 'groupStart_native' };
+    waits[0].resolve(nativeWrapper);
+    await flush();
+    assert.deepEqual([...group.classes], ['cached-zalgo', 'message_native', 'cozy_native', 'groupStart_native']);
+    assert.equal(group.mutations, 1);
+    assert.equal(plugin.classes.message, 'message_native');
+  } finally { restore(); }
 });
 
 test('message class resolving before selected also refreshes the stylesheet in both stages', async () => {

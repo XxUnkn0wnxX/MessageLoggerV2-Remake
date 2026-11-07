@@ -1353,6 +1353,37 @@ module.exports = class MessageLoggerV2 {
       try { controller.abort(); } catch {}
     }
   }
+  applyLoggerMessageGroupClasses(root, normalizedWrapper) {
+    const wrapper = normalizeSemanticCssModule(
+      normalizedWrapper || DiscordModules.MessageWrapperClasses,
+      ['message', 'cozyMessage', 'groupStart']
+    );
+    if (!wrapper) return;
+    const tokens = value => typeof value === 'string' ? value.split(/\s+/).filter(Boolean) : [];
+    const message = tokens(wrapper.message);
+    const cozyMessage = tokens(wrapper.cozyMessage);
+    const groupStart = tokens(wrapper.groupStart);
+    const validClass = value => /^-?[_a-zA-Z][\w-]*$/.test(value);
+    if ([...message, ...cozyMessage, ...groupStart].some(value => !validClass(value))) return;
+    if (!message.length || !cozyMessage.length || !groupStart.length) return;
+
+    const selector = '[data-ml2-logger-message-start]';
+    const groups = [];
+    if (root?.dataset && ['true', 'false'].includes(root.dataset.ml2LoggerMessageStart)) groups.push(root);
+    try {
+      for (const group of root?.querySelectorAll?.(selector) || []) {
+        if (group !== root && group?.dataset && ['true', 'false'].includes(group.dataset.ml2LoggerMessageStart)) groups.push(group);
+      }
+    } catch {}
+    for (const group of new Set(groups)) {
+      const classList = group.classList;
+      if (typeof classList?.contains !== 'function' || typeof classList.add !== 'function') continue;
+      const wanted = [...message, ...cozyMessage];
+      if (group.dataset.ml2LoggerMessageStart === 'true') wanted.push(...groupStart);
+      const missing = [...new Set(wanted)].filter(className => !classList.contains(className));
+      if (missing.length) classList.add(...missing);
+    }
+  }
   recoverStartupMessageClasses() {
     if (!this.__started || !this.classes || this._startupMessageClassRecovery) return;
     const classes = this.classes;
@@ -1382,6 +1413,10 @@ module.exports = class MessageLoggerV2 {
       const value = extract(candidate, role);
       if (!value) return false;
       classes[role] = value;
+      if (role === 'message' && typeof document !== 'undefined') {
+        const wrapper = normalizeSemanticCssModule(candidate, ['message', 'cozyMessage', 'groupStart']);
+        if (wrapper) this.applyLoggerMessageGroupClasses(document, wrapper);
+      }
       if (role === 'message' || role === 'selected') this.updateCSS();
       return true;
     };
@@ -25442,16 +25477,11 @@ module.exports = class MessageLoggerV2 {
       this.createMessageGroup.classes = {
         extra: [
           /* 0 */ this.joinClassNames(
-          this.getDiscordClass('groupStart message'),
-          this.getDiscordClass('groupStart cozyMessage'),
-          this.getDiscordClass('systemMessage groupStart'),
           this.getDiscordClass('zalgo wrapper'),
           this.getDiscordClass('zalgo cozy'),
           this.getDiscordClass('cozy zalgo')
         ),
           /* 1 */ this.joinClassNames(
-          this.getDiscordClass('groupStart message'),
-          this.getDiscordClass('groupStart cozyMessage'),
           this.getDiscordClass('zalgo wrapper'),
           this.getDiscordClass('zalgo cozy'),
           this.getDiscordClass('cozy zalgo')
@@ -25519,6 +25549,8 @@ module.exports = class MessageLoggerV2 {
                                     <div class="${classes.extra[7]}"></div>
                                   </div>`);
     element.messageId = message.id;
+    if (element.dataset) element.dataset.ml2LoggerMessageStart = isStart ? 'true' : 'false';
+    this.applyLoggerMessageGroupClasses(element);
     if (isStart && forumLocationParts) {
       const detailNode = element.querySelector('[data-ml2-log-details="true"]');
       if (detailNode) {
@@ -27741,6 +27773,7 @@ module.exports = class MessageLoggerV2 {
       const entry = session.getEntry({
         surfaceKey: view.surfaceKey, channelId: source.channel_id, messageId, revision,
         build: (ownedEntry, host) => {
+          host.style.display = 'flow-root';
           const pending = [];
           const buildSerial = ownedEntry.buildSerial;
           const startupGeneration = this._startupGeneration;
@@ -27770,7 +27803,10 @@ module.exports = class MessageLoggerV2 {
               this.cleanupLoggerNativeAudioRoots(host, true);
               this.cleanupLoggerNativeDocumentRoots(host, true);
             },
-            resume: () => { for (const callback of pending.splice(0)) callback(); }
+            resume: () => {
+              this.applyLoggerMessageGroupClasses(host);
+              for (const callback of pending.splice(0)) callback();
+            }
           });
           const previous = this._viewportBuildingEntry;
           const previousCallback = this._viewportDisplayCallback;

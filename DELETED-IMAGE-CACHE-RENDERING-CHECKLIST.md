@@ -3963,3 +3963,5 @@ behavior, persistence, rendering, or external-open behavior.
   `$HOME/.Trash/MessageLoggerRuntimeCompatibilityAudit-final-clean-2026-08-30-1310/`.
   No Discord restart, release metadata, commit, push, `main`, or paused
   cache/embed scope was changed.
+
+- **Logger row spacing follow-up:** a media-Off cold-start capture exposed collapsed author-only rows and missing outer message classes cached before Discord finished loading. The user requested normal row/avatar spacing for deleted and edited records without restoring media placeholders. The scoped repair uses native classes, repairs existing/retained groups in place, and includes native margins in Logger viewport height measurements. Local validation passes **986/986**, with no failures or skips (**5.76 seconds** wall time). Private CI and installation are next; native spacing acceptance remains open.

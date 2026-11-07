@@ -914,7 +914,7 @@ test('semantic CSS and Logger-owned literals are covered by the audit helper', (
   assert.match(helperSource, /const ambiguous = selectedUsableCandidateCount !== 1/);
 
   assert.equal(resolverSignatures.length, 26);
-  assert.equal(classMethodSignatures.length, 23);
+  assert.equal(classMethodSignatures.length, 18);
   assert.equal(requestedSignatures.length, 38);
   for (const signature of [...resolverSignatures, ...classMethodSignatures]) {
     assert.ok(requestedSignatureSet.has(signature), `helper is missing requested key signature ${signature}`);
@@ -928,7 +928,7 @@ test('semantic CSS and Logger-owned literals are covered by the audit helper', (
   assert.ok(helperSource.includes('mlv2-toast-progress'));
 
   const markerTokens = [...new Set([...productionSource.matchAll(/data-(?:ml2|mlv2)-[A-Za-z0-9-]+/g)].map(([token]) => token))];
-  assert.equal(markerTokens.length, 22);
+  assert.equal(markerTokens.length, 23);
   for (const token of markerTokens) assert.ok(helperSource.includes(token), `helper is missing marker ${token}`);
 
   const fixedDependencies = [

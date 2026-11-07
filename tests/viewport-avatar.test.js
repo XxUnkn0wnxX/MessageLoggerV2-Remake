@@ -3,14 +3,28 @@ const assert = require('node:assert/strict');
 const { createPlugin } = require('./helpers/plugin-harness');
 
 class Node {
-  constructor() { this.children = []; this.parentNode = null; this.dataset = {}; this.style = {}; this.isConnected = true; this.listeners = {}; this.classList = { add() {}, remove() {}, contains() { return false; } }; }
+  constructor() {
+    this.children = []; this.parentNode = null; this.dataset = {}; this.style = {}; this.isConnected = true; this.listeners = {};
+    this.classNames = new Set(); this.classMutations = [];
+    this.classList = {
+      add: (...names) => { this.classMutations.push(names); names.forEach(name => this.classNames.add(name)); },
+      remove: (...names) => names.forEach(name => this.classNames.delete(name)),
+      contains: name => this.classNames.has(name)
+    };
+  }
   append(...nodes) { nodes.forEach(node => this.appendChild(node)); }
   appendChild(node) { node.remove(); this.children.push(node); node.parentNode = this; return node; }
   replaceChildren(...nodes) { this.children.forEach(node => { node.parentNode = null; }); this.children = []; this.append(...nodes); }
   remove() { if (!this.parentNode) return; this.parentNode.children = this.parentNode.children.filter(child => child !== this); this.parentNode = null; }
   contains(node) { return node === this || this.children.some(child => child.contains(node)); }
   querySelector() { return null; }
-  querySelectorAll() { return []; }
+  querySelectorAll(selector) {
+    if (selector !== '[data-ml2-logger-message-start]') return [];
+    return this.children.flatMap(child => [
+      ...(child.dataset.ml2LoggerMessageStart === 'true' || child.dataset.ml2LoggerMessageStart === 'false' ? [child] : []),
+      ...child.querySelectorAll(selector)
+    ]);
+  }
   addEventListener(type, callback) { this.listeners[type] = callback; }
   getBoundingClientRect() { return { height: 80 }; }
 }
@@ -38,7 +52,7 @@ function setup(liveUser, savedAvatar) {
     markLoggerViewerJumpAvailableAuthor() {}, wireLoggerViewerDoubleClick() {},
     parseHTML(html) {
       const group = new Node(), avatar = new Node(), name = new Node(), timestamp = new Node();
-      avatar.src = html.match(/<img src="([^"]+)"/)[1];
+      avatar.src = html.match(/<img src="([^"]+)"/)?.[1] || '';
       group.getElementsByClassName = key => ({ avatar: [avatar], name: [name], timestamp: [timestamp] })[key] || [];
       group.avatar = avatar;
       groups.push(group);
@@ -79,6 +93,42 @@ test('real message-group avatar presentation never mutates the saved author', ()
       assert.equal(group.avatar.src, '/assets/322c936a8c8be1b803cd94861bdfa868.png');
     } finally { f.restore(); }
   }
+});
+
+test('message-group spacing classes are added in place only to native group starts', () => {
+  const f = setup({ id: 'u', avatar: 'same' }, 'same');
+  try {
+    const start = f.plugin.createMessageGroup(structuredClone(f.message), true);
+    const continuation = f.plugin.createMessageGroup(structuredClone(f.message), false);
+    assert.equal(start.dataset.ml2LoggerMessageStart, 'true');
+    assert.equal(continuation.dataset.ml2LoggerMessageStart, 'false');
+    const host = new Node();
+    host.append(start, continuation);
+    const native = {
+      message: 'message_native shared_native',
+      cozyMessage: 'cozy_native shared_native',
+      groupStart: 'groupStart_native'
+    };
+
+    f.plugin.applyLoggerMessageGroupClasses(host, native);
+    assert.deepEqual([...start.classNames], ['message_native', 'shared_native', 'cozy_native', 'groupStart_native']);
+    assert.deepEqual([...continuation.classNames], ['message_native', 'shared_native', 'cozy_native']);
+    assert.equal(start.classMutations.length, 1);
+    assert.equal(continuation.classMutations.length, 1);
+    f.plugin.applyLoggerMessageGroupClasses(host, native);
+    assert.equal(start.classMutations.length, 1, 'already-correct start is not mutated');
+    assert.equal(continuation.classMutations.length, 1, 'already-correct continuation is not mutated');
+
+    const rootGroup = new Node();
+    rootGroup.dataset.ml2LoggerMessageStart = 'true';
+    f.plugin.applyLoggerMessageGroupClasses(rootGroup, native);
+    assert.ok(rootGroup.classNames.has('groupStart_native'), 'the supplied root is included');
+
+    const unavailable = new Node();
+    unavailable.dataset.ml2LoggerMessageStart = 'true';
+    f.plugin.applyLoggerMessageGroupClasses(unavailable, null);
+    assert.equal(unavailable.classMutations.length, 0, 'missing native module does not add guessed classes');
+  } finally { f.restore(); }
 });
 
 test('avatar context actions keep the live-user and missing-user behavior', () => {

@@ -2026,6 +2026,7 @@ function describeLoggerOwnedMountContract() {
     'data-ml2-forum-list-item-id',
     'data-ml2-inline-delete-control',
     'data-ml2-log-details',
+    'data-ml2-logger-message-start',
     'data-ml2-message-id',
     'data-ml2-native-delete-host',
     'data-ml2-pending-delete-control',
