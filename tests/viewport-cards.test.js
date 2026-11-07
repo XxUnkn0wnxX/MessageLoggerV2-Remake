@@ -42,7 +42,23 @@ function getHelper(plugin) {
   const start = source.indexOf('    const retainedPreviewCards = new Map();');
   const end = source.indexOf('    const removeForumCardNode =', start);
   assert.ok(start > 0 && end > start);
-  return Function(source.slice(start, end) + '\nreturn { mountRetainedPreviewCard, parkRetainedPreviewCard, parkRetainedPreviewType, retainedThreadBrowserHeaders, sweepDetachedPreviewCards };').call(plugin);
+  return Function(source.slice(start, end) + '\nreturn { mountRetainedPreviewCard, parkRetainedPreviewCard, parkRetainedPreviewType, retainedThreadBrowserHeaders, restoreThreadBrowserNativeMinHeight, restoreAllThreadBrowserNativeMinHeights, refreshThreadBrowserNativeMinHeight, threadBrowserNativeMinHeightAttribute, sweepDetachedPreviewCards };').call(plugin);
+}
+function inlineStyle(initial = {}) {
+  const values = new Map(Object.entries(initial).map(([key, value]) => [key.replace(/[A-Z]/g, c => `-${c.toLowerCase()}`), String(value)]));
+  const priorities = new Map();
+  return {
+    getPropertyValue(name) { return values.get(name) || ''; },
+    getPropertyPriority(name) { return priorities.get(name) || ''; },
+    setProperty(name, value, priority = '') { values.set(name, String(value)); priorities.set(name, String(priority)); },
+    removeProperty(name) { values.delete(name); priorities.delete(name); },
+    get height() { return this.getPropertyValue('height'); },
+    set height(value) { this.setProperty('height', value); },
+    get minHeight() { return this.getPropertyValue('min-height'); },
+    set minHeight(value) { this.setProperty('min-height', value); },
+    get display() { return this.getPropertyValue('display'); },
+    set display(value) { this.setProperty('display', value); }
+  };
 }
 function fixture() {
   const env = setup();
@@ -144,6 +160,13 @@ test('real thread-browser restoration mounts only matching cards and reuses filt
     const end = source.indexOf('    const restoreDeletedCompactThreads =', start);
     assert.ok(start > 0 && end > start);
     const content = f.parent, header = new Node('header');
+    content.style = inlineStyle({ height: '112px', minHeight: '12px' });
+    content.style.setProperty('min-height', '12px', 'important');
+    let naturalScrollHeight = 376;
+    Object.defineProperty(content, 'scrollHeight', { get() {
+      return Math.max(naturalScrollHeight, parseFloat(content.style.height) || 0,
+        parseFloat(content.style.minHeight) || 0);
+    } });
     header.cloneNode = () => new Node('header');
     header.textContent = 'Joined Threads';
     const makeNativeCard = ({heading = true, subtext = true, preview = false, restored = false} = {}) => {
@@ -215,33 +238,83 @@ test('real thread-browser restoration mounts only matching cards and reuses filt
     const builds = [];
     const restore = Function('findThreadBrowserSource', 'isForumListChannel', 'getRestorableCompactThreadRecords',
       'getForumRecordTitle', 'parkRetainedPreviewCard', 'parkRetainedPreviewType', 'retainedThreadBrowserHeaders', 'mountRetainedPreviewCard', 'createRestoredThreadBrowserCard',
-      'applyRestoredThreadTint', 'scheduleRestoreDeletedCompactThreads',
+      'applyRestoredThreadTint', 'scheduleRestoreDeletedCompactThreads', 'refreshThreadBrowserNativeMinHeight',
+      'restoreThreadBrowserNativeMinHeight', 'restoreAllThreadBrowserNativeMinHeights', 'threadBrowserNativeMinHeightAttribute',
       source.slice(start, end) + '\nreturn restoreDeletedThreadBrowserCards;').call(f.plugin,
         findThreadBrowserSource,
         () => false, () => records, record => record.message.content,
         f.helper.parkRetainedPreviewCard, f.helper.parkRetainedPreviewType, f.helper.retainedThreadBrowserHeaders, f.helper.mountRetainedPreviewCard,
         record => { builds.push(record.message.id); const card = new Node('div'); card.setAttribute('data-ml2-restored-thread-browser-card', record.message.id); return card; },
-        () => {}, () => {});
+        () => {}, () => {}, f.helper.refreshThreadBrowserNativeMinHeight,
+        f.helper.restoreThreadBrowserNativeMinHeight, f.helper.restoreAllThreadBrowserNativeMinHeights,
+        f.helper.threadBrowserNativeMinHeightAttribute);
     f.plugin.isSuppressedForumThreadId = () => false;
     f.plugin.style = { restoredThreadBrowserSection: 'section' };
     restore();
+    assert.equal(content.style.height, '112px', 'the native canvas height remains untouched');
+    assert.equal(content.style.getPropertyValue('min-height'), '376px', 'the measured native scroll extent extends the popup canvas');
+    assert.equal(content.style.getPropertyPriority('min-height'), 'important', 'the Logger-owned extension preserves the native important priority');
     const aShell = content.querySelector('[data-ml2-restored-thread-browser-card="a"]');
     assert.ok(aShell); assert.equal(content.querySelector('[data-ml2-restored-thread-browser-card="b"]'), null);
     assert.deepEqual(builds, []);
     f.env.observers[0].show(aShell); f.env.tick();
     const cardA = content.querySelector('[data-ml2-restored-thread-browser-card="a"]');
     assert.deepEqual(builds, ['a']);
+    naturalScrollHeight = 384; // Native card margin/layout changes are reflected by the browser measurement.
     input.value = 'two'; restore();
+    assert.equal(content.style.getPropertyValue('min-height'), '384px', 'reconciliation follows the new measured scroll extent without adding to the previous extension');
+    assert.equal(content.style.getPropertyPriority('min-height'), 'important');
+    assert.equal(content.style.height, '112px');
     assert.equal(content.querySelector('[data-ml2-restored-thread-browser-card="a"]'), null);
     const bShell = content.querySelector('[data-ml2-restored-thread-browser-card="b"]');
     assert.ok(bShell); assert.deepEqual(builds, ['a']);
     input.value = 'one'; restore();
+    assert.equal(content.style.getPropertyValue('min-height'), '384px', 'repeated reconciliation does not accumulate height');
     assert.equal(content.querySelector('[data-ml2-restored-thread-browser-card="a"]'), cardA);
     assert.deepEqual(builds, ['a']);
+    naturalScrollHeight = 300;
+    restore();
+    assert.equal(content.style.minHeight, '300px', 'a smaller layout must not retain the previous owned minimum');
+    content.style.height = '4096px';
+    restore();
+    assert.equal(content.style.height, '4096px', 'native virtual-list extent is never replaced with visible-card geometry');
+    assert.equal(content.style.minHeight, '4096px');
+    content.style.height = '112px';
+    records.length = 0;
+    naturalScrollHeight = 376;
+    restore();
+    assert.equal(content.style.getPropertyValue('min-height'), '12px', 'an empty deleted section restores native sizing');
+    assert.equal(content.style.getPropertyPriority('min-height'), 'important');
+
+    records.push(f.records.a, f.records.b);
+    naturalScrollHeight = 376;
+    restore();
+    assert.equal(content.style.getPropertyValue('min-height'), '376px');
     selectedGuild = null;
     restore();
     assert.equal(content.querySelector('[data-ml2-restored-thread-browser-card="a"]'), null);
     assert.equal(content.querySelector('[data-ml2-restored-thread-browser-section="parent"]'), null);
+    assert.equal(content.style.getPropertyValue('min-height'), '12px', 'hiding the browser restores the native inline min-height');
+    assert.equal(content.style.getPropertyPriority('min-height'), 'important', 'the native inline priority is restored');
+    assert.equal(content.style.height, '112px');
+
+    naturalScrollHeight = 376;
+    selectedGuild = 'g1'; restore();
+    assert.equal(content.style.getPropertyValue('min-height'), '376px');
+    const cleanupStart = source.indexOf('    const restoreThreadBrowserHeights = () => {', source.indexOf('  cleanupArchivePresentationForDisable('));
+    const cleanupEnd = source.indexOf('\n    };', cleanupStart) + 7;
+    assert.ok(cleanupStart > 0 && cleanupEnd > cleanupStart);
+    const restoreThreadBrowserHeights = Function('threadBrowserParents', 'document', 'Logger',
+      source.slice(cleanupStart, cleanupEnd) + '\nreturn restoreThreadBrowserHeights;')(
+      new Set(), Object.assign(global.document, {
+        querySelectorAll: selector => selector === '[data-ml2-thread-browser-native-min-height]'
+          ? [content] : []
+      }), { warn() {} });
+    restoreThreadBrowserHeights();
+    assert.equal(content.style.getPropertyValue('min-height'), '12px', 'shutdown cleanup restores the saved native value');
+    assert.equal(content.style.getPropertyPriority('min-height'), 'important', 'shutdown cleanup restores the saved priority');
+    assert.equal(content.style.height, '112px', 'shutdown cleanup leaves the native height untouched');
+    assert.equal(content.hasAttribute('data-ml2-thread-browser-native-min-height'), false);
   } finally { f.env.restore(); }
 });
 
@@ -525,9 +598,10 @@ test('server preview restoration avoids source and record traversal in DMs and s
         () => { sourceLookups++; return {}; }, () => { recordLookups++; return []; });
     const browserStart = source.indexOf('    const restoreDeletedThreadBrowserCards =');
     const browserEnd = source.indexOf('    const restoreDeletedCompactThreads =', browserStart);
-    const browser = Function('parkRetainedPreviewType', 'findThreadBrowserSource',
+    const browser = Function('parkRetainedPreviewType', 'findThreadBrowserSource', 'restoreAllThreadBrowserNativeMinHeights',
       source.slice(browserStart, browserEnd) + '\nreturn restoreDeletedThreadBrowserCards;').call(f.plugin,
-        f.helper.parkRetainedPreviewType, () => { sourceLookups++; return {}; });
+        f.helper.parkRetainedPreviewType, () => { sourceLookups++; return {}; },
+        f.helper.restoreAllThreadBrowserNativeMinHeights);
     forum(); browser();
     assert.equal(sourceLookups, 0); assert.equal(recordLookups, 0); assert.equal(channelLookups, 0);
     guild = 'new';

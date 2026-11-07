@@ -2038,6 +2038,10 @@ function describeLoggerOwnedMountContract() {
     'data-ml2-restored-thread-browser-card',
     'data-ml2-restored-thread-browser-section',
     'data-ml2-restored-thread-entry',
+    'data-ml2-thread-browser-native-min-height',
+    'data-ml2-thread-browser-native-min-height-priority',
+    'data-ml2-thread-browser-owned-min-height',
+    'data-ml2-thread-browser-owned-min-height-priority',
     'data-ml2-thread-log-messages'
   ];
   const fixedSelectors = [

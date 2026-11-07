@@ -636,27 +636,16 @@ test('stop restores archive presentation state and clears logger-only DOM artifa
   const shiftCalls = [];
   const stopOrder = [];
   let closedMenus = 0;
-  const nativeSection = {
-    textContent: 'Joined Threads',
-    hasAttribute() { return false; },
-    getBoundingClientRect() { return { height: 12 }; }
-  };
-  const nativeCard = {
-    hasAttribute() { return false; },
-    querySelector(selector) {
-      return selector === 'h2 [class*="threadName_"]'
-        || selector === '[id^="message-content-"]'
-        ? {}
-        : null;
-    },
-    getBoundingClientRect() { return { height: 40 }; }
-  };
+  const threadBrowserAttributes = new Map([
+    ['data-ml2-thread-browser-native-min-height', ''],
+    ['data-ml2-thread-browser-native-min-height-priority', ''],
+    ['data-ml2-thread-browser-owned-min-height', '4180px'],
+    ['data-ml2-thread-browser-owned-min-height-priority', '']
+  ]);
   const threadBrowserParent = {
-    style: { height: '180px' },
-    children: [nativeSection],
-    querySelectorAll(selector) {
-      return selector === 'div[role="button"]' ? [nativeCard] : [];
-    }
+    style: { height: '4096px', minHeight: '4180px' },
+    getAttribute(name) { return threadBrowserAttributes.get(name) ?? null; },
+    removeAttribute(name) { threadBrowserAttributes.delete(name); }
   };
   const style = {
     deleted: 'logger-deleted',
@@ -786,7 +775,9 @@ test('stop restores archive presentation state and clears logger-only DOM artifa
   assert.equal(cleanupCopies.length, 1);
   assert.equal(cleanupCopies[0][0], nativeHost);
   assert.equal(cleanupCopies[0][1], true);
-  assert.equal(threadBrowserParent.style.height, '52px');
+  assert.equal(threadBrowserParent.style.height, '4096px', 'shutdown preserves the full native canvas');
+  assert.equal(threadBrowserParent.style.minHeight, '', 'shutdown removes only the owned height extension');
+  assert.equal(threadBrowserAttributes.size, 0);
   assert.equal(classRemovals.includes(style.deleted), true);
   assert.equal(classRemovals.includes(style.deletedAlt), true);
   assert.equal(classRemovals.includes(style.deletedForumText), true);

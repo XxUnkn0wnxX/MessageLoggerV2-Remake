@@ -92,6 +92,7 @@ Master media-Off catch-up reuses the deferred-media descriptors and request pump
 - Complete root deletion stores one logical root plus eligible replies under the thread ID; root hide/unhide/remove actions cascade through `getForumThreadRecordIds`.
 - Forum posts are naturally self-keyed. If a channel thread has a distinct starter-message ID, its initial payload is folded into the thread root: the title stays in `forum_metadata`, the root message carries the starter body/author/media/edits, and the original starter ID remains in metadata for cache lookup. Replies remain separate records.
 - Restored forum cards, channel sidebar entries, and thread-browser entries require a live Discord item as a DOM/React layout anchor. Their saved preview text is passed through the logger's native markup parser so mentions render without parsing the separately generated author and deletion labels.
+- Restored thread-browser sections extend the native list's measured content height, including theme spacing. Discord retains control of the pop-up's minimum and maximum size; removing the restored content releases Logger's height extension.
 - Thread-scoped logger views, context labels, jump routing, tinting, and suppression must continue distinguishing forum posts from ordinary channel threads.
 
 ## 🛡️ Anti-Nuke Recovery

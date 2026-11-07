@@ -192,7 +192,13 @@ issue. Its acceptance is independent of the remaining hotfix/cache checks.
 
 ## Living handoff snapshot
 
-### Current accepted rework checkpoint — 2026-11-08
+### Current checkpoint — accepted rework and native sizing follow-up — 2026-11-08
+
+The agreed rework below has passed. The user subsequently requested that deleted
+thread cards contribute to the Threads pop-up's native expansion. A sizing
+capture confirms that the existing calculation omits card and heading margins.
+The focused correction preserves Discord's own list height and pop-up size
+limits; its native visual check remains pending before the old-host rewrite.
 
 Installed source `f42bfde` (version **2.8.2.20**) passes **991/991 local tests**
 and [exact-source CI](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/runs/42418244705), with zero failures, skips or cancellations. The user confirms
@@ -204,8 +210,8 @@ for evidence provenance and coverage limits.
 
 GitHub is public, `develop` remains the default/source/updater branch, and
 `main` remains README-only. The separate old-host redirect migration preserves
-source history on GitHub and in a local recovery bundle. No further native test
-is required for this rework stage; site work and later roadmap features remain
+source history on GitHub and in a local recovery bundle. Only the additional
+native sizing check remains; site work and later roadmap features remain
 separate. The early cold-start exception is deferred, and the ordinary-thread
 full-format matrix is waived rather than passed.
 

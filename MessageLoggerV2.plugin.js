@@ -8275,27 +8275,33 @@ module.exports = class MessageLoggerV2 {
       threadBrowserParents.add(node.parentElement);
     };
     const restoreThreadBrowserHeights = () => {
+      const nativeMinHeightAttribute = 'data-ml2-thread-browser-native-min-height';
+      const nativeMinHeightPriorityAttribute = 'data-ml2-thread-browser-native-min-height-priority';
+      const ownedMinHeightAttribute = 'data-ml2-thread-browser-owned-min-height';
+      const ownedMinHeightPriorityAttribute = 'data-ml2-thread-browser-owned-min-height-priority';
+      try {
+        document.querySelectorAll(`[${nativeMinHeightAttribute}]`).forEach(parent => threadBrowserParents.add(parent));
+      } catch (error) {}
       for (const parent of threadBrowserParents) {
         try {
-          const nativeSection = Array.from(parent.children || []).find(node =>
-            !node?.hasAttribute?.('data-ml2-restored-thread-browser-section')
-            && /joined threads/i.test(node?.textContent || '')
-          );
-          const nativeCards = Array.from(parent.querySelectorAll?.('div[role="button"]') || [])
-            .filter(node =>
-              !node?.hasAttribute?.('data-ml2-restored-thread-browser-card')
-              && node?.querySelector?.('h2 [class*="threadName_"]')
-              && node?.querySelector?.('[id^="message-content-"]')
-            );
-          const nativeHeight = (nativeSection?.getBoundingClientRect?.().height || 0)
-            + nativeCards.reduce(
-              (height, card) => height + (card.getBoundingClientRect?.().height || 0),
-              0
-            );
-          parent.style.height = nativeHeight > 0 ? `${nativeHeight}px` : '';
+          const nativeMinHeight = parent.getAttribute?.(nativeMinHeightAttribute);
+          if (nativeMinHeight === null || nativeMinHeight === undefined) continue;
+          const ownedMinHeight = parent.getAttribute?.(ownedMinHeightAttribute);
+          const ownedMinHeightPriority = parent.getAttribute?.(ownedMinHeightPriorityAttribute) || '';
+          const currentMinHeight = parent.style.getPropertyValue?.('min-height') ?? parent.style.minHeight ?? '';
+          const currentMinHeightPriority = parent.style.getPropertyPriority?.('min-height') || '';
+          if (currentMinHeight === ownedMinHeight && currentMinHeightPriority === ownedMinHeightPriority) {
+            const nativeMinHeightPriority = parent.getAttribute?.(nativeMinHeightPriorityAttribute) || '';
+            if (nativeMinHeight) parent.style.setProperty?.('min-height', nativeMinHeight, nativeMinHeightPriority);
+            else if (parent.style.removeProperty) parent.style.removeProperty('min-height');
+            else parent.style.minHeight = '';
+          }
+          parent.removeAttribute?.(nativeMinHeightAttribute);
+          parent.removeAttribute?.(nativeMinHeightPriorityAttribute);
+          parent.removeAttribute?.(ownedMinHeightAttribute);
+          parent.removeAttribute?.(ownedMinHeightPriorityAttribute);
         } catch (error) {
-          try { parent.style.height = ''; } catch {}
-          Logger.warn('Could not restore a thread-browser height during plugin shutdown.', error);
+          Logger.warn('Could not restore a thread-browser min-height during plugin shutdown.', error);
         }
       }
     };
@@ -23560,6 +23566,73 @@ module.exports = class MessageLoggerV2 {
     const retainedPreviewCards = new Map();
     const retainedPreviewScopes = new WeakMap();
     const retainedThreadBrowserHeaders = new Set();
+    const threadBrowserNativeMinHeightAttribute = 'data-ml2-thread-browser-native-min-height';
+    const threadBrowserNativeMinHeightPriorityAttribute = 'data-ml2-thread-browser-native-min-height-priority';
+    const threadBrowserOwnedMinHeightAttribute = 'data-ml2-thread-browser-owned-min-height';
+    const threadBrowserOwnedMinHeightPriorityAttribute = 'data-ml2-thread-browser-owned-min-height-priority';
+    const getInlineMinHeight = node => node?.style?.getPropertyValue?.('min-height') ?? node?.style?.minHeight ?? '';
+    const getInlineMinHeightPriority = node => node?.style?.getPropertyPriority?.('min-height') || '';
+    const setInlineMinHeight = (node, value, priority = '') => {
+      if (value && node?.style?.setProperty) node.style.setProperty('min-height', value, priority);
+      else if (value && node?.style) node.style.minHeight = value;
+      else if (node?.style?.removeProperty) node.style.removeProperty('min-height');
+      else if (node?.style) node.style.minHeight = '';
+    };
+    const restoreThreadBrowserNativeMinHeight = parent => {
+      if (!parent?.hasAttribute?.(threadBrowserNativeMinHeightAttribute)) return false;
+      const ownedValue = parent.getAttribute(threadBrowserOwnedMinHeightAttribute);
+      const ownedPriority = parent.getAttribute(threadBrowserOwnedMinHeightPriorityAttribute) || '';
+      if (getInlineMinHeight(parent) === ownedValue && getInlineMinHeightPriority(parent) === ownedPriority) {
+        setInlineMinHeight(
+          parent,
+          parent.getAttribute(threadBrowserNativeMinHeightAttribute) || '',
+          parent.getAttribute(threadBrowserNativeMinHeightPriorityAttribute) || ''
+        );
+      }
+      for (const attribute of [threadBrowserNativeMinHeightAttribute, threadBrowserNativeMinHeightPriorityAttribute,
+        threadBrowserOwnedMinHeightAttribute, threadBrowserOwnedMinHeightPriorityAttribute]) {
+        parent.removeAttribute?.(attribute);
+      }
+      return true;
+    };
+    const restoreAllThreadBrowserNativeMinHeights = scope => {
+      if (scope?.hasAttribute?.(threadBrowserNativeMinHeightAttribute)) restoreThreadBrowserNativeMinHeight(scope);
+      scope?.querySelectorAll?.(`[${threadBrowserNativeMinHeightAttribute}]`)
+        .forEach(restoreThreadBrowserNativeMinHeight);
+    };
+    const refreshThreadBrowserNativeMinHeight = content => {
+      if (!content?.style || !content.hasAttribute || !content.setAttribute || !content.removeAttribute) return false;
+      const currentValue = getInlineMinHeight(content);
+      const currentPriority = getInlineMinHeightPriority(content);
+      if (!content.hasAttribute(threadBrowserNativeMinHeightAttribute)) {
+        content.setAttribute(threadBrowserNativeMinHeightAttribute, currentValue);
+        content.setAttribute(threadBrowserNativeMinHeightPriorityAttribute, currentPriority);
+      } else if (content.hasAttribute(threadBrowserOwnedMinHeightAttribute)
+        && (currentValue !== content.getAttribute(threadBrowserOwnedMinHeightAttribute)
+          || currentPriority !== (content.getAttribute(threadBrowserOwnedMinHeightPriorityAttribute) || ''))) {
+        // Preserve a native update made while the browser remains mounted.
+        content.setAttribute(threadBrowserNativeMinHeightAttribute, currentValue);
+        content.setAttribute(threadBrowserNativeMinHeightPriorityAttribute, currentPriority);
+      }
+      setInlineMinHeight(
+        content,
+        content.getAttribute(threadBrowserNativeMinHeightAttribute) || '',
+        content.getAttribute(threadBrowserNativeMinHeightPriorityAttribute) || ''
+      );
+      content.removeAttribute(threadBrowserOwnedMinHeightAttribute);
+      content.removeAttribute(threadBrowserOwnedMinHeightPriorityAttribute);
+      const measuredHeight = Number(content.scrollHeight);
+      if (!(Number.isFinite(measuredHeight) && measuredHeight > 0)) {
+        restoreThreadBrowserNativeMinHeight(content);
+        return false;
+      }
+      const ownedValue = `${measuredHeight}px`;
+      const ownedPriority = content.getAttribute(threadBrowserNativeMinHeightPriorityAttribute) || '';
+      setInlineMinHeight(content, ownedValue, ownedPriority);
+      content.setAttribute(threadBrowserOwnedMinHeightAttribute, ownedValue);
+      content.setAttribute(threadBrowserOwnedMinHeightPriorityAttribute, ownedPriority);
+      return true;
+    };
     const parkRetainedPreviewCard = node => {
       retainedThreadBrowserHeaders.delete(node);
       const session = this._viewportSession;
@@ -23573,19 +23646,23 @@ module.exports = class MessageLoggerV2 {
       node?.remove?.();
     };
     const parkRetainedPreviewType = (type, keepParentId = null) => {
+      const threadBrowserContents = new Set();
       for (const [entry, session] of retainedPreviewCards) {
         if (!entry.surfaceKey.startsWith(`preview:${type}:`) || session !== this._viewportSession || !entry.slot) continue;
         if (keepParentId != null && entry.surfaceKey === `preview:${type}:${keepParentId}`) continue;
         const slot = entry.slot;
         session.park(entry, entry.leaseToken);
+        if (type === 'thread-browser' && slot.parentElement) threadBrowserContents.add(slot.parentElement);
         slot.remove?.();
       }
       if (type === 'thread-browser') {
         for (const header of retainedThreadBrowserHeaders) {
           if (keepParentId != null && header.getAttribute?.('data-ml2-restored-thread-browser-section') === String(keepParentId)) continue;
+          if (header.parentElement) threadBrowserContents.add(header.parentElement);
           header.remove?.();
           retainedThreadBrowserHeaders.delete(header);
         }
+        for (const content of threadBrowserContents) restoreThreadBrowserNativeMinHeight(content);
       }
     };
     const sweepDetachedPreviewCards = () => {
@@ -24100,23 +24177,30 @@ module.exports = class MessageLoggerV2 {
     };
     const restoreDeletedThreadBrowserCards = () => {
       const guildId = this.getSelectedGuildId?.();
-      if (!guildId) { parkRetainedPreviewType('thread-browser'); return; }
+      if (!guildId) { parkRetainedPreviewType('thread-browser'); restoreAllThreadBrowserNativeMinHeights(document); return; }
       const selected = this.selectedChannel || this.getSelectedTextChannel?.();
       const parent = [10, 11, 12].includes(selected?.type) ? this.tools.getChannel(selected.parent_id) : selected;
       if (String(parent?.guild_id || '') !== String(guildId)) {
         parkRetainedPreviewType('thread-browser');
+        restoreAllThreadBrowserNativeMinHeights(document);
         return;
       }
       parkRetainedPreviewType('thread-browser', parent.id);
       const { browser, input, content, sectionHeader, sourceCard, sourceCards } = findThreadBrowserSource();
-      if (!browser) { parkRetainedPreviewType('thread-browser'); return; }
+      if (!browser) { parkRetainedPreviewType('thread-browser'); restoreAllThreadBrowserNativeMinHeights(document); return; }
       if (!content || !sourceCard || !sourceCards?.length) {
         browser.querySelectorAll(
           '[data-ml2-restored-thread-browser-card], [data-ml2-restored-thread-browser-section]'
         ).forEach(parkRetainedPreviewCard);
+        browser.querySelectorAll?.(`[${threadBrowserNativeMinHeightAttribute}]`)
+          .forEach(restoreThreadBrowserNativeMinHeight);
         return;
       }
-      if (!parent || isForumListChannel(parent)) { parkRetainedPreviewType('thread-browser'); return; }
+      if (!parent || isForumListChannel(parent)) {
+        parkRetainedPreviewType('thread-browser');
+        restoreAllThreadBrowserNativeMinHeights(document);
+        return;
+      }
       const records = getRestorableCompactThreadRecords(parent);
       const query = input?.value?.trim?.().toLowerCase() || '';
       const desiredIds = new Set(records.filter(record => !query || getForumRecordTitle(record).toLowerCase().includes(query))
@@ -24129,9 +24213,7 @@ module.exports = class MessageLoggerV2 {
       if (!records.length) {
         deletedHeader?.remove();
         retainedThreadBrowserHeaders.delete(deletedHeader);
-        const nativeHeight = sectionHeader.getBoundingClientRect().height
-          + sourceCards.reduce((height, card) => height + card.getBoundingClientRect().height, 0);
-        if (nativeHeight) content.style.height = `${nativeHeight}px`;
+        restoreThreadBrowserNativeMinHeight(content);
         return;
       }
       if (!deletedHeader) {
@@ -24159,24 +24241,15 @@ module.exports = class MessageLoggerV2 {
         input.dataset.ml2RestoredThreadFilter = 'true';
         input.addEventListener('input', () => scheduleRestoreDeletedCompactThreads());
       }
-      const baseHeight = sectionHeader.getBoundingClientRect().height
-        + sourceCards.reduce((height, card) => height + card.getBoundingClientRect().height, 0);
-      const visibleCards = Array.from(content.querySelectorAll('[data-ml2-restored-thread-browser-card]'))
-        .filter(node => node.style.display !== 'none').length;
-      const cardHeight = sourceCard.getBoundingClientRect().height || 80;
-      content.style.height = `${baseHeight + deletedHeader.getBoundingClientRect().height + (visibleCards * cardHeight)}px`;
+      refreshThreadBrowserNativeMinHeight(content);
     };
     const restoreDeletedCompactThreads = () => {
       if (!canRestoreVisibleThreadRoots()) {
         document.querySelectorAll(
           '[data-ml2-restored-thread-entry], [data-ml2-restored-thread-browser-card], [data-ml2-restored-thread-browser-section]'
         ).forEach(parkRetainedPreviewCard);
-        const { content, sectionHeader, sourceCards } = findThreadBrowserSource();
-        if (content && sectionHeader && sourceCards?.length) {
-          const nativeHeight = sectionHeader.getBoundingClientRect().height
-            + sourceCards.reduce((height, card) => height + card.getBoundingClientRect().height, 0);
-          if (nativeHeight) content.style.height = `${nativeHeight}px`;
-        }
+        document.querySelectorAll(`[${threadBrowserNativeMinHeightAttribute}]`)
+          .forEach(restoreThreadBrowserNativeMinHeight);
         return;
       }
       restoreDeletedSidebarThreads();
