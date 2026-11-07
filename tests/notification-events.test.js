@@ -309,7 +309,7 @@ test('edit-spam debug reports username counters and the full cooldown lifecycle'
   assert.equal(plugin._getEditNotificationSpamDecision('123456789', 0, 'Alice'), 'allow');
   assert.equal(plugin._getEditNotificationSpamDecision('123456789', 1_000, 'Alice'), 'started');
   assert.deepEqual(
-    styledConsoleMessages('DEBUG'),
+    styledConsoleMessages('DEBUG · EDIT'),
     [
       'Edit-spam counter for Alice: 1/2 edits within 60 seconds.',
       'Edit-spam counter for Alice: 2/2 edits within 60 seconds.',
@@ -321,7 +321,7 @@ test('edit-spam debug reports username counters and the full cooldown lifecycle'
   scheduled[0].callback();
   scheduled[1].callback();
   assert.deepEqual(
-    styledConsoleMessages('DEBUG').slice(-2),
+    styledConsoleMessages('DEBUG · EDIT').slice(-2),
     [
       'Edit-spam cooldown for Alice will reset in 10 seconds.',
       'Edit-spam cooldown for Alice reset after 60 seconds.'
@@ -329,7 +329,7 @@ test('edit-spam debug reports username counters and the full cooldown lifecycle'
   );
   assert.equal(plugin.editHistoryAntiSpam['123456789'], undefined);
   assert.equal(plugin._editSpamCooldownTimers.size, 0);
-  assert.ok(styledConsoleMessages('DEBUG').every(message => !message.includes('123456789')));
+  assert.ok(styledConsoleMessages('DEBUG · EDIT').every(message => !message.includes('123456789')));
   assert.ok(notifications.every(args => !String(args[1]).includes('123456789')));
   assert.ok(notifications.every(args => args[5].pauseOnHover === false && args[5].instantDismiss === true));
 

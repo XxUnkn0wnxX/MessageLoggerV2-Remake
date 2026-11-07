@@ -3,7 +3,7 @@ const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { createPlugin: standardPlugin, resetHarness, loggerEvents } = require('./helpers/plugin-harness');
+const { createPlugin: standardPlugin, resetHarness, loggerEvents, ReactDOM, Webpack } = require('./helpers/plugin-harness');
 const alternatePath = process.env.MLV2_OWNED_BASELINE;
 const RuntimePlugin = alternatePath ? require(alternatePath) : null;
 const createPlugin = overrides => RuntimePlugin ? Object.assign(new RuntimePlugin({ name: 'MessageLoggerV2', version: 'test' }), overrides) : standardPlugin(overrides);
@@ -145,7 +145,7 @@ function createInlineHarness(plugin, record, entry) {
     DiscordModules: { ClickableClasses: {} }
   });
   return {
-    render() { stateIndex = 0; refIndex = 0; return component({ attachment: entry.attachment, presentationPlan: entry.plan, fallback: 'fallback' }); },
+    render() { stateIndex = 0; refIndex = 0; return component({ plugin, currentRecord: record, parseContent: text => text, attachment: entry.attachment, presentationPlan: entry.plan, fallback: 'fallback' }); },
     unmount() { cleanup?.(); }
   };
 }
@@ -658,7 +658,7 @@ test('inline dispatch sends only cached audio and files to the stable native ada
   const plugin = {}, currentRecord = { message: {} };
   const render = vm.runInNewContext(`${source.slice(start, end)}\nrenderEditHistoryAttachment;`, {
     React: { createElement: (type, props) => ({ type, props }) },
-    plugin, currentRecord, EditHistoryNativeAttachment: Native, EditHistoryMedia: Media
+    plugin, currentRecord, owner: null, parseContent: text => text, EditHistoryNativeAttachment: Native, EditHistoryMedia: Media
   });
   const attachment = { id: 'a' };
   for (const mediaType of ['audio', 'attachment']) {
@@ -1130,4 +1130,95 @@ test('inline audio continuation rebinds after startup generation changes at the 
     h.render();
     assert.equal(h.mounts[3].url, 'blob://local/audio');
   } finally { h.unmount(); h.flush(); h.restore(); }
+});
+
+async function exerciseRetainedCapabilityUpgrade(mediaType, invalidate = null) {
+  const h = createInlineNativeHarness(mediaType);
+  const previousCreateRoot = ReactDOM.createRoot;
+  const previousGetModule = Webpack.getModule;
+  const previousFilter = Webpack.Filters.byPrototypeKeys;
+  const roots = mediaType === 'audio' ? h.plugin._loggerNativeAudioRoots : h.plugin._loggerNativeDocumentRoots;
+  const unrelated = fakeNode('div');
+  let unrelatedUnmounts = 0, previousUnmounts = 0, nativeMounts = 0, mountCalls = 0, removedListeners = 0, resolveLoad;
+  let active = true, ready = false;
+  const session = { isActive: () => active, owns: () => true, isOwnerActive: () => false };
+  const owner = { buildSerial: 1, builtRevision: 'revision', revision: () => 'revision' };
+  h.plugin._viewportSession = session;
+  roots.set(unrelated, { host: unrelated, root: { unmount() { unrelatedUnmounts++; } } });
+  const createElement = h.document.createElement;
+  h.document.createElement = tag => {
+    const node = createElement(tag);
+    node.removeEventListener = () => { removedListeners++; };
+    if (tag === 'div') roots.set(node, { host: node, root: { unmount() { previousUnmounts++; } } });
+    return node;
+  };
+  const pending = new Promise(resolve => { resolveLoad = resolve; });
+  const proto = Object.getPrototypeOf(h.plugin);
+  ReactDOM.createRoot = () => ({ render() { nativeMounts++; }, unmount() {} });
+  Webpack.Filters.byPrototypeKeys = () => () => true;
+  Webpack.getModule = () => function MessageAccessories() {};
+  global.document = h.document;
+  if (mediaType === 'audio') {
+    h.plugin.resolveLoggerNativeAudioPlayer = () => ready ? function Player() {} : null;
+    h.plugin.ensureLoggerNativeAudioPlayer = () => pending;
+    h.plugin.createLoggerNativeAudioProps = () => ({});
+    h.plugin.cleanupLoggerNativeAudioRoots = proto.cleanupLoggerNativeAudioRoots.bind(h.plugin);
+    h.plugin.mountLoggerNativeAudio = (...args) => { mountCalls++; return proto.mountLoggerNativeAudio.apply(h.plugin, args); };
+  } else {
+    h.plugin.tools = { getChannel: () => ({ id: 'c' }) };
+    h.plugin.resolveLoggerNativeDocumentMessageClass = () => ready ? function Message() {} : null;
+    h.plugin.ensureLoggerNativeDocumentMessageClass = () => pending;
+    h.plugin.createLoggerNativeDocumentMessage = () => ({});
+    h.plugin.createLoggerNativeDocumentProps = () => ({});
+    h.plugin.createLoggerNativeDocumentErrorBoundary = () => function Boundary() {};
+    h.plugin.getSavedInlineTextAttachmentProbeContext = () => null;
+    h.plugin.wrapSavedInlineTextAttachmentProbeRender = value => value;
+    h.plugin.cleanupLoggerNativeDocumentRoots = proto.cleanupLoggerNativeDocumentRoots.bind(h.plugin);
+    h.plugin.mountLoggerNativeDocument = (...args) => { mountCalls++; return proto.mountLoggerNativeDocument.apply(h.plugin, args); };
+  }
+  try {
+    h.render({ owner });
+    const inner = h.outer.children[0];
+    assert.equal(mountCalls, 1);
+    assert.equal(previousUnmounts, 1, `${mediaType} replaces its existing exact host root`);
+    assert.equal(unrelatedUnmounts, 0);
+    const previousRemovedListeners = removedListeners;
+    active = false;
+    inner.isConnected = false;
+    ready = true;
+    resolveLoad(function Ready() {});
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(mountCalls, 1, `${mediaType} is suspended while parked`);
+    assert.equal(nativeMounts, 0);
+    assert.equal(owner.nativePendingDisplay?.length, 1);
+    if (invalidate === 'record') h.plugin.messageRecord.m = { ...h.record };
+    if (invalidate === 'reset') h.plugin._viewportSession = null;
+    if (invalidate === 'unmount') { h.unmount(); h.flush(); }
+    active = true;
+    if (invalidate !== 'unmount') inner.isConnected = true;
+    for (const callback of owner.nativePendingDisplay.splice(0)) callback();
+    const expected = invalidate ? 1 : 2;
+    assert.equal(mountCalls, expected, `${mediaType} ${invalidate || 'resume'}`);
+    assert.equal(nativeMounts, invalidate ? 0 : 1);
+    assert.equal(unrelatedUnmounts, 0);
+    if (!invalidate) {
+      assert.ok(roots.get(inner)?.root, `${mediaType} installed its native root`);
+      assert.equal(owner.nativePendingDisplay.length, 0);
+      if (mediaType === 'audio') assert.ok(removedListeners > previousRemovedListeners, 'fallback listener was removed on upgrade');
+    }
+  } finally {
+    h.unmount(); h.flush(); h.restore();
+    if (previousCreateRoot === undefined) delete ReactDOM.createRoot; else ReactDOM.createRoot = previousCreateRoot;
+    if (previousGetModule === undefined) delete Webpack.getModule; else Webpack.getModule = previousGetModule;
+    if (previousFilter === undefined) delete Webpack.Filters.byPrototypeKeys; else Webpack.Filters.byPrototypeKeys = previousFilter;
+  }
+}
+
+test('retained native audio and document capabilities upgrade once on resume and ignore stale owners', async () => {
+  for (const mediaType of ['audio', 'attachment']) {
+    for (const invalidate of [null, 'record', 'reset', 'unmount']) {
+      await exerciseRetainedCapabilityUpgrade(mediaType, invalidate);
+    }
+  }
 });

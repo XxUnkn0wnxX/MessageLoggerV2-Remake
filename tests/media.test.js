@@ -270,7 +270,7 @@ function delay(ms) {
 }
 
 function mediaNetworkDebugMessages(url = null) {
-  return styledConsoleMessages('DEBUG')
+  return styledConsoleMessages('DEBUG · NETWORK')
     .filter(message => (
       message.startsWith('Media request #')
       && (url == null || message.includes(url))
@@ -497,14 +497,14 @@ test('media-cache fetch latches native incompatibility on synchronous throw and 
     assert.equal(rendererCalls, 1);
     assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
     assert.equal(notifications.length, 1);
-    assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
+    assert.deepEqual(styledConsoleMessages('DEBUG · NETWORK'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
     assert.equal(notifications[0][0], MEDIA_CACHE_LEGACY_ROUTING_NOTICE);
     assert.equal(notifications[0][1].timeout, 4000);
     await plugin.fetchMediaCacheResponse('https://cdn.example/throw');
     assert.equal(nativeCalls, 0);
     assert.equal(rendererCalls, 2);
     assert.equal(notifications.length, 1);
-    assert.equal(styledConsoleMessages('DEBUG').length, 1);
+    assert.equal(styledConsoleMessages('DEBUG · NETWORK').length, 1);
   } finally {
     global.BdApi.Net = originalNetApi;
     global.fetch = originalFetch;
@@ -752,7 +752,7 @@ test('media-cache transport notices follow active-delivered routing and dedupe u
     { console: true, toast: false }
   );
   assert.deepEqual(first, { console: true, toast: false });
-  assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
+  assert.deepEqual(styledConsoleMessages('DEBUG · NETWORK'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
   assert.equal(notifications.length, 0);
 
   plugin.settings.debugToasts = true;
@@ -776,7 +776,7 @@ test('media-cache transport notices follow active-delivered routing and dedupe u
   assert.deepEqual(fourth, { console: false, toast: false });
   assert.equal(notifications.length, 1);
   plugin._activateMediaCacheLegacyRoutingNotice();
-  assert.deepEqual(styledConsoleMessages('DEBUG'), [
+  assert.deepEqual(styledConsoleMessages('DEBUG · NETWORK'), [
     MEDIA_CACHE_LEGACY_ROUTING_NOTICE,
     MEDIA_CACHE_LEGACY_ROUTING_NOTICE
   ]);
@@ -802,7 +802,7 @@ test('legacy-routing notice flushes both destinations when master is re-enabled 
     { console: true, toast: false }
   );
   assert.deepEqual(first, { console: true, toast: true });
-  assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
+  assert.deepEqual(styledConsoleMessages('DEBUG · NETWORK'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0][0], MEDIA_CACHE_LEGACY_ROUTING_NOTICE);
   assert.equal(plugin.settings.debugToasts, true, 're-enabling the master must not rewrite the saved child value');
@@ -812,12 +812,12 @@ test('legacy-routing notice flushes both destinations when master is re-enabled 
     { console: true, toast: false }
   );
   assert.deepEqual(second, { console: false, toast: false });
-  assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
+  assert.deepEqual(styledConsoleMessages('DEBUG · NETWORK'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
   assert.equal(notifications.length, 1);
 
   const third = plugin._flushMediaCacheLegacyRoutingNoticeForOutputSelection();
   assert.deepEqual(third, { console: false, toast: false });
-  assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
+  assert.deepEqual(styledConsoleMessages('DEBUG · NETWORK'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
   assert.equal(notifications.length, 1);
 });
 
@@ -845,13 +845,13 @@ test('legacy-routing notice stays console-only when master is re-enabled with to
     { console: true, toast: false }
   );
   assert.deepEqual(first, { console: true, toast: false });
-  assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
+  assert.deepEqual(styledConsoleMessages('DEBUG · NETWORK'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
   assert.equal(notifications.length, 0);
   assert.equal(plugin.settings.debugToasts, false);
 
   const second = plugin._flushMediaCacheLegacyRoutingNoticeForOutputSelection();
   assert.deepEqual(second, { console: false, toast: false });
-  assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
+  assert.deepEqual(styledConsoleMessages('DEBUG · NETWORK'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
   assert.equal(notifications.length, 0);
 });
 
@@ -865,9 +865,9 @@ test('media cache force toggle reports immediately and preserves a latched nativ
     plugin._mediaCacheNativeFetchCompatible = null;
     plugin.setMediaCacheFetchTransportPreference(true);
     assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
-    assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
+    assert.deepEqual(styledConsoleMessages('DEBUG · NETWORK'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
     plugin.setMediaCacheFetchTransportPreference(true);
-    assert.equal(styledConsoleMessages('DEBUG').length, 1);
+    assert.equal(styledConsoleMessages('DEBUG · NETWORK').length, 1);
 
     plugin.settings.forceLegacyMediaFetching = false;
     let nativeCalls = 0;
@@ -888,7 +888,7 @@ test('media cache force toggle reports immediately and preserves a latched nativ
     assert.equal(plugin.getMediaCacheTransportSelection(), 'legacy');
     assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
     assert.equal(nativeCalls, 0);
-    assert.deepEqual(styledConsoleMessages('DEBUG'), [
+    assert.deepEqual(styledConsoleMessages('DEBUG · NETWORK'), [
       MEDIA_CACHE_LEGACY_ROUTING_NOTICE,
       MEDIA_CACHE_LEGACY_ROUTING_NOTICE
     ]);
@@ -913,14 +913,14 @@ test('media routing legacy notice startup state initializer selects native-laten
     plugin._initializeMediaCacheLegacyRoutingNoticeState();
     assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
     assert.equal(plugin._mediaCacheNativeFetchCompatible, null);
-    assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
+    assert.deepEqual(styledConsoleMessages('DEBUG · NETWORK'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
 
     plugin.settings.forceLegacyMediaFetching = false;
     global.BdApi.Net = undefined;
     plugin._initializeMediaCacheLegacyRoutingNoticeState();
     assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
     assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
-    assert.deepEqual(styledConsoleMessages('DEBUG'), [
+    assert.deepEqual(styledConsoleMessages('DEBUG · NETWORK'), [
       MEDIA_CACHE_LEGACY_ROUTING_NOTICE,
       MEDIA_CACHE_LEGACY_ROUTING_NOTICE
     ]);
@@ -935,7 +935,7 @@ test('media routing legacy notice startup state initializer selects native-laten
     plugin._initializeMediaCacheLegacyRoutingNoticeState();
     assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, true);
     assert.equal(plugin._mediaCacheNativeFetchCompatible, false);
-    assert.deepEqual(styledConsoleMessages('DEBUG'), [
+    assert.deepEqual(styledConsoleMessages('DEBUG · NETWORK'), [
       MEDIA_CACHE_LEGACY_ROUTING_NOTICE,
       MEDIA_CACHE_LEGACY_ROUTING_NOTICE,
       MEDIA_CACHE_LEGACY_ROUTING_NOTICE
@@ -949,7 +949,7 @@ test('media routing legacy notice startup state initializer selects native-laten
     assert.equal(plugin._mediaCacheNativeFetchCompatible, null);
     assert.equal(plugin._mediaCacheLegacyRoutingNoticeState.active, false);
     assert.equal(notifications.length, 0);
-    assert.equal(styledConsoleMessages('DEBUG').length, 3);
+    assert.equal(styledConsoleMessages('DEBUG · NETWORK').length, 3);
   } finally {
     global.BdApi.Net = originalNetApi;
   }
@@ -10775,7 +10775,7 @@ test('deferred media retries exactly three bounded attempts without latching the
   await waitForQueuedMediaTasks();
 
   assert.equal(fetches, 3);
-  assert.deepEqual(styledConsoleMessages('DEBUG'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
+  assert.deepEqual(styledConsoleMessages('DEBUG · NETWORK'), [MEDIA_CACHE_LEGACY_ROUTING_NOTICE]);
   assert.equal(mediaErrors.length, 1, 'only terminal media exhaustion should route the media error');
   assert.equal(plugin._activeDeferredMediaCacheRequests.size, 0);
   assert.equal(plugin.isDataSaveModeTransitionBusy(), false);

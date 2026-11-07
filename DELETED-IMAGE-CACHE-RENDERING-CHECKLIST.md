@@ -60,22 +60,32 @@ compact roadmap.
       optimisation for the Logger window and Logger additions to native
       conversations/cards. Load text and attachments together near the viewport;
       retain activated content for session reuse. Resolve native ownership,
-      implement and validate the acceptance checks below. Not implemented;
-      implementation sequencing remains undecided.
+      implement and validate the acceptance checks below. Implementation now
+      explicitly requested before finishing Logger; validation remains open.
 - [ ] Parked — optional Stage 4a Reveal File; define its scope before activation.
 - [ ] Parked — multi-instance storage isolation; separate architecture and not
       a blocker for the active media/viewer path.
-- [ ] Exact next feature stage: R1. Finish the current compatibility hotfix and
-      its native validation first; feature implementation remains deferred.
+- [ ] Exact next feature stage: R7, explicitly activated before Logger
+      completion. Keep R1–R5 deferred; finish the current compatibility hotfix
+      and remaining native acceptance before publication.
 
 ## Planned optimisation feature
 
 ### R7 — Viewport loading and session retention
 
-**Status: requested feature addition; design incomplete, not implemented or
-validated.** This is additional rendering optimisation work, separate from the
-compatibility hotfixes already tested. See the
-[architecture notes](docs/architecture.md#planned-viewport-loading-and-session-reuse).
+**Status: implemented and locally verified; native acceptance pending.**
+Shared viewport scheduling, retained Logger/native roots, restored-card placement,
+probe suspension/resumption and classified diagnostics are integrated. The user
+requested one complete build before the authorised closed-client install and
+consolidated acceptance run. This is additional rendering optimisation work,
+separate from the compatibility hotfixes already tested. See the
+[architecture notes](docs/architecture.md#r7--viewport-loading-and-session-retention).
+
+The combined automated suite passes 892 tests. Focused coverage includes retained
+node identity, targeted invalidation, parked requests and native capability
+upgrades, stale callbacks, root failure containment and normal/selected history
+anchor resets. The lifecycle review passed after those corrections. The checks
+below remain open until the corresponding Discord behavior is verified.
 
 - [ ] Cover the **main Logger window**, including available tabs, filters,
       sorting, existing Load More batches and close/reopen. Also cover saved
@@ -92,11 +102,11 @@ compatibility hotfixes already tested. See the
       Logger-owned views, not merely identical output or reused file URLs.
       Inactive retained views must be noninteractive and suspend playback and
       display-driven work; background capture remains independent.
-- [ ] Resolve the native ownership boundary before claiming parity: Discord can
-      unmount its channel/thread/forum message tree. Literal native mount
-      retention across navigation remains **design unresolved**. Prepared-state
-      reuse alone is a narrower alternative requiring acceptance, not completion
-      of the requested mounted-content retention.
+- [ ] Verify the implemented native ownership boundary: Discord can unmount its
+      channel/thread/forum tree while Logger retains its owned content roots.
+      Preserve current native anchors, refs, message envelopes and callbacks on
+      reattachment. Prove actual mounted-content retention; prepared-state reuse
+      alone does not satisfy this requirement.
 - [ ] Reset session rendering state on cold start, Logger stop/reload and
       relevant rehydrating toggles. Refresh/invalidate affected content on real
       edits, deletions, visibility or source-policy changes so retained views do

@@ -1202,9 +1202,9 @@ test('backup debug lifecycle reports the queue delay, write start, and completio
   plugin.saveBackupTimeout = 0;
   plugin.saveBackup();
 
-  assert.ok(styledConsoleMessages('DEBUG').includes('Automatic backup queued. Starting in 300 seconds.'));
-  assert.ok(styledConsoleMessages('DEBUG').includes('Automatic backup started.'));
-  assert.ok(styledConsoleMessages('DEBUG').includes('Automatic backup completed successfully.'));
+  assert.ok(styledConsoleMessages('DEBUG · BACKUP').includes('Automatic backup queued. Starting in 300 seconds.'));
+  assert.ok(styledConsoleMessages('DEBUG · BACKUP').includes('Automatic backup started.'));
+  assert.ok(styledConsoleMessages('DEBUG · BACKUP').includes('Automatic backup completed successfully.'));
   assert.deepEqual(
     notifications.map(event => event[1]),
     [

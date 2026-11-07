@@ -475,7 +475,7 @@ test('detailed media-network diagnostics are linked, lazy, and console-only', ()
   assert.match(debugSettings, /id: 'debugLogging',[\s\S]*full URL, route, status, bytes, elapsed, outcome[\s\S]*sends no toasts[\s\S]*sensitive query data[\s\S]*id: 'detailedMediaNetworkDebug',[\s\S]*enableWith: 'debugLogging',[\s\S]*id: 'debugToasts'/);
   assert.match(diagnostics, /_createMediaNetworkRequestContext\(url, options = \{\}\) \{\s*if \(!this\._isDetailedMediaNetworkDebugEnabled\(\)\) return null;/);
   assert.match(diagnostics, /return !!\(this\.settings\?\.debugLogging && this\.settings\?\.detailedMediaNetworkDebug\);/);
-  assert.match(diagnostics, /this\.reportDebugEvent\([\s\S]*\{ console: true, toast: false \}\s*\)/);
+  assert.match(diagnostics, /this\.reportDebugEvent\([\s\S]*\{ console: true, toast: false \},\s*'NETWORK'\s*\)/);
   assert.doesNotMatch(diagnostics, /notifyUser\(|debugToasts/);
 });
 
@@ -705,7 +705,7 @@ test('date order applies to optional timestamps and forced logger dates', () => 
   );
   assert.match(savedAttachmentPresentationContent, /const SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER = '__mlv2SavedAttachmentPresentationContent'/);
   assert.match(savedAttachmentPresentationContent, /const SavedAttachmentPresentationContent = \(\{ plugin, contentModule, contentProps \}\) => \{[\s\S]*const \[,\s*forceUpdate\] = Hooks\.useForceUpdate\(\);[\s\S]*getNativeDeletedAttachmentPresentationMessageForMessageContent\(sourceProps\.message\)[\s\S]*const messageId = String\(displayedMessage\?\.id \|\| ''\);[\s\S]*React\.useEffect\(/);
-  assert.match(savedAttachmentPresentationContent, /if \(!messageId\) return;[\s\S]*if \(callbacks\) callbacks\.add\(forceUpdate\);[\s\S]*plugin\._unregisterMessageCallback\.bind\(plugin, messageId, forceUpdate\)/);
+  assert.match(savedAttachmentPresentationContent, /if \(!messageId\) return;[\s\S]*const update = owner \? \(\) => plugin\.reconcileNativeViewportMessage\(owner, 'native-content-update'\) : forceUpdate;[\s\S]*if \(callbacks\) callbacks\.add\(update\);[\s\S]*plugin\._unregisterMessageCallback\.bind\(plugin, messageId, update\)/);
   assert.match(savedAttachmentPresentationContent, /(?:return|const nativeContent =) React\.createElement\(contentModule\.type, \{[\s\S]*\[\s*SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER\s*\]\s*:\s*true/);
   const savedAttachmentTransitionState = source.slice(
     source.indexOf('  constructor(meta) {'),
@@ -820,20 +820,21 @@ test('date order applies to optional timestamps and forced logger dates', () => 
   assert.match(editHistoryGate, /presentationPlan\?\.action !== 'remote'[\s\S]*presentationPlan\?\.action !== 'blob'/);
   assert.match(editHistoryGate, /typeof presentationPlan\?\.url !== 'string'[\s\S]*!presentationPlan\.url/);
   assert.match(editHistoryGate, /if \(mediaType !== 'image' && mediaType !== 'video'\)/);
-  assert.match(editHistoryGate, /const initialMediaType = presentationPlan\?\.mediaType/);
-  assert.match(editHistoryGate, /if \(displayPlan\?\.action !== 'remote'[\s\S]*plugin\.settings\?\.cacheAllImages === false[\s\S]*plugin\.settings\?\.onlyRenderCachedAttachments\)/);
-  assert.match(editHistoryGate, /getSavedAttachmentDescriptor\([\s\S]*currentRecord\?\.message[\s\S]*resolveSavedAttachmentMediaFailureContext\([\s\S]*coordinateSavedAttachmentMediaFailure\([\s\S]*displayPlan\.url/);
-  assert.match(editHistoryGate, /setDisplayPlan\(\{[\s\S]*action: nextPlan\.action,[\s\S]*mediaType: nextPlan\.mediaType,[\s\S]*url: nextPlan\.url[\s\S]*\}\)/);
-  assert.match(editHistoryGate, /url: displayPlan\.url,[\s\S]*placeholder: displayPlan\.url,[\s\S]*original: displayPlan\.url/);
+  const editHistoryMedia = source.slice(source.indexOf('const EditHistoryMedia ='), source.indexOf("EditHistoryMedia.displayName = 'EditHistoryMedia'"));
+  assert.match(editHistoryMedia, /const initialMediaType = presentationPlan\?\.mediaType/);
+  assert.match(editHistoryMedia, /if \(displayPlan\?\.action !== 'remote'[\s\S]*plugin\.settings\?\.cacheAllImages === false[\s\S]*plugin\.settings\?\.onlyRenderCachedAttachments\)/);
+  assert.match(editHistoryMedia, /getSavedAttachmentDescriptor\([\s\S]*currentRecord\?\.message[\s\S]*resolveSavedAttachmentMediaFailureContext\([\s\S]*coordinateSavedAttachmentMediaFailure\([\s\S]*displayPlan\.url/);
+  assert.match(editHistoryMedia, /setDisplayPlan\(\{[\s\S]*action: nextPlan\.action,[\s\S]*mediaType: nextPlan\.mediaType,[\s\S]*url: nextPlan\.url[\s\S]*\}\)/);
+  assert.match(editHistoryMedia, /url: displayPlan\.url,[\s\S]*placeholder: displayPlan\.url,[\s\S]*original: displayPlan\.url/);
   assert.match(editHistoryGate, /const mediaKey = `\$\{key\}-\$\{presentationPlan\.action\}-\$\{presentationPlan\.url\}`/);
-  assert.match(editHistoryGate, /const \[errored, setErrored\] = React\.useState\(false\)/);
+  assert.match(editHistoryMedia, /const \[errored, setErrored\] = React\.useState\(false\)/);
   assert.doesNotMatch(editHistoryGate, /Hooks\.useState/);
   assert.doesNotMatch(editHistoryGate, /isAttachmentLocallyCached\(/);
   assert.doesNotMatch(editHistoryGate, /currentRecord\.message\.(attachments|embeds|components)\s*=/);
   assert.match(source, /Patcher\.before\(mcc, 'type',[\s\S]*repliedTextContent[\s\S]*getNativeDeletedAttachmentPresentationMessageForMessageContent\(message\)/);
   assert.match(source, /const isSavedAttachmentPresentationReentry = Boolean\(props\?\.?\[SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER\]\);/);
   assert.match(source, /if \(\s*!isSavedAttachmentPresentationReentry[\s\S]*return React\.createElement\(SavedAttachmentPresentationContent,/);
-  assert.match(source, /if \(record\?\.edit_history && Array\.isArray\(ret\?\.props\?\.children\)\)[\s\S]*return React\.createElement\(EditHistoryContent,/);
+  assert.match(source, /if \(record\?\.edit_history && Array\.isArray\(ret\?\.props\?\.children\)\)[\s\S]*const History = [\s\S]*\? NativeHistoryBridge : EditHistoryContent;[\s\S]*return React\.createElement\(History,/);
   assert.match(source, /if \(record\?\.delete_data\?\.time && ret\)[\s\S]*return React\.createElement\(DeletedContentTooltip,[\s\S]*deletedAt: record\.delete_data\.time/);
   assert.doesNotMatch(source, /if \(showEditHistory\)/);
   assert.doesNotMatch(source, /const deletedChildren = ret\.props\.children\.slice\(\)/);
@@ -883,11 +884,11 @@ test('saved restored video ownership projects MessageAccessories.render before a
   assert.doesNotMatch(source, /getSavedAttachmentPresentationIdentityKeys/);
   const projection = source.slice(
     source.indexOf('  getSavedAttachmentMessageContentPresentationMessage(message) {'),
-    source.indexOf('  renderSavedAttachmentMessageAccessories(thisObject, args, original) {')
+    source.indexOf('  renderSavedAttachmentMessageAccessories(')
   );
   const inlineProbeWrapper = source.slice(
     source.indexOf('  wrapSavedInlineTextAttachmentProbeRender(renderedValue, contextsOrMessage) {'),
-    source.indexOf('  renderSavedAttachmentMessageAccessories(thisObject, args, original) {')
+    source.indexOf('  renderSavedAttachmentMessageAccessories(')
   );
   assert.match(inlineProbeWrapper, /getSavedInlineTextAttachmentProbeComponent\(\)/);
   assert.match(inlineProbeWrapper, /React\.Fragment/);
@@ -901,7 +902,7 @@ test('saved restored video ownership projects MessageAccessories.render before a
     /if \(typeof message\.set === 'function'\)[\s\S]*const updatedMessage = message\.set\('attachments', attachments\);[\s\S]*if \(updatedMessage && typeof updatedMessage === 'object'\) return updatedMessage;[\s\S]*catch \{\}[\s\S]*return \{\s*\.\.\.message, attachments\s*\};/
   );
   const accessoriesOwner = source.slice(
-    source.indexOf('  renderSavedAttachmentMessageAccessories(thisObject, args, original) {'),
+    source.indexOf('  renderSavedAttachmentMessageAccessories('),
     source.indexOf('  getLoggerSavedAttachmentPresentationEntries(message, record) {')
   );
   assert.match(accessoriesOwner, /SAVED_INLINE_TEXT_ATTACHMENT_PROBE_DETACHED_PROP\] === true[\s\S]*return original\.apply\(thisObject, args\)/);
@@ -980,7 +981,7 @@ test('renderer Blob plans accept generic attachments while native MessageAccesso
 
   const projection = source.slice(
     source.indexOf('  getSavedAttachmentMessageContentPresentationMessage(message) {'),
-    source.indexOf('  renderSavedAttachmentMessageAccessories(thisObject, args, original) {')
+    source.indexOf('  renderSavedAttachmentMessageAccessories(')
   );
   assert.match(projection, /displayedAttachments\.filter\(\(_, index\) => displayedPlans\[index\]\?\.mediaType !== 'video'\)/);
   assert.doesNotMatch(projection, /displayedPlans\[index\].*mediaType === '(?:text|pdf)'/);
@@ -1601,8 +1602,8 @@ test('backup and edit-spam diagnostics remain opt-in under their warning-colored
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*'Debug'[\s\S]*id: 'ml2-settings-debug'[\s\S]*collapsible: true[\s\S]*shown: false/);
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Enable debug logging[\s\S]*id: 'debugLogging'[\s\S]*type: 'switch'/);
   assert.match(source, /var\(--text-warning, var\(--status-warning\)\)[\s\S]*Show debug messages as toasts[\s\S]*id: 'debugToasts'[\s\S]*enableWith: 'debugLogging'[\s\S]*type: 'switch'/);
-  assert.match(source, /reportDebugEvent\(message, timeout = 4000, outputSelection = null\)[\s\S]*const output = this\._normalizeDebugEventOutputSelection\(outputSelection\);[\s\S]*if \(output\.console && this\.settings\?\.debugLogging\)[\s\S]*this\._logStyledConsoleEvent\('DEBUG', message\)[\s\S]*if \(output\.toast && this\.settings\?\.debugLogging && this\.settings\?\.debugToasts\)[\s\S]*this\.notifyUser\(message,[\s\S]*title: 'Message Logger Debug'[\s\S]*type: 'warning'/);
-  assert.match(source, /Log automatic-backup, edit-spam, channel-entry, and networking diagnostics to the console\./);
+  assert.match(source, /reportDebugEvent\(message, timeout = 4000, outputSelection = null, category = 'DEBUG'\)[\s\S]*const output = this\._normalizeDebugEventOutputSelection\(outputSelection\);[\s\S]*if \(output\.console && this\.settings\?\.debugLogging\)[\s\S]*const label = category === 'DEBUG' \? 'DEBUG' : `DEBUG · \$\{category\}`;[\s\S]*this\._logStyledConsoleEvent\(label, message\)[\s\S]*if \(output\.toast && this\.settings\?\.debugLogging && this\.settings\?\.debugToasts\)[\s\S]*this\.notifyUser\(message,[\s\S]*title: 'Message Logger Debug'[\s\S]*type: 'warning'/);
+  assert.match(source, /Log automatic-backup, edit-spam, channel-entry, networking, and rendering diagnostics to the console\./);
   assert.match(source, /id: 'debugLogging',[\s\S]*action: 'reportLegacyRoutingDebugLoggingState'/);
   assert.match(source, /id: 'debugToasts',[\s\S]*action: 'reportLegacyRoutingDebugToastsState'/);
   assert.match(source, /reportLegacyRoutingDebugLoggingState:[\s\S]*console: true, toast: false/);

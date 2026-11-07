@@ -951,6 +951,9 @@ module.exports = class MessageLoggerV2 {
   }
   stop() {
     this._startupGeneration = (this._startupGeneration || 0) + 1;
+    this._viewportSession?.reset();
+    this._viewportHydrationDebugIssueState?.clear();
+    this._viewportHydrationDebugIssueState = null;
     this.cancelStartupMessageClassRecovery();
     this._loggerNativeAudioLoadGeneration = (this._loggerNativeAudioLoadGeneration || 0) + 1;
     this._loggerNativeAudioLoadPromise = null;
@@ -5397,7 +5400,8 @@ module.exports = class MessageLoggerV2 {
     const result = this.reportDebugEvent(
       MEDIA_CACHE_LEGACY_ROUTING_NOTICE,
       4000,
-      pending
+      pending,
+      'NETWORK'
     );
     state.delivered.console = state.delivered.console || result.console;
     state.delivered.toast = state.delivered.toast || result.toast;
@@ -5427,9 +5431,9 @@ module.exports = class MessageLoggerV2 {
     }
     return this._deactivateMediaCacheLegacyRoutingNotice();
   }
-  reportDebugEvent(message, timeout = 4000, outputSelection = null) {
+  reportDebugEvent(message, timeout = 4000, outputSelection = null, category = 'DEBUG') {
     // Debug output is intentionally opt-in for automatic-backup, edit-spam timer,
-    // channel-entry counter, and media-networking events. Toast routing is linked to the
+    // channel-entry counter, networking, and rendering events. Toast routing is linked to the
     // console master switch, so all report destinations can be disabled at once by turning
     // off Enable debug logging.
     // All debug notifications deliberately use the warning type so they share the same
@@ -5438,7 +5442,8 @@ module.exports = class MessageLoggerV2 {
     let reportedConsole = false;
     let reportedToast = false;
     if (output.console && this.settings?.debugLogging) {
-      this._logStyledConsoleEvent('DEBUG', message);
+      const label = category === 'DEBUG' ? 'DEBUG' : `DEBUG · ${category}`;
+      this._logStyledConsoleEvent(label, message);
       reportedConsole = true;
     }
     if (output.toast && this.settings?.debugLogging && this.settings?.debugToasts) {
@@ -5453,6 +5458,40 @@ module.exports = class MessageLoggerV2 {
       console: reportedConsole,
       toast: reportedToast
     };
+  }
+  reportViewportDebugIssue(reason) {
+    const messages = {
+      'row-hydration-failure': 'Hydration failed while building a message row.',
+      'unexpected-native-accessory-envelope': 'Hydration received an unexpected native accessory envelope.',
+      'resource-resume-failure': 'Hydration resource resume failed.',
+      'resource-suspend-failure': 'Hydration resource suspend failed.',
+      'resource-dispose-failure': 'Hydration resource dispose failed.'
+    };
+    const message = typeof reason === 'string' && Object.prototype.hasOwnProperty.call(messages, reason)
+      ? messages[reason]
+      : 'Hydration encountered an unexpected issue.';
+    if (!this.settings?.debugLogging) return { console: false, toast: false };
+
+    const state = this._viewportHydrationDebugIssueState ||= new Map();
+    let delivered = state.get(message);
+    if (!delivered) {
+      delivered = { console: false, toast: false };
+      state.set(message, delivered);
+    }
+    const result = { console: false, toast: false };
+    if (!delivered.console) {
+      this._logStyledConsoleEvent('DEBUG · HYDRATE', message);
+      delivered.console = true;
+      result.console = true;
+    }
+    if (!delivered.toast && this.settings?.debugToasts) {
+      const toast = this.reportDebugEvent(message, 4000, { console: false, toast: true });
+      if (toast.toast) {
+        delivered.toast = true;
+        result.toast = true;
+      }
+    }
+    return result;
   }
   _nextMediaNetworkRequestId() {
     this._mediaCacheRequestSerial += 1;
@@ -5508,7 +5547,8 @@ module.exports = class MessageLoggerV2 {
       this.reportDebugEvent(
         `Media request #${context.id} ${destination} (${route})${detail}${extra}`,
         4000,
-        { console: true, toast: false }
+        { console: true, toast: false },
+        'NETWORK'
       );
     } catch {
     }
@@ -5568,7 +5608,7 @@ module.exports = class MessageLoggerV2 {
   }
   queueAutoBackup(delayMs, reason = 'queued') {
     this.saveBackupTimeout = setTimeout(() => this.saveBackup(), delayMs);
-    this.reportDebugEvent(`Automatic backup ${reason}. Starting in ${this.formatBackupDebugDelay(delayMs)}.`);
+    this.reportDebugEvent(`Automatic backup ${reason}. Starting in ${this.formatBackupDebugDelay(delayMs)}.`, 4000, null, 'BACKUP');
     return this.saveBackupTimeout;
   }
   handleAutoBackupSetting(enabled) {
@@ -5607,7 +5647,7 @@ module.exports = class MessageLoggerV2 {
       );
     }
     if (!enabled && hadPendingBackup) {
-      this.reportDebugEvent('Pending automatic backup cancelled because Auto backup was disabled.');
+      this.reportDebugEvent('Pending automatic backup cancelled because Auto backup was disabled.', 4000, null, 'BACKUP');
     }
     if (enabled && !this.settings.dontSaveData) this.saveBackup();
   }
@@ -6381,7 +6421,7 @@ module.exports = class MessageLoggerV2 {
               { style: { color: 'var(--text-warning, var(--status-warning))' } },
               'Enable debug logging'
             ),
-            note: 'Log automatic-backup, edit-spam, channel-entry, and networking diagnostics to the console.',
+            note: 'Log automatic-backup, edit-spam, channel-entry, networking, and rendering diagnostics to the console.',
             id: 'debugLogging',
             type: 'switch',
             action: 'reportLegacyRoutingDebugLoggingState'
@@ -6637,6 +6677,7 @@ module.exports = class MessageLoggerV2 {
     return React.createElement("div", { className: "plugin-form-container" }, list);
   }
   saveSettings() {
+    this._viewportSession?.reconcileActive();
     Data.save(this.getName(), 'settings', this.settings);
   }
   // No-save recovery payload helpers. These keep validation, normalization, and runtime
@@ -7531,6 +7572,7 @@ module.exports = class MessageLoggerV2 {
     // Preserve additive top-level metadata owned by other forks. Known core fields are
     // regenerated by this fork, while foreign extensions survive a round trip unchanged.
     this.dataPayloadExtensions = this.getDataPayloadExtensions(data);
+    this._viewportSession?.pruneMessages(data.messageRecord);
     this.messageRecord = data.messageRecord;
     this.messageRecordIds = new Set(Object.keys(this.messageRecord));
     this.deletedMessageRecord = data.deletedMessageRecord;
@@ -8807,7 +8849,10 @@ module.exports = class MessageLoggerV2 {
       ? `${guild.name}, #${channel.name || 'unknown-channel'}`
       : this.getLiteralName(channel.guild_id, channel.id);
     this.reportDebugEvent(
-      `${config.label} channel-entry counter increased to ${total} (+${increment}) for ${location}.`
+      `${config.label} channel-entry counter increased to ${total} (+${increment}) for ${location}.`,
+      4000,
+      null,
+      'CHANNEL'
     );
     return total;
   }
@@ -9237,7 +9282,7 @@ module.exports = class MessageLoggerV2 {
       this.reportDataSavingDisabled();
       this.notifySettingDependencyChange('dontLoadArchivedData');
       if (hadPendingBackup) {
-        this.reportDebugEvent('Pending automatic backup cancelled because data saving was disabled.');
+        this.reportDebugEvent('Pending automatic backup cancelled because data saving was disabled.', 4000, null, 'BACKUP');
       }
       return true;
     }
@@ -9330,11 +9375,13 @@ module.exports = class MessageLoggerV2 {
   }
   _logStyledConsoleEvent(category, message) {
     const label = String(category || 'MEDIA');
+    const prefix = label.startsWith('DEBUG · ')
+      ? `[DEBUG] [${label.slice('DEBUG · '.length)}]` : `[${label}]`;
     return emitStyledConsoleEvent(
       'log',
       [String(message)],
       label,
-      [`[${label}] ${String(message)}`]
+      [`${prefix} ${String(message)}`]
     );
   }
   _mediaCacheTrimDebug(message, category = 'TIMER') {
@@ -9993,6 +10040,7 @@ module.exports = class MessageLoggerV2 {
     this.reportMajorSettingChange('cacheAllImages', enabled);
   }
   resetSavedAttachmentPresentationState() {
+    this._viewportSession?.reset();
     this.cancelSavedInlineTextAttachmentProbes?.();
     this.closeLoggerOwnedAttachmentMediaViewers?.();
     this._cancelAllSavedAttachmentPresentationTransitions?.();
@@ -10575,6 +10623,7 @@ module.exports = class MessageLoggerV2 {
     );
   }
   saveData() {
+    this._viewportSession?.reconcileActive();
     if (this.settings.dontSaveData) {
       if (this._noSaveMergeInProgress) this._noSaveMergeDirty = true;
       else this.flushNoSavePersistedRemovals();
@@ -10663,10 +10712,10 @@ module.exports = class MessageLoggerV2 {
   saveBackup() {
     if (this.settings.dontSaveData && !this._noSaveMergeInProgress) {
       this.saveBackupTimeout = 0;
-      this.reportDebugEvent('Automatic backup skipped because data saving is disabled.');
+      this.reportDebugEvent('Automatic backup skipped because data saving is disabled.', 4000, null, 'BACKUP');
       return;
     }
-    this.reportDebugEvent('Automatic backup started.');
+    this.reportDebugEvent('Automatic backup started.', 4000, null, 'BACKUP');
     const writeEpoch = this._dataWriteEpoch || 0;
     const callback = (err, cancelled = false) => {
       if (err) {
@@ -10687,9 +10736,9 @@ module.exports = class MessageLoggerV2 {
       if (!err && !cancelled && !this.settings.dontSaveData && !backupWasLoaded) {
         this.queueAutoBackup(300, 'verification retry queued');
       } else if (cancelled) {
-        this.reportDebugEvent('Automatic backup write was cancelled before commit.');
+        this.reportDebugEvent('Automatic backup write was cancelled before commit.', 4000, null, 'BACKUP');
       } else if (!err) {
-        this.reportDebugEvent('Automatic backup completed successfully.');
+        this.reportDebugEvent('Automatic backup completed successfully.', 4000, null, 'BACKUP');
       }
     };
     this.efficientlySaveData(
@@ -11165,7 +11214,8 @@ module.exports = class MessageLoggerV2 {
       onUnavailable?.('documentHostUnavailable');
       return null;
     }
-    this.cleanupLoggerNativeDocumentRoots(host);
+    if (this._viewportSession?.owns(host)) this.cleanupLoggerNativeDocumentRoots(host, true);
+    else this.cleanupLoggerNativeDocumentRoots(host);
     try { host.replaceChildren?.(); } catch {}
 
     const messageId = String(sourceMessage?.id || renderMessage?.id || '');
@@ -11180,7 +11230,7 @@ module.exports = class MessageLoggerV2 {
     const notifyUnavailable = reason => {
       if (unavailableCalled) return;
       unavailableCalled = true;
-      this.cleanupLoggerNativeDocumentRoots(host);
+      this.cleanupLoggerNativeDocumentRoots(host, true);
       try { host.replaceChildren?.(); } catch {}
       try { onUnavailable?.(reason); } catch {}
     };
@@ -11197,28 +11247,28 @@ module.exports = class MessageLoggerV2 {
       void Promise.resolve(
         this.ensureLoggerNativeDocumentMessageClass(sourceMessage || renderMessage)
       ).then(messageClass => {
-        const owned = this._loggerNativeDocumentRoots.get(host);
-        if (!owned || owned !== entry || host.isConnected === false
-          || generation !== this._loggerNativeDocumentMessageLoadGeneration) return;
-        if (!messageClass) {
-          notifyUnavailable('nativeDocumentMessageClassUnavailable');
-          return;
-        }
-        this.cleanupLoggerNativeDocumentRoots(host);
-        if (host.isConnected === false) return;
-        this.mountLoggerNativeDocument(
-          host,
-          renderMessage,
-          attachment,
-          sourceMessage,
-          onUnavailable,
-          { ...options, retryNative: false }
-        );
+        const finish = () => {
+          const owned = this._loggerNativeDocumentRoots.get(host);
+          if (!owned || owned !== entry || host.isConnected === false
+            || generation !== this._loggerNativeDocumentMessageLoadGeneration) return;
+          if (!messageClass) {
+            notifyUnavailable('nativeDocumentMessageClassUnavailable');
+            return;
+          }
+          this.cleanupLoggerNativeDocumentRoots(host, true);
+          if (host.isConnected === false) return;
+          this.mountLoggerNativeDocument(
+            host, renderMessage, attachment, sourceMessage, onUnavailable,
+            { ...options, retryNative: false }
+          );
+        };
+        if (options.deferDisplay) options.deferDisplay(finish)(); else finish();
       }).catch(error => {
-        const owned = this._loggerNativeDocumentRoots.get(host);
-        if (owned === entry && generation === this._loggerNativeDocumentMessageLoadGeneration) {
-          notifyUnavailable(error);
-        }
+        const finish = () => {
+          const owned = this._loggerNativeDocumentRoots.get(host);
+          if (owned === entry && generation === this._loggerNativeDocumentMessageLoadGeneration) notifyUnavailable(error);
+        };
+        if (options.deferDisplay) options.deferDisplay(finish)(); else finish();
       });
       return { ...entry, native: false };
     };
@@ -11270,9 +11320,12 @@ module.exports = class MessageLoggerV2 {
       generation
     };
     const reportBoundaryFailure = error => {
-      const owned = this._loggerNativeDocumentRoots.get(host);
-      if (owned !== entry || generation !== this._loggerNativeDocumentMessageLoadGeneration) return;
-      notifyUnavailable(error);
+      const finish = () => {
+        const owned = this._loggerNativeDocumentRoots.get(host);
+        if (owned !== entry || generation !== this._loggerNativeDocumentMessageLoadGeneration) return;
+        notifyUnavailable(error);
+      };
+      if (options.deferDisplay) options.deferDisplay(finish)(); else finish();
     };
     const ErrorBoundary = this.createLoggerNativeDocumentErrorBoundary(reportBoundaryFailure);
     if (!ErrorBoundary) {
@@ -11459,7 +11512,7 @@ module.exports = class MessageLoggerV2 {
   }
   mountLoggerNativeAudio(host, src, attachment, sourceMessage, onError = null, options = {}) {
     if (!host || typeof host.appendChild !== 'function') return null;
-    this.cleanupLoggerNativeAudioRoots(host);
+    this.cleanupLoggerNativeAudioRoots(host, true);
     try {
       host.replaceChildren?.();
     } catch {}
@@ -11519,19 +11572,16 @@ module.exports = class MessageLoggerV2 {
         const generation = this._loggerNativeAudioLoadGeneration;
         const fallbackEntry = this._loggerNativeAudioRoots.get(host);
         void Promise.resolve(this.ensureLoggerNativeAudioPlayer()).then(component => {
-          const owned = this._loggerNativeAudioRoots.get(host);
-          const connected = host.isConnected !== false;
-          if (!component || !connected || owned !== fallbackEntry || generation !== this._loggerNativeAudioLoadGeneration) return;
-          this.cleanupLoggerNativeAudioRoots(host);
-          if (host.isConnected === false) return;
-          this.mountLoggerNativeAudio(
-            host,
-            src,
-            attachment,
-            sourceMessage,
-            onError,
-            { retryNative: false }
-          );
+          const finish = () => {
+            const owned = this._loggerNativeAudioRoots.get(host);
+            const connected = host.isConnected !== false;
+            if (!component || !connected || owned !== fallbackEntry || generation !== this._loggerNativeAudioLoadGeneration) return;
+            this.cleanupLoggerNativeAudioRoots(host, true);
+            if (host.isConnected === false) return;
+            this.mountLoggerNativeAudio(host, src, attachment, sourceMessage, onError,
+              { ...options, retryNative: false });
+          };
+          if (options.deferDisplay) options.deferDisplay(finish)(); else finish();
         }).catch(() => {});
       }
       return fallback;
@@ -11817,6 +11867,7 @@ module.exports = class MessageLoggerV2 {
       || !React.Fragment
     ) return renderedValue;
     const Sentinel = this.getSavedInlineTextAttachmentProbeComponent();
+    const Probe = this._nativeViewportComponents?.OwnedProbe || Sentinel;
     if (typeof Sentinel !== 'function') return renderedValue;
     const seenIdentityKeys = new Set();
     const eligibleContexts = contexts.filter(context => {
@@ -11834,17 +11885,258 @@ module.exports = class MessageLoggerV2 {
       null,
       renderedValue,
       ...eligibleContexts.map(context => React.createElement(
-        Sentinel,
-        { key: context.identityKey, context }
+        Probe,
+        { key: context.identityKey, context, Sentinel }
       ))
     );
   }
-  renderSavedAttachmentMessageAccessories(thisObject, args, original) {
+  reconcileNativeViewportMessage(owner, reason) {
+    const session = this._viewportSession;
+    if (!owner || session?.ownerOf(owner.host) !== owner || !owner.activated || owner.dirty) return;
+    if (owner.revision() !== owner.builtRevision) session.invalidate(owner.messageId, reason);
+  }
+  deferNativeViewportDisplay(owner, callback) {
+    if (!owner) return callback;
+    const session = this._viewportSession;
+    const buildSerial = owner.buildSerial;
+    const startupGeneration = this._startupGeneration;
+    const revision = owner.builtRevision;
+    return (...args) => {
+      if (!session || this._viewportSession !== session || !this.__started
+        || this._startupGeneration !== startupGeneration || owner.buildSerial !== buildSerial) return;
+      const event = args[0];
+      const target = event?.currentTarget || event?.target;
+      const source = target?.currentSrc || target?.src;
+      const capturedArgs = event && typeof event === 'object'
+        ? [{ ...event, currentTarget: event.currentTarget, target: event.target }, ...args.slice(1)] : args;
+      const run = () => {
+        if (this._viewportSession !== session || !session.isActive(owner)
+          || owner.buildSerial !== buildSerial || this._startupGeneration !== startupGeneration
+          || (source && (target?.currentSrc || target?.src) !== source)) return;
+        if (typeof owner.revision === 'function' && owner.revision() !== (revision ?? owner.builtRevision)) {
+          session.invalidate(owner.messageId, 'stale-native-display');
+          return;
+        }
+        callback(...capturedArgs);
+      };
+      if (session.isActive(owner)) run();
+      else (owner.nativePendingDisplay ||= []).push(run);
+    };
+  }
+  shouldRetainNativeSavedMessage(message) {
+    const record = this.messageRecord?.[message?.id];
+    return !!record?.delete_data && !!record.message
+      && this.shouldPresentSavedMessage?.(record.message.channel_id, record.message.id) !== false;
+  }
+  getNativeViewportComponents() {
+    if (this._nativeViewportComponents) return this._nativeViewportComponents;
+    if (typeof IntersectionObserver !== 'function' || typeof ReactDOM?.createRoot !== 'function'
+      || typeof React?.Component !== 'function'
+      || typeof React?.createContext !== 'function' || typeof React?.useContext !== 'function'
+      || typeof React?.useRef !== 'function' || typeof React?.useLayoutEffect !== 'function') return null;
+    const plugin = this;
+    const OwnerContext = React.createContext(null);
+    class ViewportErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { failed: false };
+      }
+      static getDerivedStateFromError() { return { failed: true }; }
+      componentDidCatch() {
+        const { entry, session, buildSerial, startupGeneration } = this.props;
+        if (!plugin.__started || plugin._viewportSession !== session
+          || plugin._startupGeneration !== startupGeneration || entry.buildSerial !== buildSerial
+          || session.ownerOf(entry.host) !== entry) return;
+        entry.failed = true;
+        plugin.reportViewportDebugIssue('row-hydration-failure');
+      }
+      render() {
+        return this.state.failed
+          ? React.createElement('div', { className: 'ml2-viewport-error' }, 'Saved message could not be loaded.')
+          : this.props.children;
+      }
+    }
+    ViewportErrorBoundary.displayName = 'MessageLoggerViewportErrorBoundary';
+    const ViewportPayload = ({ entry, current, nativeProps }) => current.render(entry, nativeProps);
+    ViewportPayload.displayName = 'MessageLoggerViewportPayload';
+    const ActivationNotice = ({ entry, session, token }) => {
+      React.useLayoutEffect(() => {
+        const notify = () => {
+          if (session.isActive(entry, token)) entry.nativeLatest.current.onActivate?.();
+        };
+        if (session.isActive(entry, token)) notify();
+        else entry.nativePendingActivation = notify;
+        return () => { if (entry.nativePendingActivation === notify) entry.nativePendingActivation = null; };
+      }, [entry, session, token]);
+      return null;
+    };
+    const Bridge = ({ message, kind, render, nativeProps = {}, onActivate, onDeactivate }) => {
+      const slotRef = React.useRef(null);
+      const leaseRef = React.useRef(null);
+      const latest = React.useRef(null);
+      latest.current = { render, nativeProps, onActivate, onDeactivate };
+      const session = plugin.__started === true ? plugin.getViewportSession() : null;
+      const channelId = String(message?.channel_id || '');
+      const messageId = String(message?.id || '');
+      React.useLayoutEffect(() => {
+        const slot = slotRef.current;
+        if (!session || !slot) return;
+        const row = slot.closest?.('[id^="chat-messages-"], [data-list-item-id^="chat-messages___"], [data-ml2-restored-forum-card]')
+          || slot.parentElement || slot;
+        const token = {};
+        const occurrence = session.acquireNativeOccurrence(row, channelId, messageId, kind, token);
+        if (!occurrence) return;
+        const revision = () => JSON.stringify([
+          plugin.messageRecord?.[messageId], plugin.editModifiers?.[messageId],
+          plugin.settings?.cacheAllImages, plugin.settings?.onlyRenderCachedAttachments,
+          plugin.settings?.maxShownEdits, plugin.settings?.hideNewerEditsFirst,
+          plugin.settings?.useAlternativeDeletedStyle
+        ]);
+        const entry = session.getEntry({ surfaceKey: 'native', channelId, messageId,
+          variant: `${occurrence.index}:${kind}`, revision, build(owned, host) {
+            const root = ReactDOM.createRoot(host);
+            owned.nativeRoot = root;
+            session.own(owned, host, root, {
+              dispose() {
+                owned.nativePendingDisplay = [];
+                owned.nativePendingActivation = null;
+                owned.nativeRoot = null;
+                owned.nativeResumeCallbacks?.clear();
+                root.unmount();
+              },
+              suspend() { owned.nativeLatest.current.onDeactivate?.(); },
+              resume() {
+                for (const callback of owned.nativePendingDisplay?.splice(0) || []) callback();
+                for (const callback of owned.nativeResumeCallbacks || []) callback();
+                const notify = owned.nativePendingActivation;
+                owned.nativePendingActivation = null;
+                notify?.();
+              }
+            });
+            owned.renderNative(true);
+          }
+        });
+        entry.nativeLatest = latest;
+        entry.nativeOccurrence = occurrence;
+        entry.nativeOccurrenceKind = kind;
+        entry.nativeCallbacks ||= new Map();
+        entry.renderNative = (admittedBuild = false) => {
+          if (!entry.nativeRoot || (!session.isActive(entry, token)
+            && !(admittedBuild && entry.slot && entry.leaseToken === token))) return;
+          const current = entry.nativeLatest.current;
+          const props = { ...current.nativeProps };
+          for (const [key, value] of Object.entries(props)) {
+            if (typeof value !== 'function') continue;
+            if (!entry.nativeCallbacks.has(key)) entry.nativeCallbacks.set(key, (...args) => {
+              if (!session.isActive(entry)) return;
+              return entry.nativeLatest.current.nativeProps[key]?.(...args);
+            });
+            props[key] = entry.nativeCallbacks.get(key);
+          }
+          entry.nativeRoot.render(React.createElement(ViewportErrorBoundary, {
+            entry, session, buildSerial: entry.buildSerial, startupGeneration: plugin._startupGeneration
+          }, React.createElement(OwnerContext.Provider, { value: entry },
+            React.createElement(ViewportPayload, { entry, current, nativeProps: props }),
+            React.createElement(ActivationNotice, { entry, session, token }))));
+        };
+        leaseRef.current = { entry, token };
+        const registry = plugin._messageUpdateRegistry;
+        if (registry && !registry.has(messageId)) registry.set(messageId, new Set());
+        const update = () => plugin.reconcileNativeViewportMessage(entry, 'native-record-update');
+        registry?.get(messageId)?.add(update);
+        session.attach(entry, slot, token, { observeTarget: row });
+        return () => {
+          if (registry) plugin._unregisterMessageCallback(messageId, update);
+          session.release(entry, token);
+          session.releaseNativeOccurrence(occurrence, kind, token);
+          if (leaseRef.current?.token === token) leaseRef.current = null;
+        };
+      }, [session, channelId, messageId, kind]);
+      React.useLayoutEffect(() => {
+        const entry = leaseRef.current?.entry;
+        if (!session || !entry || !session.isActive(entry) || !entry.activated || entry.dirty || entry.pendingWorkDirty) return;
+        if (entry.revision() !== entry.builtRevision) session.invalidate(messageId, 'native-record-update');
+        else entry.renderNative();
+      });
+      return React.createElement('div', { ref: slotRef, style: { display: 'contents' } });
+    };
+    Bridge.displayName = 'MessageLoggerNativeViewportBridge';
+    const AccessoriesGate = ({ instance, args, original }) => {
+      const owner = React.useContext(OwnerContext);
+      const previous = React.useRef(null);
+      const parkedUpdate = React.useRef(false);
+      const [, forceUpdate] = React.useState(0);
+      React.useLayoutEffect(() => {
+        if (!owner) return;
+        const resume = () => {
+          if (!parkedUpdate.current) return;
+          parkedUpdate.current = false;
+          forceUpdate(value => value + 1);
+        };
+        (owner.nativeResumeCallbacks ||= new Set()).add(resume);
+        return () => owner.nativeResumeCallbacks.delete(resume);
+      }, [owner]);
+      if (owner) {
+        if (!plugin._viewportSession?.isActive(owner)) {
+          parkedUpdate.current = true;
+          return previous.current;
+        }
+        parkedUpdate.current = false;
+        return previous.current = plugin.renderSavedAttachmentMessageAccessories(instance, args, original, true);
+      }
+      const props = instance.props;
+      const ActualAccessories = instance.constructor;
+      return React.createElement(Bridge, { message: props.message, kind: 'accessories', nativeProps: props,
+        render(entry, currentProps) {
+          const factory = entry.nativeLatest.current.nativeProps.renderAccessories;
+          if (typeof factory !== 'function') return null;
+          const envelope = factory({ ...currentProps,
+            channelMessageProps: { message: currentProps.message, channel: currentProps.channel, compact: currentProps.compact },
+            handleContextMenu: currentProps.onMediaItemContextMenu
+          });
+          if (envelope == null) return null;
+          const child = envelope.props?.children;
+          if (!React.isValidElement?.(envelope) || !React.isValidElement?.(child)
+            || envelope.props.message !== currentProps.message || child.props?.message !== currentProps.message) {
+            plugin.reportViewportDebugIssue('unexpected-native-accessory-envelope');
+            return null;
+          }
+          return React.cloneElement(envelope, {}, React.createElement(ActualAccessories, currentProps));
+        }
+      });
+    };
+    AccessoriesGate.displayName = 'MessageLoggerNativeAccessoriesGate';
+    const OwnedProbe = ({ context, Sentinel }) => {
+      const owner = React.useContext(OwnerContext);
+      if (!owner) return React.createElement(Sentinel, { context });
+      const session = plugin._viewportSession;
+      const serial = owner.buildSerial;
+      const originalActive = context.isActive;
+      const ownedContext = { ...context, ownerToken: owner, viewportEntry: owner,
+        isActive(allowDetached = false) {
+          return plugin._viewportSession === session && owner.buildSerial === serial
+            && (!originalActive || originalActive(allowDetached))
+            && (allowDetached || session.isActive(owner));
+        },
+        deferUntilActive(callback) { plugin.deferNativeViewportDisplay(owner, callback)(); }
+      };
+      return React.createElement(Sentinel, { context: ownedContext });
+    };
+    OwnedProbe.displayName = 'MessageLoggerOwnedNativeProbe';
+
+    this._nativeViewportComponents = { OwnerContext, Bridge, AccessoriesGate, OwnedProbe };
+    return this._nativeViewportComponents;
+  }
+  renderSavedAttachmentMessageAccessories(thisObject, args, original, owned = false) {
     if (typeof original !== 'function') return;
     const originalProps = thisObject?.props;
     const message = originalProps?.message;
     if (originalProps?.[SAVED_INLINE_TEXT_ATTACHMENT_PROBE_DETACHED_PROP] === true) {
       return original.apply(thisObject, args);
+    }
+    if (!owned && this.shouldRetainNativeSavedMessage(message)) {
+      const components = this.getNativeViewportComponents();
+      if (components) return React.createElement(components.AccessoriesGate, { instance: thisObject, args, original });
     }
     const projectedMessage = this.getSavedAttachmentMessageContentPresentationMessage(message);
     if (!originalProps || projectedMessage === message) {
@@ -12663,10 +12955,19 @@ module.exports = class MessageLoggerV2 {
     if (!context?.identityKey || !context?.sourceKey) return null;
     return JSON.stringify([context.identityKey, context.sourceKey]);
   }
-  acquireSavedInlineTextAttachmentProbe(context) {
-    const revalidate = (value, allowDetached = false) => value?.ownedRemoved
-      ? this.revalidateOwnedRemovedTextProbeContext(value, allowDetached)
-      : this.revalidateSavedInlineTextAttachmentProbeContext(value);
+  acquireSavedInlineTextAttachmentProbe(context, resumeNotStarted = null) {
+    const revalidate = (value, allowDetached = false) => {
+      if (value?.ownedRemoved) return this.revalidateOwnedRemovedTextProbeContext(value, allowDetached);
+      if (typeof value?.isActive === 'function') {
+        try { if (!value.isActive(allowDetached)) return null; } catch { return null; }
+      }
+      const current = this.revalidateSavedInlineTextAttachmentProbeContext(value);
+      if (!current) return null;
+      if (typeof value?.isActive !== 'function' && typeof value?.deferUntilActive !== 'function'
+        && value?.ownerToken == null && value?.viewportEntry == null) return current;
+      return { ...current, viewportEntry: value.viewportEntry, ownerToken: value.ownerToken,
+        isActive: value.isActive, deferUntilActive: value.deferUntilActive };
+    };
     const current = revalidate(context, true);
     if (!current || !this._hasSavedInlineTextAttachmentProbeNativeFetch()) return null;
     const key = this._getSavedInlineTextAttachmentProbeKey(current);
@@ -12685,11 +12986,13 @@ module.exports = class MessageLoggerV2 {
     if (entry) {
       const token = Symbol('saved-inline-text-attachment-probe');
       entry.consumers.set(token, current);
+      entry.resumeNotStarted.set(token, resumeNotStarted);
       let released = false;
       const release = () => {
         if (released) return false;
         released = true;
         entry.consumers.delete(token);
+        entry.resumeNotStarted.delete(token);
         if (entry.consumers.size > 0) return true;
         entry.cancelled = true;
         if (inFlight.get(key) === entry) inFlight.delete(key);
@@ -12719,6 +13022,7 @@ module.exports = class MessageLoggerV2 {
         context: current,
         controller,
         consumers: new Map(),
+        resumeNotStarted: new Map(),
         cancelled: false,
         settled: false,
         failureHandled: false,
@@ -12729,6 +13033,7 @@ module.exports = class MessageLoggerV2 {
       const run = async () => {
         let response = null;
         let failure = null;
+        let started = false;
         const activeConsumers = () => [...entry.consumers.entries()]
           .map(([token, value]) => [token, revalidate(value)])
           .filter(([, value]) => value);
@@ -12740,12 +13045,30 @@ module.exports = class MessageLoggerV2 {
           && entry.consumers.size > 0
           && this.__started !== false
           && this._hasSavedInlineTextAttachmentProbeNativeFetch();
+        const deferNotStarted = () => {
+          if (entry.cancelled || entry.controller?.signal?.aborted || this.__started === false
+            || entry.generation !== (this._savedInlineTextAttachmentProbeGeneration || 0)
+            || !this._hasSavedInlineTextAttachmentProbeNativeFetch()) return;
+          for (const [token, value] of entry.consumers) {
+            const resume = entry.resumeNotStarted.get(token);
+            if (typeof value.deferUntilActive !== 'function' || typeof resume !== 'function'
+              || revalidate(value) || !revalidate(value, true)) continue;
+            value.deferUntilActive(() => {
+              if (entry.cancelled || entry.controller?.signal?.aborted
+                || entry.generation !== (this._savedInlineTextAttachmentProbeGeneration || 0)
+                || !this._hasSavedInlineTextAttachmentProbeNativeFetch()
+                || !entry.consumers.has(token) || !revalidate(value)) return;
+              resume();
+            });
+          }
+        };
         try {
           // Logger can mount the sentinel just before its row is attached.
           if (!canStart()) await Promise.resolve();
-          if (!canStart()) return false;
+          if (!canStart()) { deferNotStarted(); return false; }
           response = await Promise.resolve().then(() => {
             if (!canStart()) return null;
+            started = true;
             return this.fetchMediaNetworkResponse(
               current.sourceUrl,
               {
@@ -12757,12 +13080,13 @@ module.exports = class MessageLoggerV2 {
               { nativeOnly: true }
             );
           });
-          if (!response?.ok) failure = new Error('Saved inline text attachment probe failed.');
+          if (started && !response?.ok) failure = new Error('Saved inline text attachment probe failed.');
         } catch (error) {
           failure = error;
         } finally {
           await this._releaseSavedInlineTextAttachmentProbeResponse(response);
         }
+        if (!started) { deferNotStarted(); return false; }
         if (!failure || entry.failureHandled) return !failure;
         if (entry.generation !== (this._savedInlineTextAttachmentProbeGeneration || 0)
           || inFlight.get(key) !== entry
@@ -12773,11 +13097,14 @@ module.exports = class MessageLoggerV2 {
           || !this._hasSavedInlineTextAttachmentProbeNativeFetch()) return false;
         entry.failureHandled = true;
         entry.settled = true;
-        const consumers = activeConsumers();
         let coordinated = false;
         let coordinatedPlan = null;
-        for (const [token, latest] of consumers) {
-          if (!entry.consumers.has(token) || !revalidate(latest)) continue;
+        const deliver = (token, value) => {
+          if (entry.cancelled || entry.controller?.signal?.aborted
+            || entry.generation !== (this._savedInlineTextAttachmentProbeGeneration || 0)
+            || !entry.consumers.has(token)) return;
+          const latest = revalidate(value);
+          if (!latest) return;
           try {
             if (latest.ownedRemoved && !latest.deleted) {
               latest.onFailure(null, latest.sourceUrl);
@@ -12786,13 +13113,19 @@ module.exports = class MessageLoggerV2 {
                 const strictContext = latest.ownedRemoved
                   ? this.resolveSavedAttachmentMediaFailureContext(latest.descriptor)
                   : latest;
-                if (!strictContext) continue;
+                if (!strictContext) return;
                 coordinatedPlan = this.coordinateSavedAttachmentMediaFailure(strictContext, latest.sourceUrl)?.plan || null;
                 coordinated = true;
               }
               if (latest.ownedRemoved) latest.onFailure(coordinatedPlan, latest.sourceUrl);
             }
           } catch {}
+        };
+        for (const [token, value] of entry.consumers) {
+          if (revalidate(value)) deliver(token, value);
+          else if (revalidate(value, true) && typeof value.deferUntilActive === 'function') {
+            value.deferUntilActive(() => deliver(token, value));
+          }
         }
         return false;
       };
@@ -12800,6 +13133,7 @@ module.exports = class MessageLoggerV2 {
     }
     const token = Symbol('saved-inline-text-attachment-probe');
     entry.consumers.set(token, current);
+    entry.resumeNotStarted.set(token, resumeNotStarted);
     if (!entry.promise && typeof entry.run === 'function') {
       const run = entry.run;
       entry.run = null;
@@ -12813,6 +13147,7 @@ module.exports = class MessageLoggerV2 {
       if (released) return false;
       released = true;
       entry.consumers.delete(token);
+      entry.resumeNotStarted.delete(token);
       if (entry.consumers.size > 0) return true;
       entry.cancelled = true;
       if (inFlight.get(key) === entry) inFlight.delete(key);
@@ -12838,6 +13173,12 @@ module.exports = class MessageLoggerV2 {
     const contextKey = context => context
       ? `${context.identityKey || ''}\u0000${context.sourceKey || ''}\u0000${context.sourceUrl || ''}`
       : '';
+    const sameContext = (left, right) => !!left && !!right
+      && contextKey(left) === contextKey(right)
+      && left.ownerToken === right.ownerToken && left.viewportEntry === right.viewportEntry
+      && left.record === right.record && left.message === right.message
+      && left.sourceKind === right.sourceKind && left.ownedRemoved === right.ownedRemoved
+      && left.startupGeneration === right.startupGeneration;
     class SavedInlineTextAttachmentProbeSentinel extends React.Component {
       constructor(props) {
         super(props);
@@ -12845,14 +13186,16 @@ module.exports = class MessageLoggerV2 {
       }
       acquireProbe(context) {
         this._releaseProbe?.();
-        this._releaseProbe = plugin.acquireSavedInlineTextAttachmentProbe(context);
+        this._releaseProbe = plugin.acquireSavedInlineTextAttachmentProbe(context, () => {
+          const current = this.props?.context;
+          if (sameContext(context, current)) this.acquireProbe(current);
+        });
       }
       componentDidMount() {
         this.acquireProbe(this.props?.context);
       }
       componentDidUpdate(previousProps) {
-        if (contextKey(previousProps?.context) === contextKey(this.props?.context)
-          && previousProps?.context?.ownerToken === this.props?.context?.ownerToken) return;
+        if (sameContext(previousProps?.context, this.props?.context)) return;
         this.acquireProbe(this.props?.context);
       }
       componentWillUnmount() {
@@ -12899,6 +13242,7 @@ module.exports = class MessageLoggerV2 {
     const messageId = String(context?.messageId || '');
     const channelId = String(context?.channelId || '');
     if (!messageId || !channelId) return;
+    this._viewportSession?.invalidate(messageId, 'saved-media');
 
     const callbacks = this._messageUpdateRegistry?.get?.(messageId);
     if (callbacks?.forEach) {
@@ -13056,6 +13400,7 @@ module.exports = class MessageLoggerV2 {
         allowBlob: true
       });
       if (!plan || plan.action !== 'blob') return;
+      this._viewportSession?.invalidate(safeMessageId, 'local-media-ready');
       this.remountSavedAttachmentPresentationRecords(record);
       this.dispatcher?.dispatch?.({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' });
       for (const [threadId, refresh] of this._forumThreadLogRefreshers?.entries?.() || []) {
@@ -13788,6 +14133,7 @@ module.exports = class MessageLoggerV2 {
           const directMatch = nodes.includes(child);
           const parentMatch = nodes.some(parent => parent.contains?.(child));
           if (directMatch || parentMatch) {
+            if (this._viewportSession?.owns(child)) continue;
             cleanup();
             break;
           }
@@ -13797,6 +14143,9 @@ module.exports = class MessageLoggerV2 {
         childList: true,
         subtree: true
       });
+      if (this._viewportBuildingEntry && child) {
+        this.getViewportSession().own(this._viewportBuildingEntry, child, root, cleanup);
+      }
       return child;
     } catch (e) {
       Logger.error('formatMarkup error:', e);
@@ -14430,6 +14779,7 @@ module.exports = class MessageLoggerV2 {
     this._cancelSavedAttachmentPresentationTransition(record.message.channel_id, record.message.id);
     if (record.delete_data) record.delete_data.hidden = hidden;
     if (record.edit_history?.length) record.edits_hidden = hidden;
+    this._viewportSession?.invalidate(record.message.id, 'record-visibility');
     return true;
   }
   setSavedThreadHidden(record, hidden) {
@@ -14812,19 +15162,19 @@ module.exports = class MessageLoggerV2 {
     const blockedUntil = Number(state.blockedUntil);
     const remaining = Math.max(0, blockedUntil - now);
     const username = this._getEditNotificationSpamUsername(state);
-    this.reportDebugEvent(`Edit-spam cooldown for ${username} started. Resetting in 60 seconds.`);
+    this.reportDebugEvent(`Edit-spam cooldown for ${username} started. Resetting in 60 seconds.`, 4000, null, 'EDIT');
     const isCurrentCooldown = () => (
       Number(this.editHistoryAntiSpam?.[key]?.blockedUntil) === blockedUntil
     );
     const warningTimer = setTimeout(() => {
       if (!isCurrentCooldown()) return;
       const currentUsername = this._getEditNotificationSpamUsername(this.editHistoryAntiSpam[key]);
-      this.reportDebugEvent(`Edit-spam cooldown for ${currentUsername} will reset in 10 seconds.`);
+      this.reportDebugEvent(`Edit-spam cooldown for ${currentUsername} will reset in 10 seconds.`, 4000, null, 'EDIT');
     }, Math.max(0, remaining - EDIT_SPAM_DEBUG_WARNING_MS));
     const resetTimer = setTimeout(() => {
       if (!isCurrentCooldown()) return;
       const currentUsername = this._getEditNotificationSpamUsername(this.editHistoryAntiSpam[key]);
-      this.reportDebugEvent(`Edit-spam cooldown for ${currentUsername} reset after 60 seconds.`);
+      this.reportDebugEvent(`Edit-spam cooldown for ${currentUsername} reset after 60 seconds.`, 4000, null, 'EDIT');
       delete this.editHistoryAntiSpam[key];
       this._editSpamCooldownTimers?.delete(key);
     }, remaining);
@@ -14837,7 +15187,7 @@ module.exports = class MessageLoggerV2 {
     const hadActiveState = activeEntries.length > 0;
     for (const [, state] of activeEntries) {
       const username = this._getEditNotificationSpamUsername(state);
-      this.reportDebugEvent(`Edit-spam timer for ${username} is about to reset because ${reason}.`);
+      this.reportDebugEvent(`Edit-spam timer for ${username} is about to reset because ${reason}.`, 4000, null, 'EDIT');
     }
     this._clearEditSpamCooldownTimers();
     this.editHistoryAntiSpam = {};
@@ -14888,14 +15238,14 @@ module.exports = class MessageLoggerV2 {
     if (state.blockedUntil) {
       this._cancelEditSpamCooldownTimer(authorId);
       const currentUsername = this._getEditNotificationSpamUsername(state);
-      this.reportDebugEvent(`Edit-spam cooldown for ${currentUsername} reset after 60 seconds.`);
+      this.reportDebugEvent(`Edit-spam cooldown for ${currentUsername} reset after 60 seconds.`, 4000, null, 'EDIT');
       state.blockedUntil = 0;
       state.times = [];
     }
     state.times = state.times.filter(time => now - time < 60 * 1000);
     state.times.push(now);
     const currentUsername = this._getEditNotificationSpamUsername(state);
-    this.reportDebugEvent(`Edit-spam counter for ${currentUsername}: ${state.times.length}/${threshold} edits within 60 seconds.`);
+    this.reportDebugEvent(`Edit-spam counter for ${currentUsername}: ${state.times.length}/${threshold} edits within 60 seconds.`, 4000, null, 'EDIT');
     if (state.times.length < threshold) return 'allow';
     state.times = [];
     state.blockedUntil = now + EDIT_SPAM_COOLDOWN_MS;
@@ -15607,6 +15957,7 @@ module.exports = class MessageLoggerV2 {
       ...data,
       suppressedForumThreadIds: Array.from(this.suppressedForumThreadIds || [])
     });
+    this._viewportSession?.pruneMessages(canonical.messageRecord);
     this.messageRecord = canonical.messageRecord;
     this.deletedMessageRecord = canonical.deletedMessageRecord;
     this.editedMessageRecord = canonical.editedMessageRecord;
@@ -15756,6 +16107,7 @@ module.exports = class MessageLoggerV2 {
       ? this.cloneDataValue(rootRecord.saved_location)
       : this.cloneDataValue(contextRecord.saved_location || null);
     this.messageRecord[rootId] = mergedRecord;
+    this._viewportSession?.disposeMessage(contextMessageId);
     delete this.messageRecord[contextMessageId];
     this.messageRecordIds?.delete(contextMessageId);
     this.messageRecordIds?.add(rootId);
@@ -20076,7 +20428,8 @@ module.exports = class MessageLoggerV2 {
       this.reportDebugEvent(
         'Waiting for Discord to mount a native message toolbar before finalizing inline Delete controls. Logger clones use a generic Trash fallback until a normal message toolbar is exposed.',
         4000,
-        'console'
+        'console',
+        'RENDER'
       );
     }
     return !!this._nativeDeleteButtonPresentation;
@@ -20283,8 +20636,10 @@ module.exports = class MessageLoggerV2 {
   cleanupCopiedNativeDeleteControls(rootNode = null, force = false) {
     for (const [host, root] of this._copiedDeleteControlRoots || []) {
       const belongsToRoot = rootNode && (rootNode === host || rootNode.contains?.(host));
+      if (rootNode && !belongsToRoot) continue;
       if (!force) {
-        if (rootNode && !belongsToRoot) continue;
+        if (this._viewportSession?.owns(host)
+          && (rootNode !== host || !this._viewportSession.isOwnerActive(host))) continue;
         if (!rootNode && host.isConnected) continue;
       }
       try { root.unmount(); } catch (error) {
@@ -20303,8 +20658,10 @@ module.exports = class MessageLoggerV2 {
         || rootNode.contains?.(key)
         || rootNode.contains?.(ownedNode)
       );
+      if (rootNode && !belongsToRoot) continue;
       if (!force) {
-        if (rootNode && !belongsToRoot) continue;
+        if (this._viewportSession?.owns(ownedNode)
+          && (rootNode !== ownedNode || !this._viewportSession.isOwnerActive(ownedNode))) continue;
         if (!rootNode && ownedNode?.isConnected) continue;
       }
       try {
@@ -20330,8 +20687,10 @@ module.exports = class MessageLoggerV2 {
         || rootNode.contains?.(key)
         || rootNode.contains?.(ownedNode)
       );
+      if (rootNode && !belongsToRoot) continue;
       if (!force) {
-        if (rootNode && !belongsToRoot) continue;
+        if (this._viewportSession?.owns(ownedNode)
+          && (rootNode !== ownedNode || !this._viewportSession.isOwnerActive(ownedNode))) continue;
         if (!rootNode && ownedNode?.isConnected) continue;
       }
       try { entry?.cleanup?.(); } catch {}
@@ -20577,6 +20936,7 @@ module.exports = class MessageLoggerV2 {
     return true;
   }
   deleteMessageFromRecords(id, options = {}) {
+    this._viewportSession?.disposeMessage(id);
     const record = this.messageRecord[id];
     // The live plugin may be hot-swapped from a pre-Nuked build. Make local removal safe during
     // that short transition instead of assuming a full Discord restart initialized the index.
@@ -21285,7 +21645,8 @@ module.exports = class MessageLoggerV2 {
       plugin,
       attachment,
       sourceMessage,
-      presentationPlan
+      presentationPlan,
+      owner
     }) => {
       const initialPlan = {
         action: presentationPlan?.action,
@@ -21334,7 +21695,7 @@ module.exports = class MessageLoggerV2 {
         || !displayPlan.url) {
         return null;
       }
-      const onError = () => {
+      const onError = plugin.deferNativeViewportDisplay(owner, () => {
         const currentUrl = displayPlan.url;
         if (displayPlan.action !== 'remote' && displayPlan.action !== 'blob') {
           setPlaceholderLabel(getPlanLabel(displayPlan));
@@ -21371,7 +21732,7 @@ module.exports = class MessageLoggerV2 {
           return;
         }
         setPlaceholderLabel(getPlanLabel(nextPlan || displayPlan));
-      };
+      });
       return React.createElement(
         'div',
         {
@@ -21404,6 +21765,9 @@ module.exports = class MessageLoggerV2 {
     };
     SavedAttachmentPresentationVideo.displayName = 'SavedAttachmentPresentationVideo';
     const SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER = '__mlv2SavedAttachmentPresentationContent';
+    const NATIVE_VIEWPORT_CONTENT_SOURCE = '__mlv2NativeViewportContentSource';
+    const NATIVE_VIEWPORT_CONTENT_BYPASS = '__mlv2NativeViewportContentBypass';
+    const deferredNativeContentChildren = [];
     const SavedAttachmentPresentationContent = ({ plugin, contentModule, contentProps }) => {
       const [, forceUpdate] = Hooks.useForceUpdate();
       const sourceProps = contentProps || {};
@@ -21415,8 +21779,10 @@ module.exports = class MessageLoggerV2 {
           plugin._messageUpdateRegistry.set(messageId, new Set());
         }
         const callbacks = plugin._messageUpdateRegistry.get(messageId);
-        if (callbacks) callbacks.add(forceUpdate);
-        return plugin._unregisterMessageCallback.bind(plugin, messageId, forceUpdate);
+        const owner = sourceProps.__mlv2NativeViewportOwner;
+        const update = owner ? () => plugin.reconcileNativeViewportMessage(owner, 'native-content-update') : forceUpdate;
+        if (callbacks) callbacks.add(update);
+        return plugin._unregisterMessageCallback.bind(plugin, messageId, update);
       }, [messageId]);
       const record = plugin.messageRecord?.[messageId];
       const sourceMessage = record?.message;
@@ -21454,14 +21820,15 @@ module.exports = class MessageLoggerV2 {
           plugin,
           attachment,
           sourceMessage,
-          presentationPlan
+          presentationPlan,
+          owner: sourceProps.__mlv2NativeViewportOwner
         }
       ));
       return React.createElement(React.Fragment, {}, nativeContent, ...loggerVideoContent);
     };
     SavedAttachmentPresentationContent.displayName = 'SavedAttachmentPresentationContent';
     const inlineNativeFailureReports = new Set();
-    const EditHistoryNativeAttachment = ({ plugin, record, attachment, mediaType, url: initialUrl, presentationPlan, fallback }) => {
+    const EditHistoryNativeAttachment = ({ plugin, record, attachment, mediaType, url: initialUrl, presentationPlan, fallback, owner }) => {
       const hostRef = React.useRef(null);
       const [url, setUrl] = React.useState(initialUrl);
       const continuationRef = React.useRef(null);
@@ -21500,7 +21867,9 @@ module.exports = class MessageLoggerV2 {
           if (typeof queueMicrotask === 'function') queueMicrotask(cleanup);
           else Promise.resolve().then(cleanup);
         };
-        const isCurrent = () => active && outer.isConnected !== false && inner.isConnected !== false
+        const isCurrent = (allowDetached = false) => active
+          && (allowDetached || (outer.isConnected !== false && inner.isConnected !== false
+            && (!owner || plugin._viewportSession?.isActive(owner))))
           && plugin.__started === true && plugin._startupGeneration === generation
           && plugin.settings?.cacheAllImages !== false && plugin.shouldPresentEditedMessages()
           && !record.edits_hidden && !record.delete_data?.hidden
@@ -21509,7 +21878,7 @@ module.exports = class MessageLoggerV2 {
             !item.hidden && plugin.getRemovedAttachmentIdentity(item) === attachmentId
             && (item.url || '') === attachmentUrl
             && (item.proxy_url || item.proxyUrl || item.proxyURL || '') === attachmentProxyUrl);
-        const onUnavailable = (event, failedSource) => {
+        const onUnavailable = plugin.deferNativeViewportDisplay(owner, (event, failedSource) => {
           if (!isCurrent() || (typeof failedSource === 'string' && failedSource && failedSource !== url)) return;
           const audioSourceError = mediaType === 'audio'
             && ['AUDIO', 'SOURCE'].includes(String(event?.target?.tagName || '').toUpperCase())
@@ -21540,24 +21909,27 @@ module.exports = class MessageLoggerV2 {
             const reportKey = `${mediaType}:${reason}`;
             if (!inlineNativeFailureReports.has(reportKey)) {
               inlineNativeFailureReports.add(reportKey);
-              plugin.reportDebugEvent(`Inline ${mediaType} fallback: ${reason}`);
+              plugin.reportDebugEvent(`Inline ${mediaType} fallback: ${reason}`, 4000, null, 'RENDER');
             }
           }
           dispose();
           setFailedFor({ record, sourceMessage, generation, url, deleted, attachmentUrl, attachmentProxyUrl });
-        };
+        });
         if (!isCurrent()) {
           dispose();
           return dispose;
         }
         try {
+          const deferDisplay = callback => plugin.deferNativeViewportDisplay(owner, () => {
+            if (isCurrent()) callback();
+          });
           if (mediaType === 'audio') {
-            plugin.mountLoggerNativeAudio(inner, url, attachment, sourceMessage, onUnavailable);
+            plugin.mountLoggerNativeAudio(inner, url, attachment, sourceMessage, onUnavailable, { deferDisplay });
           } else {
             const displayAttachment = { ...attachment, url, proxy_url: url };
             const displayMessage = { ...sourceMessage, attachments: [displayAttachment] };
             const probeContext = plugin.createOwnedRemovedTextProbeContext(
-              record, attachment, url, {}, isCurrent,
+              record, attachment, url, owner || {}, isCurrent,
               (coordinatedPlan, failedUrl) => {
                 if (!isCurrent()) return;
                 const nextPlan = coordinatedPlan || continuationRef.current?.next?.(failedUrl);
@@ -21572,8 +21944,12 @@ module.exports = class MessageLoggerV2 {
                 }
               }, 'inline'
             );
+            if (probeContext && owner) {
+              probeContext.viewportEntry = owner;
+              probeContext.deferUntilActive = callback => plugin.deferNativeViewportDisplay(owner, callback)();
+            }
             plugin.mountLoggerNativeDocument(inner, displayMessage, displayAttachment, sourceMessage, onUnavailable,
-              { ownedProbeContext: probeContext });
+              { ownedProbeContext: probeContext, deferDisplay });
           }
         } catch {
           onUnavailable();
@@ -21592,35 +21968,8 @@ module.exports = class MessageLoggerV2 {
       });
     };
     EditHistoryNativeAttachment.displayName = 'EditHistoryNativeAttachment';
-    const EditHistoryContent = ({ plugin, messageId, originalElement, compact }) => {
-      const [, forceUpdate] = Hooks.useForceUpdate();
-      React.useEffect(() => {
-        if (!plugin._messageUpdateRegistry.has(messageId)) {
-          plugin._messageUpdateRegistry.set(messageId, new Set());
-        }
-        plugin._messageUpdateRegistry.get(messageId).add(forceUpdate);
-        return plugin._unregisterMessageCallback.bind(plugin, messageId, forceUpdate);
-      }, [messageId]);
-      const currentRecord = plugin.messageRecord[messageId];
-      const renderOriginal = () => currentRecord?.delete_data?.time
-        ? React.createElement(DeletedContentTooltip, {
-          plugin,
-          deletedAt: currentRecord.delete_data.time
-        }, originalElement)
-        : originalElement;
-      if (!plugin.shouldPresentEditedMessages()
-        || !currentRecord
-        || plugin.isEphemeralMessage(currentRecord.message)
-        || !currentRecord.edit_history
-        || currentRecord.edits_hidden) {
-        return renderOriginal();
-      }
-      const originalChildren = originalElement?.props?.children;
-      if (!Array.isArray(originalChildren)) return renderOriginal();
-      const parseContent = content => plugin.tools.parserNew
-        ? plugin.tools.parserNew(content)
-        : String(content);
-      const EditHistoryMedia = ({
+    const EditHistoryMedia = ({
+        plugin, currentRecord, parseContent, owner,
         attachment,
         presentationPlan,
         fallback
@@ -21668,7 +22017,7 @@ module.exports = class MessageLoggerV2 {
         if (typeof displayPlan?.url !== 'string' || !displayPlan.url) return fallback;
         if (displayPlan?.mediaType !== 'image' && displayPlan?.mediaType !== 'video') return fallback;
         if (errored) return errorFallback || fallback;
-        const onError = event => {
+        const onError = plugin.deferNativeViewportDisplay(owner, event => {
           if (ownedContinuation.current.next
             && (!ownedContinuation.current.active || event?.currentTarget?.isConnected === false
               || plugin.__started === false || plugin._startupGeneration !== ownedContinuation.current.generation)) return;
@@ -21721,7 +22070,7 @@ module.exports = class MessageLoggerV2 {
             return;
           }
           setErrorFallbackForPlan(nextPlan || displayPlan);
-        };
+        });
         const onClick = () => {
           const savedAttachmentOpenDescriptor = (
             displayPlan?.mediaType === 'image'
@@ -21805,7 +22154,38 @@ module.exports = class MessageLoggerV2 {
           }
         );
       };
-      EditHistoryMedia.displayName = 'EditHistoryMedia';
+    EditHistoryMedia.displayName = 'EditHistoryMedia';
+    this._editHistoryMediaComponent = EditHistoryMedia;
+    const EditHistoryContent = ({ plugin, messageId, originalElement, compact, owner, historyOnly = false }) => {
+      const [, forceUpdate] = Hooks.useForceUpdate();
+      React.useEffect(() => {
+        if (!plugin._messageUpdateRegistry.has(messageId)) {
+          plugin._messageUpdateRegistry.set(messageId, new Set());
+        }
+        const update = owner ? () => plugin.reconcileNativeViewportMessage(owner, 'native-history-update') : forceUpdate;
+        plugin._messageUpdateRegistry.get(messageId).add(update);
+        return plugin._unregisterMessageCallback.bind(plugin, messageId, update);
+      }, [messageId]);
+      const currentRecord = plugin.messageRecord[messageId];
+      const renderOriginal = () => {
+        const original = historyOnly ? React.cloneElement(originalElement, { nativeCurrent: true }, null) : originalElement;
+        return currentRecord?.delete_data?.time
+          ? React.createElement(DeletedContentTooltip, { plugin, deletedAt: currentRecord.delete_data.time }, original)
+          : original;
+      };
+      if (!plugin.shouldPresentEditedMessages()
+        || !currentRecord
+        || plugin.isEphemeralMessage(currentRecord.message)
+        || !currentRecord.edit_history
+        || currentRecord.edits_hidden) {
+        return renderOriginal();
+      }
+      const originalChildren = originalElement?.props?.children;
+      if (!Array.isArray(originalChildren)) return renderOriginal();
+      const parseContent = content => plugin.tools.parserNew
+        ? plugin.tools.parserNew(content)
+        : String(content);
+      const EditHistoryMedia = plugin._editHistoryMediaComponent;
       const renderEditHistoryAttachment = (attachment, key, fallback, presentationPlan) => {
         const mediaType = presentationPlan?.mediaType;
         if (presentationPlan?.action !== 'remote'
@@ -21819,13 +22199,14 @@ module.exports = class MessageLoggerV2 {
         if (mediaType === 'audio' || mediaType === 'attachment') {
           return React.createElement(EditHistoryNativeAttachment, {
             key: `${mediaKey}-${JSON.stringify(presentationPlan.sources || [])}`,
-            plugin, record: currentRecord, attachment, mediaType,
+            plugin, record: currentRecord, attachment, mediaType, owner,
             url: presentationPlan.url, presentationPlan, fallback
           });
         }
         if (mediaType !== 'image' && mediaType !== 'video') return null;
         return React.createElement(EditHistoryMedia, {
           key: mediaKey,
+          plugin, currentRecord, parseContent, owner,
           attachment,
           presentationPlan,
           fallback
@@ -21985,7 +22366,7 @@ module.exports = class MessageLoggerV2 {
           const currentContent = currentRecord.delete_data?.time
             ? React.createElement(DeletedContentTooltip, { plugin, deletedAt: currentRecord.delete_data.time, block: true }, oContent)
             : oContent;
-          current = React.cloneElement(originalElement, {}, currentContent);
+          current = React.cloneElement(originalElement, historyOnly ? { nativeCurrent: true } : {}, currentContent);
         }
         return React.createElement('div', { className: [plugin.style.editHistoryLayout, plugin.style.edited].filter(Boolean).join(' ') }, editedRows, current);
       }
@@ -22022,9 +22403,88 @@ module.exports = class MessageLoggerV2 {
         if (!edit) continue;
         edits.push(createEditedMessage(edit, i));
       }
+      if (historyOnly) return React.createElement(React.Fragment, {},
+        React.createElement('div', { className: [originalElement.props.className, plugin.style.edited].filter(Boolean).join(' ') }, edits),
+        React.cloneElement(originalElement, { nativeCurrent: true,
+          className: [originalElement.props.className, plugin.style.edited].filter(Boolean).join(' ') }, null));
       return renderEdited(React.createElement(React.Fragment, {}, edits, currentContent));
     };
     EditHistoryContent.displayName = 'EditHistoryContent';
+    const RetainedHistoryAnchor = ({ plugin, owner, children, nativeCurrent, className }) => {
+      const target = React.useRef(null);
+      const payload = React.useRef(null);
+      if (!payload.current && !nativeCurrent) {
+        payload.current = document.createElement('div');
+        payload.current.style.display = 'contents';
+      }
+      React.useLayoutEffect(() => {
+        const host = payload.current;
+        if (!host) return;
+        plugin._viewportSession?.own(owner, host, null, {
+          dispose: () => host.remove(),
+          suspend() { for (const media of host.querySelectorAll?.('audio, video') || []) { try { media.pause(); } catch {} } }
+        });
+      }, [owner]);
+      const onAnchor = owner.nativeLatest.current.nativeProps.onAnchor;
+      const leaseToken = owner.leaseToken;
+      React.useLayoutEffect(() => {
+        const session = plugin._viewportSession;
+        const current = () => owner.leaseToken === leaseToken
+          && plugin._viewportSession === session && session?.ownerOf(owner.host) === owner;
+        const publish = () => {
+          if (current() && session.isActive(owner, leaseToken)) {
+            onAnchor({ target: target.current, payload: nativeCurrent ? null : payload.current, className });
+          }
+        };
+        (owner.nativeResumeCallbacks ||= new Set()).add(publish);
+        publish();
+        return () => {
+          owner.nativeResumeCallbacks.delete(publish);
+          if (current()) onAnchor(null);
+        };
+      }, [onAnchor, nativeCurrent, className, leaseToken]);
+      return React.createElement(React.Fragment, {},
+        React.createElement('div', { ref: target, style: { display: 'contents' } }),
+        !nativeCurrent && ReactDOM.createPortal(children, payload.current));
+    };
+    RetainedHistoryAnchor.displayName = 'MessageLoggerRetainedHistoryAnchor';
+    const RetainedHistoryPayload = ({ host }) => {
+      const ref = React.useRef(null);
+      React.useLayoutEffect(() => {
+        const slot = ref.current;
+        slot?.appendChild(host);
+        return () => { if (host.parentNode === slot) host.remove(); };
+      }, [host]);
+      return React.createElement('div', { ref, style: { display: 'contents' } });
+    };
+    const NativeHistoryBridge = ({ plugin, messageId, originalElement, compact }) => {
+      const components = plugin.getNativeViewportComponents();
+      const [anchor, setAnchor] = React.useState(null);
+      const onAnchor = React.useRef(null);
+      if (!onAnchor.current) onAnchor.current = setAnchor;
+      const record = plugin.messageRecord?.[messageId];
+      return React.createElement(React.Fragment, {},
+        React.createElement(components.Bridge, { message: record?.message, kind: 'history',
+          nativeProps: { originalElement, compact, onAnchor: onAnchor.current },
+          onDeactivate: () => onAnchor.current(null),
+          render(owner, props) {
+            const original = props.originalElement;
+            const identity = React.createElement(RetainedHistoryAnchor, {
+              ...original.props, ref: undefined, id: undefined, plugin, owner
+            });
+            return React.createElement(EditHistoryContent, {
+              plugin, messageId, originalElement: identity, compact: props.compact, owner, historyOnly: true
+            });
+          }
+        }),
+        anchor?.target ? ReactDOM.createPortal(anchor.payload
+          ? React.cloneElement(originalElement, { className: anchor.className }, React.createElement(RetainedHistoryPayload, { host: anchor.payload }))
+          : React.cloneElement(originalElement, { className: anchor.className }), anchor.target)
+          : plugin.editModifiers?.[messageId] ? React.cloneElement(originalElement, {}, null) : originalElement);
+
+    };
+    NativeHistoryBridge.displayName = 'MessageLoggerNativeHistoryBridge';
+
     this.installEditHistoryPatch = (mcc) => {
       mcc = mcc || DiscordModules.MessageContentComponent;
       if (!mcc) return false;
@@ -22034,6 +22494,11 @@ module.exports = class MessageLoggerV2 {
           if (typeof props?.className === 'string' && props.className.includes('repliedTextContent')) return;
           const message = args?.[0]?.message;
           if (!message) return;
+          if (!props[NATIVE_VIEWPORT_CONTENT_BYPASS] && this.shouldRetainNativeSavedMessage(message)
+            && this.getNativeViewportComponents()) {
+            args[0] = { ...props, children: deferredNativeContentChildren, [NATIVE_VIEWPORT_CONTENT_SOURCE]: props };
+            return;
+          }
           const contentMessage = this.getNativeDeletedAttachmentPresentationMessageForMessageContent(message);
           const presentationMessage = props?.[SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER]
             ? contentMessage
@@ -22045,6 +22510,22 @@ module.exports = class MessageLoggerV2 {
           if (typeof props.className === 'string' && props.className.includes('repliedTextContent')) return;
           if (!this.messageRecordIds.has(props.message.id)) return;
           const record = this.messageRecord[props.message.id];
+          const sourceProps = props[NATIVE_VIEWPORT_CONTENT_SOURCE];
+          const components = sourceProps && this.getNativeViewportComponents();
+          if (components && ret) {
+            const innerProps = { ...sourceProps, contentRef: null, ref: null, id: undefined,
+              [NATIVE_VIEWPORT_CONTENT_BYPASS]: true };
+            delete innerProps[NATIVE_VIEWPORT_CONTENT_SOURCE];
+            return React.cloneElement(ret, {}, React.createElement(components.Bridge, {
+              message: sourceProps.message, kind: 'content', nativeProps: innerProps,
+              onActivate: () => sourceProps.onUpdate?.(),
+              render: (entry, currentProps) => React.createElement(mcc.type, { ...currentProps, __mlv2NativeViewportOwner: entry })
+            }));
+          }
+
+          if (props[NATIVE_VIEWPORT_CONTENT_BYPASS] && ret && typeof React.cloneElement === 'function') {
+            ret = React.cloneElement(ret, { id: undefined, ref: null });
+          }
           const isSavedAttachmentPresentationReentry = Boolean(props?.[SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER]);
           const recordMessage = record?.message;
           const hasSavedMedia = (Array.isArray(recordMessage?.attachments)
@@ -22067,11 +22548,14 @@ module.exports = class MessageLoggerV2 {
           // callback can then hide or restore history immediately in either direction without
           // waiting for Discord to rerender the message or reloading the channel.
           if (record?.edit_history && Array.isArray(ret?.props?.children)) {
-            return React.createElement(EditHistoryContent, {
+            const History = !props[NATIVE_VIEWPORT_CONTENT_BYPASS] && this.getNativeViewportComponents()
+              && typeof ReactDOM.createPortal === 'function' ? NativeHistoryBridge : EditHistoryContent;
+            return React.createElement(History, {
               plugin: this,
               messageId: props.message.id,
               originalElement: ret,
-              compact: props.compact
+              compact: props.compact,
+              owner: props.__mlv2NativeViewportOwner
             });
           }
           if (record?.delete_data?.time && ret) {
@@ -22664,21 +23148,26 @@ module.exports = class MessageLoggerV2 {
       const viewportHeight = document.getElementById('app-mount')?.getBoundingClientRect?.().height || 800;
       messagesNode.style.minHeight = viewportHeight * 0.514090909 + 'px';
       messagesNode.style.maxHeight = '65vh';
+      const surfaces = this._viewportThreadSurfaces ||= new Map();
+      const usedSurfaces = surfaces.get(threadId) || new Set();
+      let surfaceIndex = 0;
+      while (usedSurfaces.has(surfaceIndex)) surfaceIndex++;
+      usedSurfaces.add(surfaceIndex);
+      surfaces.set(threadId, usedSurfaces);
+      const view = { surfaceKey: `thread:${threadId}:${surfaceIndex}`,
+        independent: true, shownMessages: -1, leases: new Map(), generation: 0, closed: false };
       const populateMessages = () => {
+        const generation = ++view.generation;
         const run = () => {
-          const previousShownMessages = this.menu.shownMessages;
-          this.menu.shownMessages = -1;
-          try {
-            while (messagesNode.firstChild) messagesNode.firstChild.remove();
-            this.populateParent(messagesNode, getSavedForumThreadMessageIds(record));
-            if (!messagesNode.childElementCount && message?.content && !hasDistinctStarter) {
-              const fallback = document.createElement('div');
-              fallback.className = this.multiClasses.defaultColor || this.classes.markup || '';
-              fallback.textContent = message.content;
-              messagesNode.appendChild(fallback);
-            }
-          } finally {
-            this.menu.shownMessages = previousShownMessages;
+          if (view.closed || generation !== view.generation) return;
+          this.parkLoggerViewportView(view);
+          while (messagesNode.firstChild) messagesNode.firstChild.remove();
+          this.populateParent(messagesNode, getSavedForumThreadMessageIds(record), view);
+          if (!messagesNode.childElementCount && message?.content && !hasDistinctStarter) {
+            const fallback = document.createElement('div');
+            fallback.className = this.multiClasses.defaultColor || this.classes.markup || '';
+            fallback.textContent = message.content;
+            messagesNode.appendChild(fallback);
           }
         };
         requestAnimationFrame(run);
@@ -22692,7 +23181,14 @@ module.exports = class MessageLoggerV2 {
           children: [this.tools.createWrappedElement([messagesNode])],
           ml2Data: true,
           className: this.style.menuRoot,
-          onClose: () => this._forumThreadLogRefreshers?.delete(threadId)
+          onClose: () => {
+            view.closed = true;
+            view.generation++;
+            this.parkLoggerViewportView(view);
+            usedSurfaces.delete(surfaceIndex);
+            if (!usedSurfaces.size) surfaces.delete(threadId);
+            if (this._forumThreadLogRefreshers?.get(threadId) === populateMessages) this._forumThreadLogRefreshers.delete(threadId);
+          }
         },
         false,
         `ML2-thread-log-${threadId}`
@@ -22725,6 +23221,64 @@ module.exports = class MessageLoggerV2 {
       }
       return {};
     };
+    const retainedPreviewCards = new Map();
+    const parkRetainedPreviewCard = node => {
+      const session = this._viewportSession;
+      const entry = session?.ownerOf(node);
+      if (entry && retainedPreviewCards.has(entry)) {
+        const slot = entry.slot;
+        session.park(entry, entry.leaseToken);
+        slot?.remove?.();
+        return;
+      }
+      node?.remove?.();
+    };
+    const sweepDetachedPreviewCards = () => {
+      for (const [entry, session] of retainedPreviewCards) {
+        if (session !== this._viewportSession || session.ownerOf(entry.host) !== entry) {
+          retainedPreviewCards.delete(entry);
+        } else if (entry.slot && entry.slot.isConnected === false) {
+          session.park(entry, entry.leaseToken);
+        }
+      }
+    };
+    const mountRetainedPreviewCard = (record, parent, type, parentId, builder, template = null) => {
+      if (typeof IntersectionObserver !== 'function' || typeof parent?.replaceChildren !== 'function') {
+        const node = builder(record);
+        if (node) parent.appendChild(node);
+        return node;
+      }
+      const threadId = String(record.message.id);
+      const session = this.getViewportSession();
+      const revision = () => JSON.stringify([this.messageRecord?.[threadId],
+        this.noTintIds.has(threadId), this.settings.useAlternativeDeletedStyle]);
+      const entry = session.getEntry({ surfaceKey: `preview:${type}:${parentId}`,
+        channelId: record.message.channel_id, messageId: threadId, revision,
+        build: ownedEntry => {
+          const previous = this._viewportBuildingEntry;
+          this._viewportBuildingEntry = ownedEntry;
+          try {
+            const node = builder(this.messageRecord?.[threadId]);
+            if (!node || !session.adoptHost(ownedEntry, node)) throw new Error('Could not build a saved thread preview.');
+            session.own(ownedEntry, node, null, () => this.cleanupCopiedNativeDeleteControls(node, true));
+          } finally { this._viewportBuildingEntry = previous; }
+        }
+      });
+      const shell = document.createElement(type === 'forum' ? 'li' : 'div');
+      if (typeof template?.className === 'string') shell.className = template.className;
+      if (type === 'forum') {
+        shell.setAttribute('data-item-role', 'item');
+        shell.setAttribute('data-ml2-restored-forum-thread', threadId);
+        shell.setAttribute('data-ml2-restored-forum-card', threadId);
+        shell.setAttribute('data-item-id', threadId);
+        shell.setAttribute('data-list-item-id', `forum-channel-list-${parentId}___${threadId}`);
+        shell.setAttribute('data-ml2-forum-list-item-id', `forum-channel-list-${parentId}___${threadId}`);
+      } else shell.setAttribute('data-ml2-restored-thread-browser-card', threadId);
+      parent.appendChild(shell);
+      retainedPreviewCards.set(entry, session);
+      session.attach(entry, shell, {}, { replaceSlot: true });
+      return entry.slot;
+    };
     const removeForumCardNode = (threadId) => {
       if (!threadId) return;
       const selectors = [
@@ -22737,7 +23291,7 @@ module.exports = class MessageLoggerV2 {
       for (const selector of selectors) {
         document.querySelectorAll(selector).forEach(node => {
           const target = node.matches?.('li') ? node : node.closest?.('li') || node;
-          target?.remove?.();
+          parkRetainedPreviewCard(target);
         });
       }
     };
@@ -22752,7 +23306,7 @@ module.exports = class MessageLoggerV2 {
       if (!parentChannelId) return;
       document.querySelectorAll(`[data-ml2-forum-list-item-id^="forum-channel-list-${parentChannelId}___"]`).forEach(node => {
         const target = node.closest?.('[data-ml2-restored-forum-thread]') || node.closest?.('li') || node;
-        target?.remove?.();
+        parkRetainedPreviewCard(target);
       });
     };
     const removeSuppressedForumCards = (root = document) => {
@@ -22765,7 +23319,7 @@ module.exports = class MessageLoggerV2 {
         const threadId = node.getAttribute?.('data-item-id') || node.getAttribute?.('data-ml2-restored-forum-card');
         if (!this.isSuppressedForumThreadId(threadId)) continue;
         const target = node.closest?.('li') || node;
-        target?.remove?.();
+        parkRetainedPreviewCard(target);
         removed = true;
       }
       return removed;
@@ -23009,7 +23563,7 @@ module.exports = class MessageLoggerV2 {
       const parentChannel = this.selectedChannel || this.getSelectedTextChannel?.();
       if (!canRestoreVisibleThreadRoots()) {
         if (parentChannel?.id) removeRestoredForumCardsForChannel(parentChannel.id);
-        else document.querySelectorAll('[data-ml2-restored-forum-thread]').forEach(node => node.remove());
+        else document.querySelectorAll('[data-ml2-restored-forum-thread]').forEach(parkRetainedPreviewCard);
         return;
       }
       if (!isForumListChannel(parentChannel) || !parentChannel?.guild_id) return;
@@ -23022,7 +23576,7 @@ module.exports = class MessageLoggerV2 {
       removeSuppressedForumCards(list);
       document.querySelectorAll(`[data-list-item-id^="forum-channel-list-${parentChannel.id}___"]`).forEach(focus => {
         const restoredLi = focus.closest?.(`[data-ml2-restored-forum-thread]`);
-        if (restoredLi && !list.contains(restoredLi)) restoredLi.remove();
+        if (restoredLi && !list.contains(restoredLi)) parkRetainedPreviewCard(restoredLi);
       });
       const records = getRestorableForumRecordsForChannel(parentChannel);
       const desiredIds = new Set(records.map(record => String(record.message.id)));
@@ -23032,6 +23586,7 @@ module.exports = class MessageLoggerV2 {
         const threadId = card.getAttribute('data-ml2-restored-forum-card');
         if (desiredIds.has(String(threadId))) return;
         const target = card.closest?.('[data-ml2-restored-forum-thread]') || card.closest?.('li') || card;
+        parkRetainedPreviewCard(target);
         target.remove?.();
       });
       const existingIds = new Set(Array.from(list.querySelectorAll('[data-item-id], [data-ml2-restored-forum-card]'))
@@ -23043,9 +23598,9 @@ module.exports = class MessageLoggerV2 {
           tintForumCardByThreadId(threadId);
           continue;
         }
-        const restored = createRestoredForumCard(record, sourceCard, sourceLi, parentChannel);
+        const restored = mountRetainedPreviewCard(record, list, 'forum', parentChannel.id,
+          current => createRestoredForumCard(current, sourceCard, sourceLi, parentChannel), sourceLi);
         if (!restored) continue;
-        list.appendChild(restored);
         existingIds.add(threadId);
         tintForumCardByThreadId(threadId);
       }
@@ -23161,17 +23716,19 @@ module.exports = class MessageLoggerV2 {
       if (!content || !sourceCard || !sourceCards?.length) {
         browser.querySelectorAll(
           '[data-ml2-restored-thread-browser-card], [data-ml2-restored-thread-browser-section]'
-        ).forEach(node => node.remove());
+        ).forEach(parkRetainedPreviewCard);
         return;
       }
       const selected = this.selectedChannel || this.getSelectedTextChannel?.();
       const parent = [10, 11, 12].includes(selected?.type) ? this.tools.getChannel(selected.parent_id) : selected;
       if (!parent || isForumListChannel(parent)) return;
       const records = getRestorableCompactThreadRecords(parent);
-      const desiredIds = new Set(records.map(record => record.message.id));
+      const query = input?.value?.trim?.().toLowerCase() || '';
+      const desiredIds = new Set(records.filter(record => !query || getForumRecordTitle(record).toLowerCase().includes(query))
+        .map(record => record.message.id));
       content.querySelectorAll('[data-ml2-restored-thread-browser-card]').forEach(node => {
         const threadId = node.getAttribute('data-ml2-restored-thread-browser-card');
-        if (!desiredIds.has(threadId) || this.isSuppressedForumThreadId(threadId)) node.remove();
+        if (!desiredIds.has(threadId) || this.isSuppressedForumThreadId(threadId)) parkRetainedPreviewCard(node);
       });
       let deletedHeader = content.querySelector(`[data-ml2-restored-thread-browser-section="${parent.id}"]`);
       if (!records.length) {
@@ -23190,14 +23747,13 @@ module.exports = class MessageLoggerV2 {
       deletedHeader.textContent = `${records.length} deleted thread${records.length === 1 ? '' : 's'}`;
       for (const record of records) {
         const threadId = record.message.id;
+        if (!desiredIds.has(threadId)) continue;
         let card = content.querySelector(`[data-ml2-restored-thread-browser-card="${threadId}"]`);
         if (!card) {
-          card = createRestoredThreadBrowserCard(record, sourceCard);
-          if (card) content.appendChild(card);
+          card = mountRetainedPreviewCard(record, content, 'thread-browser', parent.id,
+            current => createRestoredThreadBrowserCard(current, sourceCard), sourceCard);
         }
         if (card) {
-          const query = input?.value?.trim?.().toLowerCase() || '';
-          card.style.display = !query || getForumRecordTitle(record).toLowerCase().includes(query) ? '' : 'none';
           applyRestoredThreadTint(threadId);
         }
       }
@@ -23216,7 +23772,7 @@ module.exports = class MessageLoggerV2 {
       if (!canRestoreVisibleThreadRoots()) {
         document.querySelectorAll(
           '[data-ml2-restored-thread-entry], [data-ml2-restored-thread-browser-card], [data-ml2-restored-thread-browser-section]'
-        ).forEach(node => node.remove());
+        ).forEach(parkRetainedPreviewCard);
         const { content, sectionHeader, sourceCards } = findThreadBrowserSource();
         if (content && sectionHeader && sourceCards?.length) {
           const nativeHeight = sectionHeader.getBoundingClientRect().height
@@ -23344,6 +23900,7 @@ module.exports = class MessageLoggerV2 {
       restoreDeletedCompactThreads();
     };
     const tintObserver = new MutationObserver((mutations) => {
+      let removedNodes = false;
       for (const m of mutations) {
         if (m.type === 'childList') {
           for (const node of m.removedNodes) {
@@ -23351,6 +23908,7 @@ module.exports = class MessageLoggerV2 {
             this.cleanupLoggerNativeAudioRoots(node);
             this.cleanupLoggerNativeDocumentRoots(node);
           }
+          if (m.removedNodes.length) removedNodes = true;
           const targetMessageNode = getMessageNodeFromAnyNode(m.target);
           if (targetMessageNode) tintMessageNode(targetMessageNode);
           tintNativeThreadBrowserPreviews(m.target);
@@ -23394,6 +23952,7 @@ module.exports = class MessageLoggerV2 {
           if (threadId) tintForumCardByThreadId(threadId);
         }
       }
+      if (removedNodes) sweepDetachedPreviewCards();
       scheduleRestoreDeletedCompactThreads();
     });
     tintObserver.observe(document.body, {
@@ -23411,6 +23970,7 @@ module.exports = class MessageLoggerV2 {
     sweepDom();
     this.unpatches.push(() => {
       try { tintObserver.disconnect(); } catch {}
+      retainedPreviewCards.clear();
       this.cleanupCopiedNativeDeleteControls(null, true);
       this.cleanupLoggerNativeAudioRoots(null, true);
       this.cleanupLoggerNativeDocumentRoots(null, true);
@@ -23453,6 +24013,7 @@ module.exports = class MessageLoggerV2 {
         }
         let modalOpen = this.ModalStack.hasModalOpen(this.style.menu);
         if (this.menu.open && !modalOpen) {
+          this.parkLoggerViewportView(this._loggerViewportView);
           this.menu.filter = '';
           this.menu.open = false;
           this.menu.shownMessages = -1;
@@ -25001,9 +25562,491 @@ module.exports = class MessageLoggerV2 {
     }
     return element;
   }
-  populateParent(parent, messages) {
-    const populate = i => {
+  getViewportSession() {
+    if (this._viewportSession) return this._viewportSession;
+    const plugin = this;
+    const entries = new Map();
+    const slots = new Map();
+    const observedTargets = new Map();
+    const nativeRows = new WeakMap();
+    const nativeOccurrences = new Map();
+    const queue = new Set();
+    const owners = new WeakMap();
+    const frame = callback => typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame(callback) : setTimeout(callback, 0);
+    let framePending = false;
+    let reconcilePending = false;
+    let generation = 0;
+    let buildCount = 0;
+    let disposedCount = 0;
+    let closed = false;
+    let loadingStyle = null;
+    const supported = typeof document !== 'undefined'
+      && typeof document.createElement === 'function'
+      && typeof IntersectionObserver === 'function';
+    let observer = null;
+
+    const revisionOf = entry => typeof entry.revision === 'function'
+      ? entry.revision() : entry.revision;
+    const active = (entry, token = entry?.leaseToken) => !!entry && !!entry.slot
+      && entry.leaseToken === token && entry.slot.isConnected !== false;
+    const registerNode = (entry, node) => {
+      if (!node || (typeof node !== 'object' && typeof node !== 'function')) return false;
+      const owned = owners.get(node);
+      if (owned && owned.entry !== entry) return false;
+      if (owned) owned.count++; else owners.set(node, { entry, count: 1 });
+      return true;
+    };
+    const unregisterNode = (entry, node) => {
+      if (!node || (typeof node !== 'object' && typeof node !== 'function')) return;
+      const owned = owners.get(node);
+      if (owned?.entry !== entry) return;
+      if (--owned.count === 0) owners.delete(node);
+    };
+    const notifyResources = (entry, method) => {
+      for (const resource of entry.resources) {
+        try { resource[method]?.(); } catch (error) {
+          plugin.reportViewportDebugIssue(`resource-${method}-failure`);
+          Logger.warn(`Could not ${method} a retained logger resource:`, error);
+        }
+      }
+    };
+    const suspend = entry => {
+      if (entry.suspended) return;
+      entry.suspended = true;
+      notifyResources(entry, 'suspend');
+    };
+    const resume = entry => {
+      if (!entry.suspended) return;
+      entry.suspended = false;
+      notifyResources(entry, 'resume');
+    };
+    const replaceSlot = (entry, node) => {
+      if (entry.slot === node) return;
+      const previous = entry.slot;
+      if (!previous?.parentNode) return;
+      unobserve(entry);
+      slots.delete(previous);
+      if (previous === entry.shell) unregisterNode(entry, previous);
+      const jumpClass = plugin.style?.restoredForumJump;
+      if (jumpClass && previous.classList?.contains?.(jumpClass)) {
+        node.classList?.add?.(jumpClass);
+        setTimeout(() => node.classList?.remove?.(jumpClass), 2200);
+      }
+      previous.replaceWith(node);
+      entry.slot = node;
+      entry.observeTarget = node;
+      slots.set(node, entry);
+      if (node === entry.shell) registerNode(entry, node);
+      observe(entry);
+    };
+    const present = entry => {
+      if (entry.replaceSlot) replaceSlot(entry, entry.host);
+      else entry.slot.replaceChildren(entry.host);
+    };
+    const showPending = (entry, visible = false) => {
+      if (!entry.placeholder) {
+        const placeholder = document.createElement('div');
+        placeholder.style.color = 'var(--text-warning, var(--status-warning))';
+        const label = document.createElement('span');
+        label.textContent = 'Loading saved message';
+        const dots = document.createElement('span');
+        dots.textContent = '...';
+        dots.className = 'ml2-viewport-loading-dots';
+        placeholder.append(label, dots);
+        entry.placeholder = placeholder;
+      }
+      if (!loadingStyle && (document.head || document.body)) {
+        loadingStyle = document.createElement('style');
+        loadingStyle.textContent = '@keyframes ml2-viewport-dots{0%,100%{opacity:.25}50%{opacity:1}}[data-pending-visible="true"] .ml2-viewport-loading-dots{animation:ml2-viewport-dots 1s infinite}@media (prefers-reduced-motion:reduce){.ml2-viewport-loading-dots{animation:none!important}}';
+        (document.head || document.body).appendChild(loadingStyle);
+      }
+      entry.placeholder.style.minHeight = `${entry.measuredHeight || 72}px`;
+      entry.placeholder.dataset.pendingVisible = String(visible);
+      if (entry.replaceSlot && entry.slot !== entry.shell) {
+        const height = entry.host.getBoundingClientRect?.().height;
+        if (height > 0) entry.measuredHeight = height;
+        entry.placeholder.style.minHeight = `${entry.measuredHeight || 72}px`;
+        replaceSlot(entry, entry.shell);
+      }
+      entry.slot.replaceChildren(entry.placeholder);
+    };
+    const disposeResources = entry => {
+      for (const resource of entry.resources.splice(0)) {
+        unregisterNode(entry, resource.node);
+        try {
+          if (resource.disposeCallback) resource.disposeCallback();
+          else resource.root?.unmount?.();
+        } catch (error) {
+          plugin.reportViewportDebugIssue('resource-dispose-failure');
+          Logger.warn('Could not dispose a retained logger resource:', error);
+        }
+      }
+    };
+    const enqueue = entry => {
+      if (closed) return;
+      queue.add(entry);
+      if (framePending) return;
+      framePending = true;
+      const scheduledGeneration = generation;
+      frame(() => {
+        if (scheduledGeneration !== generation) return;
+        framePending = false;
+        let count = 0;
+        const now = () => typeof globalThis.performance?.now === 'function' ? globalThis.performance.now() : Date.now();
+        const started = now();
+        for (const item of queue) {
+          queue.delete(item);
+          if (active(item)) activate(item, item.leaseToken);
+          if (++count >= 4 || now() - started >= 8) break;
+        }
+        if (queue.size) enqueue(queue.values().next().value);
+      });
+    };
+    const observe = entry => {
+      const target = entry.observeTarget || entry.slot;
+      if (!target || !observer) return;
+      let group = observedTargets.get(target);
+      if (!group) { group = new Set(); group.visible = false; observedTargets.set(target, group); observer.observe(target); }
+      group.add(entry);
+      entry.visible = group.visible;
+      if (entry.visible && (!entry.activated || entry.dirty || entry.pendingWorkDirty)) enqueue(entry);
+    };
+    const unobserve = entry => {
+      const target = entry.observeTarget || entry.slot;
+      const group = observedTargets.get(target);
+      if (!group) return;
+      group.delete(entry);
+      if (!group.size) { observedTargets.delete(target); observer?.unobserve(target); }
+    };
+    const scheduleReconcile = entry => {
+      if (!active(entry)) return;
+      entry.dirty = true;
+      suspend(entry);
+      showPending(entry);
+      if (entry.visible || !observer) enqueue(entry); else observe(entry);
+    };
+    const activate = (entry, token) => {
+      if (!active(entry, token)) return false;
+      let nextRevision;
       try {
+        nextRevision = revisionOf(entry);
+        if (!entry.activated || entry.dirty || entry.pendingWorkDirty || nextRevision !== entry.builtRevision) {
+          disposeResources(entry);
+          entry.host.replaceChildren();
+          entry.dirty = false;
+          entry.pendingWorkDirty = false;
+          buildCount++;
+          const serial = ++entry.buildSerial;
+          entry.pendingBuild = false;
+          entry.failed = false;
+          const result = entry.build(entry, entry.host);
+          if (result && typeof result.then === 'function') {
+            entry.pendingBuild = true;
+            Promise.resolve(result).then(() => {
+              if (entries.get(entry.key) !== entry || entry.buildSerial !== serial) return;
+              entry.pendingBuild = false;
+              if (!active(entry, token)) {
+                entry.pendingWorkDirty = true;
+                if (active(entry)) scheduleReconcile(entry);
+              } else {
+                present(entry);
+                resume(entry);
+              }
+            }, error => {
+              if (entries.get(entry.key) !== entry || entry.buildSerial !== serial) return;
+              entry.pendingBuild = false;
+              if (!active(entry, token)) {
+                entry.pendingWorkDirty = true;
+                if (active(entry)) scheduleReconcile(entry);
+                return;
+              }
+              disposeResources(entry);
+              entry.host.replaceChildren();
+              entry.host.textContent = 'Saved message could not be loaded.';
+              entry.failed = true;
+              present(entry);
+              resume(entry);
+              plugin.reportViewportDebugIssue('row-hydration-failure');
+              Logger.error('Could not load a saved message:', error);
+            });
+          }
+          entry.builtRevision = nextRevision;
+          entry.activated = true;
+        }
+        if (entry.pendingBuild) { suspend(entry); showPending(entry, true); }
+        else { present(entry); resume(entry); }
+        return true;
+      } catch (error) {
+        disposeResources(entry);
+        entry.host.replaceChildren();
+        entry.host.textContent = 'Saved message could not be loaded.';
+        entry.activated = true;
+        entry.failed = true;
+        entry.builtRevision = nextRevision;
+        entry.dirty = false;
+        entry.pendingWorkDirty = false;
+        if (entry.replaceSlot && entry.slot === entry.shell) entry.shell.textContent = 'Saved message could not be loaded.';
+        else present(entry);
+        resume(entry);
+        plugin.reportViewportDebugIssue('row-hydration-failure');
+        Logger.error('Could not load a saved message:', error);
+        return false;
+      }
+    };
+    if (supported) {
+      observer = new IntersectionObserver(changes => {
+        for (const change of changes) {
+          const group = observedTargets.get(change.target);
+          if (group) group.visible = !!change.isIntersecting;
+          for (const entry of group || []) {
+            if (!entry.slot) continue;
+            const visible = entry.visible = !!change.isIntersecting;
+            if (entry.placeholder?.dataset) entry.placeholder.dataset.pendingVisible = String(visible);
+            if (visible && (!entry.activated || entry.dirty || entry.pendingWorkDirty)) enqueue(entry);
+            else if (!visible) queue.delete(entry);
+          }
+        }
+      });
+    }
+    const session = {
+      supported,
+      getEntry({ surfaceKey, channelId, messageId, variant = '', revision, build }) {
+        if (closed) return null;
+        const key = JSON.stringify([surfaceKey, channelId, messageId, variant]);
+        let entry = entries.get(key);
+        if (!entry) {
+          entry = { key, surfaceKey, channelId, messageId, variant, revision, build,
+            host: document.createElement('div'), resources: [], slot: null, leaseToken: null,
+            activated: false, dirty: false, pendingWorkDirty: false, builtRevision: undefined,
+            measuredHeight: 0, placeholder: null, buildSerial: 0, pendingBuild: false, suspended: false };
+          entry.host.dataset.ml2ViewportHost = 'true';
+          entries.set(key, entry);
+          registerNode(entry, entry.host);
+        } else {
+          entry.revision = revision;
+          entry.build = build;
+        }
+        return entry;
+      },
+      attach(entry, slot, leaseToken, options = {}) {
+        if (closed || !entry || !slot || leaseToken == null || entries.get(entry.key) !== entry) return false;
+        queue.delete(entry);
+        if (entry.slot) {
+          unobserve(entry);
+          slots.delete(entry.slot);
+          if (entry.slot === entry.shell) unregisterNode(entry, entry.slot);
+        }
+        const previous = slots.get(slot);
+        if (previous && previous !== entry) session.release(previous, previous.leaseToken);
+        entry.slot = slot;
+        entry.replaceSlot = options.replaceSlot === true;
+        entry.shell = entry.replaceSlot ? slot : null;
+        if (entry.replaceSlot) registerNode(entry, slot);
+        entry.observeTarget = options.observeTarget || slot;
+        entry.visible = false;
+        entry.leaseToken = leaseToken;
+        slots.set(slot, entry);
+        observe(entry);
+        if (entry.activated) {
+          try {
+            if (entry.dirty || entry.pendingWorkDirty || revisionOf(entry) !== entry.builtRevision) {
+              scheduleReconcile(entry);
+            } else if (entry.pendingBuild) showPending(entry, true);
+            else { present(entry); resume(entry); }
+          } catch (error) {
+            if (!entry.failed) scheduleReconcile(entry);
+            else { present(entry); resume(entry); }
+          }
+        } else if (!supported) {
+          activate(entry, leaseToken);
+        } else {
+          showPending(entry);
+          observe(entry);
+        }
+        return true;
+      },
+      adoptHost(entry, node) {
+        if (closed || !entry || entries.get(entry.key) !== entry || !node || node === entry.slot) return false;
+        const existingOwner = owners.get(node);
+        if (existingOwner && existingOwner.entry !== entry) return false;
+        if (entry.host !== node) {
+          unregisterNode(entry, entry.host);
+          entry.host = node;
+          registerNode(entry, node);
+          node.dataset.ml2ViewportHost = 'true';
+        }
+        return true;
+      },
+      acquireNativeOccurrence(row, channelId, messageId, kind, token) {
+        if (closed || !row) return null;
+        const key = JSON.stringify([channelId, messageId]);
+        let occurrence = nativeRows.get(row);
+        if (!occurrence || occurrence.key !== key || occurrence.leases.has(kind)
+          || (occurrence.row !== row && occurrence.leases.size > 0)) {
+          let occurrences = nativeOccurrences.get(key);
+          if (!occurrences) { occurrences = []; nativeOccurrences.set(key, occurrences); }
+          occurrence = occurrences.find(item => item.leases.size === 0);
+          if (!occurrence) {
+            occurrence = { key, index: occurrences.length, leases: new Map() };
+            occurrences.push(occurrence);
+          }
+          nativeRows.set(row, occurrence);
+        }
+        occurrence.row = row;
+        occurrence.leases.set(kind, token);
+        return occurrence;
+      },
+      releaseNativeOccurrence(occurrence, kind, token) {
+        if (occurrence?.leases.get(kind) !== token) return false;
+        occurrence.leases.delete(kind);
+        if (!occurrence.leases.size) occurrence.row = null;
+        return true;
+      },
+      activate(entry, leaseToken) { return activate(entry, leaseToken); },
+      release(entry, leaseToken) {
+        if (!entry || entry.leaseToken !== leaseToken || !entry.slot) return false;
+        const slot = entry.slot;
+        unobserve(entry);
+        slots.delete(slot);
+        if (slot === entry.shell) unregisterNode(entry, slot);
+        queue.delete(entry);
+        const height = entry.host.getBoundingClientRect?.().height;
+        if (height > 0) entry.measuredHeight = height;
+        for (const media of entry.host.querySelectorAll?.('audio, video') || []) {
+          try { media.pause(); } catch {}
+        }
+        entry.host.remove();
+        if (entry.replaceSlot && slot === entry.shell) slot.remove();
+        entry.slot = null;
+        entry.observeTarget = null;
+        entry.visible = false;
+        entry.leaseToken = null;
+        suspend(entry);
+        return true;
+      },
+      park(entry, leaseToken) { return session.release(entry, leaseToken); },
+      isActive(entry, leaseToken) { return !entry?.suspended && active(entry, leaseToken); },
+      own(entry, node, root, disposeCallback) {
+        if (closed || !entry || entries.get(entry.key) !== entry || !registerNode(entry, node)) return false;
+        const hooks = disposeCallback && typeof disposeCallback === 'object' ? disposeCallback : {};
+        entry.resources.push({ node, root,
+          disposeCallback: typeof disposeCallback === 'function' ? disposeCallback : hooks.dispose,
+          suspend: hooks.suspend, resume: hooks.resume });
+        if (entry.suspended) {
+          try { hooks.suspend?.(); } catch (error) {
+            plugin.reportViewportDebugIssue('resource-suspend-failure');
+            Logger.warn('Could not suspend a retained logger resource:', error);
+          }
+        }
+        return true;
+      },
+      ownerOf(node) {
+        if (closed) return null;
+        for (let current = node; current && (typeof current === 'object' || typeof current === 'function'); current = current.parentNode) {
+          const owned = owners.get(current);
+          if (owned) return owned.entry;
+        }
+        return null;
+      },
+      owns(node) { return !!session.ownerOf(node); },
+      isOwnerActive(node) {
+        const entry = session.ownerOf(node);
+        return !!entry && !entry.suspended && active(entry) && !!entry.slot.contains?.(entry.host);
+      },
+      invalidate(messageId, reason) {
+        for (const entry of entries.values()) {
+          if (String(entry.messageId) !== String(messageId)) continue;
+          entry.dirty = true;
+          entry.dirtyReason = reason;
+          if (entry.activated && active(entry)) scheduleReconcile(entry);
+        }
+      },
+      markPendingWorkDirty(entry, guard) {
+        if (!entry || entries.get(entry.key) !== entry || (guard && !guard())) return false;
+        if (active(entry)) return false;
+        entry.pendingWorkDirty = true;
+        return true;
+      },
+      reconcileActive() {
+        if (closed || reconcilePending) return;
+        reconcilePending = true;
+        const scheduledGeneration = generation;
+        frame(() => {
+          if (scheduledGeneration !== generation) return;
+          reconcilePending = false;
+          for (const entry of entries.values()) {
+            if (!entry.activated || !active(entry)) continue;
+            try {
+              if (entry.dirty || entry.pendingWorkDirty || revisionOf(entry) !== entry.builtRevision) scheduleReconcile(entry);
+            } catch (error) { if (!entry.failed) { entry.dirty = true; scheduleReconcile(entry); } }
+          }
+        });
+      },
+      dispose(entry) {
+        if (!entry || entries.get(entry.key) !== entry) return false;
+        session.releaseNativeOccurrence(entry.nativeOccurrence, entry.nativeOccurrenceKind, entry.leaseToken);
+        if (entry.slot) session.release(entry, entry.leaseToken);
+        disposeResources(entry);
+        entry.buildSerial++;
+        entry.host.replaceChildren();
+        unregisterNode(entry, entry.host);
+        entries.delete(entry.key);
+        disposedCount++;
+        return true;
+      },
+      disposeMessage(messageId) {
+        for (const entry of [...entries.values()]) {
+          if (String(entry.messageId) === String(messageId)) session.dispose(entry);
+        }
+      },
+      pruneMessages(records) {
+        for (const entry of [...entries.values()]) {
+          if (!Object.prototype.hasOwnProperty.call(records || {}, entry.messageId)) session.dispose(entry);
+        }
+      },
+      getDebugSnapshot() {
+        const snapshot = { entries: entries.size, cold: 0, activated: 0, parked: 0,
+          active: 0, disposed: disposedCount, resources: 0, pendingBuilds: queue.size,
+          epoch: generation, buildCount };
+        for (const entry of entries.values()) {
+          if (entry.activated) snapshot.activated++; else snapshot.cold++;
+          if (active(entry)) snapshot.active++; else snapshot.parked++;
+          snapshot.resources += entry.resources.length;
+          if (entry.pendingBuild && !queue.has(entry)) snapshot.pendingBuilds++;
+        }
+        return snapshot;
+      },
+      reset() {
+        if (closed) return;
+        generation++;
+        framePending = false;
+        reconcilePending = false;
+        queue.clear();
+        for (const entry of [...entries.values()]) session.dispose(entry);
+        observer?.disconnect();
+        observedTargets.clear();
+        nativeOccurrences.clear();
+        loadingStyle?.remove();
+        closed = true;
+        if (plugin._viewportSession === session) plugin._viewportSession = null;
+      }
+    };
+    this._viewportSession = session;
+    return session;
+  }
+  parkLoggerViewportView(view) {
+    if (!view?.leases) return;
+    for (const [entry, token] of view.leases) this._viewportSession?.park(entry, token);
+    view.leases.clear();
+  }
+  populateParent(parent, messages) {
+    const view = arguments[2] || null;
+    const buildRow = (i, parent) => {
+      const viewportEntry = this._viewportBuildingEntry;
+      try {
+        const deferDisplay = this._viewportDisplayCallback || (callback => callback);
+        const viewportSession = viewportEntry ? this._viewportSession : null;
         const messageId = messages[i];
         const record = this.getSavedMessage(messageId);
         const sourceMessage = record ? record.message : this.getMessageAny(messageId);
@@ -25348,7 +26391,7 @@ module.exports = class MessageLoggerV2 {
             markRemovedPreview(img, { id: attachmentId });
             img.messageId = messageId;
             img.idx = attachmentIdx;
-            const existingElement = document.getElementById(attachmentId);
+            const existingElement = Array.from(parent.querySelectorAll('[id]')).find(node => node.id === String(attachmentId));
             if (existingElement) {
               existingElement.id = "og-" + attachmentId;
             }
@@ -25400,7 +26443,7 @@ module.exports = class MessageLoggerV2 {
                 true
               );
             });
-            img.onerror = () => {
+            img.onerror = deferDisplay(() => {
               coordinateLoggerBlobFailure(
                 { id: attachmentId, filename },
                 img.currentSrc || img.src
@@ -25409,7 +26452,7 @@ module.exports = class MessageLoggerV2 {
                 presentationLabel || filename,
                 { id: attachmentId }
               ));
-            };
+            });
             contentDiv.appendChild(img);
             return true;
           };
@@ -25439,7 +26482,7 @@ module.exports = class MessageLoggerV2 {
             return { container, video };
           };
           const attemptToUseCachedVideo = (attachmentId, attachmentIdx, hidden, filename, width, height, presentationLabel, cachedUrl) => {
-            const existingElement = document.getElementById(attachmentId);
+            const existingElement = Array.from(parent.querySelectorAll('[id]')).find(node => node.id === String(attachmentId));
             if (existingElement) {
               existingElement.id = "og-" + attachmentId;
             }
@@ -25481,7 +26524,7 @@ module.exports = class MessageLoggerV2 {
                 false
               );
             });
-            video.onerror = () => {
+            video.onerror = deferDisplay(() => {
               coordinateLoggerBlobFailure(
                 { id: attachmentId, filename },
                 video.currentSrc || video.src
@@ -25490,7 +26533,7 @@ module.exports = class MessageLoggerV2 {
                 presentationLabel || filename,
                 { id: attachmentId }
               ));
-            };
+            });
             contentDiv.appendChild(container);
             return true;
           };
@@ -25598,7 +26641,7 @@ module.exports = class MessageLoggerV2 {
               markRemovedPreview(documentHost, sourceAttachment || attachment);
               contentDiv.appendChild(documentHost);
               let unavailableHandled = false;
-              const onDocumentUnavailable = () => {
+              const onDocumentUnavailable = () => { deferDisplay(() => {
                 if (unavailableHandled || documentHost.parentElement !== contentDiv) return;
                 unavailableHandled = true;
                 this.cleanupLoggerNativeDocumentRoots(documentHost);
@@ -25606,7 +26649,7 @@ module.exports = class MessageLoggerV2 {
                   getPresentationFallbackLabel(null, attachment, sourceAttachment),
                   sourceAttachment || attachment
                 ));
-              };
+              })(); };
               const mountDocument = () => {
                 const mountedSource = attachment.url;
                 const probeContext = loggerAttachmentEntry?.removed
@@ -25614,7 +26657,7 @@ module.exports = class MessageLoggerV2 {
                     record, sourceAttachment, mountedSource, {},
                     allowDetached => attachment.url === mountedSource && documentHost.parentElement === contentDiv
                       && (allowDetached || documentHost.isConnected !== false),
-                    (coordinatedPlan, failedUrl) => {
+                    deferDisplay((coordinatedPlan, failedUrl) => {
                       if (documentHost.isConnected === false || documentHost.parentElement !== contentDiv) return;
                       const nextPlan = coordinatedPlan || ownedContinuation?.(failedUrl);
                       if (nextPlan?.action === 'ignore') return;
@@ -25625,11 +26668,14 @@ module.exports = class MessageLoggerV2 {
                         attachment._ml2PresentationAction = nextPlan.action;
                         mountDocument();
                       } else onDocumentUnavailable();
-                    }, 'logger'
+                    }), 'logger'
                   ) : null;
+                if (probeContext && viewportEntry && viewportSession) {
+                  probeContext.deferUntilActive = callback => deferDisplay(callback)();
+                }
                 this.mountLoggerNativeDocument(
                   documentHost, message, attachment, sourceMessage, onDocumentUnavailable,
-                  { ownedProbeContext: probeContext }
+                  { ownedProbeContext: probeContext, deferDisplay }
                 );
               };
               mountDocument();
@@ -25649,7 +26695,7 @@ module.exports = class MessageLoggerV2 {
                   sourceAttachment || attachment
                 ));
               };
-              const onAudioError = (event, currentSource) => {
+              const onAudioError = deferDisplay((event, currentSource) => {
                 const failedSource = typeof currentSource === 'string' && currentSource
                   ? currentSource
                   : attachment.url;
@@ -25702,18 +26748,18 @@ module.exports = class MessageLoggerV2 {
                     nextUrl,
                     audioAttachment,
                     sourceMessage,
-                    onAudioError
+                    onAudioError, { deferDisplay }
                   );
                   return;
                 }
                 replaceAudioWithPlaceholder(nextPlan);
-              };
+              });
               this.mountLoggerNativeAudio(
                 audioHost,
                 attachment.url,
                 audioAttachment,
                 sourceMessage,
-                onAudioError
+                onAudioError, { deferDisplay }
               );
               return;
             }
@@ -25781,7 +26827,7 @@ module.exports = class MessageLoggerV2 {
                   );
                 });
               }
-              video.onerror = () => {
+              video.onerror = deferDisplay(() => {
                 if (presentationAction === 'remote'
                   && this.settings.cacheAllImages !== false
                   && !this.settings.onlyRenderCachedAttachments) {
@@ -25805,7 +26851,7 @@ module.exports = class MessageLoggerV2 {
                     getLoggerAttachmentEntry(attachment)?.attachment || attachment
                   ));
                 }
-              };
+              });
               contentDiv.appendChild(container);
             } else if (this.isImage(attachment.url)) {
               const img = document.createElement('img');
@@ -25853,7 +26899,7 @@ module.exports = class MessageLoggerV2 {
                   );
                 });
               }
-              img.onerror = () => {
+              img.onerror = deferDisplay(() => {
                 if (presentationAction === 'remote'
                   && this.settings.cacheAllImages !== false
                   && !this.settings.onlyRenderCachedAttachments) {
@@ -25877,7 +26923,7 @@ module.exports = class MessageLoggerV2 {
                     getLoggerAttachmentEntry(attachment)?.attachment || attachment
                   ));
                 }
-              };
+              });
               if (attachment.hidden) {
                 img.src = `https://i.clouds.tf/q2vy/r8q6.png#${record.message.channel_id},${img.id}`;
                 img.width = 200;
@@ -25899,13 +26945,80 @@ module.exports = class MessageLoggerV2 {
         parent.appendChild(messageGroup);
       } catch (err) {
         Logger.error('Error in populateParent', err);
+        if (viewportEntry) throw err;
       }
     };
+    const supportsViewport = view && typeof IntersectionObserver === 'function'
+      && typeof parent.replaceChildren === 'function';
+    const populate = i => {
+      if (!supportsViewport) return buildRow(i, parent);
+      const messageId = messages[i];
+      const source = this.getSavedMessage(messageId)?.message || this.getMessageAny(messageId);
+      if (!source) return;
+      const session = this.getViewportSession();
+      const revision = () => JSON.stringify([
+        this.getSavedMessage(messageId) || this.getMessageAny(messageId),
+        this.settings.cacheAllImages, this.settings.onlyRenderCachedAttachments,
+        this.settings.useAlternativeDeletedStyle
+      ]);
+      const entry = session.getEntry({
+        surfaceKey: view.surfaceKey, channelId: source.channel_id, messageId, revision,
+        build: (ownedEntry, host) => {
+          const pending = [];
+          const buildSerial = ownedEntry.buildSerial;
+          const startupGeneration = this._startupGeneration;
+          const buildRevision = revision();
+          const deferDisplay = callback => (...args) => {
+            if (this._viewportSession !== session || ownedEntry.buildSerial !== buildSerial
+              || this._startupGeneration !== startupGeneration) return;
+            const target = args[0]?.target;
+            const sourceAtEvent = target?.currentSrc || target?.src || '';
+            const run = () => {
+              if (this._viewportSession !== session || ownedEntry.buildSerial !== buildSerial
+                || this._startupGeneration !== startupGeneration) return;
+              if (revision() !== buildRevision) {
+                session.invalidate(messageId, 'stale-display-callback');
+                return;
+              }
+              if (sourceAtEvent && (target?.currentSrc || target?.src || '') !== sourceAtEvent) return;
+              callback(...args);
+            };
+            if (session.isActive(ownedEntry, ownedEntry.leaseToken)) run();
+            else pending.push(run);
+          };
+          session.own(ownedEntry, host, null, {
+            dispose: () => {
+              pending.length = 0;
+              this.cleanupCopiedNativeDeleteControls(host, true);
+              this.cleanupLoggerNativeAudioRoots(host, true);
+              this.cleanupLoggerNativeDocumentRoots(host, true);
+            },
+            resume: () => { for (const callback of pending.splice(0)) callback(); }
+          });
+          const previous = this._viewportBuildingEntry;
+          const previousCallback = this._viewportDisplayCallback;
+          this._viewportBuildingEntry = ownedEntry;
+          this._viewportDisplayCallback = deferDisplay;
+          try { buildRow(i, host); } finally {
+            this._viewportBuildingEntry = previous;
+            this._viewportDisplayCallback = previousCallback;
+          }
+        }
+      });
+      const slot = document.createElement('div');
+      slot.dataset.ml2ViewportSlot = 'true';
+      const token = {};
+      parent.appendChild(slot);
+      view.leases.set(entry, token);
+      session.attach(entry, slot, token);
+    };
     let i = 0;
+    const getShown = () => view?.independent ? view.shownMessages : this.menu.shownMessages;
+    const setShown = value => { if (view?.independent) view.shownMessages = value; else this.menu.shownMessages = value; };
     const addMore = () => {
-      for (let added = 0; i < messages.length && (added < this.settings.renderCap || (this.menu.shownMessages != -1 && i < this.menu.shownMessages)); i++, added++) populate(i);
+      for (let added = 0; i < messages.length && (added < this.settings.renderCap || (getShown() != -1 && i < getShown())); i++, added++) populate(i);
       handleMoreMessages();
-      this.menu.shownMessages = i;
+      setShown(i);
     };
     const handleMoreMessages = () => {
       if (i < messages.length) {
@@ -26108,12 +27221,14 @@ module.exports = class MessageLoggerV2 {
   refilterMessages() {
     const messagesDIV = document.getElementById(this.style.menuMessages);
     const original = messagesDIV.style.display;
+    this.parkLoggerViewportView(this._loggerViewportView);
     this.cleanupLoggerNativeAudioRoots(messagesDIV);
     this.cleanupLoggerNativeDocumentRoots(messagesDIV);
     messagesDIV.style.display = 'none';
     while (messagesDIV.firstChild) messagesDIV.firstChild.remove();
     this.menu.messages = this.getFilteredMessages();
-    this.populateParent(messagesDIV, this.menu.messages);
+    this._loggerViewportView ||= { surfaceKey: 'logger', leases: new Map() };
+    this.populateParent(messagesDIV, this.menu.messages, this._loggerViewportView);
     messagesDIV.style.display = original;
   }
   refreshLoggerMenu() {
@@ -26405,7 +27520,7 @@ module.exports = class MessageLoggerV2 {
         children: [this.tools.createWrappedElement([messagesDIV])],
         onCancel: onChangeOrder,
         onConfirm: onClearLog,
-        onClose: _ => { },
+        onClose: _ => this.parkLoggerViewportView(this._loggerViewportView),
         ml2Data: true,
         className: this.style.menuRoot
       },
@@ -26591,6 +27706,7 @@ module.exports = class MessageLoggerV2 {
                 addElement(
                   `${this.editModifiers[messageId].noSuffix ? 'Show' : 'Hide'} (edited) Tag`,
                   () => {
+                    this._viewportSession?.invalidate(messageId, 'edit-selection');
                     this.editModifiers[messageId].noSuffix = true;
                     this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
                   }
@@ -26598,6 +27714,7 @@ module.exports = class MessageLoggerV2 {
                 addElement(
                   `Undo Show As Message`,
                   () => {
+                    this._viewportSession?.invalidate(messageId, 'edit-selection');
                     delete this.editModifiers[messageId];
                     this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
                   },
@@ -26607,6 +27724,7 @@ module.exports = class MessageLoggerV2 {
                 addElement(
                   'Show Edit As Message',
                   () => {
+                    this._viewportSession?.invalidate(messageId, 'edit-selection');
                     this.editModifiers[messageId] = { editNum };
                     this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT', id: messageId });
                   }
