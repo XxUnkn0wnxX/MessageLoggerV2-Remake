@@ -359,8 +359,8 @@ test('the BdApi notification setting omits the outdated basic qualifier', () => 
 
 test('the current changelog covers media-Off, hydration and hotfixes for the development release', () => {
   const notes = createPlugin().getChanges().flatMap(change => change.items).join(' ');
-  assert.match(notes, /Turning media off removes retained previews and generated placeholders/);
-  assert.match(notes, /preserving message text and edit history/);
+  assert.match(notes, /Logger keeps previews and fallbacks beside their matching edits/);
+  assert.match(notes, /Turning media off hides attachment-only rows, previews and placeholders while preserving saved text and history/);
   assert.match(notes, /load in batches as you scroll/);
   assert.match(notes, /keeping loaded content ready for reuse/);
   assert.match(notes, /freezes during rapid scrolling and tab switching/);
@@ -1996,7 +1996,7 @@ test('populateParent routes audio through one native host and the shared saved-a
   assert.ok(audioStart >= 0 && audioEnd > audioStart, 'Logger viewer must have a bounded audio-first render branch');
   const audioBranch = viewer.slice(audioStart, audioEnd);
   assert.match(audioBranch, /const sourceAttachment = loggerAttachmentEntry\?\.attachment \|\| null;/);
-  assert.match(audioBranch, /contentDiv\.appendChild\(audioHost\);/);
+  assert.match(audioBranch, /mediaHost\.appendChild\(audioHost\);/);
   assert.match(audioBranch, /this\.mountLoggerNativeAudio\([\s\S]*audioHost,[\s\S]*attachment\.url,[\s\S]*audioAttachment,[\s\S]*sourceMessage,[\s\S]*onAudioError/);
   assert.match(audioBranch, /currentPresentationAction !== 'remote'/);
   assert.match(audioBranch, /this\.settings\.cacheAllImages === false/);
@@ -2180,8 +2180,8 @@ test('populateParent keeps native attachment rendering isolated, exact, and per 
   const audioStart = viewer.indexOf("if (isAudioFile) {", documentStart);
   const documentBranch = viewer.slice(documentStart, audioStart);
   const renderLoop = viewer.slice(
-    viewer.indexOf('const handleCreateImage = (attachment, idx) =>'),
-    viewer.indexOf('for (const sticker of this.getMessageStickerItems(message))')
+    viewer.indexOf('const handleCreateImage = (attachment, idx, mediaHost) =>'),
+    viewer.indexOf('for (const sticker of this.settings?.cacheAllImages')
   );
 
   assert.ok(markerStart >= 0 && markerEnd > markerStart);
@@ -2196,13 +2196,14 @@ test('populateParent keeps native attachment rendering isolated, exact, and per 
   assert.ok(documentStart >= 0 && audioStart > documentStart, 'document rendering must precede audio rendering');
   assert.match(documentBranch, /const isNativeAttachment = attachment\?\._ml2PresentationMediaType === 'attachment';[\s\S]*if \(isNativeAttachment\)/);
   assert.match(documentBranch, /const loggerAttachmentEntry = getLoggerAttachmentEntry\(attachment\);[\s\S]*const sourceAttachment = loggerAttachmentEntry\?\.attachment \|\| null;/);
-  assert.match(documentBranch, /const documentHost = document\.createElement\('div'\);[\s\S]*markLoggerAttachmentTarget\(documentHost, sourceAttachment \|\| attachment\);[\s\S]*contentDiv\.appendChild\(documentHost\);/);
+  assert.match(documentBranch, /const documentHost = document\.createElement\('div'\);[\s\S]*markLoggerAttachmentTarget\(documentHost, sourceAttachment \|\| attachment\);[\s\S]*mediaHost\.appendChild\(documentHost\);/);
   assert.match(documentBranch, /const onDocumentUnavailable = \(\) => \{[\s\S]*cleanupLoggerNativeDocumentRoots\(documentHost\);[\s\S]*documentHost\.replaceWith\(createUnavailableAttachmentPlaceholder\([\s\S]*getPresentationFallbackLabel\(null, attachment, sourceAttachment\),[\s\S]*sourceAttachment \|\| attachment/);
   assert.match(documentBranch, /this\.mountLoggerNativeDocument\([\s\S]*documentHost,[\s\S]*message,[\s\S]*attachment,[\s\S]*sourceMessage,[\s\S]*onDocumentUnavailable[\s\S]*\);[\s\S]*return;/);
   assert.doesNotMatch(documentBranch, /createModal\(|createElement\('(?:iframe|a)'\)|addEventListener\('click'|onMediaItemContextMenu/);
   assert.doesNotMatch(documentBranch, /_ml2PresentationMediaType === '(?:text|pdf)'/);
   assert.doesNotMatch(documentBranch, /message\.attachments|attachments\s*\[\s*0\s*\]|\.find\(/);
-  assert.match(renderLoop, /for \(let ii = 0; ii < renderedMedia\.length; ii\+\+\) handleCreateImage\(renderedMedia\[ii\], ii\);/);
+  assert.match(renderLoop, /for \(let ii = 0; ii < renderedMedia\.length; ii\+\+\) \{[\s\S]*historyMediaHosts\.get\(identity\)[\s\S]*handleCreateImage\(\{ \.\.\.attachment \}, ii, host\)[\s\S]*handleCreateImage\(attachment, ii, contentDiv\)/);
+  assert.match(documentBranch, /documentHost\.parentElement !== mediaHost[\s\S]*documentHost\.parentElement === mediaHost/);
   assert.ok(renderLoop.indexOf('const documentHost = document.createElement') >= 0);
   assert.ok(renderLoop.indexOf('getLoggerAttachmentEntry(attachment)') >= 0);
 });

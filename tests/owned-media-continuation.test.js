@@ -71,6 +71,7 @@ function fakeNode(tag) {
     tagName: tag.toUpperCase(), children: [], dataset: {}, style: {}, textContent: '', parentElement: null,
     classList: { add: (...values) => values.forEach(value => tokens.add(value)), remove: (...values) => values.forEach(value => tokens.delete(value)), contains: value => tokens.has(value) },
     appendChild(child) { this.children.push(child); child.parentElement = this; return child; },
+    insertBefore(child, reference) { const index = this.children.indexOf(reference); if (index < 0) throw Error('reference not found'); this.children.splice(index, 0, child); child.parentElement = this; return child; },
     remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter(child => child !== this); this.parentElement = null; },
     replaceWith(other) { const parent = this.parentElement; if (!parent) return; const index = parent.children.indexOf(this); parent.children[index] = other; other.parentElement = parent; this.parentElement = null; },
     addEventListener() {}, insertAdjacentHTML() {}, querySelectorAll() { return []; },
@@ -413,9 +414,10 @@ test('Logger removes only markers for admitted previews and preserves source his
   });
   try {
     plugin.populateParent(root, ['m']);
-    assert.equal(renderedContents[0], `before  middle  missing \`Attachment Deleted: \`${missingUrl} unknown \`Attachment Deleted: \`${unknownUrl}`);
-    assert.equal(renderedContents[1], 'surviving');
-    const host = group.children.find(child => child.dataset.ml2RemovedAttachmentHost === 'true');
+    assert.equal(renderedContents.slice(0, -1).join(''), `before  middle  missing \`Attachment Deleted: \`${missingUrl} unknown \`Attachment Deleted: \`${unknownUrl}`);
+    assert.equal(renderedContents.at(-1), 'surviving');
+    const layout = group.children.find(child => child.children.some(node => node.dataset.ml2EditHistoryIndex === '0'));
+    const host = layout.children[0].children.find(child => child.dataset.ml2EditHistoryMedia === '0');
     const img = host.children.find(child => child.tagName === 'IMG');
     assert.equal(img.src, 'blob://local/selected');
     assert.equal(blobReads, 1, 'the admitted Blob is reused by the renderer');
@@ -1311,7 +1313,7 @@ test('Logger omits media-only history nodes and restores them when media is enab
     plugin.formatMarkup = content => { contents.push(content); const node = fakeNode('div'); node.textContent = content; return node; };
     tooltips = 0;
     plugin.populateParent(root, ['m']);
-    return { root, markup, contents, tooltips };
+    return { root, group, markup, contents, tooltips };
   };
   try {
     const off = render();
@@ -1321,7 +1323,12 @@ test('Logger omits media-only history nodes and restores them when media is enab
     assert.equal(off.root.children.length, 1);
     plugin.settings.cacheAllImages = true;
     const on = render();
-    assert.deepEqual(on.markup.children.filter(node => node.edit !== undefined).map(node => node.edit), [0, 1, 2, 3, 4]);
+    const historyLayout = on.group.children.find(node => node.children.some(child => child.dataset.ml2EditHistoryIndex !== undefined));
+    assert.deepEqual(historyLayout.children.map(node => node.edit), [0, 1, 2, 3, 4]);
+    for (const row of historyLayout.children.slice(0, 2)) {
+      const media = row.children.find(node => node.dataset.ml2EditHistoryMedia !== undefined);
+      assert.equal(media.children[0].id, attachment.id, 'the repeated marker retains a preview in each matching edit');
+    }
     assert.equal(on.tooltips, 5);
     assert.deepEqual(record, before);
   } finally { global.document = oldDocument; }
@@ -1352,5 +1359,134 @@ test('Logger renders no embed summary while Off and retains component text and c
     plugin.settings.cacheAllImages = true;
     assert.ok(render().some(text => text.includes('[Embed] Hidden embed')));
     assert.deepEqual(message, before);
+  } finally { global.document = oldDocument; }
+});
+
+test('Logger places each admitted removed file in its historical row across media fallbacks and policy toggles', () => {
+  const makeAttachment = (id, name) => ({ id, filename: name, url: `https://cdn.discordapp.com/attachments/channel/${id}/${name}?old=1`, proxy_url: `https://media.discordapp.net/attachments/channel/${id}/${name}?old=1`, width: 300, height: 200 });
+  const image = makeAttachment('111111111111111111', 'photo.png');
+  const document = makeAttachment('222222222222222222', 'notes.pdf');
+  const video = makeAttachment('333333333333333333', 'clip.mp4');
+  const extra = makeAttachment('444444444444444444', 'extra.png');
+  const current = makeAttachment('555555555555555555', 'current.png');
+  const hidden = { ...makeAttachment('666666666666666666', 'hidden.png'), hidden: true };
+  const marker = attachment => '`Attachment Deleted: `' + attachment.url.replace('old=1', 'new=2');
+  const unknown = '`Attachment Deleted: `https://example.com/unmatched.png';
+  const record = { message: { id: 'm', channel_id: 'channel', content: 'current text', attachments: [current] }, delete_data: null,
+    edit_history: [{ content: `snapshot one ${marker(image)} ${marker(hidden)} ${marker(document)} ${unknown}`, time: 1 },
+      { content: marker(video), time: 2 }, { content: 'plain text', time: 3 }],
+    removed_attachments: [extra, video, document, hidden, image] };
+  const original = structuredClone(record);
+  const plugin = createPlugin({ messageRecord: { m: record }, settings: { cacheAllImages: true, onlyRenderCachedAttachments: false, renderCap: 0 },
+    imageCacheServerSimulator: { _resolveImagePath: () => '/cache/file', get: () => 'blob://local/file' } });
+  const previousDocument = global.document;
+  global.document = { createElement: fakeNode, createTextNode: value => ({ textContent: value }), getElementById: () => null };
+  let documentMount;
+  Object.assign(plugin, { style: { edited: 'edited', editHistoryLayout: 'history-layout', removedAttachmentPreview: 'removed-preview' },
+    classes: { markup: 'markup' }, multiClasses: { markup: 'markup' }, menu: { shownMessages: -1 }, getSavedMessage: () => record,
+    getSingleDiscordClass: () => 'missing', Tooltip: function () {}, getEditedTimestampClasses: () => 'stamp', createTimeStamp: value => String(value), translatedEdited: 'edited',
+    formatMarkup: content => { if (!content) return null; const node = fakeNode('div'); node.textContent = content; node.className = 'markup'; return node; },
+    mountLoggerNativeDocument: (host, message, attachment, source, onError) => { documentMount = { host, onError }; }, cleanupLoggerNativeDocumentRoots() {} });
+  const render = () => {
+    const root = fakeNode('div'), group = fakeNode('div'), markup = fakeNode('div');
+    markup.className = 'markup-native message-content-native';
+    group.appendChild(markup); group.getElementsByClassName = name => name === 'markup' ? [markup] : [];
+    plugin.createMessageGroup = () => group; plugin.populateParent(root, ['m']);
+    return { root, group, markup };
+  };
+  try {
+    const on = render();
+    const layout = on.group.children.find(node => node.className === 'history-layout');
+    assert.ok(layout); assert.strictEqual(on.group.children[1], on.markup);
+    assert.deepEqual(layout.children.map(row => row.edit), [0, 1, 2]);
+    const first = layout.children[0], second = layout.children[1];
+    const firstHost = first.children.find(node => node.dataset.ml2EditHistoryMedia === '0');
+    const secondHost = second.children.find(node => node.dataset.ml2EditHistoryMedia === '1');
+    assert.equal(first.children.filter(node => node.className === 'markup').map(node => node.textContent).join(''), `snapshot one  ${marker(hidden)}  ${unknown}`);
+    assert.deepEqual(first.children.map(node => node.tagName === 'TIME' ? 'time' : node.dataset.ml2EditHistoryMedia !== undefined ? 'media' : node.textContent.includes('hidden.png') ? 'hidden marker' : node.textContent.includes('unmatched.png') ? 'unmatched marker' : 'text'),
+      ['text', 'media', 'hidden marker', 'media', 'unmatched marker', 'time']);
+    assert.equal(first.children.at(-1).tagName, 'TIME'); assert.equal(second.children.at(-1).tagName, 'TIME');
+    assert.equal(second.children.length, 2, 'marker-only history retains a media host and timestamp');
+    const documentHost = first.children.filter(node => node.dataset.ml2EditHistoryMedia === '0')[1];
+    assert.equal(firstHost.parentElement, first); assert.equal(documentMount.host.parentElement, documentHost);
+    for (const text of first.children.filter(node => node.className === 'markup')) {
+      assert.equal(text.classList.contains('markup-native'), true);
+      assert.equal(text.classList.contains('message-content-native'), true);
+    }
+    for (const host of [firstHost, documentHost, secondHost]) {
+      assert.equal(host.classList.contains('markup-native'), false);
+      assert.equal(host.classList.contains('message-content-native'), false);
+    }
+    assert.equal(firstHost.children.length, 1);
+    const videoNode = secondHost.children[0].children[0];
+    assert.equal(videoNode.id, video.id);
+    videoNode.onerror(); assert.equal(videoNode.src, video.proxy_url);
+    videoNode.onerror(); assert.equal(secondHost.children[0].children[0].src, 'blob://local/file');
+    const imageNode = firstHost.children.find(node => node.id === image.id);
+    assert.equal(imageNode.src, image.url); imageNode.onerror(); assert.equal(imageNode.src, image.proxy_url);
+    imageNode.onerror();
+    const localImage = firstHost.children.find(node => node.src === 'blob://local/file');
+    assert.ok(localImage); assert.equal(localImage.parentElement, firstHost);
+    documentMount.onError();
+    assert.ok(documentHost.children.some(node => node.textContent.includes('notes.pdf')));
+    const currentHost = on.group.children.find(node => node.dataset.ml2RemovedAttachmentHost === 'true');
+    assert.deepEqual(currentHost.children.map(node => node.id).sort(), [current.id, extra.id].sort());
+    assert.equal(on.markup.children[0].textContent, 'current text');
+    assert.deepEqual(record, original);
+    plugin.settings.cacheAllImages = false;
+    const off = render();
+    assert.equal(off.group.children.some(node => node.className === 'history-layout'), false);
+    assert.equal(off.markup.children.length, 3, 'text-bearing snapshots and current text remain');
+    assert.deepEqual(record, original);
+    plugin.settings.cacheAllImages = true;
+    const restored = render();
+    assert.equal(restored.group.children.find(node => node.className === 'history-layout').children.length, 3);
+    assert.deepEqual(record, original);
+  } finally { global.document = previousDocument; }
+});
+
+test('local-only Logger history preserves unavailable markers between admitted files in marker order', () => {
+  const make = (id, name) => ({ id, filename: name, url: `https://cdn.discordapp.com/attachments/channel/${id}/${name}` });
+  const first = make('111111111111111111', 'first.png'), missing = make('222222222222222222', 'missing.png'), last = make('333333333333333333', 'last.png');
+  const marker = attachment => '`Attachment Deleted: `' + attachment.url;
+  const record = { message: { id: 'm', channel_id: 'channel', content: 'current', attachments: [] },
+    edit_history: [{ content: `${marker(first)} ${marker(missing)} ${marker(last)}`, time: 1 }], removed_attachments: [last, missing, first] };
+  const before = structuredClone(record);
+  const plugin = createPlugin({ messageRecord: { m: record }, settings: { cacheAllImages: true, onlyRenderCachedAttachments: true, renderCap: 0 },
+    imageCacheServerSimulator: { _resolveImagePath: id => id === missing.id ? null : '/cache/file', get: () => 'blob://local/file' } });
+  const root = fakeNode('div'), group = fakeNode('div'), markup = fakeNode('div'), oldDocument = global.document;
+  group.appendChild(markup); group.getElementsByClassName = name => name === 'markup' ? [markup] : [];
+  global.document = { createElement: fakeNode, createTextNode: value => ({ textContent: value }), getElementById: () => null };
+  Object.assign(plugin, { style: { edited: 'edited', editHistoryLayout: 'history-layout' }, classes: { markup: 'markup' }, multiClasses: { markup: 'markup' },
+    menu: { shownMessages: -1 }, getSavedMessage: () => record, createMessageGroup: () => group, getSingleDiscordClass: () => 'missing',
+    formatMarkup: text => { const node = fakeNode('div'); node.textContent = text; return node; },
+    Tooltip: function () {}, getEditedTimestampClasses: () => '', createTimeStamp: () => '', translatedEdited: 'edited' });
+  try {
+    plugin.populateParent(root, ['m']);
+    const row = group.children.find(node => node.className === 'history-layout').children[0];
+    const parts = row.children.filter(node => node.tagName !== 'TIME');
+    assert.equal(parts[0].children[0].id, first.id);
+    assert.equal(parts[1].textContent, ` ${marker(missing)} `);
+    assert.equal(parts[2].children[0].id, last.id);
+    assert.deepEqual(record, before);
+  } finally { global.document = oldDocument; }
+});
+
+test('Logger retains an unmatched marker-only historical row when media is enabled', () => {
+  const marker = '`Attachment Deleted: `https://example.com/unmatched.png';
+  const record = { message: { id: 'm', channel_id: 'channel', content: '', attachments: [] }, edit_history: [{ content: marker, time: 1 }], removed_attachments: [] };
+  const plugin = createPlugin({ messageRecord: { m: record }, settings: { cacheAllImages: true, renderCap: 0 } });
+  const root = fakeNode('div'), group = fakeNode('div'), markup = fakeNode('div'), oldDocument = global.document;
+  group.appendChild(markup); group.getElementsByClassName = name => name === 'markup' ? [markup] : [];
+  global.document = { createElement: fakeNode, createTextNode: value => ({ textContent: value }), getElementById: () => null };
+  Object.assign(plugin, { style: { edited: 'edited' }, classes: { markup: 'markup' }, multiClasses: { markup: 'markup' }, menu: { shownMessages: -1 },
+    getSavedMessage: () => record, createMessageGroup: () => group, getSingleDiscordClass: () => 'missing',
+    formatMarkup: text => { if (!text) return null; const node = fakeNode('div'); node.textContent = text; return node; },
+    Tooltip: function () {}, getEditedTimestampClasses: () => '', createTimeStamp: () => '', translatedEdited: 'edited' });
+  try {
+    plugin.populateParent(root, ['m']);
+    assert.equal(root.children[0], group);
+    assert.equal(markup.children[0].textContent, marker);
+    assert.equal(record.edit_history[0].content, marker);
   } finally { global.document = oldDocument; }
 });

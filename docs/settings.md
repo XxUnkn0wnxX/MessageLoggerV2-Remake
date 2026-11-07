@@ -103,7 +103,7 @@ Self-related gates are cumulative across sent, edited, deleted, bulk-delete, gho
 
 ## 🎬 Media settings
 
-When media rendering is enabled, historical removed uploads have a separate display rule: use an existing cached preview or file card, otherwise retain the attachment-removal text. A displayed cached representation replaces its duplicate deletion marker. This does not disable background caching or change the CDN/local policy for current attachments. Inline history and Logger reuse the existing supported audio and document/file-card renderers; inline image/video previews remain thumbnail-sized.
+When media rendering is enabled, removed uploads use the same selected source policy as deleted attachments: CDN -> distinct proxy -> local cache -> existing fallback, or local cache -> fallback in local-only mode. An admitted preview replaces its duplicate deletion marker. Logger keeps each removed file or fallback beside its own edit snapshot, in the original edit and attachment-marker order. Repeated text remains part of each snapshot while media is On. Inline history and Logger reuse the supported audio and document/file-card renderers; inline image/video previews remain thumbnail-sized.
 
 | Setting | Default | Behavior |
 | --- | --- | --- |

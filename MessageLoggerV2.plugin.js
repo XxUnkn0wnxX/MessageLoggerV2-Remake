@@ -1190,7 +1190,7 @@ module.exports = class MessageLoggerV2 {
         title: 'Removed attachments and media controls',
         type: 'fixed',
         items: [
-          'Removed attachments share the deleted-media source policy, sizing and tint across supported previews. Turning media off removes retained previews and generated placeholders while preserving message text and edit history.',
+          'Removed attachments share the deleted-media source policy, sizing and tint. Logger keeps previews and fallbacks beside their matching edits. Turning media off hides attachment-only rows, previews and placeholders while preserving saved text and history.',
           'Eligible media seen while rendering is off can be cached later in the same session after media and saving are enabled.'
         ]
       },
@@ -26790,6 +26790,27 @@ module.exports = class MessageLoggerV2 {
           .filter(entry => entry.removed && ['remote', 'blob'].includes(entry.plan?.action) && !entry.attachment?.hidden)
           .map(entry => this.getRemovedAttachmentIdentity(entry.attachment)).filter(Boolean));
         const markedRemovedIds = new Set();
+        const historyMediaIds = new Map();
+        const historyMediaHosts = new Map();
+        if (this.settings?.cacheAllImages !== false) {
+          for (const [index, hist] of (record?.edit_history || []).entries()) {
+            if (typeof hist?.content !== 'string') continue;
+            const ids = new Set();
+            for (const match of hist.content.matchAll(/`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g)) {
+              const attachment = this.getRemovedAttachmentFromEditHistoryMarker(match[1], removedAttachments, null);
+              const identity = this.getRemovedAttachmentIdentity(attachment);
+              if (identity && admittedRemovedIds.has(identity)) ids.add(identity);
+            }
+            if (ids.size) historyMediaIds.set(index, ids);
+          }
+        }
+        let historyLayout = null;
+        let hasRenderedHistory = false;
+        if (historyMediaIds.size && markup.parentElement) {
+          historyLayout = document.createElement('div');
+          historyLayout.className = this.style.editHistoryLayout || '';
+          markup.parentElement.insertBefore(historyLayout, markup);
+        }
         if (record?.edit_history) {
           for (let ii = 0; ii < record.edit_history.length; ii++) {
             const hist = record.edit_history[ii];
@@ -26804,14 +26825,59 @@ module.exports = class MessageLoggerV2 {
                 return admittedRemovedIds.has(identity) ? '' : marker;
               })
               : hist.content;
-            const editedMarkup = formatContent(displayContent, message.channel_id);
-            if (!editedMarkup) continue;
-            editedMarkup.insertAdjacentHTML('beforeend', `<time class="${this.getEditedTimestampClasses()}">(${this.translatedEdited})</time>`);
-            new this.Tooltip(editedMarkup, 'Edited at ' + (typeof hist.time === 'string' ? hist.time : this.createTimeStamp(hist.time)), { side: 'left' });
-            editedMarkup.classList.add(this.style.edited);
+            const mediaIds = historyLayout && historyMediaIds.get(ii);
+            if (historyLayout) {
+              const row = document.createElement('div');
+              row.className = this.style.edited || '';
+              row.dataset.ml2EditHistoryIndex = String(ii);
+              row.edit = ii;
+              const appendHistoryText = (text, allowEmpty = false) => {
+                if (text === '' && !allowEmpty) return;
+                const node = formatContent(text, message.channel_id);
+                if (!node) return;
+                node.classList.add(...String(markup.className || '').split(/\s+/).filter(Boolean));
+                node.classList.add(this.style.edited);
+                node.edit = ii;
+                row.appendChild(node);
+              };
+              if (mediaIds?.size && typeof hist.content === 'string') {
+                let cursor = 0;
+                const placed = new Set();
+                for (const match of hist.content.matchAll(/`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g)) {
+                  const attachment = this.getRemovedAttachmentFromEditHistoryMarker(match[1], removedAttachments, null);
+                  const identity = this.getRemovedAttachmentIdentity(attachment);
+                  if (!identity || !mediaIds.has(identity)) continue;
+                  appendHistoryText(hist.content.slice(cursor, match.index));
+                  cursor = match.index + match[0].length;
+                  if (placed.has(identity)) continue;
+                  placed.add(identity);
+                  const host = document.createElement('div');
+                  host.dataset.ml2AttachmentMessageId = messageId;
+                  host.dataset.ml2EditHistoryMedia = String(ii);
+                  row.appendChild(host);
+                  if (!historyMediaHosts.has(identity)) historyMediaHosts.set(identity, []);
+                  historyMediaHosts.get(identity).push(host);
+                }
+                appendHistoryText(hist.content.slice(cursor));
+              } else appendHistoryText(displayContent, true);
+              if (!row.childElementCount && !mediaIds?.size) continue;
+              const timestamp = document.createElement('time');
+              timestamp.className = this.getEditedTimestampClasses();
+              timestamp.textContent = `(${this.translatedEdited})`;
+              row.appendChild(timestamp);
+              new this.Tooltip(row, 'Edited at ' + (typeof hist.time === 'string' ? hist.time : this.createTimeStamp(hist.time)), { side: 'left' });
+              historyLayout.appendChild(row);
+            } else {
+              const editedMarkup = formatContent(displayContent, message.channel_id);
+              if (!editedMarkup) continue;
+              editedMarkup.insertAdjacentHTML('beforeend', `<time class="${this.getEditedTimestampClasses()}">(${this.translatedEdited})</time>`);
+              new this.Tooltip(editedMarkup, 'Edited at ' + (typeof hist.time === 'string' ? hist.time : this.createTimeStamp(hist.time)), { side: 'left' });
+              editedMarkup.classList.add(this.style.edited);
+              editedMarkup.edit = ii;
+              markup.appendChild(editedMarkup);
+            }
             markup.classList.add(this.style.edited);
-            editedMarkup.edit = ii;
-            markup.appendChild(editedMarkup);
+            hasRenderedHistory = true;
           }
         }
         const formattedContent = formatContent(message.content, message.channel_id);
@@ -27071,7 +27137,7 @@ module.exports = class MessageLoggerV2 {
               return null;
             }
           };
-          const attemptToUseCachedImage = (attachmentId, attachmentIdx, hidden, filename, width, height, presentationLabel, cachedUrl) => {
+          const attemptToUseCachedImage = (attachmentId, attachmentIdx, hidden, filename, width, height, presentationLabel, cachedUrl, mediaHost) => {
             const img = document.createElement('img');
             markLoggerAttachmentTarget(img, { id: attachmentId });
             img.classList = DiscordModules.ClickableClasses?.clickable || '';
@@ -27140,7 +27206,7 @@ module.exports = class MessageLoggerV2 {
                 { id: attachmentId }
               ));
             });
-            contentDiv.appendChild(img);
+            mediaHost.appendChild(img);
             return true;
           };
           const createVideoContainer = (videoId, videoIdx, videoWidth) => {
@@ -27168,7 +27234,7 @@ module.exports = class MessageLoggerV2 {
             container.appendChild(playButton);
             return { container, video };
           };
-          const attemptToUseCachedVideo = (attachmentId, attachmentIdx, hidden, filename, width, height, presentationLabel, cachedUrl) => {
+          const attemptToUseCachedVideo = (attachmentId, attachmentIdx, hidden, filename, width, height, presentationLabel, cachedUrl, mediaHost) => {
             const existingElement = Array.from(parent.querySelectorAll('[id]')).find(node => node.id === String(attachmentId));
             if (existingElement) {
               existingElement.id = "og-" + attachmentId;
@@ -27221,10 +27287,10 @@ module.exports = class MessageLoggerV2 {
                 { id: attachmentId }
               ));
             });
-            contentDiv.appendChild(container);
+            mediaHost.appendChild(container);
             return true;
           };
-          const handleCreateImage = (attachment, idx) => {
+          const handleCreateImage = (attachment, idx, mediaHost) => {
             const presentationAction = attachment._ml2PresentationAction;
             const ownedEntry = getLoggerAttachmentEntry(attachment);
             const ownedContinuation = ownedEntry
@@ -27299,7 +27365,8 @@ module.exports = class MessageLoggerV2 {
                   width,
                   height,
                   getPresentationFallbackLabel(nextPlan, mediaAttachment, sourceAttachment),
-                  nextPlan.url
+                  nextPlan.url,
+                  mediaHost
                 );
                 return;
               }
@@ -27326,10 +27393,10 @@ module.exports = class MessageLoggerV2 {
               const documentHost = document.createElement('div');
               markLoggerAttachmentTarget(documentHost, sourceAttachment || attachment);
               markRemovedPreview(documentHost, sourceAttachment || attachment);
-              contentDiv.appendChild(documentHost);
+              mediaHost.appendChild(documentHost);
               let unavailableHandled = false;
               const onDocumentUnavailable = () => { deferDisplay(() => {
-                if (unavailableHandled || documentHost.parentElement !== contentDiv) return;
+                if (unavailableHandled || documentHost.parentElement !== mediaHost) return;
                 unavailableHandled = true;
                 this.cleanupLoggerNativeDocumentRoots(documentHost);
                 documentHost.replaceWith(createUnavailableAttachmentPlaceholder(
@@ -27342,10 +27409,10 @@ module.exports = class MessageLoggerV2 {
                 const probeContext = loggerAttachmentEntry?.removed
                   ? this.createOwnedRemovedTextProbeContext(
                     record, sourceAttachment, mountedSource, {},
-                    allowDetached => attachment.url === mountedSource && documentHost.parentElement === contentDiv
+                    allowDetached => attachment.url === mountedSource && documentHost.parentElement === mediaHost
                       && (allowDetached || documentHost.isConnected !== false),
                     deferDisplay((coordinatedPlan, failedUrl) => {
-                      if (documentHost.isConnected === false || documentHost.parentElement !== contentDiv) return;
+                      if (documentHost.isConnected === false || documentHost.parentElement !== mediaHost) return;
                       const nextPlan = coordinatedPlan || ownedContinuation?.(failedUrl);
                       if (nextPlan?.action === 'ignore') return;
                       if ((nextPlan?.action === 'remote' || nextPlan?.action === 'blob')
@@ -27374,7 +27441,7 @@ module.exports = class MessageLoggerV2 {
               const audioAttachment = sourceAttachment || attachment;
               const audioHost = document.createElement('div');
               markRemovedPreview(audioHost, sourceAttachment || attachment);
-              contentDiv.appendChild(audioHost);
+              mediaHost.appendChild(audioHost);
               const replaceAudioWithPlaceholder = plan => {
                 this.cleanupLoggerNativeAudioRoots(audioHost);
                 audioHost.replaceWith(createUnavailableAttachmentPlaceholder(
@@ -27464,7 +27531,8 @@ module.exports = class MessageLoggerV2 {
                 attachment.width,
                 attachment.height,
                 getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment),
-                presentationAction === 'blob' ? attachment.url : null
+                presentationAction === 'blob' ? attachment.url : null,
+                mediaHost
               );
             } else if (isCached) {
               attemptToUseCachedImage(
@@ -27475,7 +27543,8 @@ module.exports = class MessageLoggerV2 {
                 attachment.width,
                 attachment.height,
                 getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment),
-                presentationAction === 'blob' ? attachment.url : null
+                presentationAction === 'blob' ? attachment.url : null,
+                mediaHost
               );
             } else if (this.isVideo(attachment.url)) {
               const { container, video } = createVideoContainer(attachment.id, idx, this.clamp(attachment.width, 200, 400));
@@ -27530,7 +27599,9 @@ module.exports = class MessageLoggerV2 {
                     attachment.filename,
                     attachment.width,
                     attachment.height,
-                    getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment)
+                    getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment),
+                    null,
+                    mediaHost
                   );
                 } else {
                   container.replaceWith(createUnavailableAttachmentPlaceholder(
@@ -27539,7 +27610,7 @@ module.exports = class MessageLoggerV2 {
                   ));
                 }
               });
-              contentDiv.appendChild(container);
+              mediaHost.appendChild(container);
             } else if (this.isImage(attachment.url)) {
               const img = document.createElement('img');
               markLoggerAttachmentTarget(img, attachment);
@@ -27602,7 +27673,9 @@ module.exports = class MessageLoggerV2 {
                     attachment.filename,
                     attachment.width,
                     attachment.height,
-                    getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment)
+                    getPresentationFallbackLabel(null, attachment, getLoggerAttachmentEntry(attachment)?.attachment),
+                    null,
+                    mediaHost
                   );
                 } else {
                   img.replaceWith(createUnavailableAttachmentPlaceholder(
@@ -27618,10 +27691,19 @@ module.exports = class MessageLoggerV2 {
                 img.src = attachment.url;
                 img.width = this.clamp(attachment.width, 200, 650);
               }
-              contentDiv.appendChild(img);
+              mediaHost.appendChild(img);
             }
           };
-          for (let ii = 0; ii < renderedMedia.length; ii++) handleCreateImage(renderedMedia[ii], ii);
+          for (let ii = 0; ii < renderedMedia.length; ii++) {
+            const attachment = renderedMedia[ii];
+            const entry = getLoggerAttachmentEntry(attachment);
+            const identity = entry?.removed && this.getRemovedAttachmentIdentity(entry.attachment);
+            if (identity && markedRemovedIds.has(identity) && !admittedRemovedIds.has(identity)) continue;
+            const hosts = identity && historyMediaHosts.get(identity);
+            if (hosts?.length) {
+              for (const host of hosts) handleCreateImage({ ...attachment }, ii, host);
+            } else handleCreateImage(attachment, ii, contentDiv);
+          }
         }
         for (const sticker of this.settings?.cacheAllImages === false ? [] : this.getMessageStickerItems(message)) {
           if (this.getStickerMedia(sticker)) continue;
@@ -27632,7 +27714,7 @@ module.exports = class MessageLoggerV2 {
           this.hasSupportedMessagePayload(sourceMessage) || removedAttachments.length
         );
         if ((!contentDiv || !contentDiv.childElementCount) && !message.content.length
-          && !hasPayloadReference && !hasSavedHistory && !hasSuppressedSavedMedia) return;
+          && !hasPayloadReference && !hasSavedHistory && !hasRenderedHistory && !hasSuppressedSavedMedia && !historyMediaHosts.size) return;
         parent.appendChild(messageGroup);
       } catch (err) {
         Logger.error('Error in populateParent', err);

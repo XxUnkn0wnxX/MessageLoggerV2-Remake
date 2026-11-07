@@ -117,6 +117,8 @@ the source correction is installed. The latest native check adds one display req
 - [x] Media-Off rendering source gate: `e0746d1`, 965/965 tests passed; native installation and acceptance remain pending.
 - [x] R7.10 implementation and focused gate: bounded same-session media-Off catch-up reuses the existing deferred-media/cache path, with both media and saving gates, successful-save ordering, current child restrictions, cancellation and `DEBUG CACHE` summaries. All 11 focused catch-up tests passed; native acceptance remains pending.
 - [x] Media-Off suppression/catch-up gate and closed-client installation: 986/986 tests passed (no skips or failures; 6.93 seconds), and build `9efcb95` was installed with data/settings/private-helper preservation verified. Native acceptance then exposed generated blank lines in text-only history; the spacing correction is now installed as `2098ad2` and visible in the channel capture. The unchanged-text attachment-removal history correction is now installed as `51ef560` and user-confirmed with media Off in channel and Logger.
+- [x] Final media-Off history behavior in channel and Logger: the user confirms attachment-only rows are hidden and genuine text edits remain. Channel media-On restoration also passes.
+- [ ] Logger media-On snapshot placement: each removed preview or fallback must appear with its corresponding edit in canonical order. The shared row builder now captures a per-marker destination, including asynchronous failures; final validation and installation follow.
 - [ ] Focused native Off/On confirmation in chat and Logger; confirm media-only
       edits and unchanged-text attachment-removal edits vanish, genuine text edits remain, embeds disappear, and media returns.
 
