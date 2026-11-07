@@ -118,7 +118,7 @@ the source correction is installed. The latest native check adds one display req
 - [x] R7.10 implementation and focused gate: bounded same-session media-Off catch-up reuses the existing deferred-media/cache path, with both media and saving gates, successful-save ordering, current child restrictions, cancellation and `DEBUG CACHE` summaries. All 11 focused catch-up tests passed; native acceptance remains pending.
 - [x] Media-Off suppression/catch-up gate and closed-client installation: 986/986 tests passed (no skips or failures; 6.93 seconds), and build `9efcb95` was installed with data/settings/private-helper preservation verified. Native acceptance then exposed generated blank lines in text-only history; the spacing correction is now installed as `2098ad2` and visible in the channel capture. The unchanged-text attachment-removal history correction is now installed as `51ef560` and user-confirmed with media Off in channel and Logger.
 - [x] Final media-Off history behavior in channel and Logger: the user confirms attachment-only rows are hidden and genuine text edits remain. Channel media-On restoration also passes.
-- [ ] Logger media-On snapshot placement: each removed preview or fallback must appear with its corresponding edit in canonical order. The shared row builder now captures a per-marker destination, including asynchronous failures; final validation and installation follow.
+- [ ] Logger media-On snapshot placement: each removed preview or fallback must appear with its corresponding edit in canonical order. The shared row builder captures a per-marker destination, including asynchronous failures. Build `3ef72ee` passed 983/983 locally and in GitHub Actions and is installed; native placement acceptance remains pending.
 - [ ] Focused native Off/On confirmation in chat and Logger; confirm media-only
       edits and unchanged-text attachment-removal edits vanish, genuine text edits remain, embeds disappear, and media returns.
 
@@ -191,8 +191,10 @@ issue. Its acceptance is independent of the remaining hotfix/cache checks.
 
 ### Current media-gate and private GitHub migration checkpoint — 2026-11-08
 
+- **Paused after the requested installation:** `3ef72ee` (`2.8.2.20`) places Logger previews and fallbacks with their corresponding snapshots, preserving edit order and isolating file cards from text markup. Local **983/983** passed in **6.61 seconds**; [exact-revision GitHub CI](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/runs/42407934199) passed **983/983** in **7.52 seconds**, with no failures or skips. Closed-client installation preserved data/settings/backup/PersonalPins/private-helper state and reopened Stable. The user will perform the remaining local acceptance checks; do not mark this new native layout passed yet.
+
 - Media-Off suppression is committed locally as `e0746d1`; version `2.8.2.20` includes the requested hotfix/hydration/debug changelog and development notice. The full source gate passed **965/965** tests in **6.61 seconds**.
-- Discord now runs installed build `51ef560` (`2.8.2.20`). The final shared display projection hides unchanged-text attachment-removal history while media is Off, retaining real text changes and canonical indices. Local **980/980** passed in **6.07 seconds** and [GitHub Actions](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/runs/42406816968) passed **980/980** in **9.35 seconds**, with no failures or skips. The guarded closed-client installation preserved settings, archive, backup, PersonalPins and the private audit helper. The user confirms the Off projection in both channel and Logger, and On restoration in the live channel. Logger restores its files but groups them after all snapshot text; the user now requests each file beside its own snapshot, keeping the repeated snapshot text. That placement correction is the active follow-up.
+- The previous installed build `51ef560` (`2.8.2.20`). The final shared display projection hides unchanged-text attachment-removal history while media is Off, retaining real text changes and canonical indices. Local **980/980** passed in **6.07 seconds** and [GitHub Actions](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/runs/42406816968) passed **980/980** in **9.35 seconds**, with no failures or skips. The guarded closed-client installation preserved settings, archive, backup, PersonalPins and the private audit helper. The user confirms the Off projection in both channel and Logger, and On restoration in the live channel. Logger restores its files but groups them after all snapshot text; the user now requests each file beside its own snapshot, keeping the repeated snapshot text. That placement correction is the active follow-up.
 - The requested bounded same-session media-Off catch-up is implemented and reviewed, reusing the existing deferred-media/cache path and preserving both master gates and successful-save ordering. The 11 focused tests also cover clearing queued live requests. This is the only added acquisition scope; no archive-wide download scan or persistent queue.
 - The user now authorizes migration and iterative publication to a **private GitHub repository** before all native checks are complete. Keep **develop** as default and **main** as a README-only holding branch; retain NightBirde attribution and an active-development warning. The full migration and successful exact-head CI must precede the next install. All slowb site/history changes remain deferred until Logger is ready.
 
@@ -590,13 +592,12 @@ Hotfix acceptance (does not complete any parked feature stage):
 ### Exact next action
 
 Private GitHub migration, develop-only CI and both branch badges are complete.
-The final media-Off history filter is installed after focused/full tests and
-successful exact-revision CI. Off behavior is user-confirmed in channel and
-Logger; On restores the live channel. Finish the user-requested Logger layout
-correction so removed files appear with their own snapshots rather than after
-all history text, preserving the accepted Off filter and existing media policy.
-Validate and install that correction, then confirm its native layout, the two
-media/saving gates and the final warmed compatibility audit. Forum media checks passed; the user
+Paused at the user’s request after installing the verified Logger snapshot
+layout correction. Await their local checks of snapshot/file/fallback order,
+media/source toggles, bounded catch-up under both saving gates, retained-view
+lifecycle and the final warmed compatibility capture. Off behavior already
+passed in channel and Logger; the previous On channel check passed. The new
+Logger layout and remaining lifecycle/catch-up cases are not yet native passes. Forum media checks passed; the user
 waived a separate ordinary-thread native check. Keep the
 intermittent cold-start display bug explicitly deferred; do not restart its
 investigation or count it as fixed. Public release remains gated on the remaining agreed checks. The explicitly
