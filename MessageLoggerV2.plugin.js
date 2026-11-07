@@ -7163,12 +7163,29 @@ module.exports = class MessageLoggerV2 {
   }
   projectMediaOffEditHistoryContent(content) {
     if (this.settings?.cacheAllImages !== false || typeof content !== 'string') return content;
-    return content.replace(/\n(?:`Attachment Deleted: `https?:\/\/[^\s\r\n]+\n)+$/, '');
+    return content.replace(/(?:\n(?:`Attachment Deleted: `https?:\/\/[^\s\r\n]+\n)+)+$/, '');
   }
-  isSuppressedMediaOnlyEditHistory(content) {
+  isSuppressedMediaOnlyEditHistory(content, record = null, editNum = null) {
     if (this.settings?.cacheAllImages !== false || typeof content !== 'string') return false;
     const marker = /`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g;
-    return !this.projectMediaOffEditHistoryContent(content).replace(marker, '').trim();
+    const projectedContent = this.projectMediaOffEditHistoryContent(content);
+    if (!projectedContent.replace(marker, '').trim()) return true;
+    if (projectedContent === content || !record || !Number.isInteger(editNum)) return false;
+
+    const history = record.edit_history;
+    if (!Array.isArray(history) || editNum < 0 || editNum >= history.length
+      || history[editNum]?.content !== content) return false;
+    let nextContent;
+    if (editNum < history.length - 1) {
+      const nextEdit = history[editNum + 1];
+      if (!nextEdit || typeof nextEdit.content !== 'string') return false;
+      nextContent = nextEdit.content;
+    } else {
+      nextContent = record.message?.content;
+    }
+    if (typeof nextContent !== 'string') return false;
+    const projectText = value => this.projectMediaOffEditHistoryContent(value).replace(marker, '');
+    return projectText(content) === projectText(nextContent);
   }
   getEditHistoryContentSegments(content, removedAttachments, message) {
     content = this.projectMediaOffEditHistoryContent(content);
@@ -22566,7 +22583,11 @@ module.exports = class MessageLoggerV2 {
         }
       }
       for (let index = selectedEdits.length - 1; index >= 0; index--) {
-        if (plugin.isSuppressedMediaOnlyEditHistory(selectedEdits[index].edit.content)) selectedEdits.splice(index, 1);
+        if (plugin.isSuppressedMediaOnlyEditHistory(
+          selectedEdits[index].edit.content,
+          currentRecord,
+          selectedEdits[index].editNum
+        )) selectedEdits.splice(index, 1);
       }
       if (!selectedEdits.length) return renderOriginal();
       const removedAttachments = plugin.getRecordRemovedAttachments(currentRecord);
@@ -26772,7 +26793,7 @@ module.exports = class MessageLoggerV2 {
         if (record?.edit_history) {
           for (let ii = 0; ii < record.edit_history.length; ii++) {
             const hist = record.edit_history[ii];
-            if (this.isSuppressedMediaOnlyEditHistory(hist?.content)) continue;
+            if (this.isSuppressedMediaOnlyEditHistory(hist?.content, record, ii)) continue;
             const displayContent = typeof hist.content === 'string'
               ? this.projectMediaOffEditHistoryContent(hist.content).replace(/`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g, (marker, url) => {
                 if (this.settings?.cacheAllImages === false) return '';

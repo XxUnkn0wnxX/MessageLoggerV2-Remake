@@ -86,7 +86,13 @@ test('media Off removes only the generated trailing edit block on both rendering
     url: `https://cdn.example/removed-${index}.txt`
   }));
   const generated = plugin._getChangedAttachments(oldAttachments, [], 'm', 'c', null).content;
+  const generatedAgain = plugin._getChangedAttachments(oldAttachments.map(attachment => ({
+    ...attachment,
+    id: `${attachment.id}-again`,
+    url: attachment.url.replace('removed-', 'removed-again-')
+  })), [], 'm', 'c', null).content;
   assert.equal((generated.match(/`Attachment Deleted: `/g) || []).length, 4);
+  assert.equal((generatedAgain.match(/`Attachment Deleted: `/g) || []).length, 4);
   assert.deepEqual(record, beforeGenerated);
 
   const markerOnly = `\n${generated}`;
@@ -94,13 +100,16 @@ test('media Off removes only the generated trailing edit block on both rendering
   const trailingLf = 'text with a genuine trailing LF\n';
   const trailingCrlf = 'text with a genuine trailing CRLF\r\n';
   const generatedSuffix = text => `${text}\n${generated}`;
+  const repeatedSuffix = text => `${text}\n${generated}\n${generatedAgain}`;
   const inline = 'before `Attachment Deleted: `https://example.com/inline.png middle after';
   const leadingMarker = '`Attachment Deleted: `https://example.com/legacy.png\nKeep this text';
 
   for (const [source, expected] of [
     [generatedSuffix(original), original],
     [generatedSuffix(trailingLf), trailingLf],
-    [generatedSuffix(trailingCrlf), trailingCrlf]
+    [generatedSuffix(trailingCrlf), trailingCrlf],
+    [repeatedSuffix(trailingLf), trailingLf],
+    [repeatedSuffix(trailingCrlf), trailingCrlf]
   ]) {
     assert.equal(plugin.projectMediaOffEditHistoryContent(source), expected);
     assert.equal(plugin.getEditHistoryContentSegments(source, [], record.message).map(segment => segment.value).join(''), expected);
@@ -113,13 +122,17 @@ test('media Off removes only the generated trailing edit block on both rendering
 
   record.edit_history = [
     { content: generatedSuffix(original), time: '123' },
-    { content: markerOnly, time: '456' },
-    { content: generatedSuffix(trailingLf), time: '789' },
-    { content: generatedSuffix(trailingCrlf), time: '987' },
-    { content: leadingMarker, time: '111' }
+    { content: repeatedSuffix(original), time: '456' },
+    { content: generatedSuffix('text after the real edit'), time: '789' },
+    { content: repeatedSuffix('text after the real edit'), time: '987' },
+    { content: generatedSuffix(trailingLf), time: '100' },
+    { content: generatedSuffix(trailingCrlf), time: '111' },
+    { content: leadingMarker, time: '222' },
+    { content: markerOnly, time: '333' }
   ];
   const before = structuredClone(record);
-  const expectedVisible = [original, trailingLf, trailingCrlf, '\nKeep this text'];
+  freeze(record);
+  const expectedVisible = [original, 'text after the real edit', trailingLf, trailingCrlf, '\nKeep this text'];
   const formatted = [];
   const tooltipLabels = [];
   const root = fakeNode('div');
@@ -142,8 +155,8 @@ test('media Off removes only the generated trailing edit block on both rendering
   try {
     plugin.populateParent(root, ['m']);
     assert.deepEqual(formatted.slice(0, expectedVisible.length), expectedVisible);
-    assert.deepEqual(markup.children.filter(node => node.edit !== undefined).map(node => node.edit), [0, 2, 3, 4]);
-    assert.deepEqual(tooltipLabels, ['Edited at 123', 'Edited at 789', 'Edited at 987', 'Edited at 111']);
+    assert.deepEqual(markup.children.filter(node => node.edit !== undefined).map(node => node.edit), [1, 3, 4, 5, 6]);
+    assert.deepEqual(tooltipLabels, ['Edited at 456', 'Edited at 987', 'Edited at 100', 'Edited at 111', 'Edited at 222']);
     assert.deepEqual(record, before);
 
     plugin.settings.cacheAllImages = true;

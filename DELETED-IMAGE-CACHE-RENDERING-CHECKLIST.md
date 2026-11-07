@@ -109,16 +109,16 @@ Complete saved embeds are hidden; original message text/URLs remain. Apply this 
 and Logger windows/tabs, preserve actual text/history and canonical cache/data,
 and restore supported media under the existing source policy when switched On.
 This supersedes earlier stage notes describing master-Off filename placeholders;
-the source correction is committed, while installation and focused native toggle acceptance remain pending.
+the source correction is installed. The latest native check adds one display requirement: when media is Off, omit attachment-removal edits whose text is unchanged, while retaining genuine text changes and the current message. Canonical history remains intact and returns when media is On.
 
 - [x] Prepare version **2.8.2.20** and the concise built-in hotfix/hydration
       changelog, including the active-development notice; document hydration
       batch outcomes and deduplicated failure-only toast behavior.
 - [x] Media-Off rendering source gate: `e0746d1`, 965/965 tests passed; native installation and acceptance remain pending.
 - [x] R7.10 implementation and focused gate: bounded same-session media-Off catch-up reuses the existing deferred-media/cache path, with both media and saving gates, successful-save ordering, current child restrictions, cancellation and `DEBUG CACHE` summaries. All 11 focused catch-up tests passed; native acceptance remains pending.
-- [x] Media-Off suppression/catch-up gate and closed-client installation: 986/986 tests passed (no skips or failures; 6.93 seconds), and build `9efcb95` was installed with data/settings/private-helper preservation verified. Native acceptance then exposed generated blank lines in text-only history; that follow-up remains open.
+- [x] Media-Off suppression/catch-up gate and closed-client installation: 986/986 tests passed (no skips or failures; 6.93 seconds), and build `9efcb95` was installed with data/settings/private-helper preservation verified. Native acceptance then exposed generated blank lines in text-only history; the spacing correction is now installed as `2098ad2` and visible in the channel capture. The remaining native correction is to hide unchanged-text attachment-removal history while media is Off.
 - [ ] Focused native Off/On confirmation in chat and Logger; confirm media-only
-      edits vanish, text-bearing edits remain, embeds disappear, and media returns.
+      edits and unchanged-text attachment-removal edits vanish, genuine text edits remain, embeds disappear, and media returns.
 
 - [ ] Cover the **main Logger window**, including available tabs, filters,
       sorting, automatic batch admission and close/reopen. Also cover saved
@@ -194,7 +194,9 @@ issue. Its acceptance is independent of the remaining hotfix/cache checks.
 - The requested bounded same-session media-Off catch-up is implemented and reviewed, reusing the existing deferred-media/cache path and preserving both master gates and successful-save ordering. The 11 focused tests also cover clearing queued live requests. This is the only added acquisition scope; no archive-wide download scan or persistent queue.
 - The user now authorizes migration and iterative publication to a **private GitHub repository** before all native checks are complete. Keep **develop** as default and **main** as a README-only holding branch; retain NightBirde attribution and an active-development warning. The full migration and successful exact-head CI must precede the next install. All slowb site/history changes remain deferred until Logger is ready.
 
-- GitHub migration is published privately at `XxUnkn0wnxX/MessageLoggerV2-Remake`: origin and branch push/upstream routing use GitHub; develop is the verified default; main contains only its holding README. Maintained-fork updater links use GitHub develop, while the NightBirde attribution link is preserved. Automatic test scope is develop pushes and PRs targeting develop, with documentation-only workload skipped and manual runs available. Both READMEs use the live **Tests (develop)** workflow badge.
+- GitHub migration is published privately at `XxUnkn0wnxX/MessageLoggerV2-Remake`: origin and branch push/upstream routing use GitHub; develop is the verified default; main contains only its holding README. Maintained-fork updater links use GitHub develop, while the NightBirde attribution link is preserved. Automatic test scope is develop pushes and PRs targeting develop. Native `paths-ignore` excludes root Markdown, docs and documentation templates/license files before a workflow starts; tests/tools fixtures remain in scope. Manual runs remain available. Both READMEs use the live **Tests (develop)** workflow badge.
+
+- The final media-Off history follow-up now hides attachment-removal entries whose text did not change, while preserving genuine text edits and canonical snapshot indices. Focused rendering checks passed 13/13; the combined suite passed **980/980** in **6.07 seconds**, without failures or skips. The lower count reflects removal of the redundant custom CI scope selector and its ten tests, plus two new native history regressions. Exact-revision CI, installation and native confirmation for this follow-up remain pending.
 
 ### Compatibility baseline before R7 — 2026-11-08
 
@@ -585,8 +587,9 @@ Hotfix acceptance (does not complete any parked feature stage):
 
 ### Exact next action
 
-Private GitHub migration, develop-only CI, both branch badges and the guarded
-installation are complete. Verify native
+Private GitHub migration, develop-only CI and both branch badges are complete.
+Finish the shared media-Off attachment-only history filter, pass focused/full tests
+and exact-revision CI, then install through the closed-client guard. Verify native
 Off/On suppression/restoration and the two media/saving gates, then run the final
 warmed compatibility audit. Forum media checks passed; the user
 waived a separate ordinary-thread native check. Keep the

@@ -11,7 +11,7 @@ function renderEditHistory(filename = 'removed.pdf', options = {}) {
   const end = source.indexOf("EditHistoryContent.displayName = 'EditHistoryContent';", start);
   assert.ok(start >= 0 && end > start);
   const attachment = { id: '111111111111111111', filename, url: `https://cdn.discordapp.com/attachments/c/111111111111111111/${filename}` };
-  const message = { id: 'm', channel_id: 'c', content: 'current text', attachments: [] };
+  const message = { id: 'm', channel_id: 'c', content: options.currentContent ?? 'current text', attachments: [] };
   const record = { message, edit_history: [{ content: 'old text `Attachment Deleted: `' + attachment.url, time: 1 }], removed_attachments: [attachment] };
   if (options.edits) record.edit_history = options.edits(attachment);
   const Tooltip = props => props.children({});
@@ -33,7 +33,7 @@ function renderEditHistory(filename = 'removed.pdf', options = {}) {
     return options.transformSegments ? options.transformSegments(segments) : segments;
   };
   const ref = { current: null };
-  const original = { type: 'div', props: { id: 'message-content-m', className: 'markup_native messageContent_native', ref, role: 'article', onClick: options.handler || (() => {}), children: [null, 'current text'] } };
+  const original = { type: 'div', props: { id: 'message-content-m', className: 'markup_native messageContent_native', ref, role: 'article', onClick: options.handler || (() => {}), children: [null, message.content] } };
   const Fragment = Symbol('fragment');
   const React = {
     Fragment,
@@ -60,6 +60,13 @@ function inspectTree(node, visit, ancestors = []) {
     return;
   }
   inspectTree(node.props?.children, visit, [...ancestors, node]);
+}
+
+function freezeDeep(value) {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  Object.freeze(value);
+  Object.values(value).forEach(freezeDeep);
+  return value;
 }
 
 test('cached native edit-history file cards live outside Discord message-content scopes', () => {
@@ -226,4 +233,114 @@ test('media-only selected edit or limited range shows original without generated
     assert.deepEqual(view.record, before);
     assert.deepEqual(view.plugin.editModifiers || {}, modifierBefore);
   }
+});
+
+test('media Off suppresses only annotated snapshots with unchanged next text and preserves native edit mapping', () => {
+  const firstUrl = 'https://cdn.discordapp.com/attachments/c/111111111111111111/first.png';
+  const secondUrl = 'https://cdn.discordapp.com/attachments/c/222222222222222222/second.png';
+  const markerBlock = url => '\n`Attachment Deleted: `' + url + '\n';
+  const firstBlock = markerBlock(firstUrl);
+  const secondBlock = markerBlock(secondUrl);
+  const edits = () => [
+    { content: `A${firstBlock}`, time: 1 },
+    { content: `A${firstBlock}${secondBlock}`, time: 2 },
+    { content: `B${firstBlock}`, time: 3 },
+    { content: `B${firstBlock}${secondBlock}`, time: 4 }
+  ];
+
+  const full = renderEditHistory('removed.pdf', { edits, currentContent: 'C' });
+  const fullBefore = structuredClone(full.record);
+  freezeDeep(full.record);
+  const fullOn = [];
+  inspectTree(full.tree, node => { if (node.props?.editNum !== undefined) fullOn.push(node.props.editNum); });
+  assert.deepEqual(fullOn, [0, 1, 2, 3]);
+  full.plugin.settings.cacheAllImages = false;
+  const fullOff = [];
+  const fullOffTree = full.render();
+  inspectTree(fullOffTree, node => { if (node.props?.editNum !== undefined) fullOff.push(node.props.editNum); });
+  assert.deepEqual(fullOff, [1, 3], 'unchanged attachment-only transitions disappear while text changes retain original indices');
+  const currentBody = [];
+  inspectTree(fullOffTree, node => { if (node.props?.id === full.original.props.id) currentBody.push(node); });
+  assert.equal(currentBody.length, 1);
+  const currentChildren = currentBody[0].props.children;
+  const currentText = [];
+  const collectText = node => {
+    if (typeof node === 'string') currentText.push(node);
+    else if (Array.isArray(node)) node.forEach(collectText);
+    else if (node && typeof node === 'object') collectText(node.props?.children);
+  };
+  collectText(currentChildren);
+  assert.equal(currentText.includes('C'), true, 'current message body remains unchanged');
+  full.plugin.settings.cacheAllImages = true;
+  const restored = [];
+  inspectTree(full.render(), node => { if (node.props?.editNum !== undefined) restored.push(node.props.editNum); });
+  assert.deepEqual(restored, [0, 1, 2, 3]);
+  assert.deepEqual(full.record, fullBefore);
+
+  const bounded = renderEditHistory('removed.pdf', { edits, currentContent: 'C', settings: { maxShownEdits: 3 } });
+  freezeDeep(bounded.record);
+  const boundedOnRows = [];
+  inspectTree(bounded.tree, node => { if (node.props?.editNum !== undefined) boundedOnRows.push(node.props.editNum); });
+  assert.deepEqual(boundedOnRows, [1, 2, 3]);
+  bounded.plugin.settings.cacheAllImages = false;
+  const boundedRows = [];
+  inspectTree(bounded.render(), node => { if (node.props?.editNum !== undefined) boundedRows.push(node.props.editNum); });
+  assert.deepEqual(boundedRows, [1, 3], 'limits are applied to canonical edits before suppression');
+  assert.deepEqual(bounded.record.edit_history, edits());
+
+  const modified = renderEditHistory('removed.pdf', {
+    edits, currentContent: 'C', modifier: { editNum: 3, noSuffix: true }
+  });
+  const modifierBefore = structuredClone(modified.plugin.editModifiers);
+  const modifiedBefore = structuredClone(modified.record);
+  freezeDeep(modified.record);
+  modified.plugin.settings.cacheAllImages = false;
+  const modifiedRows = [];
+  inspectTree(modified.render(), node => { if (node.props?.editNum !== undefined) modifiedRows.push(node.props.editNum); });
+  assert.deepEqual(modifiedRows, [3], 'ShowAs retains the selected edit number after filtering');
+  assert.deepEqual(modified.plugin.editModifiers, modifierBefore);
+  assert.deepEqual(modified.record, modifiedBefore);
+
+  const cycle = renderEditHistory('removed.pdf', {
+    currentContent: 'A', edits: () => [
+      { content: 'A', time: 1 }, { content: 'B', time: 2 }, { content: 'A', time: 3 }
+    ]
+  });
+  freezeDeep(cycle.record);
+  cycle.plugin.settings.cacheAllImages = false;
+  const cycleRows = [];
+  inspectTree(cycle.render(), node => { if (node.props?.editNum !== undefined) cycleRows.push(node.props.editNum); });
+  assert.deepEqual(cycleRows, [0, 1, 2], 'ordinary A-to-B-to-A history is not deduplicated');
+});
+
+test('malformed next snapshots and invalid indexes conservatively preserve annotated rows', () => {
+  const annotation = '\n`Attachment Deleted: `https://cdn.discordapp.com/attachments/c/111111111111111111/first.png\n';
+  const content = `same${annotation}`;
+  const view = renderEditHistory('removed.pdf', {
+    currentContent: 'same',
+    edits: () => [{ content, time: 1 }, { time: 2 }]
+  });
+  freezeDeep(view.record);
+  view.plugin.settings.cacheAllImages = false;
+
+  const rows = [];
+  inspectTree(view.render(), node => { if (node.props?.editNum !== undefined) rows.push(node.props.editNum); });
+  assert.deepEqual(rows, [0, 1], 'missing next content does not fall through to the matching current message');
+  assert.equal(view.plugin.isSuppressedMediaOnlyEditHistory(content, view.record, 0), false);
+  assert.equal(view.plugin.isSuppressedMediaOnlyEditHistory(content, {
+    edit_history: [{ content, time: 1 }, { content: null, time: 2 }],
+    message: { content: 'same' }
+  }, 0), false, 'non-string next content does not use the current message');
+  assert.equal(view.plugin.isSuppressedMediaOnlyEditHistory(content, view.record, -1), false);
+  assert.equal(view.plugin.isSuppressedMediaOnlyEditHistory(content, view.record, view.record.edit_history.length), false);
+  assert.deepEqual(view.record.edit_history[0], { content, time: 1 });
+
+  const final = renderEditHistory('removed.pdf', {
+    currentContent: 'same',
+    edits: () => [{ content, time: 1 }]
+  });
+  final.plugin.settings.cacheAllImages = false;
+  const finalRows = [];
+  inspectTree(final.render(), node => { if (node.props?.editNum !== undefined) finalRows.push(node.props.editNum); });
+  assert.deepEqual(finalRows, [], 'only the actual final history row compares with the current message');
 });
