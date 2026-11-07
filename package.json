@@ -6,6 +6,6 @@
     "test": "node --check MessageLoggerV2.plugin.js && node --check tools/MessageLoggerRuntimeCompatibilityAudit.plugin.js && node --test tests/*.test.js",
     "test:persistence": "node --test tests/persistence.test.js",
     "test:runtime-contracts": "node --test tests/source-contracts.test.js",
-    "test:runtime-audit": "node --test tests/runtime-compatibility-audit-coverage.test.js"
+    "test:runtime-audit": "node --test tests/runtime-compatibility-audit-coverage.test.js tests/runtime-audit-*.test.js"
   }
 }

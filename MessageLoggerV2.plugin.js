@@ -22950,14 +22950,14 @@ module.exports = class MessageLoggerV2 {
       focus.setAttribute('aria-label', `Deleted forum post ${titleText}`);
 
       const left = document.createElement('div');
-      left.className = copyClass(sourceCard, '.left_faa96b', 'left_faa96b');
+      left.className = copyClass(sourceCard, '[class*="left_"]', 'left_faa96b');
       const body = document.createElement('div');
-      body.className = copyClass(sourceCard, '.body_faa96b', 'body_faa96b');
+      body.className = copyClass(sourceCard, '[class*="body_"]', 'body_faa96b');
 
       const header = document.createElement('div');
-      header.className = copyClass(sourceCard, '.header_faa96b', 'header_faa96b');
+      header.className = copyClass(sourceCard, '[class*="header_"]', 'header_faa96b');
       const headerText = document.createElement('div');
-      headerText.className = copyClass(sourceCard, '.headerText_faa96b', 'headerText_faa96b');
+      headerText.className = copyClass(sourceCard, '[class*="headerText_"]', 'headerText_faa96b');
       const title = document.createElement('h3');
       title.className = copyClass(sourceCard, '[class*="postTitleText"]', 'lineClamp2Plus__4bd52 heading-lg/semibold_cf4812 defaultColor__5345c postTitleText_faa96b');
       title.setAttribute('data-text-variant', 'heading-lg/semibold');
@@ -22968,13 +22968,13 @@ module.exports = class MessageLoggerV2 {
       header.appendChild(headerText);
 
       const messageWrap = document.createElement('div');
-      messageWrap.className = copyClass(sourceCard, '.message_faa96b', 'message_faa96b');
+      messageWrap.className = copyClass(sourceCard, '[class*="message_"]', 'message_faa96b');
       const author = document.createElement('span');
-      author.className = copyClass(sourceCard, '.message_faa96b > span', 'defaultColor__4bd52 text-sm/semibold_cf4812 author_d3eee8');
+      author.className = copyClass(sourceCard, '[class*="message_"] > span', 'defaultColor__4bd52 text-sm/semibold_cf4812 author_d3eee8');
       author.setAttribute('data-ml2-plain-forum-author', 'true');
       author.textContent = `${message.author?.username || 'Unknown'}: `;
       const focusBlock = document.createElement('div');
-      focusBlock.className = copyClass(sourceCard, '.messageFocusBlock_faa96b', 'messageFocusBlock_faa96b');
+      focusBlock.className = copyClass(sourceCard, '[class*="messageFocusBlock_"]', 'messageFocusBlock_faa96b');
       const textWrap = document.createElement('div');
       textWrap.className = copyClass(sourceCard, '[class*="messageFocusBlock_"] > div', 'text-sm/semibold_cf4812');
       const textWrapStyle = copyStyle(sourceCard, '[class*="messageFocusBlock_"] > div');
@@ -22985,9 +22985,9 @@ module.exports = class MessageLoggerV2 {
       appendRestoredPreviewMarkup(content, message.content || titleText, message.channel_id);
 
       const footer = document.createElement('div');
-      footer.className = copyClass(sourceCard, '.footer_faa96b', 'footer_faa96b');
+      footer.className = copyClass(sourceCard, '[class*="footer_"]', 'footer_faa96b');
       const meta = document.createElement('span');
-      meta.className = [copyClass(sourceCard, '[class*="text-sm/normal"]', 'text-sm/normal_cf4812'), this.style.restoredForumMeta].filter(Boolean).join(' ');
+      meta.className = [copyClass(sourceCard, '[class*="footer_"] [class*="body-sm/normal_"], [class*="footer_"] [class*="text-sm/normal_"]', 'text-sm/normal_cf4812'), this.style.restoredForumMeta].filter(Boolean).join(' ');
       meta.textContent = getForumRecordMeta(record);
 
       textWrap.appendChild(content);
@@ -22995,8 +22995,8 @@ module.exports = class MessageLoggerV2 {
       messageWrap.append(author, focusBlock);
       footer.appendChild(meta);
       appendForumCardMetadata(body, record, sourceCard);
-      body.append(header, messageWrap, footer);
-      left.appendChild(body);
+      body.append(header, messageWrap);
+      left.append(body, footer);
       card.append(focus, left);
       wireRestoredForumCard(card, record);
       li.appendChild(card);

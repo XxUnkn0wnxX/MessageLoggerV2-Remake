@@ -264,12 +264,25 @@ compact roadmap.
   admission metadata. The label survives retries and deferred/no-save replay;
   HTTP 403/404 remain terminal. Cache identities, acquisition rules, retry budgets,
   notification settings and persisted data are unchanged.
-- **Restored forum author contrast — implemented; visual recheck pending:**
+- **Restored forum author contrast — native colour recheck passed:**
   the native capture found the author using old fallback classes and inheriting
   a dark colour, while the title/body correctly used the active `--text-muted`.
   Logger now marks the restored author at construction and applies that same
   dynamic text colour only within its owned restored card. Native live authors,
   role colours elsewhere, card content, cache and saved data are unchanged.
+  After the closed-client install, the native capture confirms the author,
+  title and preview resolve to the same active theme colour. The user separately
+  checked the restored thread card and confirmed its author was already readable;
+  no thread styling change was required.
+- **Restored forum preview layout — implemented; native recheck pending:**
+  the author is now readable, but the restored message preview appears beneath
+  it. The paired native capture identifies retired class selectors in the card
+  builder: the live message row uses flex layout, while the restored row falls
+  back to block layout. The builder now reuses the current native card's
+  structural/text classes and footer placement, preserving the saved author,
+  parsed preview and deletion details. The runtime probe is also being expanded
+  to compare exercised restored-card layout with a native control, since the
+  earlier observational class counts did not validate stylesheet behavior.
 - **Historical correction:** older claims that Pins errors were unrelated are
   superseded by the proven Logger synthetic-delete trigger. Historical notes
   saying ordinary-row synthetic deletes remain are also superseded. PersonalPins
@@ -310,10 +323,13 @@ Hotfix acceptance (does not complete any parked feature stage):
 - [x] Forum media checks passed on the combined installed build. Separate
       ordinary-thread native testing was explicitly waived; do not report it
       as a native pass. Remaining source-policy and lifecycle checks stay open.
-- [ ] Verify the scoped author-colour repair on a restored deleted-forum card
-      in the native client. Computed-style evidence identified the inherited dark
-      colour; the dynamic-theme repair and scoped source checks are implemented.
-      No PermissionsViewer cause or repair is claimed.
+- [x] Verify the scoped author-colour repair on a restored deleted-forum card
+      in the native client. Before/after computed styles confirm the author now
+      matches the readable theme colour of the title and preview. The targeted
+      restored-thread contrast check also passed; the separate full thread-media
+      matrix remains waived. No PermissionsViewer cause or repair is claimed.
+- [ ] Match the restored forum author/preview row to the current native inline
+      layout, then verify it in the client before resuming media-switch checks.
 - [x] Correct null cache-warning identity; deterministic tests verify unchanged
       cache IDs, bytes, requests, terminal failure behavior and deferred toast.
       Installed with the final native verification gate still open.

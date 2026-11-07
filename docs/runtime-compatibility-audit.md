@@ -93,6 +93,21 @@ whenever MessageLoggerV2 gains or removes a runtime dependency.
   not mounted during the dump. Only the Discord renderer root is an
   unconditional DOM requirement.
 
+The `Dom.ForumThreadSurfaces` section records which selectors and fallback class
+tokens occur in the document. Its capability pass confirms the DOM queries ran;
+it does not prove Discord still styles those tokens. Logger can itself put an
+obsolete class name on a restored node, so token presence alone is insufficient.
+
+`Dom.RestoredForumCardLayout` separately compares mounted restored forum cards
+against a native card in the same forum list. Open a forum list containing both
+kinds of card before running this check. It compares the structural classes,
+author/preview layout, text sizing and footer placement while allowing Logger's
+saved plain username, deleted tint and deletion details. The report contains
+named boolean comparisons, not the inspected text, class names or CSS values.
+Missing, hidden, incomplete or truncated comparisons produce a warning rather
+than a visual pass; an exercised mismatch fails the check. This bounded check
+covers restored forum cards, not every thread view or all plugin styling.
+
 Use runtime failures as trace evidence. Update the exact lookup or fallback in
 MessageLoggerV2, add deterministic coverage where possible, and rerun the
 official test suite before syncing the plugin live.

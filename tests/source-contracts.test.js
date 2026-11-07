@@ -1156,6 +1156,24 @@ test('restored forum cards and compact threads mount from visible Deleted or Pur
   assert.match(source, /restoreDeletedForumCards[\s\S]*desiredIds[\s\S]*data-ml2-restored-forum-card[\s\S]*target\.remove\?\.\(\)/);
   assert.match(source, /html #app-mount \.\$\{this\.style\.restoredForumCard\} \[data-ml2-plain-forum-author="true"\]\s*\{\s*color: var\(--text-muted\) !important;/);
   assert.match(source, /const author = document\.createElement\('span'\);[\s\S]{0,300}author\.setAttribute\('data-ml2-plain-forum-author', 'true'\);/);
+  const restoredCardBuilderStart = source.indexOf('const createAnchoredRestoredForumCard =');
+  const restoredCardBuilderEnd = source.indexOf('const createRestoredForumCard =', restoredCardBuilderStart);
+  assert.ok(restoredCardBuilderStart >= 0 && restoredCardBuilderEnd > restoredCardBuilderStart);
+  const restoredCardBuilder = source.slice(restoredCardBuilderStart, restoredCardBuilderEnd);
+  for (const selector of [
+    '[class*="left_"]',
+    '[class*="body_"]',
+    '[class*="header_"]',
+    '[class*="headerText_"]',
+    '[class*="message_"]',
+    '[class*="message_"] > span',
+    '[class*="messageFocusBlock_"]',
+    '[class*="footer_"]'
+  ]) {
+    assert.ok(restoredCardBuilder.includes(`copyClass(sourceCard, '${selector}'`), `restored card should reuse ${selector} from the live source card`);
+  }
+  assert.match(restoredCardBuilder, /copyClass\(sourceCard, '\[class\*="footer_"\] \[class\*="body-sm\/normal_"\], \[class\*="footer_"\] \[class\*="text-sm\/normal_"\]'/);
+  assert.match(restoredCardBuilder, /body\.append\(header, messageWrap\);[\s\S]*left\.append\(body, footer\);/);
   assert.match(source, /restoreDeletedSidebarThreads[\s\S]*getRestorableCompactThreadRecords\(parent\)/);
   assert.match(source, /restoreDeletedThreadBrowserCards[\s\S]*getRestorableCompactThreadRecords\(parent\)/);
   assert.match(source, /shouldTintMessage = \(channelId, messageId\) => \{[\s\S]*shouldPresentSavedMessage\(channelId, messageId\)/);

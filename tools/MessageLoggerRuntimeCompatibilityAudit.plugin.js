@@ -1698,6 +1698,155 @@ function describeForumThreadDomContract() {
   };
 }
 
+// Compares a mounted restored card with a native card from the same forum list.
+// Only fixed role labels and boolean comparisons leave this collector.
+function describeRestoredForumCardLayout() {
+  const roles = [
+    ['focus', '[data-list-item-id^="forum-channel-list-"]', /^focusTarget_/],
+    ['left', '[class*="left_"]', /^left_/], ['body', '[class*="body_"]', /^body_/],
+    ['header', '[class*="header_"]', /^header_/], ['headerText', '[class*="headerText_"]', /^headerText_/],
+    ['title', '[class*="postTitleText_"]', /^postTitleText_/], ['message', '[class*="message_"]', /^message_/],
+    ['author', '[class*="message_"] > span', /^author_/],
+    ['authorTypography', '[class*="message_"] > span', /^(?:body|text)-sm\/semibold_/],
+    ['focusBlock', '[class*="messageFocusBlock_"]', /^messageFocusBlock_/],
+    ['previewText', '[class*="messageFocusBlock_"] > div', /^(?:body|text)-sm\/semibold_/],
+    ['footer', '[class*="footer_"]', /^footer_/],
+    ['footerTypography', '[class*="footer_"] [class*="body-sm/normal_"], [class*="footer_"] [class*="text-sm/normal_"]', /^(?:body|text)-sm\/normal_/]
+  ];
+  const checks = [
+    ['messageDisplay', 'message', 'display'], ['messageDirection', 'message', 'flexDirection'],
+    ['bodyDisplay', 'body', 'display'], ['bodyDirection', 'body', 'flexDirection'],
+    ['titleFontSize', 'title', 'fontSize'], ['titleLineHeight', 'title', 'lineHeight'],
+    ['authorFontSize', 'author', 'fontSize'], ['authorLineHeight', 'author', 'lineHeight'],
+    ['previewFontSize', 'previewText', 'fontSize'], ['previewLineHeight', 'previewText', 'lineHeight'],
+    ['footerFontSize', 'footerTypography', 'fontSize'], ['footerLineHeight', 'footerTypography', 'lineHeight']
+  ];
+  const result = {
+    status: 'warn', state: 'not-exercised', expectedUniqueness: 'visible native and restored cards in one forum list',
+    loadedMatchCount: 0, counts: { restoredInspected: 0, nativeInspected: 0 },
+    roles: Object.fromEntries(roles.map(([name]) => [name, null])),
+    layout: Object.fromEntries(checks.map(([name]) => [name, null])),
+    structure: { footerOutsideBody: null, authorInsideMessage: null, focusInsideMessage: null },
+    validation: { ok: false, booleans: {}, errors: [] }
+  };
+  let incomplete = false;
+  const merge = (target, name, match) => {
+    target[name] = target[name] === false ? false : match;
+  };
+  const finish = () => {
+    const values = [...Object.values(result.roles), ...Object.values(result.layout), ...Object.values(result.structure)];
+    const mismatch = values.includes(false);
+    const complete = result.loadedMatchCount > 0 && !incomplete && values.every(value => value === true);
+    result.status = mismatch ? 'fail' : complete ? 'pass' : 'warn';
+    result.state = mismatch ? 'mismatch' : complete ? 'matched' : 'not-exercised-or-incomplete';
+    result.validation.ok = complete;
+    result.validation.booleans = { pairedVisibleCards: result.loadedMatchCount > 0,
+      allRolesMatch: Object.values(result.roles).every(value => value === true),
+      allLayoutMatches: Object.values(result.layout).every(value => value === true),
+      allStructureMatches: Object.values(result.structure).every(value => value === true), incomplete };
+    return result;
+  };
+  try {
+    const doc = globalThis.document;
+    const host = globalThis.window || globalThis;
+    const getStyle = host?.getComputedStyle || globalThis.getComputedStyle;
+    if (!doc || typeof doc.querySelectorAll !== 'function' || typeof getStyle !== 'function'
+      || !doc.documentElement || !(host.innerWidth > 0) || !(host.innerHeight > 0)) {
+      incomplete = true; return finish();
+    }
+    // Return null when visibility cannot be established; never report a hidden card as passing.
+    const visible = node => {
+      if (!node || node.isConnected === false || typeof node.getBoundingClientRect !== 'function') return false;
+      const rect = node.getBoundingClientRect();
+      if (!rect || !['width', 'height', 'left', 'top', 'right', 'bottom'].every(key => Number.isFinite(rect[key]))) return null;
+      if (rect.width <= 0 || rect.height <= 0 || rect.right <= 0 || rect.bottom <= 0
+        || rect.left >= host.innerWidth || rect.top >= host.innerHeight) return false;
+      let current = node;
+      for (let depth = 0; current && depth < 24; depth++) {
+        const style = getStyle.call(host, current);
+        if (!style || !['display', 'visibility', 'opacity'].every(key => typeof style[key] === 'string' && style[key])) return null;
+        if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || Number(style.opacity) === 0) return false;
+        if (current === doc.documentElement) return true;
+        current = current.parentElement;
+      }
+      return null;
+    };
+    const restoredNodes = doc.querySelectorAll('[data-ml2-restored-forum-card]');
+    if (!restoredNodes || !Number.isSafeInteger(restoredNodes.length) || restoredNodes.length < 0) {
+      incomplete = true; return finish();
+    }
+    if (restoredNodes.length > 8) incomplete = true;
+    const controlsByList = new Map();
+    for (let i = 0; i < Math.min(restoredNodes.length, 8); i++) {
+      result.counts.restoredInspected++;
+      try {
+        const restored = restoredNodes[i];
+        const restoredVisible = visible(restored);
+        if (restoredVisible !== true) { incomplete = true; continue; }
+        const list = restored.closest?.('li')?.parentElement;
+        if (!list || typeof list.querySelectorAll !== 'function') { incomplete = true; continue; }
+        if (!controlsByList.has(list)) {
+          const focusNodes = list.querySelectorAll('[data-list-item-id^="forum-channel-list-"]');
+          if (!focusNodes || !Number.isSafeInteger(focusNodes.length) || focusNodes.length < 0) {
+            incomplete = true; controlsByList.set(list, null);
+          } else {
+            if (focusNodes.length > 40) incomplete = true;
+            let native = null;
+            for (let j = 0; j < Math.min(focusNodes.length, 40); j++) {
+              result.counts.nativeInspected++;
+              const card = focusNodes[j]?.closest?.('[data-item-id]');
+              if (!card || card.hasAttribute?.('data-ml2-restored-forum-card')
+                || card.closest?.('li')?.parentElement !== list) continue;
+              const state = visible(card);
+              if (state === null) incomplete = true;
+              if (state === true) { native = card; break; }
+            }
+            controlsByList.set(list, native);
+          }
+        }
+        const native = controlsByList.get(list);
+        if (!native) { incomplete = true; continue; }
+        result.loadedMatchCount++;
+        const nodes = {};
+        for (const [name, selector, pattern] of roles) {
+          const source = native.querySelector?.(selector), actual = restored.querySelector?.(selector);
+          if (!source || !actual) { incomplete = true; continue; }
+          nodes[name] = [source, actual];
+          const tokens = node => {
+            const value = node.getAttribute?.('class');
+            return typeof value === 'string' ? value.split(/\s+/).filter(token => pattern.test(token)) : [];
+          };
+          const sourceTokens = tokens(source), actualTokens = tokens(actual);
+          if (sourceTokens.length !== 1 || actualTokens.length !== 1) { incomplete = true; continue; }
+          merge(result.roles, name, sourceTokens[0] === actualTokens[0]);
+        }
+        for (const [name, role, property] of checks) {
+          if (!nodes[role]) { incomplete = true; continue; }
+          const source = getStyle.call(host, nodes[role][0])?.[property];
+          const actual = getStyle.call(host, nodes[role][1])?.[property];
+          if (typeof source !== 'string' || !source || typeof actual !== 'string' || !actual) { incomplete = true; continue; }
+          merge(result.layout, name, source === actual);
+        }
+        for (const [name, parent, child, expected] of [
+          ['footerOutsideBody', 'body', 'footer', false], ['authorInsideMessage', 'message', 'author', true],
+          ['focusInsideMessage', 'message', 'focusBlock', true]
+        ]) {
+          if (!nodes[parent] || !nodes[child] || typeof nodes[parent][0].contains !== 'function'
+            || typeof nodes[parent][1].contains !== 'function') { incomplete = true; continue; }
+          merge(result.structure, name, nodes[parent].every((node, index) => node.contains(nodes[child][index]) === expected));
+        }
+      } catch {
+        incomplete = true;
+        if (!result.validation.errors.includes('dom-read-failed')) result.validation.errors.push('dom-read-failed');
+      }
+    }
+  } catch {
+    incomplete = true;
+    result.validation.errors.push('dom-read-failed');
+  }
+  return finish();
+}
+
 function describeLoggerOwnedStyleContract(api) {
   const styleSeeds = [
     'ml2-deleted',
@@ -4202,6 +4351,7 @@ module.exports = class MessageLoggerRuntimeCompatibilityAudit {
       { name: 'PlatformCapabilities', ...platform },
       { name: 'Dom.CommonSurfaces', ...dom },
       { name: 'Dom.ForumThreadSurfaces', ...describeForumThreadDomContract() },
+      { name: 'Dom.RestoredForumCardLayout', ...describeRestoredForumCardLayout() },
       { name: 'LoggerOwned.Styles', ...describeLoggerOwnedStyleContract(this.bdApi) },
       { name: 'LoggerOwned.MountMarkers', ...describeLoggerOwnedMountContract() },
       { name: 'LoggerIntegration.RenderLinkComponent', ...describeLoggerIntegrationRenderLinkComponent(this.bdApi) },

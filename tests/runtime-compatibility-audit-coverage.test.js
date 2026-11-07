@@ -678,7 +678,7 @@ test('runtime audit builds a sanitized no-write report in a mocked host', async 
     const cssContracts = report.contracts.filter(({ name }) => typeof name === 'string' && name.startsWith('Css.'));
     const reportPath = path.join(pluginFolder, 'MessageLoggerRuntimeCompatibilityAudit-report.json');
 
-    assert.equal(report.totals.total, 90);
+    assert.equal(report.totals.total, 91);
     assert.equal(report.label, 'custom');
     assert.deepEqual(report.options, { loadEntry: false, externalAssets: false });
     assert.equal(integration?.status, 'pass');
