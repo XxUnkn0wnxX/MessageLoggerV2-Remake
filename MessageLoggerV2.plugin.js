@@ -22219,7 +22219,9 @@ module.exports = class MessageLoggerV2 {
       // normal deleted-row tint decision own it as soon as the record is deleted.
       if (this.getSavedMessage(messageId)?.delete_data && this.style.removedAttachmentPreview) {
         for (const preview of node.querySelectorAll?.('[data-ml2-removed-preview]') || []) {
-          preview.classList.remove(this.style.removedAttachmentPreview);
+          if (preview.classList.contains(this.style.removedAttachmentPreview)) {
+            preview.classList.remove(this.style.removedAttachmentPreview);
+          }
         }
       }
       const shouldTint = shouldTintMessage(channelId, messageId) && !this.noTintIds.has(messageId);

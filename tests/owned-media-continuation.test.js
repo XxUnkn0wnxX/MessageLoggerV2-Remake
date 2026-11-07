@@ -803,3 +803,56 @@ test('inline document projection accepts unrelated non-cloneable message fields'
     assert.equal(h.attachment.url.startsWith('https:'), true);
   } finally { h.unmount(); h.flush(); h.restore(); }
 });
+
+test('whole-deleted preview tint reconciliation settles its class observer after removing the marker', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'MessageLoggerV2.plugin.js'), 'utf8');
+  const tintStart = source.indexOf('const tintMessageNode = (node) => {');
+  const tintEnd = source.indexOf('    const findLowestCommonAncestor', tintStart);
+  const observerStart = source.indexOf('const tintObserver = new MutationObserver(');
+  const observerEnd = source.indexOf('    tintObserver.observe(', observerStart);
+  assert.ok(tintStart >= 0 && tintEnd > tintStart && observerStart >= 0 && observerEnd > observerStart);
+  for (const mode of ['normal', 'alternative', 'noTint']) {
+    const pending = [], tokens = new Set(['removed-preview']);
+    const preview = {
+      nodeType: 1,
+      classList: {
+        contains: token => tokens.has(token),
+        remove(token) { tokens.delete(token); pending.push({ type: 'attributes', attributeName: 'class', target: preview }); }
+      }
+    };
+    const node = { id: 'chat-messages-channel-message', querySelectorAll: () => [preview] };
+    const wrapper = { tagName: 'DIV' };
+    const plugin = {
+      style: { removedAttachmentPreview: 'removed-preview' },
+      settings: { useAlternativeDeletedStyle: mode === 'alternative' },
+      getSavedMessage: () => ({ delete_data: { time: 1 } }),
+      noTintIds: new Set(mode === 'noTint' ? ['message'] : [])
+    };
+    let cleared = 0, added = 0, synced;
+    const tintMessageNode = vm.runInNewContext(`(function () { ${source.slice(tintStart, tintEnd)}; return tintMessageNode; }).call(plugin)`, {
+      plugin, getMessageTintTarget: () => wrapper, shouldTintMessage: () => true,
+      clearTintClasses: () => { cleared++; }, syncDeletedAttachmentRendererMarker: (_wrapper, _id, value) => { synced = value; },
+      addTintClass: () => { added++; }
+    });
+    const observer = vm.runInNewContext(`(function () { ${source.slice(observerStart, observerEnd)}; return tintObserver; }).call(plugin)`, {
+      plugin, MutationObserver: class { constructor(callback) { this.callback = callback; } },
+      getMessageNodeFromAnyNode: () => node, tintMessageNode,
+      tintNativeThreadBrowserPreviews() {}, tintNativeDeletedThreadHeaderPlaceholders() {},
+      getForumThreadIdFromAnyNode: () => null, tintForumCardByThreadId() {}, scheduleRestoreDeletedCompactThreads() {}
+    });
+    pending.push({ type: 'attributes', attributeName: 'class', target: preview });
+    let cycles = 0;
+    while (pending.length && cycles < 12) {
+      observer.callback([pending.shift()]);
+      cycles++;
+    }
+    assert.equal(tokens.has('removed-preview'), false, `${mode} removes the stale edit-only marker`);
+    assert.equal(pending.length, 0, `${mode} class observer must settle`);
+    assert.equal(cycles, 2, `${mode} performs one removal and one follow-up reconciliation`);
+    assert.equal(synced, mode !== 'noTint');
+    assert.equal(cleared > 0, mode === 'noTint');
+    assert.equal(added > 0, mode !== 'noTint');
+    observer.callback([{ type: 'attributes', attributeName: 'class', target: preview }]);
+    assert.equal(pending.length, 0, `${mode} repeated reconciliation must not mutate an absent marker`);
+  }
+});

@@ -204,9 +204,17 @@ compact roadmap.
   The paired native capture confirms the file hosts are outside message-text
   styling; sampled raw-code previews match Logger's native styles without
   ColorIndicator rewrites. Native Markdown keeps its internal formatting.
-  Main-channel appearance and normal Discord edit/cancel passed. Logger's
-  Show Edit As Message/Undo controls still need their separate native check.
+  Main-channel appearance and normal Discord edit/cancel passed. The native
+  Show Edit As Message check displays the selected saved TXT version on its own;
+  Undo restores the other snapshots, including the PDF entry. These controls pass.
   Threads and forum posts remain explicit final native checks under RT-09.
+- **Whole-message deletion freeze — source fixed; native retest pending:**
+  deleting an edited message with retained previews exposed a tint-observer loop.
+  Live debugging found repeated class notifications for a preview whose class
+  was already empty. Cleanup now removes the edit-only preview class only when
+  it is present. The regression exercises the actual observer and reconciliation
+  callbacks through repeated notifications, including alternative tint and no-tint
+  modes. Cache acquisition, saved history and deletion categories are unchanged.
 - **Historical correction:** older claims that Pins errors were unrelated are
   superseded by the proven Logger synthetic-delete trigger. Historical notes
   saying ordinary-row synthetic deletes remain are also superseded. PersonalPins
