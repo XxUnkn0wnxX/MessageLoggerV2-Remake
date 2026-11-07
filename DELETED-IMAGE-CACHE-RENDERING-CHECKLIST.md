@@ -190,7 +190,7 @@ issue. Its acceptance is independent of the remaining hotfix/cache checks.
 ### Current media-gate and private GitHub migration checkpoint — 2026-11-08
 
 - Media-Off suppression is committed locally as `e0746d1`; version `2.8.2.20` includes the requested hotfix/hydration/debug changelog and development notice. The full source gate passed **965/965** tests in **6.61 seconds**.
-- Discord runs installed build `9efcb95` (`2.8.2.20`). Installation preserved settings, archive, cached files and the private audit helper. Native capture confirmed generated blank lines in media-Off edit history: affected rows were 66px versus the ordinary 22px control. A shared display-only separator correction is implemented; the combined local gate passed 987/987 tests in 10.25 seconds with no failures or skips. GitHub CI also passed all 987 tests on `a084ee2`. The revised develop-only CI scope passes 988/988 locally (6.87 seconds, no skips or failures); its exact-head hosted run, the next install and native acceptance remain pending.
+- Discord now runs installed build `2098ad2` (`2.8.2.20`), including the shared display-only separator fix. The earlier native capture proved generated blank lines (66px rows versus a 22px control). The revised CI package passed **988/988 locally** (6.87 seconds) and **988/988 in GitHub Actions** (7.98 seconds), with no failures or skips. The [exact-revision run](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/runs/42405518849) preceded the guarded install. Settings, archive, backup, PersonalPins and the private audit helper were preserved; Stable reopened. Native spacing and switch acceptance remain pending.
 - The requested bounded same-session media-Off catch-up is implemented and reviewed, reusing the existing deferred-media/cache path and preserving both master gates and successful-save ordering. The 11 focused tests also cover clearing queued live requests. This is the only added acquisition scope; no archive-wide download scan or persistent queue.
 - The user now authorizes migration and iterative publication to a **private GitHub repository** before all native checks are complete. Keep **develop** as default and **main** as a README-only holding branch; retain NightBirde attribution and an active-development warning. The full migration and successful exact-head CI must precede the next install. All slowb site/history changes remain deferred until Logger is ready.
 
@@ -585,9 +585,8 @@ Hotfix acceptance (does not complete any parked feature stage):
 
 ### Exact next action
 
-Publish the final develop-only CI rules and branch-labelled badge,
-and require successful CI on that exact develop commit before the next authorized
-closed-client install. Verify native
+Private GitHub migration, develop-only CI, both branch badges and the guarded
+installation are complete. Verify native
 Off/On suppression/restoration and the two media/saving gates, then run the final
 warmed compatibility audit. Forum media checks passed; the user
 waived a separate ordinary-thread native check. Keep the
