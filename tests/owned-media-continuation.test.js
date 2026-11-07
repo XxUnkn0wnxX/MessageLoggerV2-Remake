@@ -494,7 +494,7 @@ test('surviving inline preview yields to whole-message tint at the existing mess
   assert.equal(added, false);
 });
 
-test('Logger retains empty-content rows with recognized removed markers when cache is unavailable', () => {
+test('Logger retains removed-file fallbacks when media is on and omits empty rows when media is off', () => {
   for (const availability of ['missing', 'unreadable', 'master-off']) {
     const attachment = { id: '111111111111111111', filename: 'removed.gif', url: 'https://cdn.discordapp.com/attachments/channel/111111111111111111/removed.gif' };
     const marker = '`Attachment Deleted: `' + attachment.url;
@@ -519,9 +519,15 @@ test('Logger retains empty-content rows with recognized removed markers when cac
     });
     try {
       plugin.populateParent(root, ['m']);
-      assert.equal(root.children.includes(group), true, availability);
-      assert.equal(contents[0], availability === 'master-off' ? '' : marker, availability);
-      assert.equal(markup.children.length, availability === 'master-off' ? 1 : 2, 'no duplicate fallback is appended');
+      assert.equal(root.children.includes(group), availability !== 'master-off', availability);
+      if (availability === 'master-off') {
+        assert.equal(contents.length, 0, 'suppressed rows do not build markup');
+        assert.equal(root.children.length, 1);
+        assert.equal(root.children[0].innerText, 'No messages to display with media rendering off.');
+      } else {
+        assert.equal(contents[0], marker, availability);
+        assert.equal(markup.children.length, 2, 'no duplicate fallback is appended');
+      }
       assert.deepEqual(record, original);
     } finally { global.document = previousDocument; }
   }

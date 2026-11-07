@@ -26754,6 +26754,31 @@ module.exports = class MessageLoggerV2 {
   }
   populateParent(parent, messages) {
     const view = arguments[2] || null;
+    const hasMediaOffComponentSummary = components => {
+      if (!components) return false;
+      try {
+        const projected = structuredClone({ components });
+        this.suppressSavedMessageMedia(projected);
+        return this.toSerializableArray(projected.components).length > 0;
+      } catch {
+        return true;
+      }
+    };
+    const hasMediaOffVisibleContent = (record, sourceMessage) => {
+      if (this.settings?.cacheAllImages !== false) return true;
+      if (!sourceMessage) return false;
+      if (typeof sourceMessage.content === 'string' && sourceMessage.content.trim()) return true;
+      const history = Array.isArray(record?.edit_history) ? record.edit_history : [];
+      for (let index = 0; index < history.length; index++) {
+        const content = history[index]?.content;
+        if (typeof content !== 'string'
+          || this.isSuppressedMediaOnlyEditHistory(content, record, index)) continue;
+        const projected = this.projectMediaOffEditHistoryContent(content)
+          .replace(/`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g, '');
+        if (projected.trim()) return true;
+      }
+      return hasMediaOffComponentSummary(sourceMessage.components);
+    };
     const buildRow = (i, parent) => {
       const viewportEntry = this._viewportBuildingEntry;
       try {
@@ -27742,11 +27767,8 @@ module.exports = class MessageLoggerV2 {
           appendPayloadReference('Sticker', sticker.name || sticker.id);
         }
         const hasSavedHistory = record?.edit_history?.some(hist => typeof hist.content === 'string' && hist.content.replace(/`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g, '').trim());
-        const hasSuppressedSavedMedia = this.settings?.cacheAllImages === false && record && (
-          this.hasSupportedMessagePayload(sourceMessage) || removedAttachments.length
-        );
         if ((!contentDiv || !contentDiv.childElementCount) && !message.content.length
-          && !hasPayloadReference && !hasSavedHistory && !hasRenderedHistory && !hasSuppressedSavedMedia && !historyMediaHosts.size) return;
+          && !hasPayloadReference && !hasSavedHistory && !hasRenderedHistory && !historyMediaHosts.size) return;
         parent.appendChild(messageGroup);
       } catch (err) {
         Logger.error('Error in populateParent', err);
@@ -27760,9 +27782,17 @@ module.exports = class MessageLoggerV2 {
       view.retainedSession = supportsViewport ? this.getViewportSession() : null;
     }
     const populate = i => {
-      if (!supportsViewport) return buildRow(i, parent);
       const messageId = messages[i];
-      const source = this.getSavedMessage(messageId)?.message || this.getMessageAny(messageId);
+      const record = this.getSavedMessage(messageId);
+      const source = record?.message || this.getMessageAny(messageId);
+      if (!hasMediaOffVisibleContent(record, source)) {
+        if (source && this.settings?.cacheAllImages === false) suppressedCount++;
+        return false;
+      }
+      if (!supportsViewport) {
+        buildRow(i, parent);
+        return !!source;
+      }
       if (!source) return;
       const session = this.getViewportSession();
       const revision = () => JSON.stringify([
@@ -27824,6 +27854,7 @@ module.exports = class MessageLoggerV2 {
       parent.appendChild(slot);
       view.leases.set(entry, token);
       session.attach(entry, slot, token, { crossing: true, admissionScope: view });
+      return true;
     };
     let i = 0;
     const getShown = () => view?.independent ? view.shownMessages : this.menu.shownMessages;
@@ -27833,6 +27864,8 @@ module.exports = class MessageLoggerV2 {
     let observer = null;
     let stopped = false;
     let pending = false;
+    let visibleCount = 0;
+    let suppressedCount = 0;
     let removeResetCleanup = null;
     const scheduleFrame = callback => typeof requestAnimationFrame === 'function'
       ? requestAnimationFrame(callback) : setTimeout(callback, 0);
@@ -27878,7 +27911,9 @@ module.exports = class MessageLoggerV2 {
     if (view) view.stopAutoAdmission = stopAutoAdmission;
     if (view) removeResetCleanup = this.getViewportSession().onReset(stopAutoAdmission);
     const addMore = () => {
-      for (let added = 0; i < messages.length && (!this.settings.renderCap || added < this.settings.renderCap || (getShown() != -1 && i < getShown())); i++, added++) populate(i);
+      for (let added = 0; i < messages.length && (!this.settings.renderCap || added < this.settings.renderCap || (getShown() != -1 && i < getShown())); i++, added++) {
+        if (populate(i)) visibleCount++;
+      }
       setShown(i);
       handleMoreMessages();
     };
@@ -27908,12 +27943,24 @@ module.exports = class MessageLoggerV2 {
         }
       } else {
         stopAutoAdmission();
+        appendMediaOffEmptyState();
       }
+    };
+    let mediaOffEmptyState = null;
+    const appendMediaOffEmptyState = () => {
+      if (mediaOffEmptyState || !messages.length || this.settings?.cacheAllImages !== false
+        || i < messages.length || visibleCount > 0 || suppressedCount === 0) return;
+      const strong = document.createElement('strong');
+      strong.className = this.multiClasses.defaultColor;
+      strong.innerText = 'No messages to display with media rendering off.';
+      parent.appendChild(strong);
+      mediaOffEmptyState = strong;
     };
     if (this.settings.renderCap) addMore();
     else {
-      for (; i < messages.length; i++) populate(i);
+      for (; i < messages.length; i++) if (populate(i)) visibleCount++;
       stopAutoAdmission();
+      appendMediaOffEmptyState();
     }
     if (!messages.length) {
       const strong = document.createElement('strong');

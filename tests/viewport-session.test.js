@@ -483,6 +483,133 @@ test('Logger text and history remain viewport-gated and warm with media disabled
   }
 });
 
+test('Media Off admits only visible saved rows, skips media-only batches, and preserves On fallbacks', () => {
+  const ids = ['media-only', 'removal-only', 'current-text', 'history-text', 'component-text'];
+  const f = loggerFixture({ ids });
+  const freeze = value => {
+    if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+    Object.freeze(value);
+    Object.values(value).forEach(freeze);
+    return value;
+  };
+  const removedMarker = '\n`Attachment Deleted: `https://cdn.example/removed.png\n';
+  try {
+    f.records['media-only'].message.attachments = [
+      { id: 'one', filename: 'one.png', url: 'https://cdn.example/one.png' },
+      { id: 'two', filename: 'two.png', url: 'https://cdn.example/two.png' }
+    ];
+    f.records['media-only'].message.content = '';
+    f.records['removal-only'].message.content = '';
+    f.records['removal-only'].edit_history = [{ content: removedMarker, time: 'history' }];
+    f.records['current-text'].message.content = 'current visible text';
+    f.records['current-text'].message.attachments = [{ id: 'three', filename: 'three.png' }];
+    f.records['history-text'].message.content = '';
+    f.records['history-text'].edit_history = [{ content: 'genuine historical text', time: 'history' }];
+    f.records['component-text'].message.content = '';
+    f.records['component-text'].message.components = [{ type: 10, content: 'component summary text' }];
+    const before = structuredClone(f.records);
+    freeze(f.records);
+    f.plugin.settings.cacheAllImages = false;
+    f.plugin.Tooltip = function Tooltip() {};
+    f.plugin.getEditedTimestampClasses = () => '';
+    f.plugin.translatedEdited = 'Edited';
+    f.plugin.style.edited = 'edited';
+    f.setFiltered(ids);
+    f.plugin.refilterMessages();
+
+    assert.deepEqual(f.plugin.menu.messages, ids, 'category/search IDs retain their canonical order');
+    const view = f.plugin._loggerViewportView;
+    assert.deepEqual([...view.leases.keys()], [], 'the first bounded batch skips both media-only records without slots');
+    assert.equal(f.parent.children.length, 1, 'only the sentinel remains after a fully skipped batch');
+    f.env.observers.at(-1).visible(f.parent.children[0]);
+    f.env.tick();
+    const admitted = [...view.leases.keys()].map(entry => entry.messageId);
+    assert.deepEqual(admitted, ['current-text', 'history-text'], 'the next batch admits genuine current and historical text');
+    const firstSlots = f.parent.children.slice(0, 2);
+    firstSlots.forEach(slot => f.env.observers[0].visible(slot));
+    f.env.tick();
+    assert.deepEqual(new Set(f.built), new Set(['current-text', 'history-text']));
+
+    const sentinel = f.parent.children[2];
+    f.env.observers.at(-1).visible(sentinel);
+    f.env.tick();
+    const allAdmitted = [...view.leases.keys()].map(entry => entry.messageId);
+    assert.deepEqual(allAdmitted, ['current-text', 'history-text', 'component-text'],
+      'the next bounded batch advances past skipped records');
+    const componentEntry = [...view.leases.keys()].find(entry => entry.messageId === 'component-text');
+    const componentSlot = componentEntry.slot;
+    f.env.observers[0].visible(componentSlot);
+    f.env.tick();
+    assert.ok(f.built.includes('component-text'));
+    assert.deepEqual(f.records, before, 'admission leaves frozen canonical records unchanged');
+  } finally { f.plugin._viewportSession?.reset(); f.env.restore(); }
+
+  const empty = loggerFixture({ ids: ['media-only', 'removal-only', 'component-media'], observer: false });
+  try {
+    empty.records['media-only'].message.attachments = [{ id: 'one', filename: 'one.png' }, { id: 'two', filename: 'two.png' }];
+    empty.records['media-only'].message.content = '';
+    empty.records['removal-only'].message.content = '';
+    empty.records['removal-only'].edit_history = [{ content: removedMarker, time: 'history' }];
+    empty.records['component-media'].message.content = '';
+    empty.records['component-media'].message.components = [{ type: 11, media: { url: 'https://cdn.example/media.png' } }];
+    empty.plugin.settings.cacheAllImages = false;
+    empty.plugin.settings.renderCap = 0;
+    empty.setFiltered(['media-only', 'removal-only', 'component-media']);
+    empty.plugin.refilterMessages();
+    assert.equal(empty.parent.children.length, 1);
+    assert.equal(empty.parent.children[0].innerText, 'No messages to display with media rendering off.');
+  } finally { empty.env.restore(); }
+
+  const capZeroVisible = loggerFixture({ ids: ['text'], observer: false });
+  try {
+    capZeroVisible.plugin.settings.cacheAllImages = false;
+    capZeroVisible.plugin.settings.renderCap = 0;
+    capZeroVisible.records.text.message.content = 'visible text';
+    capZeroVisible.setFiltered(['text']);
+    capZeroVisible.plugin.refilterMessages();
+    assert.equal(capZeroVisible.parent.children.length, 1);
+    assert.notEqual(capZeroVisible.parent.children[0].innerText, 'No messages to display with media rendering off.');
+  } finally { capZeroVisible.env.restore(); }
+
+  const asyncEmpty = loggerFixture({ ids: ['media-one', 'media-two', 'removal-only'] });
+  try {
+    asyncEmpty.records['media-one'].message.attachments = [{ id: 'one', filename: 'one.png' }];
+    asyncEmpty.records['media-two'].message.attachments = [{ id: 'two', filename: 'two.png' }];
+    asyncEmpty.records['media-one'].message.content = '';
+    asyncEmpty.records['media-two'].message.content = '';
+    asyncEmpty.records['removal-only'].message.content = '';
+    asyncEmpty.records['removal-only'].edit_history = [{ content: removedMarker, time: 'history' }];
+    asyncEmpty.plugin.settings.cacheAllImages = false;
+    asyncEmpty.setFiltered(['media-one', 'media-two', 'removal-only']);
+    asyncEmpty.plugin.refilterMessages();
+    assert.equal(asyncEmpty.parent.children.length, 1, 'the first bounded batch creates only its sentinel');
+    asyncEmpty.env.observers.at(-1).visible(asyncEmpty.parent.children[0]);
+    asyncEmpty.env.tick();
+    assert.equal(asyncEmpty.parent.children.length, 1);
+    assert.equal(asyncEmpty.parent.children[0].innerText, 'No messages to display with media rendering off.');
+  } finally { asyncEmpty.env.restore(); }
+
+  const on = loggerFixture({ ids: ['media-only'], observer: false });
+  try {
+    on.records['media-only'].message.attachments = [{ id: 'one', filename: 'one.png', url: 'https://cdn.example/one.png' }];
+    on.records['media-only'].message.content = '';
+    on.plugin.settings.cacheAllImages = false;
+    on.plugin.getLoggerSavedAttachmentPresentationEntries = message => on.plugin.settings.cacheAllImages
+      ? message.attachments.map(attachment => ({
+        attachment, removed: false, plan: { action: 'placeholder', label: attachment.filename }
+      }))
+      : [];
+    on.setFiltered(['media-only']);
+    on.plugin.refilterMessages();
+    assert.equal(on.parent.children.length, 1);
+    assert.equal(on.parent.children[0].innerText, 'No messages to display with media rendering off.');
+    on.plugin.settings.cacheAllImages = true;
+    on.plugin.refreshLoggerMenu();
+    assert.equal(on.parent.children.length, 1, 'Media On restores the row after a full refilter');
+    assert.ok(on.parent.children[0].children[0].children.some(node => /Attachment not cached: one\.png/.test(node.textContent || '')));
+  } finally { on.env.restore(); }
+});
+
 test('owned Logger admits cap batches, activates later visibility in either direction, and retains hosts across filters', () => {
   const f = loggerFixture();
   try {
