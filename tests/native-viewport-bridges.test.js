@@ -366,9 +366,18 @@ function installContentGate(plugin) {
   const patcher = { before(target, name, callback) { patches.before = callback; return () => {}; }, after(target, name, callback) { patches.after = callback; return () => {}; } };
   const scope = { React, ReactDOM, Patcher: patcher, DiscordModules: {},
     SavedAttachmentPresentationContent() {}, DeletedContentTooltip() {}, EditHistoryContent() {}, NativeHistoryBridge() {},
+    Hooks: { useForceUpdate: () => [null, () => {}] }, document: global.document,
+    EditHistoryNativeAttachment() {}, SuffixEdited() {},
     SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER: '__mlv2SavedAttachmentPresentationContent',
     NATIVE_VIEWPORT_CONTENT_SOURCE: '__mlv2NativeViewportContentSource', NATIVE_VIEWPORT_CONTENT_BYPASS: '__mlv2NativeViewportContentBypass',
+    NATIVE_VIEWPORT_CONTENT_ANCHOR: '__mlv2NativeViewportContentAnchor',
     deferredNativeContentChildren: [] };
+  const historyStart = source.indexOf('    const EditHistoryContent =');
+  const historyEnd = source.indexOf("    NativeHistoryBridge.displayName = 'MessageLoggerNativeHistoryBridge';", historyStart);
+  Object.assign(scope, vm.runInNewContext(`${source.slice(historyStart, historyEnd)}\n({ EditHistoryContent, RetainedHistoryAnchor, NativeHistoryBridge });`, scope));
+  const tooltipStart = source.indexOf('    const DeletedContentTooltip =');
+  const tooltipEnd = source.indexOf("    DeletedContentTooltip.displayName =", tooltipStart);
+  scope.DeletedContentTooltip = vm.runInNewContext(`${source.slice(tooltipStart, tooltipEnd)}\nDeletedContentTooltip;`, scope);
   const installer = vm.runInNewContext(`(function () { ${source.slice(start, end)} })`, scope);
   installer.call(plugin);
   const mcc = { type() {} };
@@ -379,6 +388,8 @@ function installContentGate(plugin) {
 test('full saved native Content defers parse/projection with one sentinel and preserves the outer anchor/ref/current callbacks', () => {
   const h = setup();
   try {
+    h.plugin.classes = { markup: 'markup_native' };
+    h.plugin.multiClasses = { markup: 'markup_native markup_rtl' };
     let projections = 0, updates = 0;
     h.plugin.getNativeDeletedAttachmentPresentationMessageForMessageContent = message => message;
     h.plugin.getSavedAttachmentMessageContentPresentationMessage = message => { projections++; return message; };
@@ -392,10 +403,16 @@ test('full saved native Content defers parse/projection with one sentinel and pr
     assert.equal(firstArgs[0].message, h.message, 'the outer native component keeps the real native message methods and RTL source');
     assert.equal(firstArgs[0].children, secondArgs[0].children, 'the empty parse sentinel is stable across native calls');
     assert.equal(firstArgs[0].children.length, 0);
-    const nativeAnchor = React.createElement('div', { id: 'message-content-m', ref, onClick: handler, className: 'markup_native' }, null);
+    const nativeClassName = 'markup_native messageContent_native markup_rtl other-plugin-class';
+    const nativeAnchor = React.createElement('div', { id: 'message-content-m', ref, onClick: handler, className: nativeClassName, role: 'article' }, React.createElement('span', {}, 'native adjunct'));
     const outer = patches.after(null, firstArgs, nativeAnchor);
-    assert.equal(outer.props.id, nativeAnchor.props.id); assert.equal(outer.props.ref, ref); assert.equal(outer.props.onClick, handler);
-    const bridgeElement = outer.props.children;
+    const shell = h.mount(outer.type);
+    let tree = shell.render(outer.props); shell.commit();
+    assert.equal(tree.type, React.Fragment, 'the layout must not be a native message-text or Markdown ancestor of file cards');
+    assert.equal(tree.props.children[1].props.id, nativeAnchor.props.id);
+    assert.equal(tree.props.children[1].props.children, null, 'cold content must not mount even native non-text adjuncts before admission');
+    assert.equal(nativeAnchor.props.className, nativeClassName, 'the native text element must not be mutated');
+    const bridgeElement = tree.props.children[0];
     const body = h.bridge(bridgeElement.props);
     assert.equal(h.roots.length, 0);
     h.visible(body.row); h.tick();
@@ -405,12 +422,95 @@ test('full saved native Content defers parse/projection with one sentinel and pr
     assert.equal(inner.props.children, sourceProps.children); assert.equal(inner.props.contentRef, null); assert.equal(inner.props.ref, null);
     assert.equal(inner.props.__mlv2NativeViewportOwner, body.entry());
     const innerArgs = [inner.props]; patches.before(null, innerArgs); assert.equal(projections, 1, 'inner bypass skips only retention');
-    const inside = patches.after(null, innerArgs, nativeAnchor);
-    assert.equal(inside.props.children.props.id, undefined); assert.equal(inside.props.children.props.ref, null);
+    const parsed = React.cloneElement(nativeAnchor, {}, 'saved text');
+    const inside = patches.after(null, innerArgs, parsed);
+    h.plugin.Tooltip = function Tooltip() {}; h.plugin.createTimeStamp = () => 'deleted time';
+    const tooltip = inside.type(inside.props);
+    const onMouseEnter = () => {};
+    const tooltipBody = tooltip.props.children({ onMouseEnter });
+    assert.equal(tooltipBody.type, 'div');
+    assert.equal(tooltipBody.props.onMouseEnter, onMouseEnter, 'deletion hover handlers reach a DOM wrapper rather than being lost on the retained text anchor');
+    assert.equal(inside.props.children.props.id, undefined); assert.equal(inside.props.children.props.ref, undefined);
+    assert.equal(inside.props.children.props.className, nativeClassName, 'real message text keeps native Markdown classes and deletion tint');
+    const anchor = h.mount(inside.props.children.type);
+    const anchorTree = anchor.render(inside.props.children.props);
+    const target = new Element(); anchorTree.props.children[0].props.ref.current = target; anchor.commit();
+    assert.equal(anchorTree.props.children[1].children, 'saved text', 'parsed native text is carried by the retained payload');
+    tree = shell.render(outer.props); shell.commit();
+    const nativePortal = tree.props.children[1];
+    assert.equal(nativePortal.target, target);
+    assert.equal(nativePortal.children.props.id, nativeAnchor.props.id);
+    assert.equal(nativePortal.children.props.ref, ref);
+    assert.equal(nativePortal.children.props.onClick, handler);
+    assert.equal(nativePortal.children.props.role, 'article');
+    assert.equal(nativePortal.children.props.className, nativeClassName);
     body.commit({ onActivate: () => { updates += 10; } }); assert.equal(updates, 1);
     body.unmount();
     const reentry = h.bridge({ ...bridgeElement.props, onActivate: () => { updates += 10; } });
     assert.equal(updates, 11); reentry.unmount();
+    anchor.unmount(); shell.unmount();
+    const portal = ReactDOM.createPortal;
+    ReactDOM.createPortal = undefined;
+    const fallbackArgs = [sourceProps]; patches.before(null, fallbackArgs);
+    assert.equal(fallbackArgs[0].__mlv2NativeViewportContentSource, undefined, 'without portals the native renderer must not receive an empty deferred sentinel');
+    ReactDOM.createPortal = portal;
+  } finally { h.restore(); }
+});
+
+test('deleted history keeps file cards outside the full retained text identity and preserves its current text', () => {
+  const h = setup();
+  try {
+    const { patches, scope } = installContentGate(h.plugin);
+    const record = h.plugin.messageRecord.m;
+    record.edit_history = [{ content: 'old attachment', time: 1 }];
+    h.plugin.shouldPresentEditedMessages = () => true;
+    h.plugin.isEphemeralMessage = () => false;
+    h.plugin.getMessageStickerItems = () => [];
+    h.plugin.getNativeDeletedAttachmentPresentationMessageForMessageContent = message => message;
+    h.plugin.getSavedAttachmentMessageContentPresentationMessage = message => message;
+    h.plugin.Tooltip = function Tooltip() {};
+    h.plugin.createTimeStamp = () => 'time';
+    h.plugin.tools = { createMomentObject: () => ({}) };
+    h.plugin.style = { edited: 'edited', editHistoryLayout: 'owned-layout' };
+    h.plugin.getRecordRemovedAttachments = () => [];
+    h.plugin.getEditHistoryContentSegments = () => [
+      { kind: 'text', value: 'old text' },
+      { kind: 'removedAttachment', attachment: { id: 'file', filename: 'removed.txt' }, value: 'fallback',
+        presentationPlan: { action: 'remote', mediaType: 'attachment', url: 'https://cdn.example/removed.txt' } }
+    ];
+    const args = [{ message: h.message }]; patches.before(null, args);
+    const native = React.createElement('div', { id: 'message-content-m', className: 'markup_native messageContent_native', ref: { current: null } }, [null, 'current text']);
+    const gate = patches.after(null, args, native);
+    const shell = h.mount(gate.type);
+    let shellTree = shell.render(gate.props); shell.commit();
+    assert.equal(shellTree.type, React.Fragment);
+    const bridge = h.bridge(shellTree.props.children[0].props);
+    h.visible(bridge.row); h.tick();
+    const inner = bridge.entry().nativeRoot.renders.at(-1).props.children[0];
+    const innerArgs = [inner.props]; patches.before(null, innerArgs);
+    const historyElement = patches.after(null, innerArgs, native);
+    const history = historyElement.type(historyElement.props);
+    assert.equal(history.props.className, 'owned-layout edited');
+    const groups = history.props.children[0][0].props.children({}).props.children;
+    assert.equal(groups[0].props.className, native.props.className, 'historical text keeps native typography');
+    assert.equal(groups[1].props.className, undefined, 'the file card layout is neutral');
+    assert.equal(groups[1].props.id, undefined);
+    assert.equal(groups[1].props.children.type, scope.EditHistoryNativeAttachment);
+    const current = history.props.children[1];
+    assert.equal(current.type, scope.RetainedHistoryAnchor);
+    assert.equal(current.props.children.props.children, 'current text');
+    const anchor = h.mount(current.type);
+    const anchorTree = anchor.render(current.props);
+    const target = new Element(); anchorTree.props.children[0].props.ref.current = target; anchor.commit();
+    shellTree = shell.render(gate.props); shell.commit();
+    const identity = shellTree.props.children[1];
+    assert.equal(identity.target, target, 'the original message identity is placed only at the current-text anchor');
+    assert.equal(identity.children.props.id, native.props.id);
+    assert.equal(identity.children.props.ref, native.props.ref);
+    assert.equal(identity.children.props.className, native.props.className);
+    assert.equal(identity.children.props.children.props.host, anchorTree.props.children[1].target);
+    assert.notEqual(identity.target, bridge.slot, 'file cards and the neutral viewport host are outside that identity');
+    anchor.unmount(); bridge.unmount(); shell.unmount();
   } finally { h.restore(); }
 });
 

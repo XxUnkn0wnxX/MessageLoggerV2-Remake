@@ -1205,7 +1205,7 @@ module.exports = class MessageLoggerV2 {
         title: 'Scrolling and display hotfixes',
         type: 'fixed',
         items: [
-          'Fixed freezes during rapid scrolling and tab switching, unwanted scroll resets, inline file-preview styling, and restored forum-card layout. Clicking the active Logger tab returns to the top.',
+          'Fixed freezes during rapid scrolling and tab switching, unwanted scroll resets, file-preview styling in edits and deleted restores, and restored forum-card layout. Clicking the active Logger tab returns to the top.',
           'Deleting a message with hidden edits now removes its live row while preserving the hidden record. Required legacy cache controls stay locked on.'
         ]
       },
@@ -22089,6 +22089,7 @@ module.exports = class MessageLoggerV2 {
     const SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER = '__mlv2SavedAttachmentPresentationContent';
     const NATIVE_VIEWPORT_CONTENT_SOURCE = '__mlv2NativeViewportContentSource';
     const NATIVE_VIEWPORT_CONTENT_BYPASS = '__mlv2NativeViewportContentBypass';
+    const NATIVE_VIEWPORT_CONTENT_ANCHOR = '__mlv2NativeViewportContentAnchor';
     const deferredNativeContentChildren = [];
     const SavedAttachmentPresentationContent = ({ plugin, contentModule, contentProps }) => {
       const [, forceUpdate] = Hooks.useForceUpdate();
@@ -22492,7 +22493,7 @@ module.exports = class MessageLoggerV2 {
       const renderOriginal = () => {
         const original = historyOnly ? React.cloneElement(originalElement, { nativeCurrent: true }, null) : originalElement;
         return currentRecord?.delete_data?.time
-          ? React.createElement(DeletedContentTooltip, { plugin, deletedAt: currentRecord.delete_data.time }, original)
+          ? React.createElement(DeletedContentTooltip, { plugin, deletedAt: currentRecord.delete_data.time, block: !!owner }, original)
           : original;
       };
       if (!plugin.shouldPresentEditedMessages()
@@ -22771,17 +22772,27 @@ module.exports = class MessageLoggerV2 {
       }, [host]);
       return React.createElement('div', { ref, style: { display: 'contents' } });
     };
-    const NativeHistoryBridge = ({ plugin, messageId, originalElement, compact }) => {
+    const NativeHistoryBridge = ({ plugin, messageId, originalElement, compact, contentModule, contentProps }) => {
       const components = plugin.getNativeViewportComponents();
       const [anchor, setAnchor] = React.useState(null);
       const onAnchor = React.useRef(null);
       if (!onAnchor.current) onAnchor.current = setAnchor;
       const record = plugin.messageRecord?.[messageId];
       return React.createElement(React.Fragment, {},
-        React.createElement(components.Bridge, { message: record?.message, kind: 'history',
-          nativeProps: { originalElement, compact, onAnchor: onAnchor.current },
+        React.createElement(components.Bridge, { message: contentProps?.message || record?.message, kind: contentModule ? 'content' : 'history',
+          nativeProps: { ...contentProps, originalElement, compact, onAnchor: onAnchor.current },
+          onActivate: () => contentProps?.onUpdate?.(),
           onDeactivate: () => onAnchor.current(null),
           render(owner, props) {
+            if (contentModule) {
+              const { originalElement, onAnchor, ...nativeProps } = props;
+              return React.createElement(contentModule.type, {
+                ...nativeProps, contentRef: null, ref: null, id: undefined,
+                [NATIVE_VIEWPORT_CONTENT_BYPASS]: true,
+                [NATIVE_VIEWPORT_CONTENT_ANCHOR]: true,
+                __mlv2NativeViewportOwner: owner
+              });
+            }
             const original = props.originalElement;
             const identity = React.createElement(RetainedHistoryAnchor, {
               ...original.props, ref: undefined, id: undefined, plugin, owner
@@ -22794,7 +22805,7 @@ module.exports = class MessageLoggerV2 {
         anchor?.target ? ReactDOM.createPortal(anchor.payload
           ? React.cloneElement(originalElement, { className: anchor.className }, React.createElement(RetainedHistoryPayload, { host: anchor.payload }))
           : React.cloneElement(originalElement, { className: anchor.className }), anchor.target)
-          : plugin.editModifiers?.[messageId] ? React.cloneElement(originalElement, {}, null) : originalElement);
+          : contentModule || plugin.editModifiers?.[messageId] ? React.cloneElement(originalElement, {}, null) : originalElement);
 
     };
     NativeHistoryBridge.displayName = 'MessageLoggerNativeHistoryBridge';
@@ -22809,7 +22820,7 @@ module.exports = class MessageLoggerV2 {
           const message = args?.[0]?.message;
           if (!message) return;
           if (!props[NATIVE_VIEWPORT_CONTENT_BYPASS] && this.shouldRetainNativeSavedMessage(message)
-            && this.getNativeViewportComponents()) {
+            && this.getNativeViewportComponents() && typeof ReactDOM.createPortal === 'function') {
             args[0] = { ...props, children: deferredNativeContentChildren, [NATIVE_VIEWPORT_CONTENT_SOURCE]: props };
             return;
           }
@@ -22827,18 +22838,22 @@ module.exports = class MessageLoggerV2 {
           const sourceProps = props[NATIVE_VIEWPORT_CONTENT_SOURCE];
           const components = sourceProps && this.getNativeViewportComponents();
           if (components && ret) {
-            const innerProps = { ...sourceProps, contentRef: null, ref: null, id: undefined,
-              [NATIVE_VIEWPORT_CONTENT_BYPASS]: true };
-            delete innerProps[NATIVE_VIEWPORT_CONTENT_SOURCE];
-            return React.cloneElement(ret, {}, React.createElement(components.Bridge, {
-              message: sourceProps.message, kind: 'content', nativeProps: innerProps,
-              onActivate: () => sourceProps.onUpdate?.(),
-              render: (entry, currentProps) => React.createElement(mcc.type, { ...currentProps, __mlv2NativeViewportOwner: entry })
-            }));
+            // Deleted rows can contain the same mixed text/file history as edits. Keep the
+            // retained layout outside native Markdown and message-content selectors; attach
+            // the native id/ref only to its actual text anchor, as the edit-only bridge does.
+            return React.createElement(NativeHistoryBridge, {
+              plugin: this, messageId: props.message.id, originalElement: ret,
+              compact: props.compact, contentModule: mcc, contentProps: sourceProps
+            });
           }
 
           if (props[NATIVE_VIEWPORT_CONTENT_BYPASS] && ret && typeof React.cloneElement === 'function') {
-            ret = React.cloneElement(ret, { id: undefined, ref: null });
+            ret = props[NATIVE_VIEWPORT_CONTENT_ANCHOR] && props.__mlv2NativeViewportOwner
+              ? React.createElement(RetainedHistoryAnchor, {
+                ...ret.props, id: undefined, ref: undefined, plugin: this,
+                owner: props.__mlv2NativeViewportOwner
+              })
+              : React.cloneElement(ret, { id: undefined, ref: null });
           }
           const isSavedAttachmentPresentationReentry = Boolean(props?.[SAVED_ATTACHMENT_PRESENTATION_CONTENT_REENTRY_MARKER]);
           const recordMessage = record?.message;
@@ -22875,7 +22890,8 @@ module.exports = class MessageLoggerV2 {
           if (record?.delete_data?.time && ret) {
             return React.createElement(DeletedContentTooltip, {
               plugin: this,
-              deletedAt: record.delete_data.time
+              deletedAt: record.delete_data.time,
+              block: !!props[NATIVE_VIEWPORT_CONTENT_ANCHOR]
             }, ret);
           }
         })

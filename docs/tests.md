@@ -171,7 +171,8 @@ Run the relevant targeted manual check after a Discord UI update or related plug
 - [`tests/helpers/plugin-harness.js`](../tests/helpers/plugin-harness.js)
 - [`tests/anti-nuke.test.js`](../tests/anti-nuke.test.js)
 - [`tests/clipboard.test.js`](../tests/clipboard.test.js)
-- [`tests/native-viewport-bridges.test.js`](../tests/native-viewport-bridges.test.js)
+- [`tests/native-viewport-bridges.test.js`](../tests/native-viewport-bridges.test.js) — includes full deleted-content composition: file cards outside text selectors, one native text identity/ref, parsed text and deletion tooltip preservation, empty cold shells, and retained roots.
+- [`tests/edit-history-native-scope.test.js`](../tests/edit-history-native-scope.test.js) — covers native file/audio layout for both edited and deleted histories, including text/code, PDF and generic files. Live deleted-restore styling still needs the focused runtime check.
 - [`tests/keybinds.test.js`](../tests/keybinds.test.js)
 - [`tests/modal-class-ownership.test.js`](../tests/modal-class-ownership.test.js)
 - [`tests/location-lists.test.js`](../tests/location-lists.test.js)

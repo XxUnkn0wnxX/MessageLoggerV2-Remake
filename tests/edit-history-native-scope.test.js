@@ -13,6 +13,7 @@ function renderEditHistory(filename = 'removed.pdf', options = {}) {
   const attachment = { id: '111111111111111111', filename, url: `https://cdn.discordapp.com/attachments/c/111111111111111111/${filename}` };
   const message = { id: 'm', channel_id: 'c', content: options.currentContent ?? 'current text', attachments: [] };
   const record = { message, edit_history: [{ content: 'old text `Attachment Deleted: `' + attachment.url, time: 1 }], removed_attachments: [attachment] };
+  if (options.deleted) record.delete_data = { time: 2 };
   if (options.edits) record.edit_history = options.edits(attachment);
   const Tooltip = props => props.children({});
   const plugin = createPlugin({
@@ -70,20 +71,22 @@ function freezeDeep(value) {
 }
 
 test('cached native edit-history file cards live outside Discord message-content scopes', () => {
-  for (const filename of ['removed.pdf', 'removed.mp3', 'removed.txt']) {
-    const { tree, Native, original, ref } = renderEditHistory(filename);
-    const nativeCards = [], originals = [];
-    inspectTree(tree, (node, ancestors) => {
-      if (node.props?.id === original.props.id) originals.push(node);
-      if (node.type === Native) nativeCards.push({ node, ancestors });
-    });
-    assert.equal(originals.length, 1, 'the native content id must not be duplicated');
-    assert.equal(originals[0].props.ref, ref);
-    assert.equal(originals[0].props.role, 'article');
-    assert.equal(nativeCards.length, 1, filename);
-    assert.equal(nativeCards[0].ancestors.some(node =>
-      node.props?.id === original.props.id
-      || /(?:^|\s)(?:markup_|messageContent_)/.test(node.props?.className || '')), false, filename);
+  for (const deleted of [false, true]) {
+    for (const filename of ['removed.pdf', 'removed.mp3', 'removed.txt', 'removed.js', 'removed.json', 'removed.xml', 'removed.csv', 'removed.html', 'removed.py', 'removed.css', 'removed.sh', 'removed.zsh', 'removed.md', 'removed.bin', 'removed.command']) {
+      const { tree, Native, original, ref } = renderEditHistory(filename, { deleted });
+      const nativeCards = [], originals = [];
+      inspectTree(tree, (node, ancestors) => {
+        if (node.props?.id === original.props.id) originals.push(node);
+        if (node.type === Native) nativeCards.push({ node, ancestors });
+      });
+      assert.equal(originals.length, 1, 'the native content id must not be duplicated');
+      assert.equal(originals[0].props.ref, ref);
+      assert.equal(originals[0].props.role, 'article');
+      assert.equal(nativeCards.length, 1, filename);
+      assert.equal(nativeCards[0].ancestors.some(node =>
+        node.props?.id === original.props.id
+        || /(?:^|\s)(?:markup_|messageContent_)/.test(node.props?.className || '')), false, filename);
+    }
   }
 });
 
