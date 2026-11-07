@@ -194,13 +194,18 @@ compact roadmap.
   Renderer failures retain the saved marker and emit a bounded, deduplicated
   Debug notice through the existing console/toast settings. AT-29 documents
   that routing; AT-55 and RT-09 retain the native media acceptance gates.
-- **Inline file style isolation — implemented; native acceptance pending:**
+- **Inline file style isolation — main-channel appearance verified:**
   native testing confirmed cards inherited message-code formatting because they
   were nested inside message text. The fix separates native file cards from that
   scope while preserving the original current-text element, edit order, limits,
   tooltips, modifiers, tint and fallback behavior. Logger-window rendering stays
   unchanged. The reported missing Markdown attachment was the sixth edit under
   a five-edit limit; changing that setting restored it without a code change.
+  The paired native capture confirms the file hosts are outside message-text
+  styling; sampled raw-code previews match Logger's native styles without
+  ColorIndicator rewrites. Native Markdown keeps its internal formatting.
+  Main-channel appearance and normal Discord edit/cancel passed. Logger's
+  Show Edit As Message/Undo controls still need their separate native check.
   Threads and forum posts remain explicit final native checks under RT-09.
 - **Historical correction:** older claims that Pins errors were unrelated are
   superseded by the proven Logger synthetic-delete trigger. Historical notes
