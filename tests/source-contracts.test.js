@@ -21,36 +21,19 @@ function readDefaultSettings() {
 }
 
 test('plugin metadata and updater remain pointed at the maintained main branch', () => {
-  assert.match(source, /@version 2\.8\.2\.19/);
+  assert.match(source, /@version 2\.8\.2\.20/);
   assert.match(source, /@source https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/src\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   assert.match(source, /@updateUrl https:\/\/git\.slowb\.ro\/XxUnkn0wnxX\/MessageLoggerV2-Remake\/raw\/branch\/main\/MessageLoggerV2\.plugin\.js/);
   const changesBlock = source.match(/  getChanges\(\) \{([\s\S]*?)\n  \}\n  async checkNewUpdate/);
   assert.ok(changesBlock, 'getChanges block was not found');
-  assert.deepEqual(
-    [...changesBlock[1].matchAll(/title: '([^']+)'[\s\S]*?type: '([^']+)'[\s\S]*?items: \[\n\s*'([^']+)'/g)].map(([, title, type, item]) => ({ title, type, item })),
-    [
-      {
-        title: 'Unified saved attachment rendering',
-        type: 'fixed',
-        item: 'Saved image, video, audio, TXT, Markdown, and PDF attachments now use one remote-first policy: CDN -> distinct proxy -> cached local file -> exact filename placeholder; local-only attachments use cached local file -> placeholder, avoiding duplicate or incorrect media mounts.'
-      },
-      {
-        title: 'Native Logger media previews',
-        type: 'improved',
-        item: 'Logger viewer now reuses guarded Discord-native audio, TXT, Markdown, and PDF presentation, remains available when live saved-message mounting is disabled, and isolates each attachment in mixed batches.'
-      },
-      {
-        title: 'Open Attachment routing',
-        type: 'improved',
-        item: 'Every exact-owned saved attachment now routes a usable CDN/proxy URL through the OS default browser or an existing cached physical file through the OS default application; it never externalizes a Blob URL and never guesses the first batch sibling.'
-      },
-      {
-        title: 'Immediate media setting transitions',
-        type: 'fixed',
-        item: 'Render & Cache media and Only render locally cached attachments now refresh saved live mounts and Logger views immediately, preserve child values, cancel stale cache work, and keep the Logger viewer independent of the live-mount display toggle.'
-      }
-    ]
-  );
+  const changes = createPlugin().getChanges();
+  assert.ok(changes.length > 0);
+  for (const change of changes) {
+    assert.equal(typeof change.title, 'string');
+    assert.ok(['fixed', 'improved'].includes(change.type));
+    assert.ok(Array.isArray(change.items) && change.items.length > 0);
+    assert.ok(change.items.every(item => typeof item === 'string' && item.trim()));
+  }
 });
 
 test('all fresh-install settings defaults remain stable', () => {
@@ -339,7 +322,7 @@ test('media-cache controls sit together below their master switch', () => {
       'forceLegacyMediaFetching'
     ]
   );
-  assert.match(mediaSettings, /name: 'Render & Cache media'[\s\S]*createLinkedSettingNote\(\s*React\.createElement\(\s*'span',\s*null,\s*'Renders saved media, caches eligible files, and retries saved live URLs after an ',\s*this\.createSettingStateLabel\(false\),\s*'-to-',\s*this\.createSettingStateLabel\(true\),\s*' transition\.'\s*\)[\s\S]*Shows attachment placeholders; child settings stay saved\.[\s\S]*Disable saving data[\s\S]*eligible logger media stays queued in memory until saving succeeds\.[\s\S]*id: 'cacheAllImages'/);
+  assert.match(mediaSettings, /name: 'Render & Cache media'[\s\S]*createLinkedSettingNote\(\s*React\.createElement\(\s*'span',\s*null,\s*'Renders saved attachments, stickers, and embeds, caches eligible files, and retries saved live URLs after an ',\s*this\.createSettingStateLabel\(false\),\s*'-to-',\s*this\.createSettingStateLabel\(true\),\s*' transition\.'\s*\)[\s\S]*When Off, saved media and embeds do not mount in chat or Logger and generated placeholders are hidden; saved data and child settings remain unchanged\.[\s\S]*Disable saving data[\s\S]*eligible logger media stays queued in memory until saving succeeds\.[\s\S]*id: 'cacheAllImages'/);
   assert.match(mediaSettings, /name: 'Show trimmer toasts'[\s\S]*note: this\.createLinkedSettingNote\([\s\S]*Shows all trimmer toasts; age \+ GB share one start\/end pair\.[\s\S]*Hides every trimmer toast; console TIMER\/TRIM logs remain visible\.[\s\S]*id: 'showMediaCacheTrimLifecycleToasts'[\s\S]*enableWith: 'cacheAllImages'[\s\S]*type: 'switch'/);
   assert.equal(miscSettings.match(/id: '(?:cacheAllImages|addUserIdToSavedMediaFilename|newSaveAllFileTypes|maxCacheFileSize|newCacheAllImagesPath|newCacheAllImages|onlyRenderCachedAttachments|deleteCachedFilesWithRecords|forceLegacyMediaFetching)'/), null);
 });
@@ -372,15 +355,16 @@ test('the BdApi notification setting omits the outdated basic qualifier', () => 
   assert.doesNotMatch(source, /BdApi basic notifications/i);
 });
 
-test('the current changelog covers the accepted saved-attachment release', () => {
-  const changesBlock = source.match(/  getChanges\(\) \{([\s\S]*?)\n  \}\n  async checkNewUpdate/);
-  assert.ok(changesBlock, 'getChanges block was not found');
-  assert.match(changesBlock[1], /CDN -> distinct proxy -> cached local file -> exact filename placeholder/);
-  assert.match(changesBlock[1], /guarded Discord-native audio, TXT, Markdown, and PDF presentation/);
-  assert.match(changesBlock[1], /OS default browser[\s\S]*OS default application/);
-  assert.match(changesBlock[1], /never externalizes a Blob URL and never guesses the first batch sibling/);
-  assert.match(changesBlock[1], /keep the Logger viewer independent of the live-mount display toggle/);
-  assert.doesNotMatch(changesBlock[1], /Trimmer lifecycle toasts|Reliable schema-update detection/);
+test('the current changelog covers media-Off, hydration and hotfixes for the development release', () => {
+  const notes = createPlugin().getChanges().flatMap(change => change.items).join(' ');
+  assert.match(notes, /Turning media off removes retained previews and generated placeholders/);
+  assert.match(notes, /preserving message text and edit history/);
+  assert.match(notes, /load in batches as you scroll/);
+  assert.match(notes, /keeping loaded content ready for reuse/);
+  assert.match(notes, /freezes during rapid scrolling and tab switching/);
+  assert.match(notes, /restored forum-card layout/);
+  assert.match(notes, /Debug logging reports hydration batches, successes and failures/);
+  assert.match(notes, /active development.*unfinished/);
 });
 
 test('settings documentation retains audited group order and current UI labels', () => {
@@ -446,7 +430,7 @@ test('media networking documentation preserves the selector boundary and officia
   );
   assert.match(
     settingsDocs,
-    /\| Show debug messages as toasts \| Off \|[^\n]*Detailed per-request media diagnostics are deliberately excluded/
+    /\| Show debug messages as toasts \| Off \|[^\n]*Successful hydration and detailed per-request media diagnostics remain console-only/
   );
   assert.match(
     testsDocs,
@@ -2290,7 +2274,7 @@ test('component-only records receive a visible Logger viewer fallback before emp
     source.indexOf('sortMessagesByAge(map, useCaptureBatchOrder')
   );
   const componentFallback = viewer.indexOf("this.hasMessageFlag(message, 32768) ? 'Components V2' : 'Components'");
-  const emptyRowPruning = viewer.indexOf('if (contentDiv && !contentDiv.childElementCount && !message.content.length && !hasPayloadReference) return;');
+  const emptyRowPruning = viewer.indexOf('if ((!contentDiv || !contentDiv.childElementCount) && !message.content.length');
 
   assert.ok(componentFallback >= 0, 'the Logger viewer must identify Components V2 payloads');
   assert.match(viewer, /appendPayloadReference\([\s\S]*getComponentPayloadSummary\(components\)/);

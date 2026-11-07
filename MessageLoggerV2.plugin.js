@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.19
+ * @version 2.8.2.20
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -1185,31 +1185,32 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Unified saved attachment rendering',
+        title: 'Removed attachments and media controls',
         type: 'fixed',
         items: [
-          'Saved image, video, audio, TXT, Markdown, and PDF attachments now use one remote-first policy: CDN -> distinct proxy -> cached local file -> exact filename placeholder; local-only attachments use cached local file -> placeholder, avoiding duplicate or incorrect media mounts.'
+          'Removed attachments share the deleted-media source policy, sizing and tint across supported previews. Turning media off removes retained previews and generated placeholders while preserving message text and edit history.'
         ]
       },
       {
-        title: 'Native Logger media previews',
+        title: 'Lighter loading as you scroll',
         type: 'improved',
         items: [
-          'Logger viewer now reuses guarded Discord-native audio, TXT, Markdown, and PDF presentation, remains available when live saved-message mounting is disabled, and isolates each attachment in mixed batches.'
+          'Saved text and media load in batches as you scroll, prioritizing the visible area and keeping loaded content ready for reuse. Logger loads further batches automatically.'
         ]
       },
       {
-        title: 'Open Attachment routing',
-        type: 'improved',
-        items: [
-          'Every exact-owned saved attachment now routes a usable CDN/proxy URL through the OS default browser or an existing cached physical file through the OS default application; it never externalizes a Blob URL and never guesses the first batch sibling.'
-        ]
-      },
-      {
-        title: 'Immediate media setting transitions',
+        title: 'Scrolling and display hotfixes',
         type: 'fixed',
         items: [
-          'Render & Cache media and Only render locally cached attachments now refresh saved live mounts and Logger views immediately, preserve child values, cancel stale cache work, and keep the Logger viewer independent of the live-mount display toggle.'
+          'Fixed freezes during rapid scrolling and tab switching, unwanted scroll resets, inline file-preview styling, and restored forum-card layout. Clicking the active Logger tab returns to the top.'
+        ]
+      },
+      {
+        title: 'Clearer diagnostics',
+        type: 'improved',
+        items: [
+          'Cache errors identify the media type. Debug logging reports hydration batches, successes and failures; optional hydration failure toasts are deduplicated.',
+          'Logger remains in active development; some planned features are unfinished.'
         ]
       }
     ];
@@ -6174,13 +6175,13 @@ module.exports = class MessageLoggerV2 {
               React.createElement(
                 'span',
                 null,
-                'Renders saved media, caches eligible files, and retries saved live URLs after an ',
+                'Renders saved attachments, stickers, and embeds, caches eligible files, and retries saved live URLs after an ',
                 this.createSettingStateLabel(false),
                 '-to-',
                 this.createSettingStateLabel(true),
                 ' transition.'
               ),
-              'Shows attachment placeholders; child settings stay saved.',
+              'When Off, saved media and embeds do not mount in chat or Logger and generated placeholders are hidden; saved data and child settings remain unchanged.',
               ' New downloads pause while ',
               React.createElement(
                 'span',
@@ -7157,6 +7158,11 @@ module.exports = class MessageLoggerV2 {
     }
     return null;
   }
+  isSuppressedMediaOnlyEditHistory(content) {
+    if (this.settings?.cacheAllImages !== false || typeof content !== 'string') return false;
+    const marker = /`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g;
+    return !content.replace(marker, '').trim();
+  }
   getEditHistoryContentSegments(content, removedAttachments, message) {
     if (typeof content !== 'string') return [{ kind: 'text', value: String(content) }];
     const attachments = Array.isArray(removedAttachments)
@@ -7177,6 +7183,10 @@ module.exports = class MessageLoggerV2 {
     while ((match = attachmentMarker.exec(content))) {
       if (match.index > cursor) {
         segments.push({ kind: 'text', value: content.slice(cursor, match.index) });
+      }
+      if (!cacheAllImages) {
+        cursor = attachmentMarker.lastIndex;
+        continue;
       }
       const attachment = this.getRemovedAttachmentFromEditHistoryMarker(
         match[1],
@@ -7220,11 +7230,10 @@ module.exports = class MessageLoggerV2 {
       }
       cursor = attachmentMarker.lastIndex;
     }
-    if (!segments.length) return [{ kind: 'text', value: content }];
     if (cursor < content.length) {
       segments.push({ kind: 'text', value: content.slice(cursor) });
     }
-    return segments;
+    return segments.length ? segments : [{ kind: 'text', value: '' }];
   }
   repairAntiNukeChannelThreadStarterMetadata(data, onlyThreadIds = null) {
     const records = data?.messageRecord;
@@ -12398,6 +12407,7 @@ module.exports = class MessageLoggerV2 {
     return false;
   }
   getLoggerSavedAttachmentPresentationEntries(message, record) {
+    if (this.settings?.cacheAllImages === false) return [];
     const renderMessage = message && typeof message === 'object' ? message : null;
     if (!renderMessage) return [];
     const cacheAllImages = this.settings?.cacheAllImages !== false;
@@ -12461,6 +12471,40 @@ module.exports = class MessageLoggerV2 {
     }
     return entries;
   }
+  suppressSavedMessageMedia(message) {
+    if (!message || typeof message !== 'object' || Array.isArray(message)) return;
+    const projectComponents = components => {
+      if (!Array.isArray(components)) return components;
+      return components.flatMap(component => {
+        if (!component || typeof component !== 'object' || Array.isArray(component)) return [component];
+        const type = Number(component.type);
+        if ([11, 12, 13].includes(type)) return [];
+        if (type === 9 && Number(component.accessory?.type) === 11) {
+          return Array.isArray(component.components)
+            ? component.components.filter(child => Number(child?.type) === 10)
+            : [];
+        }
+        if (type === 17 && Array.isArray(component.components)) {
+          component.components = projectComponents(component.components);
+          return component.components.length ? [component] : [];
+        }
+        return [component];
+      });
+    };
+    if (Array.isArray(message.embeds)) message.embeds = [];
+    if (Array.isArray(message.attachments)) message.attachments = [];
+    for (const alias of ['sticker_items', 'stickerItems', 'stickers']) {
+      if (Array.isArray(message[alias])) message[alias] = [];
+    }
+    if (Array.isArray(message.components)) message.components = projectComponents(message.components);
+    for (const alias of ['message_snapshots', 'messageSnapshots']) {
+      if (!Array.isArray(message[alias])) continue;
+      for (const snapshot of message[alias]) {
+        if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) continue;
+        if (snapshot.message && typeof snapshot.message === 'object') this.suppressSavedMessageMedia(snapshot.message);
+      }
+    }
+  }
   getCacheOnlyMessage(message) {
     if (!message) return message;
     // Discord may enrich rendered message/user objects in place (for example by adding the
@@ -12471,6 +12515,7 @@ module.exports = class MessageLoggerV2 {
     // legacy or mixed-fork media objects that do not satisfy its render contract.
     this.sanitizeNestedEmbedCollections(renderMessage);
     const cacheAllImages = this.settings?.cacheAllImages !== false;
+    if (!cacheAllImages) this.suppressSavedMessageMedia(renderMessage);
     const presentationOptions = {
       allowBlob: cacheAllImages && this.settings?.onlyRenderCachedAttachments,
       allowRemote: cacheAllImages && !this.settings?.onlyRenderCachedAttachments
@@ -12513,10 +12558,10 @@ module.exports = class MessageLoggerV2 {
     }
     for (const alias of ['sticker_items', 'stickerItems', 'stickers']) {
       if (!Array.isArray(renderMessage[alias])) continue;
-      renderMessage[alias] = renderMessage[alias].filter(sticker => {
+      renderMessage[alias] = cacheAllImages ? renderMessage[alias].filter(sticker => {
         const stickerId = sticker?.id == null ? null : String(sticker.id);
         return !stickerId || !excludedStickerIds.has(stickerId);
-      });
+      }) : [];
     }
     return {
       ...renderMessage,
@@ -12525,7 +12570,7 @@ module.exports = class MessageLoggerV2 {
   }
   getNativeDeletedAttachmentPresentationMessage(message) {
     const renderMessage = this.getCacheOnlyMessage(message);
-    if (!renderMessage) return renderMessage;
+    if (!renderMessage || this.settings?.cacheAllImages === false) return renderMessage;
     const sourceMessage = message && typeof message === 'object' ? message : null;
     const cacheAllImages = this.settings?.cacheAllImages !== false;
     const presentationOptions = cacheAllImages
@@ -13563,9 +13608,7 @@ module.exports = class MessageLoggerV2 {
       if (!record?.delete_data) continue;
       const message = record.message;
       if (!message?.id || !message.channel_id) continue;
-      const attachments = Array.isArray(message.attachments) && message.attachments.length ? message.attachments : [];
-      const hasStickers = this.getMessageStickerItems(message).length > 0;
-      if (!attachments.length && !hasStickers || record.delete_data.hidden) continue;
+      if (!this.hasSupportedMessagePayload(message) || record.delete_data.hidden) continue;
       const channelId = String(message.channel_id);
       const liveSavedChannel = this.tools?.getChannel?.(channelId);
       const keepsDiscordOwnedThreadMount = [10, 11, 12].includes(Number(liveSavedChannel?.type))
@@ -13983,10 +14026,7 @@ module.exports = class MessageLoggerV2 {
       for (const id of ids) {
         const record = this.messageRecord?.[id];
         if (!record?.delete_data || !record.message || record.delete_data?.hidden) continue;
-        const hasAttachments = Array.isArray(record.message?.attachments)
-          && record.message.attachments.length > 0;
-        const hasStickers = this.getMessageStickerItems(record.message).length > 0;
-        if (!hasAttachments && !hasStickers) continue;
+        if (!this.hasSupportedMessagePayload(record.message)) continue;
         records.push(record);
       }
       remountedCount = this.remountSavedAttachmentPresentationRecords(records) || 0;
@@ -14010,7 +14050,8 @@ module.exports = class MessageLoggerV2 {
       || message?.attachments?.length
       || message?.embeds?.length
       || this.toSerializableArray(message?.components).length
-      || this.toSerializableArray(message?.message_snapshots || message?.messageSnapshots).length
+      || this.toSerializableArray(message?.message_snapshots).length
+      || this.toSerializableArray(message?.messageSnapshots).length
       || this.getMessageStickerItems(message).length
     );
   }
@@ -22440,6 +22481,10 @@ module.exports = class MessageLoggerV2 {
           if (currentRecord.edit_history[index]) selectedEdits.push({ edit: currentRecord.edit_history[index], editNum: index });
         }
       }
+      for (let index = selectedEdits.length - 1; index >= 0; index--) {
+        if (plugin.isSuppressedMediaOnlyEditHistory(selectedEdits[index].edit.content)) selectedEdits.splice(index, 1);
+      }
+      if (!selectedEdits.length) return renderOriginal();
       const removedAttachments = plugin.getRecordRemovedAttachments(currentRecord);
       let hasNativeCard = false;
       for (const { edit, editNum } of selectedEdits) {
@@ -22524,23 +22569,7 @@ module.exports = class MessageLoggerV2 {
           block: true
         }, oContent)
         : oContent;
-      const edits = [];
-      let i = 0;
-      let max = currentRecord.edit_history.length;
-      if (plugin.settings.maxShownEdits) {
-        if (currentRecord.edit_history.length > plugin.settings.maxShownEdits) {
-          if (plugin.settings.hideNewerEditsFirst) {
-            max = plugin.settings.maxShownEdits;
-          } else {
-            i = currentRecord.edit_history.length - plugin.settings.maxShownEdits;
-          }
-        }
-      }
-      for (; i < max; i++) {
-        const edit = currentRecord.edit_history[i];
-        if (!edit) continue;
-        edits.push(createEditedMessage(edit, i));
-      }
+      const edits = selectedEdits.map(({ edit, editNum }) => createEditedMessage(edit, editNum));
       if (historyOnly) return React.createElement(React.Fragment, {},
         React.createElement('div', { className: [originalElement.props.className, plugin.style.edited].filter(Boolean).join(' ') }, edits),
         React.cloneElement(originalElement, { nativeCurrent: true,
@@ -26591,7 +26620,11 @@ module.exports = class MessageLoggerV2 {
     const buildRow = (i, parent) => {
       const viewportEntry = this._viewportBuildingEntry;
       try {
-        const deferDisplay = this._viewportDisplayCallback || (callback => callback);
+        const deferViewportDisplay = this._viewportDisplayCallback || (callback => callback);
+        const deferDisplay = callback => deferViewportDisplay((...args) => {
+          if (this.settings?.cacheAllImages === false) return;
+          return callback(...args);
+        });
         const viewportSession = viewportEntry ? this._viewportSession : null;
         const messageId = messages[i];
         const record = this.getSavedMessage(messageId);
@@ -26653,11 +26686,12 @@ module.exports = class MessageLoggerV2 {
           .map(entry => this.getRemovedAttachmentIdentity(entry.attachment)).filter(Boolean));
         const markedRemovedIds = new Set();
         if (record?.edit_history) {
-          markup.classList.add(this.style.edited);
           for (let ii = 0; ii < record.edit_history.length; ii++) {
             const hist = record.edit_history[ii];
+            if (this.isSuppressedMediaOnlyEditHistory(hist?.content)) continue;
             const displayContent = typeof hist.content === 'string'
               ? hist.content.replace(/`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g, (marker, url) => {
+                if (this.settings?.cacheAllImages === false) return '';
                 const attachment = this.getRemovedAttachmentFromEditHistoryMarker(url, removedAttachments, null);
                 const identity = this.getRemovedAttachmentIdentity(attachment);
                 if (!identity) return marker;
@@ -26670,6 +26704,7 @@ module.exports = class MessageLoggerV2 {
             editedMarkup.insertAdjacentHTML('beforeend', `<time class="${this.getEditedTimestampClasses()}">(${this.translatedEdited})</time>`);
             new this.Tooltip(editedMarkup, 'Edited at ' + (typeof hist.time === 'string' ? hist.time : this.createTimeStamp(hist.time)), { side: 'left' });
             editedMarkup.classList.add(this.style.edited);
+            markup.classList.add(this.style.edited);
             editedMarkup.edit = ii;
             markup.appendChild(editedMarkup);
           }
@@ -26858,7 +26893,8 @@ module.exports = class MessageLoggerV2 {
           const guild = this.tools.getServer(channel?.guild_id);
           markup.addEventListener('click', () => this.jumpToMessage(message.channel_id, message.id, guild?.id));
         }
-        const stickerMedia = this.getMessageStickerItems(message).map(sticker => this.getStickerMedia(sticker)).filter(Boolean);
+        const stickerMedia = this.settings?.cacheAllImages === false ? []
+          : this.getMessageStickerItems(message).map(sticker => this.getStickerMedia(sticker)).filter(Boolean);
         const renderedMedia = [
           ...(record ? loggerMediaRenderCurrent : message.attachments || []),
           ...(record ? loggerMediaRenderRemoved : []),
@@ -27482,12 +27518,16 @@ module.exports = class MessageLoggerV2 {
           };
           for (let ii = 0; ii < renderedMedia.length; ii++) handleCreateImage(renderedMedia[ii], ii);
         }
-        for (const sticker of this.getMessageStickerItems(message)) {
+        for (const sticker of this.settings?.cacheAllImages === false ? [] : this.getMessageStickerItems(message)) {
           if (this.getStickerMedia(sticker)) continue;
           appendPayloadReference('Sticker', sticker.name || sticker.id);
         }
-        if (contentDiv && !contentDiv.childElementCount && !message.content.length && !hasPayloadReference) return;
-        if (!contentDiv && !message.content.length && !hasPayloadReference) return;
+        const hasSavedHistory = record?.edit_history?.some(hist => typeof hist.content === 'string' && hist.content.replace(/`Attachment Deleted:\s*`\s*(https?:\/\/[^\s]+)/g, '').trim());
+        const hasSuppressedSavedMedia = this.settings?.cacheAllImages === false && record && (
+          this.hasSupportedMessagePayload(sourceMessage) || removedAttachments.length
+        );
+        if ((!contentDiv || !contentDiv.childElementCount) && !message.content.length
+          && !hasPayloadReference && !hasSavedHistory && !hasSuppressedSavedMedia) return;
         parent.appendChild(messageGroup);
       } catch (err) {
         Logger.error('Error in populateParent', err);

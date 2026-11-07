@@ -1878,7 +1878,7 @@ test('a full deleted root promotes the absolute oldest saved context regardless 
   );
 });
 
-test('attachment-only thread promotion preserves canonical media while cache-off presentation becomes a placeholder', () => {
+test('attachment-only thread promotion preserves media while Off hides it and On restores the local-miss fallback', () => {
   const rootId = '694';
   const replyId = '695';
   const author = { id: 'author', username: 'Author', public_flags: 0 };
@@ -1947,8 +1947,12 @@ test('attachment-only thread promotion preserves canonical media while cache-off
   assert.deepEqual(promoted.message.attachments, [attachment]);
   assert.equal(promoted.delete_data.forum_thread_delete, true);
   assert.equal(promoted.delete_data.forum_metadata.rootContextMessageId, replyId);
-  assert.equal(rendered.content, '[Not cached: reply.png]');
+  assert.equal(rendered.content, '');
   assert.deepEqual(rendered.attachments, []);
+  plugin.settings.cacheAllImages = true;
+  plugin.settings.onlyRenderCachedAttachments = true;
+  plugin.imageCacheServerSimulator = { exists: () => false };
+  assert.equal(plugin.getNativeDeletedAttachmentPresentationMessage(promoted.message).content, '[Not cached: reply.png]');
   assert.deepEqual(promoted.message, canonicalBeforePresentation);
 });
 

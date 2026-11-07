@@ -472,7 +472,8 @@ test('Logger text and history remain viewport-gated and warm with media disabled
       visit(host);
       assert.ok(nodes.some(node => node.textContent === 'earlier text'));
       assert.ok(nodes.some(node => node.textContent === 'text a'));
-      assert.ok(nodes.some(node => String(node.textContent || '').includes('photo.png')));
+      assert.equal(nodes.some(node => String(node.textContent || '').includes('photo.png')), masterEnabled,
+        'only the enabled local-cache miss should render a filename placeholder');
       assert.equal(nodes.some(node => ['img', 'video', 'audio'].includes(node.tagName)), false);
       assert.deepEqual(f.records.a, before, 'presentation must preserve the saved attachment and history');
       f.env.observers[0].hidden(slot); f.env.observers[0].visible(slot); f.env.tick();

@@ -2201,7 +2201,7 @@ test('text, attachments, embeds, and sticker-only messages are supported payload
   assert.equal(plugin.hasSupportedMessagePayload({ content: '', attachments: [], embeds: [], sticker_items: [] }), false);
 });
 
-test('reAddDeletedMessages keeps attachment-only cache-master-off records as placeholder text rows', () => {
+test('reAddDeletedMessages keeps attachment-only cache-master-off records without placeholders', () => {
   const plugin = createPlugin({
     settings: {
       cacheAllImages: false,
@@ -2253,9 +2253,9 @@ test('reAddDeletedMessages keeps attachment-only cache-master-off records as pla
   const textSiblingRow = rowsById.get('102');
 
   assert.equal(messages.length, 2);
-  assert.equal(attachmentOnlyRow?.content, '[Not cached: photo.png]');
+  assert.equal(attachmentOnlyRow?.content, '');
   assert.equal(textSiblingRow?.id, '102');
-  assert.equal(textSiblingRow?.content, 'kept text\n[Not cached: notes.txt]');
+  assert.equal(textSiblingRow?.content, 'kept text');
   assert.deepEqual(plugin.messageRecord['101'].message, attachmentOnlyBefore);
   assert.deepEqual(plugin.messageRecord['102'].message, textBefore);
 });
@@ -2698,7 +2698,7 @@ test('edit-history marker lookup matches removed attachments by exact url/id and
   ), null);
 });
 
-test('edit-history inline segments replace matched markers with exact placeholders when cache master is off', () => {
+test('edit-history inline segments remove generated markers when cache master is off', () => {
   const plugin = createPlugin({
     settings: { cacheAllImages: false }
   });
@@ -2734,12 +2734,10 @@ test('edit-history inline segments replace matched markers with exact placeholde
 
   const segments = plugin.getEditHistoryContentSegments(content, removedAttachments, message);
 
-  assert.equal(segments.filter(segment => segment.kind === 'removedAttachment').length, 0);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[Not cached: first.gif]'), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value === '[Not cached: second.mp4]'), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('third.pdf')), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('missing.txt')), true);
-  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('cdn.discordapp.com/attachments/channel/111111111111111111/first.gif')), false);
+  assert.equal(segments.every(segment => segment.kind === 'text'), true);
+  assert.equal(segments.map(segment => segment.value).join(''), '   ');
+  assert.deepEqual(plugin.getEditHistoryContentSegments('`Attachment Deleted: `https://example.com/missing.png', [], message), [{ kind: 'text', value: '' }]);
+  assert.deepEqual(plugin.getEditHistoryContentSegments('`Attachment Deleted: `https://example.com/missing.png\nKeep this text after the removed file.', [], message), [{ kind: 'text', value: '\nKeep this text after the removed file.' }]);
   assert.deepEqual(removedAttachments, before.removedAttachments);
   assert.deepEqual(message, before.message);
 });
@@ -3793,7 +3791,7 @@ test('removed ordinary attachment cache admission follows main and all-attachmen
   );
 });
 
-test('logger saved-attachment presentation entries expose exact image/attachment placeholder labels when master media cache is off', () => {
+test('logger saved-attachment presentation entries are suppressed when master media cache is off', () => {
   const message = {
     id: 'message',
     channel_id: 'channel',
@@ -3818,11 +3816,7 @@ test('logger saved-attachment presentation entries expose exact image/attachment
 
   const entries = plugin.getLoggerSavedAttachmentPresentationEntries(message, record);
 
-  assert.deepEqual(
-    entries.map(entry => entry.plan.label),
-    ['[image:photo.png]', '[attachment:notes.txt]', '[image:removed-image.png]', '[attachment:removed-note.txt]']
-  );
-  assert.equal(entries.every(entry => entry.plan.action === 'placeholder'), true);
+  assert.deepEqual(entries, []);
 });
 
 test('logger saved-attachment presentation entries prefer remote display and only probe a blob when no remote candidate exists', () => {
@@ -6303,7 +6297,7 @@ test('attachment presentation remount coalesces channels and protects Discord-ow
   assert.equal(dispatches[0].ML2, true);
   assert.equal(dispatches[0].message.id, 'thread');
   assert.equal(dispatches[0].message.attachments.length, 0);
-  assert.equal(dispatches[0].message.content, 'thread root\n[Not cached: thread.png]');
+  assert.equal(dispatches[0].message.content, 'thread root');
 
   await setImmediatePromise();
   assert.deepEqual([...invalidations].sort(), ['channel', 'thread']);
@@ -6311,7 +6305,7 @@ test('attachment presentation remount coalesces channels and protects Discord-ow
   assert.deepEqual([ordinaryOne, ordinaryTwo, threadRoot], canonicalBefore);
 });
 
-test('refreshCacheOnlyMessage dispatches detached placeholder content when cache master is off', async () => {
+test('refreshCacheOnlyMessage dispatches detached content without media when cache master is off', async () => {
   const dispatches = [];
   const plugin = createPlugin({
     dispatcher: {
@@ -6339,7 +6333,7 @@ test('refreshCacheOnlyMessage dispatches detached placeholder content when cache
 
   assert.equal(dispatches.length, 1);
   assert.equal(dispatches[0].type, 'MESSAGE_UPDATE');
-  assert.equal(dispatches[0].message.content, '[Not cached: photo.png]');
+  assert.equal(dispatches[0].message.content, '');
   assert.equal(dispatches[0].message.attachments.length, 0);
   assert.notStrictEqual(dispatches[0].message, message);
   assert.deepEqual(message, canonicalBefore);
@@ -6976,8 +6970,8 @@ test('MessageContent mount path applies latest deleted attachment presentation c
   };
   const offRendered = plugin.getNativeDeletedAttachmentPresentationMessageForMessageContent(masterOffLive);
 
-  assert.equal(offRendered.content, '[Not cached: photo.png]');
-  assert.equal(offRendered !== masterOffLive, true);
+  assert.equal(offRendered.content, '');
+  assert.strictEqual(offRendered, masterOffLive);
   assert.equal(masterOffLive.content, '');
 
   const unrelated = { id: 'not-tracked', channel_id: '700', content: 'normal row' };
@@ -10256,8 +10250,7 @@ test('sticker presentation plans project image-backed formats and retain unsuppo
     assert.equal(masterOffRendered.stickerItems.length, 0);
     assert.equal(masterOffRendered.stickers.length, 0);
     const nativePlaceholder = masterOffPlugin.getNativeDeletedAttachmentPresentationMessage(message);
-    assert.equal(nativePlaceholder.content.includes('[Not cached: static.png]'), true);
-    assert.equal(nativePlaceholder.content.includes('[Not cached: native]'), true);
+    assert.equal(nativePlaceholder.content, 'body');
     assert.deepEqual(message, canonicalBefore);
   }
 
@@ -10304,7 +10297,7 @@ test('sticker-only saved records use native projection, content correction, refr
   });
   masterOffPlugin.shouldPresentSavedMessage = () => true;
   const offRendered = masterOffPlugin.getNativeDeletedAttachmentPresentationMessage(message);
-  assert.equal(offRendered.content, '[Not cached: live-sticker.png]');
+  assert.equal(offRendered.content, '');
   assert.deepEqual(offRendered.attachments, []);
   assert.deepEqual(offRendered.sticker_items, []);
   assert.deepEqual(offRendered.stickerItems, []);
@@ -10315,7 +10308,7 @@ test('sticker-only saved records use native projection, content correction, refr
     stickerItems: [{ ...sticker }],
     stickers: [{ ...sticker }]
   });
-  assert.equal(corrected.content, '[Not cached: live-sticker.png]');
+  assert.equal(corrected.content, '');
   const stickerOnlyWithoutAttachments = structuredClone(message);
   delete stickerOnlyWithoutAttachments.attachments;
   assert.doesNotThrow(() => {
@@ -10459,6 +10452,11 @@ test('unsupported native-only stickers show one Logger placeholder only when rem
         messageRecord: { [message.id]: record }
       });
       const entries = plugin.getLoggerSavedAttachmentPresentationEntries(message, record);
+      if (label === 'master off') {
+        assert.deepEqual(entries, []);
+        assert.deepEqual(message, canonicalBefore);
+        continue;
+      }
       assert.equal(entries.length, 1, `${label} must expose one placeholder entry`);
       assert.equal(entries[0].sourceKind, 'sticker');
       assert.equal(entries[0].attachment.id, 'unsupported-sticker');
@@ -13321,4 +13319,36 @@ test('owned removed text probes allow Logger hidden records but reject hidden in
   attachment.hidden = true;
   assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(create('logger')), null);
   assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(create('inline')), null);
+});
+
+test('media policy refresh includes text, embeds, components and snapshot records and protects thread starters', async () => {
+  const payloads = {
+    text: { content: 'text' },
+    embed: { content: '', embeds: [{ title: 'embed' }] },
+    component: { content: '', components: [{ type: 10, content: 'component' }] },
+    snapshot: { content: '', message_snapshots: [], messageSnapshots: [{ message: { content: 'forward' } }] }
+  };
+  const records = Object.entries(payloads).map(([id, payload]) => ({ delete_data: { time: 1 }, message: { id, channel_id: 'channel', attachments: [], ...payload } }));
+  const thread = { delete_data: { time: 1, forum_thread_message_delete: true }, message: { id: 'thread', channel_id: 'thread', content: '', embeds: [{ title: 'thread embed' }] } };
+  const hidden = { delete_data: { time: 1, hidden: true }, message: { id: 'hidden', channel_id: 'channel', content: 'hidden' } };
+  const actions = [];
+  const plugin = createPlugin({ settings: { cacheAllImages: false }, selectedChannel: { id: 'channel' },
+    tools: { getChannel: id => ({ id, type: id === 'thread' ? 11 : 0 }) }, dispatcher: { dispatch: action => actions.push(action) },
+    invalidateChannelCache() {}, cacheChannelMessages() {}, invalidateAllChannelCache() {}, scheduleLoggerMenuRefresh() {} });
+  installMountedSavedMedia(plugin, [...records, thread, hidden]);
+  plugin.shouldPresentSavedMessage = () => true;
+  let seen;
+  const remount = plugin.remountSavedAttachmentPresentationRecords.bind(plugin);
+  plugin.remountSavedAttachmentPresentationRecords = input => { seen = input; return remount(input); };
+  plugin.refreshAttachmentRendering();
+  assert.deepEqual(seen.map(record => record.message.id), ['text', 'embed', 'component', 'snapshot']);
+  plugin.remountSavedAttachmentPresentationRecords(thread);
+  const update = actions.find(action => action.type === 'MESSAGE_UPDATE' && action.message.id === 'thread');
+  assert.ok(update); assert.deepEqual(update.message.embeds, []);
+  assert.deepEqual(thread.message.embeds, [{ title: 'thread embed' }]);
+  plugin.settings.cacheAllImages = true;
+  plugin.remountSavedAttachmentPresentationRecords(thread);
+  const updates = actions.filter(action => action.type === 'MESSAGE_UPDATE' && action.message.id === 'thread');
+  assert.deepEqual(updates.at(-1).message.embeds, [{ title: 'thread embed' }]);
+  await setImmediatePromise();
 });

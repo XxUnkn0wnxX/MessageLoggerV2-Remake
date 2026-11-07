@@ -46,8 +46,9 @@ function renderEditHistory(filename = 'removed.pdf', options = {}) {
     React, Hooks: { useForceUpdate: () => [null, () => {}] },
     EditHistoryNativeAttachment: Native, DeletedContentTooltip: () => {}, SuffixEdited: () => {}, DiscordModules: { ClickableClasses: {} }
   });
-  const tree = component({ plugin, messageId: 'm', originalElement: original, compact: !!options.compact });
-  return { tree, Native, original, ref, record, plugin, Tooltip, planCalls };
+  const render = () => component({ plugin, messageId: 'm', originalElement: original, compact: !!options.compact, historyOnly: !!options.historyOnly });
+  const tree = render();
+  return { tree, render, Native, original, ref, record, plugin, Tooltip, planCalls };
 }
 
 function inspectTree(node, visit, ancestors = []) {
@@ -178,4 +179,51 @@ test('mixed native layout retains fallback text for a media segment that cannot 
   const nodes = [];
   inspectTree(view.tree, node => { if (node.props?.children === marker) nodes.push(node); });
   assert.equal(nodes.length, 1);
+});
+
+test('master policy hides only media-only edits and restores rows without mutating history or modifiers', () => {
+  const view = renderEditHistory('removed.png', { edits: a => [
+    { content: '`Attachment Deleted: `' + a.url, time: 1 },
+    { content: '`Attachment Deleted: `' + a.url + '\ntext after', time: 2 },
+    { content: 'text only', time: 3 },
+    { content: '', time: 4 },
+    { content: ' \n ', time: 5 }
+  ] });
+  const before = structuredClone(view.record);
+  const rows = tree => { const found = []; inspectTree(tree, node => { if (node.props?.editNum !== undefined) found.push(node); }); return found; };
+  assert.deepEqual(rows(view.tree).map(row => row.props.editNum), [0, 1, 2, 3, 4]);
+  view.plugin.settings.cacheAllImages = false;
+  const off = rows(view.render());
+  assert.deepEqual(off.map(row => row.props.editNum), [1, 2]);
+  const text = []; inspectTree(off, node => { if (typeof node.props?.children === 'string') text.push(node.props.children); });
+  assert.ok(text.includes('\ntext after'));
+  view.plugin.settings.cacheAllImages = true;
+  assert.deepEqual(rows(view.render()).map(row => row.props.editNum), [0, 1, 2, 3, 4]);
+  assert.deepEqual(view.record, before);
+});
+
+test('media-only selected edit or limited range shows original without generated history while off', () => {
+  for (const options of [
+    { modifier: { editNum: 0, noSuffix: true } },
+    { settings: { maxShownEdits: 1, hideNewerEditsFirst: true } },
+    { historyOnly: true }
+  ]) {
+    const view = renderEditHistory('removed.png', { ...options, edits: a => [
+      { content: '`Attachment Deleted: `' + a.url, time: 1 },
+      ...(options.historyOnly ? [] : [{ content: 'later text', time: 2 }])
+    ] });
+    const before = structuredClone(view.record);
+    const modifierBefore = structuredClone(view.plugin.editModifiers || {});
+    view.plugin.settings.cacheAllImages = false;
+    const off = view.render();
+    const nodes = []; inspectTree(off, node => nodes.push(node));
+    assert.equal(nodes.some(node => node.props?.editNum !== undefined || node.type === view.Tooltip), false);
+    assert.equal(off.props.id, view.original.props.id);
+    if (!options.historyOnly) assert.strictEqual(off, view.original);
+    view.plugin.settings.cacheAllImages = true;
+    const onNodes = []; inspectTree(view.render(), node => onNodes.push(node));
+    assert.equal(onNodes.some(node => node.props?.editNum === 0), true);
+    assert.deepEqual(view.record, before);
+    assert.deepEqual(view.plugin.editModifiers || {}, modifierBefore);
+  }
 });

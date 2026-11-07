@@ -57,7 +57,7 @@ function attach(h, view, parent, id, builds) {
   parent.appendChild(slot);
   view.leases.set(entry, token);
   session.attach(entry, slot, token);
-  h.observers[0].show(slot);
+  h.observers.at(-1).show(slot);
   return { entry, slot };
 }
 
@@ -187,4 +187,37 @@ test('media fallback preserves automatic batch expansion and scroll across Logge
       assert.equal(h.root.scrollTop, 680);
     } finally { h.restore(); }
   }
+});
+
+test('master media toggles reset and rebuild retained text and media rows in both directions', () => {
+  const h = setup();
+  try {
+    const builds = [], categories = ['text-only', 'media-and-text', 'media-only'];
+    h.plugin.cancelSavedMediaExternalOpenProbes = () => {};
+    h.plugin.cancelPendingMediaCacheWrites = () => {};
+    h.plugin.notifyDataSaveModeTransitionChange = () => {};
+    h.plugin.reportMajorSettingChange = () => {};
+    h.plugin.stopMediaCacheTrimmer = () => {};
+    h.plugin.startMediaCacheTrimmer = () => {};
+    let refreshes = 0;
+    h.plugin.refreshAttachmentRendering = () => { refreshes++; };
+    const mount = () => {
+      const view = retainedView(h);
+      const entries = categories.map(id => attach(h, view, h.root, id, builds).entry);
+      h.tick();
+      return entries;
+    };
+    const initial = mount();
+    assert.deepEqual(builds, categories);
+    for (const enabled of [false, true]) {
+      h.plugin.settings.cacheAllImages = enabled;
+      h.plugin.handleMediaCachingSetting(enabled);
+      assert.equal(h.plugin._viewportSession, null);
+      assert.equal(initial.every(entry => entry.host.parentNode === null), true);
+      const next = mount();
+      assert.equal(next.every((entry, index) => entry !== initial[index]), true);
+    }
+    assert.equal(refreshes, 2);
+    assert.deepEqual(builds, [...categories, ...categories, ...categories]);
+  } finally { h.restore(); }
 });

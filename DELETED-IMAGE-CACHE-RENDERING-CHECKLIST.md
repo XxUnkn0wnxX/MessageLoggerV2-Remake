@@ -102,6 +102,22 @@ are not. This is a bounded main-window pass, not proof of every surface or of
 the final queued rows draining after the capture ends. Media-switch acceptance
 on the lazy-loading build and the final lifecycle audit remain open.
 
+**Master media-Off amendment — 2026-11-08:** the requested final behavior is
+no Logger-managed media mounts and no generated media placeholders/references,
+including **Attachment Deleted** history markers and generated embed rows.
+Complete saved embeds are hidden; original message text/URLs remain. Apply this to native views
+and Logger windows/tabs, preserve actual text/history and canonical cache/data,
+and restore supported media under the existing source policy when switched On.
+This supersedes earlier stage notes describing master-Off filename placeholders;
+implementation and focused native toggle acceptance remain pending.
+
+- [x] Prepare version **2.8.2.20** and the concise built-in hotfix/hydration
+      changelog, including the active-development notice; document hydration
+      batch outcomes and deduplicated failure-only toast behavior.
+- [ ] Final automated gate and closed-client installation of the media-Off fix.
+- [ ] Focused native Off/On confirmation in chat and Logger; confirm media-only
+      edits vanish, text-bearing edits remain, embeds disappear, and media returns.
+
 - [ ] Cover the **main Logger window**, including available tabs, filters,
       sorting, automatic batch admission and close/reopen. Also cover saved
       forum/thread log windows and Logger-owned additions in native channels,
