@@ -23,7 +23,9 @@ class Node {
 }
 function setup() {
   const old = { document: global.document, IntersectionObserver: global.IntersectionObserver,
-    requestAnimationFrame: global.requestAnimationFrame, getComputedStyle: global.getComputedStyle };
+    requestAnimationFrame: global.requestAnimationFrame, getComputedStyle: global.getComputedStyle, performance: global.performance };
+  // Keep the batch deadline deterministic; the deadline test overrides this clock.
+  global.performance = { now: () => 0 };
   const frames = [], observers = [];
   global.document = { head: new Node(), createElement: () => new Node() };
   global.requestAnimationFrame = callback => frames.push(callback);

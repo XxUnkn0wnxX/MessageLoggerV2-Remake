@@ -13384,14 +13384,24 @@ module.exports = class MessageLoggerV2 {
     }
 
     const threadRefresh = this._forumThreadLogRefreshers?.get?.(channelId);
-    if (typeof threadRefresh === 'function') {
+    if (typeof threadRefresh === 'function' && !threadRefresh.__ml2RetainedMediaView?.()) {
       try {
         threadRefresh();
       } catch (error) {
         Logger.warn(`Could not refresh thread log modal for ${channelId}.`, error);
       }
     }
-    this.scheduleLoggerMenuRefresh?.();
+    if (!this.hasRetainedLoggerMediaView()) this.scheduleLoggerMenuRefresh?.();
+  }
+  isRetainedLoggerMediaView(view, parent) {
+    return !!view && !view.closed && !!parent && parent.isConnected !== false
+      && view.retainedParent === parent && !!this._viewportSession
+      && view.retainedSession === this._viewportSession;
+  }
+  hasRetainedLoggerMediaView() {
+    if (!this.menu?.open || typeof document === 'undefined') return false;
+    const parent = document.getElementById?.(this.style?.menuMessages);
+    return this.isRetainedLoggerMediaView(this._loggerViewportView, parent);
   }
   coordinateSavedAttachmentMediaFailure(context, sourceUrl) {
     if (this.settings?.cacheAllImages === false) return null;
@@ -13531,14 +13541,14 @@ module.exports = class MessageLoggerV2 {
       this.remountSavedAttachmentPresentationRecords(record);
       this.dispatcher?.dispatch?.({ type: 'MLV2_FORCE_UPDATE_MESSAGE_CONTENT' });
       for (const [threadId, refresh] of this._forumThreadLogRefreshers?.entries?.() || []) {
-        if (typeof refresh !== 'function') continue;
+        if (typeof refresh !== 'function' || refresh.__ml2RetainedMediaView?.()) continue;
         try {
           refresh();
         } catch (error) {
           Logger.warn(`Could not refresh thread log modal for ${threadId}.`, error);
         }
       }
-      this.scheduleLoggerMenuRefresh?.();
+      if (!this.hasRetainedLoggerMediaView()) this.scheduleLoggerMenuRefresh?.();
     };
     if (typeof scheduleFrame === 'function') scheduleFrame(run);
     else if (typeof globalThis.setImmediate === 'function') globalThis.setImmediate(run);
@@ -23299,6 +23309,7 @@ module.exports = class MessageLoggerV2 {
         };
         requestAnimationFrame(run);
       };
+      populateMessages.__ml2RetainedMediaView = () => this.isRetainedLoggerMediaView(view, messagesNode);
       if (!this._forumThreadLogRefreshers) this._forumThreadLogRefreshers = new Map();
       this._forumThreadLogRefreshers.set(threadId, populateMessages);
       this.createModal(
@@ -27467,6 +27478,10 @@ module.exports = class MessageLoggerV2 {
     };
     const supportsViewport = view && typeof IntersectionObserver === 'function'
       && typeof parent.replaceChildren === 'function';
+    if (view) {
+      view.retainedParent = parent;
+      view.retainedSession = supportsViewport ? this.getViewportSession() : null;
+    }
     const populate = i => {
       if (!supportsViewport) return buildRow(i, parent);
       const messageId = messages[i];

@@ -43,7 +43,9 @@ class Element {
 
 function setup({ observer = true } = {}) {
   const old = { document: global.document, IntersectionObserver: global.IntersectionObserver,
-    requestAnimationFrame: global.requestAnimationFrame };
+    requestAnimationFrame: global.requestAnimationFrame, performance: global.performance };
+  // Keep the batch deadline deterministic; the deadline test overrides this clock.
+  global.performance = { now: () => 0 };
   const frames = [];
   const observers = [];
   global.document = { head: new Element('head'), createElement: tag => new Element(tag) };
