@@ -197,6 +197,14 @@ compact roadmap.
   messages use whole-message deletion; removing one of several files without
   text remains an edit. Deterministic checks pass; both-surface remote/local
   fallback and broader media acceptance remain open under AT-55 and RT-09.
+- **Historical attachment menu eligibility — image target verified:** a native
+  capture confirms that directly right-clicking a retained removed image and
+  right-clicking the adjacent historical row both select the same edit and
+  create **Show Edit As Message** and **Delete Edit**. Current text and current
+  attachments do not select a historical snapshot; preserve that existing text
+  behavior and the configured history-render limits. No menu behavior change
+  was needed for this case. Other media interactions and threads/forums remain
+  part of the outstanding native acceptance checks.
 - **Inline file parity follow-up — implemented; native acceptance pending:**
   the multi-file native check confirmed images/videos mount, while audio,
   TXT/PDF and generic cached files remained text despite working in Logger.
