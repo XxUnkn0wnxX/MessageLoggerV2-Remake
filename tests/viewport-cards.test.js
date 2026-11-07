@@ -42,7 +42,7 @@ function getHelper(plugin) {
   const start = source.indexOf('    const retainedPreviewCards = new Map();');
   const end = source.indexOf('    const removeForumCardNode =', start);
   assert.ok(start > 0 && end > start);
-  return Function(source.slice(start, end) + '\nreturn { mountRetainedPreviewCard, parkRetainedPreviewCard, parkRetainedPreviewType, retainedThreadBrowserHeaders, restoreThreadBrowserNativeMinHeight, restoreAllThreadBrowserNativeMinHeights, refreshThreadBrowserNativeMinHeight, threadBrowserNativeMinHeightAttribute, sweepDetachedPreviewCards };').call(plugin);
+  return Function('getComputedStyle', source.slice(start, end) + '\nreturn { mountRetainedPreviewCard, parkRetainedPreviewCard, parkRetainedPreviewType, retainedThreadBrowserHeaders, restoreThreadBrowserNativeMinHeight, restoreAllThreadBrowserNativeMinHeights, refreshThreadBrowserNativeMinHeight, threadBrowserNativeMinHeightAttribute, sweepDetachedPreviewCards };').call(plugin, node => node.style);
 }
 function inlineStyle(initial = {}) {
   const values = new Map(Object.entries(initial).map(([key, value]) => [key.replace(/[A-Z]/g, c => `-${c.toLowerCase()}`), String(value)]));
@@ -67,6 +67,36 @@ function fixture() {
   Object.assign(plugin, { messageRecord: records, settings: {}, noTintIds: new Set(), cleanupCopiedNativeDeleteControls() {} });
   return { env, plugin, records, helper: getHelper(plugin), parent: new Node('ul', true) };
 }
+
+test('thread-browser sizing retains the final native gap without duplicating theme padding', () => {
+  const f = fixture();
+  try {
+    const content = f.parent, lastCard = new Node('div');
+    content.style = inlineStyle({ height: '112px' });
+    let naturalHeight = 376;
+    Object.defineProperty(content, 'scrollHeight', { get() {
+      return Math.max(naturalHeight, parseFloat(content.style.height), parseFloat(content.style.minHeight) || 0);
+    } });
+    content.getBoundingClientRect = () => ({ top: 100 });
+    lastCard.getBoundingClientRect = () => ({ bottom: 476, height: 72 });
+    lastCard.style.marginBottom = '8px';
+    content.querySelectorAll = () => [lastCard];
+    f.helper.refreshThreadBrowserNativeMinHeight(content);
+    assert.equal(content.style.minHeight, '384px', 'the trailing collapsed margin remains visible');
+    f.helper.refreshThreadBrowserNativeMinHeight(content);
+    assert.equal(content.style.minHeight, '384px', 'refresh does not add another gap');
+    naturalHeight = 400;
+    f.helper.refreshThreadBrowserNativeMinHeight(content);
+    assert.equal(content.style.minHeight, '400px', 'existing theme padding already covers the gap');
+    naturalHeight = 376;
+    lastCard.style.marginBottom = '16px';
+    f.helper.refreshThreadBrowserNativeMinHeight(content);
+    assert.equal(content.style.minHeight, '392px', 'the gap follows current native theme spacing');
+    assert.equal(content.style.height, '112px');
+    f.helper.restoreThreadBrowserNativeMinHeight(content);
+    assert.equal(content.style.minHeight, '');
+  } finally { f.env.restore(); }
+});
 
 test('same-tag shell batches full card building; warm reattachment restores exact node and ancestry', () => {
   const f = fixture();

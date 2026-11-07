@@ -23621,7 +23621,16 @@ module.exports = class MessageLoggerV2 {
       );
       content.removeAttribute(threadBrowserOwnedMinHeightAttribute);
       content.removeAttribute(threadBrowserOwnedMinHeightPriorityAttribute);
-      const measuredHeight = Number(content.scrollHeight);
+      let measuredHeight = Number(content.scrollHeight);
+      const cards = content.querySelectorAll?.('[data-ml2-restored-thread-browser-card]') || [];
+      const lastCard = cards[cards.length - 1];
+      if (lastCard) {
+        // The last card's collapsed margin can fall outside scrollHeight.
+        // Keep its native theme spacing without adding it twice when padding already covers it.
+        const gap = Math.max(0, parseFloat(getComputedStyle(lastCard).marginBottom) || 0);
+        const bottom = lastCard.getBoundingClientRect().bottom - content.getBoundingClientRect().top;
+        if (Number.isFinite(bottom)) measuredHeight = Math.max(measuredHeight, Math.ceil(bottom + gap));
+      }
       if (!(Number.isFinite(measuredHeight) && measuredHeight > 0)) {
         restoreThreadBrowserNativeMinHeight(content);
         return false;
