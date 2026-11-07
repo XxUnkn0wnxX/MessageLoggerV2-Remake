@@ -951,6 +951,7 @@ module.exports = class MessageLoggerV2 {
   }
   stop() {
     this._startupGeneration = (this._startupGeneration || 0) + 1;
+    this.cancelPendingLoggerTabTransition();
     this._viewportSession?.reset();
     if (this._viewportHydrationActivityTimer !== null
       && this._viewportHydrationActivityTimer !== undefined) {
@@ -3610,6 +3611,7 @@ module.exports = class MessageLoggerV2 {
     return this._loggerShortcutTransitionId;
   }
   resetLoggerMenuRenderState(filter = '') {
+    this.cancelPendingLoggerTabTransition();
     if (!this.menu) return;
     this.menu.filter = filter;
     this.menu.open = false;
@@ -14250,6 +14252,7 @@ module.exports = class MessageLoggerV2 {
       }
       const child = markup.firstChild;
       let isCleanedUp = false;
+      let observer = null;
       const cleanup = () => {
         if (isCleanedUp) return;
         isCleanedUp = true;
@@ -14264,24 +14267,22 @@ module.exports = class MessageLoggerV2 {
         } catch (e) { Logger.error('cleanup error:', e) }
         if (observer) observer.disconnect();
       };
-      const observer = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-          const nodes = Array.from(mutation.removedNodes);
-          const directMatch = nodes.includes(child);
-          const parentMatch = nodes.some(parent => parent.contains?.(child));
-          if (directMatch || parentMatch) {
-            if (this._viewportSession?.owns(child)) continue;
-            cleanup();
-            break;
+      const owned = !!(this._viewportBuildingEntry && child
+        && this.getViewportSession().own(this._viewportBuildingEntry, child, root, cleanup));
+      if (!owned) {
+        observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            const nodes = Array.from(mutation.removedNodes);
+            const directMatch = nodes.includes(child);
+            const parentMatch = nodes.some(parent => parent.contains?.(child));
+            if (directMatch || parentMatch) {
+              if (this._viewportSession?.owns(child)) continue;
+              cleanup();
+              break;
+            }
           }
-        }
-      });
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true
-      });
-      if (this._viewportBuildingEntry && child) {
-        this.getViewportSession().own(this._viewportBuildingEntry, child, root, cleanup);
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
       }
       return child;
     } catch (e) {
@@ -24214,6 +24215,7 @@ module.exports = class MessageLoggerV2 {
         }
         let modalOpen = this.ModalStack.hasModalOpen(this.style.menu);
         if (this.menu.open && !modalOpen) {
+          this.cancelPendingLoggerTabTransition();
           this.parkLoggerViewportView(this._loggerViewportView);
           this.menu.filter = '';
           this.menu.open = false;
@@ -26419,7 +26421,7 @@ module.exports = class MessageLoggerV2 {
         return true;
       },
       activate(entry, leaseToken) { return activate(entry, leaseToken); },
-      release(entry, leaseToken) {
+      release(entry, leaseToken, measurement = null) {
         if (!entry || entry.leaseToken !== leaseToken || !entry.slot) return false;
         const slot = entry.slot;
         unobserve(entry);
@@ -26428,7 +26430,7 @@ module.exports = class MessageLoggerV2 {
         queue.delete(entry);
         queueAdmissionReasons?.delete(entry);
         crossingRefresh.delete(entry);
-        const height = entry.host.getBoundingClientRect?.().height;
+        const height = measurement?.premeasured ? measurement.height : entry.host.getBoundingClientRect?.().height;
         if (height > 0) entry.measuredHeight = height;
         for (const media of entry.host.querySelectorAll?.('audio, video') || []) {
           try { media.pause(); } catch {}
@@ -26442,7 +26444,7 @@ module.exports = class MessageLoggerV2 {
         suspend(entry);
         return true;
       },
-      park(entry, leaseToken) { return session.release(entry, leaseToken); },
+      park(entry, leaseToken, measurement) { return session.release(entry, leaseToken, measurement); },
       isActive(entry, leaseToken) { return !entry?.suspended && active(entry, leaseToken); },
       own(entry, node, root, disposeCallback) {
         if (closed || !entry || entries.get(entry.key) !== entry || !registerNode(entry, node)) return false;
@@ -26574,8 +26576,15 @@ module.exports = class MessageLoggerV2 {
   parkLoggerViewportView(view) {
     view?.stopAutoAdmission?.();
     if (!view?.leases) return;
-    for (const [entry, token] of view.leases) this._viewportSession?.park(entry, token);
-    view.leases.clear();
+    const session = this._viewportSession;
+    const leases = [...view.leases];
+    const measured = leases.map(([entry, token]) => ({ entry, token,
+      height: session && entry.leaseToken === token && entry.slot
+        ? entry.host.getBoundingClientRect?.().height : undefined }));
+    for (const { entry, token, height } of measured) {
+      if (this._viewportSession === session) session?.park(entry, token, { premeasured: true, height });
+      if (view.leases.get(entry) === token) view.leases.delete(entry);
+    }
   }
   populateParent(parent, messages) {
     const view = arguments[2] || null;
@@ -27852,6 +27861,26 @@ module.exports = class MessageLoggerV2 {
       this.refreshLoggerMenu();
     }, 0);
   }
+  cancelPendingLoggerTabTransition() {
+    if (this._loggerTabTransitionTimeout != null) clearTimeout(this._loggerTabTransitionTimeout);
+    this._loggerTabTransitionTimeout = null;
+    this._loggerTabTransitionId = (this._loggerTabTransitionId || 0) + 1;
+  }
+  resetLoggerScrollPosition() {
+    this.menu.scrollPosition = 0;
+    const messages = document.getElementById(this.style.menuMessages);
+    for (let node = messages; node; node = node.parentElement) {
+      let overflow = '';
+      try { overflow = globalThis.getComputedStyle?.(node)?.overflowY || ''; } catch {}
+      if (!/^(auto|scroll|overlay)$/.test(overflow)
+        || !(node.scrollHeight > node.clientHeight || node.scrollTop > 0)) continue;
+      try {
+        if (typeof node.scrollTo === 'function') node.scrollTo({ top: 0, behavior: 'instant' });
+        else node.scrollTop = 0;
+      } catch { node.scrollTop = 0; }
+      return;
+    }
+  }
   openTab(tab) {
     if (!this.isLoggerTabAvailable(tab)) {
       if (tab === 'nuked') {
@@ -27863,10 +27892,28 @@ module.exports = class MessageLoggerV2 {
     if (!tabBar) return this.notifyUser(`Error switching to tab ${tab}!`, { type: 'error', timeout: 3000 });
     const nextTab = tabBar.querySelector('#' + tab);
     if (!nextTab) return this.notifyUser(`Error switching to tab ${tab}!`, { type: 'error', timeout: 3000 });
-    tabBar.querySelector(`.${this.style.tabSelected}`)?.classList.remove(this.style.tabSelected);
-    nextTab.classList.add(this.style.tabSelected);
-    this.menu.selectedTab = tab;
-    setTimeout(() => this.refilterMessages(), 0);
+    this.cancelPendingLoggerTabTransition();
+    if (this.menu.selectedTab === tab) {
+      this.resetLoggerScrollPosition();
+      return true;
+    }
+    const transitionId = this._loggerTabTransitionId;
+    this._loggerTabTransitionTimeout = setTimeout(() => {
+      if (transitionId !== this._loggerTabTransitionId || !this.menu?.open || this.__started === false
+        || document.getElementById(this.style.menuTabBar) !== tabBar
+        || tabBar.querySelector('#' + tab) !== nextTab) return;
+      this._loggerTabTransitionTimeout = null;
+      if (this.menu.selectedTab === tab) return;
+      if (this.menu.filterSetTimeout != null) clearTimeout(this.menu.filterSetTimeout);
+      this.menu.filterSetTimeout = null;
+      this.parkLoggerViewportView(this._loggerViewportView);
+      tabBar.querySelector(`.${this.style.tabSelected}`)?.classList.remove(this.style.tabSelected);
+      nextTab.classList.add(this.style.tabSelected);
+      this.menu.selectedTab = tab;
+      this.menu.shownMessages = -1;
+      this.refilterMessages();
+      this.resetLoggerScrollPosition();
+    }, 0);
     return true;
   }
   createHeader() {
@@ -28051,6 +28098,7 @@ module.exports = class MessageLoggerV2 {
       if (type) this.openTab(type);
       return;
     }
+    this.cancelPendingLoggerTabTransition();
     this.menu.open = true;
     if (type) this.menu.selectedTab = type;
     if (!this.menu.selectedTab) this.menu.selectedTab = 'deleted';
@@ -28128,7 +28176,10 @@ module.exports = class MessageLoggerV2 {
         children: [this.tools.createWrappedElement([messagesDIV])],
         onCancel: onChangeOrder,
         onConfirm: onClearLog,
-        onClose: _ => this.parkLoggerViewportView(this._loggerViewportView),
+        onClose: _ => {
+          this.cancelPendingLoggerTabTransition();
+          this.parkLoggerViewportView(this._loggerViewportView);
+        },
         ml2Data: true,
         className: this.style.menuRoot
       },

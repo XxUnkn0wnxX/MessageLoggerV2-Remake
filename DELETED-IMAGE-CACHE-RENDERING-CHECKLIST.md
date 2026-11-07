@@ -112,6 +112,10 @@ remain open until the corresponding Discord behavior is verified.
       Fill large viewports progressively; cancel pending admission when its view
       parks/closes/refilters, preserve expanded counts during media fallback, and
       keep zero-cap behavior. Apply to main and saved thread/forum Logger windows.
+- [ ] Keep rapid scrolling and repeated tab changes responsive while hydration is
+      queued. Each changed tab starts at the top; clicking the active tab jumps
+      to the top without refiltering or collapsing expanded batches. Obsolete
+      work must not populate the new view, and warm roots must remain reusable.
 - [ ] Retain already activated content across scrolling, navigation, tab changes
       and Logger close/reopen for the session. Do not silently substitute
       unload-on-navigation or eviction. Prove retained DOM/root identity for

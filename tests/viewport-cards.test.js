@@ -254,15 +254,16 @@ test('forum formatted roots survive parking and are destroyed exactly on message
     const shell = f.helper.mountRetainedPreviewCard(f.records.a, f.parent, 'forum', 'parent', builder);
     f.env.observers[0].show(shell); f.env.tick();
     const li = f.parent.children[0];
-    assert.equal(mutationObservers.length, 1);
+    const formattedChild = li.children[0];
+    assert.equal(mutationObservers.length, 0, 'the viewport owner handles formatted-root cleanup');
     f.helper.parkRetainedPreviewCard(li);
-    mutationObservers[0].callback([{ removedNodes: [li] }]);
     assert.equal(unmounts, 0); assert.equal(deleteCleanups, 0);
     f.helper.mountRetainedPreviewCard(f.records.a, f.parent, 'forum', 'parent', builder);
     assert.equal(f.parent.children[0], li);
+    assert.equal(li.children[0], formattedChild);
     f.plugin.getViewportSession().disposeMessage('a');
     assert.equal(unmounts, 1); assert.equal(deleteCleanups, 1);
-    assert.equal(mutationObservers[0].disconnected, true);
+    assert.equal(mutationObservers.length, 0);
   } finally {
     delete ReactDOM.createRoot; delete ReactDOM.flushSync; delete Node.prototype.getElementsByClassName;
     if (oldObserver === undefined) delete global.MutationObserver; else global.MutationObserver = oldObserver;

@@ -614,7 +614,7 @@ test('in-place record edits rebuild only their row while unrelated saved rows re
   } finally { f.env.restore(); }
 });
 
-test('real markup root observer preserves parked text and disposes exactly on reset', () => {
+test('owned real markup keeps no body observer and disposes exactly on reset', () => {
   const f = loggerFixture();
   const { ReactDOM } = require('./helpers/plugin-harness');
   const oldObserver = global.MutationObserver;
@@ -641,16 +641,14 @@ test('real markup root observer preserves parked text and disposes exactly on re
     f.env.observers[0].visible(slot);
     f.env.tick();
     const host = slot.children[0];
-    assert.equal(observers.length, 1);
+    assert.equal(observers.length, 0);
     f.plugin.parkLoggerViewportView(f.plugin._loggerViewportView);
-    observers[0].callback([{ removedNodes: [host] }]);
     assert.equal(unmounts, 0);
     f.plugin.refilterMessages();
     assert.equal(f.parent.children[0].children[0], host);
     assert.equal(unmounts, 0);
     f.plugin.getViewportSession().reset();
     assert.equal(unmounts, 1);
-    assert.equal(observers[0].disconnected, true);
   } finally {
     delete ReactDOM.createRoot;
     delete ReactDOM.flushSync;
@@ -884,4 +882,305 @@ test('zero render cap registers all rows with no automatic batch bar', () => {
     assert.equal(f.env.observers.length, 1);
     assert.deepEqual(f.built, []);
   } finally { f.plugin._viewportSession?.reset(); f.env.restore(); }
+});
+
+
+test('bulk park measures every valid host before any pause or detach and preserves stale leases', () => {
+  const f = loggerFixture();
+  try {
+    f.plugin.refilterMessages();
+    const view = f.plugin._loggerViewportView;
+    const entries = [...view.leases.keys()];
+    const log = [], stale = {}, previous = entries[1].leaseToken;
+    entries[0].measuredHeight = 70;
+    entries[1].measuredHeight = 80;
+    entries[0].host.getBoundingClientRect = () => {
+      log.push('measure a');
+      entries[1].leaseToken = stale;
+      view.leases.set(entries[1], stale);
+      return { height: 0 };
+    };
+    entries[1].host.getBoundingClientRect = () => { log.push('measure b'); return { height: undefined }; };
+    entries[0].host.querySelectorAll = () => [{ pause() { log.push('pause a'); } }];
+    entries[1].host.querySelectorAll = () => [{ pause() { log.push('pause b'); } }];
+    const originalRemove = entries[0].host.remove.bind(entries[0].host);
+    entries[0].host.remove = () => { log.push('remove a'); originalRemove(); };
+    f.plugin.parkLoggerViewportView(view);
+    assert.deepEqual(log, ['measure a', 'pause a', 'remove a']);
+    assert.equal(entries[0].measuredHeight, 70);
+    assert.equal(entries[1].measuredHeight, 80);
+    assert.equal(view.leases.get(entries[1]), stale);
+    assert.equal(entries[1].leaseToken, stale);
+    entries[1].leaseToken = previous;
+    view.leases.set(entries[1], previous);
+  } finally { f.plugin._viewportSession?.reset(); f.env.restore(); }
+});
+
+test('bulk park reads all heights before pausing or removing and retains roots', () => {
+  const f = loggerFixture();
+  try {
+    f.plugin.refilterMessages();
+    const view = f.plugin._loggerViewportView, session = f.plugin.getViewportSession();
+    const entries = [...view.leases.keys()], operations = [];
+    let disposed = 0;
+    entries.forEach((entry, index) => {
+      entry.measuredHeight = 50 + index;
+      entry.host.getBoundingClientRect = () => { operations.push('read' + index); return index ? {} : { height: 0 }; };
+      entry.host.querySelectorAll = () => [{ pause() { operations.push('pause' + index); } }];
+      const remove = entry.host.remove.bind(entry.host);
+      entry.host.remove = () => { operations.push('remove' + index); remove(); };
+      session.own(entry, new Element(), { unmount() { disposed++; } });
+    });
+    f.plugin.parkLoggerViewportView(view);
+    assert.deepEqual(operations, ['read0', 'read1', 'pause0', 'remove0', 'pause1', 'remove1']);
+    assert.deepEqual(entries.map(entry => entry.measuredHeight), [50, 51]);
+    assert.equal(disposed, 0);
+    assert.equal(view.leases.size, 0);
+  } finally { f.plugin._viewportSession?.reset(); f.env.restore(); }
+});
+
+test('unowned and failed-owned markup retain removal observation and cleanup', () => {
+  const f = loggerFixture();
+  const { ReactDOM } = require('./helpers/plugin-harness');
+  const oldObserver = global.MutationObserver, observers = [];
+  let unmounts = 0;
+  global.document.body = new Element('body');
+  global.MutationObserver = class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe() {}
+    disconnect() { this.disconnected = true; }
+  };
+  ReactDOM.createRoot = markup => ({ render() { markup.appendChild(new Element()); }, unmount() { unmounts++; } });
+  ReactDOM.flushSync = callback => callback();
+  try {
+    delete f.plugin.formatMarkup;
+    f.plugin.tools = { parse: () => ({}) };
+    f.plugin.classes.hidden = 'hidden';
+    for (const failed of [false, true]) {
+      if (failed) { f.plugin._viewportBuildingEntry = {}; f.plugin.getViewportSession = () => ({ own: () => false }); }
+      const child = f.plugin.formatMarkup('test', 'channel');
+      const observer = observers.at(-1);
+      assert.ok(observer);
+      observer.callback([{ removedNodes: [child] }]);
+      assert.equal(observer.disconnected, true);
+    }
+    assert.equal(observers.length, 2);
+    assert.equal(unmounts, 2);
+  } finally {
+    delete ReactDOM.createRoot; delete ReactDOM.flushSync;
+    if (oldObserver === undefined) delete global.MutationObserver; else global.MutationObserver = oldObserver;
+    f.env.restore();
+  }
+});
+
+test('rapid tab changes coalesce and reset expanded admissions only after old leases park', () => {
+  const ids = Array.from({ length: 120 }, (_, i) => String(i));
+  const f = loggerFixture({ ids });
+  const oldSet = global.setTimeout, oldClear = global.clearTimeout, timers = [];
+  global.setTimeout = callback => { const timer = { callback }; timers.push(timer); return timer; };
+  global.clearTimeout = timer => { timer.cancelled = true; };
+  try {
+    f.plugin.menu.selectedTab = 'deleted';
+    f.plugin.menu.shownMessages = 120;
+    f.plugin.refilterMessages();
+    assert.equal(f.plugin._loggerViewportView.leases.size, 120);
+    const oldSlot = f.parent.children[0];
+    f.env.observers[0].visible(oldSlot);
+    f.env.tick();
+    const savedHost = oldSlot.children[0], savedRoot = savedHost.children[0];
+    f.env.observers[0].visible(f.parent.children[1]);
+    const tabs = { deleted: new Element(), edited: new Element(), purged: new Element() };
+    const bar = { querySelector(selector) { return selector.startsWith('#') ? tabs[selector.slice(1)] : tabs.deleted; } };
+    f.plugin.style.menuTabBar = 'tabs';
+    global.document.getElementById = id => id === 'tabs' ? bar : id === 'messages' ? f.parent : null;
+    f.plugin.isLoggerTabAvailable = () => true;
+    let builtWithTab;
+    f.plugin.getFilteredMessages = () => { builtWithTab = f.plugin.menu.selectedTab; return ids.slice(0, 10); };
+    assert.equal(f.plugin.openTab('edited'), true);
+    assert.equal(f.plugin.openTab('purged'), true);
+    assert.equal(f.plugin.menu.selectedTab, 'deleted');
+    assert.equal(f.plugin._loggerViewportView.leases.size, 120);
+    timers[0].callback();
+    assert.equal(f.plugin.menu.selectedTab, 'deleted');
+    timers[1].callback();
+    assert.equal(f.plugin.menu.selectedTab, 'purged');
+    assert.equal(builtWithTab, 'purged');
+    assert.equal(f.plugin.menu.shownMessages, 2);
+    assert.equal(f.plugin._loggerViewportView.leases.size, 2);
+    f.env.tick();
+    assert.deepEqual(f.built, ['0'], 'queued old-tab row never builds under the new tab');
+    f.plugin.openTab('deleted');
+    timers.at(-1).callback();
+    assert.equal(f.parent.children[0].children[0], savedHost);
+    assert.equal(savedHost.children[0], savedRoot);
+    assert.deepEqual(f.built, ['0']);
+    f.plugin.openTab('edited');
+    const stale = timers.at(-1);
+    f.plugin.resetLoggerMenuRenderState();
+    f.plugin.menu.open = true;
+    stale.callback();
+    assert.equal(f.plugin.menu.selectedTab, 'deleted', 'old transition cannot affect reopened window');
+    f.plugin.openTab('edited');
+    const afterStop = timers.at(-1);
+    f.plugin.stop();
+    afterStop.callback();
+    assert.equal(f.plugin.menu.selectedTab, 'deleted', 'stopped plugin rejects the old transition');
+  } finally { global.setTimeout = oldSet; global.clearTimeout = oldClear; f.plugin._viewportSession?.reset(); f.env.restore(); }
+});
+
+
+test('bulk park revalidates leases after the measurement pass', () => {
+  const f = loggerFixture();
+  try {
+    f.plugin.refilterMessages();
+    const view = f.plugin._loggerViewportView, entries = [...view.leases.keys()];
+    const originalToken = entries[0].leaseToken, replacement = {}, events = [];
+    entries[0].host.getBoundingClientRect = () => { events.push('read0'); return { height: 40 }; };
+    entries[1].host.getBoundingClientRect = () => {
+      events.push('read1');
+      entries[0].leaseToken = replacement;
+      view.leases.set(entries[0], replacement);
+      return { height: 50 };
+    };
+    entries.forEach((entry, i) => {
+      entry.host.querySelectorAll = () => [{ pause() { events.push('pause' + i); } }];
+      const remove = entry.host.remove.bind(entry.host);
+      entry.host.remove = () => { events.push('remove' + i); remove(); };
+    });
+    f.plugin.parkLoggerViewportView(view);
+    assert.deepEqual(events, ['read0', 'read1', 'pause1', 'remove1']);
+    assert.equal(view.leases.get(entries[0]), replacement);
+    assert.equal(entries[0].leaseToken, replacement);
+    entries[0].leaseToken = originalToken;
+  } finally { f.plugin._viewportSession?.reset(); f.env.restore(); }
+});
+
+test('many retained formatted roots create no per-root body observers', () => {
+  const f = loggerFixture();
+  const { ReactDOM } = require('./helpers/plugin-harness');
+  const oldObserver = global.MutationObserver;
+  let observers = 0, unmounts = 0;
+  global.document.body = new Element('body');
+  global.MutationObserver = class { constructor() { observers++; } observe() {} disconnect() {} };
+  ReactDOM.createRoot = markup => ({ render() { markup.appendChild(new Element()); }, unmount() { unmounts++; } });
+  ReactDOM.flushSync = callback => callback();
+  try {
+    delete f.plugin.formatMarkup;
+    f.plugin.tools = { parse: () => ({}) };
+    f.plugin.classes.hidden = 'hidden';
+    const session = f.plugin.getViewportSession();
+    for (let i = 0; i < 120; i++) {
+      f.plugin._viewportBuildingEntry = session.getEntry({ surfaceKey: 'logger', channelId: 'c',
+        messageId: String(i), revision: 1, build() {} });
+      assert.ok(f.plugin.formatMarkup('text', 'c'));
+    }
+    assert.equal(observers, 0);
+    session.reset();
+    assert.equal(unmounts, 120);
+  } finally {
+    delete ReactDOM.createRoot; delete ReactDOM.flushSync;
+    if (oldObserver === undefined) delete global.MutationObserver; else global.MutationObserver = oldObserver;
+    f.env.restore();
+  }
+});
+
+test('alternating tabs cancel queued work, reset the real scroll root and retain warm rows', () => {
+  for (const rootIsMessages of [true, false]) {
+    const f = loggerFixture({ ids: ['d1', 'd2', 'e1', 'e2'] });
+    const old = { setTimeout: global.setTimeout, clearTimeout: global.clearTimeout, getComputedStyle: global.getComputedStyle };
+    const timers = [];
+    global.setTimeout = callback => { const timer = { callback }; timers.push(timer); return timer; };
+    global.clearTimeout = timer => { timer.cancelled = true; };
+    const scrollRoot = rootIsMessages ? f.parent : new Element();
+    scrollRoot.scrollHeight = 5000; scrollRoot.clientHeight = 500; scrollRoot.scrollTop = 900;
+    const scrollCalls = [];
+    scrollRoot.scrollTo = options => { scrollCalls.push(options); scrollRoot.scrollTop = options.top; };
+    if (!rootIsMessages) scrollRoot.appendChild(f.parent);
+    global.getComputedStyle = node => ({ overflowY: node === scrollRoot ? 'auto' : 'visible' });
+    try {
+      f.plugin.menu.selectedTab = 'deleted';
+      f.plugin.menu.filter = 'channel:test';
+      f.plugin.getFilteredMessages = () => f.plugin.menu.selectedTab === 'deleted' ? ['d1', 'd2'] : ['e1', 'e2'];
+      f.plugin.refilterMessages();
+      const deletedSlots = f.parent.children.slice();
+      f.env.observers[0].visible(deletedSlots[0]);
+      f.env.tick();
+      const deletedHost = deletedSlots[0].children[0], deletedRoot = deletedHost.children[0];
+      f.env.observers[0].visible(deletedSlots[1]);
+      const tabs = { deleted: new Element(), edited: new Element() };
+      const bar = { querySelector(selector) { return selector.startsWith('#') ? tabs[selector.slice(1)] : tabs.deleted; } };
+      f.plugin.style.menuTabBar = 'tabs';
+      global.document.getElementById = id => id === 'tabs' ? bar : id === 'messages' ? f.parent : null;
+      const debounce = { callback() { throw new Error('stale filter callback'); } };
+      f.plugin.menu.filterSetTimeout = debounce;
+      f.plugin.isLoggerTabAvailable = () => true;
+      f.plugin.openTab('edited');
+      timers.at(-1).callback();
+      assert.equal(debounce.cancelled, true);
+      assert.equal(f.plugin.menu.filterSetTimeout, null);
+      assert.equal(f.plugin.menu.filter, 'channel:test');
+      assert.deepEqual(scrollCalls.at(-1), { top: 0, behavior: 'instant' });
+      assert.equal(scrollRoot.scrollTop, 0);
+      const editedSlots = f.parent.children.slice();
+      f.env.observers[0].visible(editedSlots[0]);
+      f.env.tick();
+      assert.deepEqual(f.built, ['d1', 'e1'], 'new visible row runs and old queued work is cancelled');
+      const editedHost = editedSlots[0].children[0];
+      f.env.observers[0].visible(editedSlots[1]);
+      scrollRoot.scrollTop = 800;
+      f.plugin.openTab('deleted');
+      timers.at(-1).callback();
+      assert.equal(scrollRoot.scrollTop, 0);
+      assert.equal(f.parent.children[0].children[0], deletedHost);
+      assert.equal(deletedHost.children[0], deletedRoot);
+      f.env.tick();
+      assert.deepEqual(f.built, ['d1', 'e1']);
+      scrollRoot.scrollTop = 700;
+      f.plugin.openTab('edited');
+      timers.at(-1).callback();
+      assert.equal(scrollRoot.scrollTop, 0);
+      assert.equal(f.parent.children[0].children[0], editedHost);
+      f.env.tick();
+      assert.deepEqual(f.built, ['d1', 'e1']);
+    } finally {
+      f.plugin._viewportSession?.reset(); f.env.restore();
+      for (const [key, value] of Object.entries(old)) { if (value === undefined) delete global[key]; else global[key] = value; }
+    }
+  }
+});
+
+test('clicking the active tab cancels a pending switch and jumps to top without rebuilding', () => {
+  const f = loggerFixture();
+  const old = { setTimeout: global.setTimeout, clearTimeout: global.clearTimeout, getComputedStyle: global.getComputedStyle };
+  const timers = [];
+  global.setTimeout = callback => { const timer = { callback }; timers.push(timer); return timer; };
+  global.clearTimeout = timer => { timer.cancelled = true; };
+  f.parent.scrollHeight = 4000; f.parent.clientHeight = 500; f.parent.scrollTop = 1000;
+  global.getComputedStyle = node => ({ overflowY: node === f.parent ? 'auto' : 'visible' });
+  try {
+    f.plugin.menu.selectedTab = 'deleted';
+    f.plugin.menu.shownMessages = 4;
+    f.plugin.refilterMessages();
+    f.env.observers[0].visible(f.parent.children[0]); f.env.tick();
+    const slots = f.parent.children.slice(), host = slots[0].children[0];
+    const tabs = { deleted: new Element(), edited: new Element() };
+    const bar = { querySelector(selector) { return selector.startsWith('#') ? tabs[selector.slice(1)] : tabs.deleted; } };
+    f.plugin.style.menuTabBar = 'tabs';
+    global.document.getElementById = id => id === 'tabs' ? bar : id === 'messages' ? f.parent : null;
+    f.plugin.isLoggerTabAvailable = () => true;
+    f.plugin.openTab('edited');
+    const stale = timers.at(-1);
+    f.plugin.openTab('deleted');
+    assert.equal(f.parent.scrollTop, 0);
+    assert.equal(stale.cancelled, true);
+    stale.callback();
+    assert.equal(f.plugin.menu.selectedTab, 'deleted');
+    assert.equal(f.plugin.menu.shownMessages, 4);
+    assert.deepEqual(f.parent.children, slots);
+    assert.equal(f.parent.children[0].children[0], host);
+    assert.deepEqual(f.built, ['a']);
+  } finally {
+    f.plugin._viewportSession?.reset(); f.env.restore();
+    for (const [key, value] of Object.entries(old)) { if (value === undefined) delete global[key]; else global[key] = value; }
+  }
 });
