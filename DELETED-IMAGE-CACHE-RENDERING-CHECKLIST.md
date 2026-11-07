@@ -208,13 +208,21 @@ compact roadmap.
   Show Edit As Message check displays the selected saved TXT version on its own;
   Undo restores the other snapshots, including the PDF entry. These controls pass.
   Threads and forum posts remain explicit final native checks under RT-09.
-- **Whole-message deletion freeze — source fixed; native retest pending:**
+- **Whole-message deletion freeze — native retest passed:**
   deleting an edited message with retained previews exposed a tint-observer loop.
   Live debugging found repeated class notifications for a preview whose class
   was already empty. Cleanup now removes the edit-only preview class only when
   it is present. The regression exercises the actual observer and reconciliation
   callbacks through repeated notifications, including alternative tint and no-tint
   modes. Cache acquisition, saved history and deletion categories are unchanged.
+  The native retest stayed responsive. Persisted before/after data confirms only
+  the deleted fixture moved from Edited to Deleted, preserving its text, seven
+  history entries and six removed attachments. Broader playback and thread/forum
+  acceptance remain open.
+- **Fresh-launch edit-history mount — investigation open:** entering a channel
+  before startup settles can leave inline edits absent until navigating away
+  and back. Capture the cold lifecycle and mounted gates before changing the
+  startup refresh path; this is separate from the accepted deletion-loop fix.
 - **Historical correction:** older claims that Pins errors were unrelated are
   superseded by the proven Logger synthetic-delete trigger. Historical notes
   saying ordinary-row synthetic deletes remain are also superseded. PersonalPins
