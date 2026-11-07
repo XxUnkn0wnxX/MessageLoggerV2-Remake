@@ -27576,7 +27576,6 @@ module.exports = class MessageLoggerV2 {
     const scheduleMore = target => {
       if (stopped || pending || target !== sentinel || parent.isConnected === false || view?.closed) return;
       pending = true;
-      target.textContent = `MLV2: Oi, speedy! Loading the next batch ... (${i} / ${messages.length})`;
       scheduleFrame(() => {
         pending = false;
         if (stopped || target !== sentinel || parent.isConnected === false || view?.closed) return;
@@ -27614,7 +27613,7 @@ module.exports = class MessageLoggerV2 {
     const handleMoreMessages = () => {
       if (i < messages.length) {
         sentinel = document.createElement('div');
-        sentinel.textContent = `MLV2: Showing ${i} of ${messages.length} messages`;
+        sentinel.textContent = 'MLV2: Oi, speedy! One batch at a time ...';
         sentinel.style.color = 'var(--text-warning, var(--status-warning))';
         sentinel.style.backgroundColor = 'var(--background-secondary, #2b2d31)';
         sentinel.style.fontWeight = '700';

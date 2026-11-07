@@ -743,14 +743,14 @@ test('automatic batch bar fills progressively without hydrating offscreen rows',
     f.plugin.refilterMessages();
     let bar = f.parent.children[2];
     const admission = f.env.observers[1];
-    assert.equal(bar.textContent, 'MLV2: Showing 2 of 7 messages');
+    assert.equal(bar.textContent, 'MLV2: Oi, speedy! One batch at a time ...');
     assert.equal(bar.style.color, 'var(--text-warning, var(--status-warning))');
     assert.equal(bar.children.length, 0);
     assert.equal(bar.attributes.role, 'status');
     assert.equal(bar.click, undefined);
     assert.deepEqual(f.built, []);
     admission.visible(bar);
-    assert.equal(bar.textContent, 'MLV2: Oi, speedy! Loading the next batch ... (2 / 7)');
+    assert.equal(bar.textContent, 'MLV2: Oi, speedy! One batch at a time ...');
     assert.equal(f.parent.children.length, 3, 'admission waits for a frame');
     f.env.tick();
     assert.equal(f.plugin.menu.shownMessages, 4);
