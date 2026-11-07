@@ -76,11 +76,12 @@ compact roadmap.
 - **Source checkpoints:** local commits `ccabb77` (runtime compatibility, safe
   cleanup and cache warning identity), `77da772` (native profile layer),
   `4d58406` (installed-layer audit), `323f437` (native dynamic theme), and
-  `1e9f56c` (dismissed-profile shortcut), and `5982c93` (modal class lifetime).
-  The latter passes **744/744** tests with no skips. None has been pushed.
+  `1e9f56c` (dismissed-profile shortcut), `5982c93` (modal class lifetime),
+  and `838a22a` (clear an open filter in place). The latter passes **745/745**
+  tests with no skips in 3.593 seconds. None has been pushed.
 - **Installed Stable:**
-  `93916195e913e41fdec46aa2710406fa5431b71bcadb21021d1e2c3f359b1961`,
-  matching `5982c93`. Stable was fully closed before installation and then
+  `8004d8c77055261144dcaf75835d5812bb557b35dfb2d6a54fb08624e9be8402`,
+  matching `838a22a`. Stable was fully closed before installation and then
   restarted; data/settings/backup/Pins bytes were unchanged during the copy.
   This includes corrected class recovery and cache warning IDs.
 - **Preserved behavior:** modal/audio/image discovery repairs; scoped immutable
@@ -91,7 +92,9 @@ compact roadmap.
   triggering Pins errors; no actual pin loss observed. Old window trace proved
   82 history fetches across 31 channels in 5.855 seconds from absent-entry media
   failures. The first fixed window capture recorded zero history fetches and
-  zero synthetic deletes. Native cleanup/Pins lifecycle acceptance remains open.
+  zero synthetic deletes. A controlled disable/re-enable on `838a22a` added
+  two ordinary history requests and zero synthetic deletes or trace errors.
+  Pins config bytes were unchanged, and the user confirms saved history remains.
 - **Startup consumer findings:** a warmed lookup audit passed while Logger kept
   a null user-popout renderer and empty message/selected classes. Action-time
   popout lookup is now user-verified. Two bounded, cancellable CSS waits recover
@@ -115,12 +118,13 @@ compact roadmap.
   or whole-application provider wrapper was added. Supplying the native
   impression callback would enable tracking for this UI, so that separate
   warning is retained without changing telemetry or OpenAsar blocking.
-- **Retained runtime audit:** the `323f437` build's full audit at
-  `2026-11-07T10:32:19.748Z` has **67 passes, 23 warnings and zero failures**
+- **Current runtime audit:** the installed `838a22a` build's full audit at
+  `2026-11-07T11:12:44.879Z` has **67 passes, 23 warnings and zero failures**
   across 90 contracts. All warning entries validate their selected contracts;
   actual message/selected classes, profile layer and theme resolver pass.
-  A fresh audit of the final functional build and the remaining
-  interactive/lifecycle checks are still required.
+  The fresh audit confirms both startup classes recovered in generation 1
+  with no pending class waits. Remaining interactive/lifecycle checks are
+  still required.
 - **Shortcut follow-up:** the user reproduced first-press close/reopen after
   dismissing a Logger profile; a second press closes it. Source review identifies
   a stale popout-stack ID overriding the empty actual manager. Local commit
@@ -133,8 +137,9 @@ compact roadmap.
   preservation on `5982c93`; 44 native Logger samples retain the owned class,
   with no trace errors. The user then clarified the all-log shortcut contract:
   `Ctrl+M` must clear a filter in an already-open Logger without closing and
-  reopening it. That narrow follow-up is in progress; closed/unfiltered toggles,
-  selected tabs, channel/server shortcuts and auxiliary dismissal remain intact.
+  reopening it. The user now verifies this on `838a22a`, including retained
+  tab, colours and dimensions and the following press closing the unfiltered
+  Logger. Channel/server shortcuts and auxiliary dismissal retain their paths.
 - **Cache-warning scope:** the current `Image null unavailable (403)` warning
   was reproduced. A missing embed/component source ID does not imply a null URL.
   The misleading identity is repaired through the existing cache-file ID, with
@@ -165,11 +170,18 @@ Hotfix acceptance (does not complete any parked feature stage):
       and native dependencies pass; opening, theme changes after reopening,
       Copy User ID, row context menus and dismissed-profile shortcuts are
       user-verified on `5982c93`.
-- [ ] Apply the user-requested all-log shortcut clarification: clear an open
-      filtered Logger in place, while retaining modal styling, selected tab,
-      unfiltered toggle and auxiliary dismissal behavior.
-- [ ] Verify disable/re-enable cleanup, Pins preservation, saved history,
-      relevant media and native-thread behavior on the final hotfix.
+- [x] Apply the user-requested all-log shortcut clarification: clear an open
+      filtered Logger in place, while retaining modal styling, selected tab
+      and unfiltered toggle. User verified on `838a22a`; regression checks
+      also preserve auxiliary dismissal behavior.
+- [x] Verify disable/re-enable cleanup, Pins preservation and saved history
+      on `838a22a`: user history check passed, Pins bytes unchanged, zero
+      synthetic deletes and no request burst.
+- [ ] Complete relevant media and native-thread checks. The user reports
+      404 resource errors; attribution and current fallback handling are under
+      review. Preserve aggressive acquisition, alternate URLs, retry/recovery,
+      existing cache modes and saved files; do not add a blanket dead-file
+      blacklist or advance parked feature stages.
 - [x] Correct null cache-warning identity; deterministic tests verify unchanged
       cache IDs, bytes, requests, terminal failure behavior and deferred toast.
       Installed with the final native verification gate still open.
