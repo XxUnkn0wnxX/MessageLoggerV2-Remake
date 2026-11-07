@@ -64,7 +64,7 @@ compact roadmap.
 
 ## Living handoff snapshot
 
-### Current compatibility checkpoint — 2026-11-07
+### Current compatibility checkpoint — 2026-11-08
 
 - **Current session:** `01a1b4bc-271d-77a1-b213-6ab542bcd323`.
 - **Scope:** current Logger errors, module lookups and evidenced caching faults
@@ -72,20 +72,23 @@ compact roadmap.
   metadata until the requested final `2.8.2.20` hotfix entry. That entry must
   state active development and unfinished features. R1–R6 remain incomplete.
   Local commits are authorized; pushing is
-  gated on the user’s UI checks and resolution of the known runtime issues.
+  gated on the user’s UI checks and resolution of the known runtime issues,
+  except the explicitly deferred intermittent cold-start display bug below.
 - **Source checkpoints:** local commits `ccabb77` (runtime compatibility, safe
   cleanup and cache warning identity), `77da772` (native profile layer),
   `4d58406` (installed-layer audit), `323f437` (native dynamic theme), and
   `1e9f56c` (dismissed-profile shortcut), `5982c93` (modal class lifetime),
   and `838a22a` (clear an open filter in place), followed by `beb7ef1`
-  (owned-media fallback) and `285a69c` (renewed remote sources). The current
-  source passes **766/766** tests with no skips in 4.685 seconds. None has
-  been pushed.
+  (owned-media fallback) and `285a69c` (renewed remote sources), followed by
+  the inline attachment/layout repairs, `99b6e41` (deletion observer),
+  `c4da5ca` (cache kind labels), `4cb6183` (removed-upload source policy), and
+  `a967367` (native menu evidence). The combined source passes **819/819**
+  tests with no skips in 3.426 seconds. None has been pushed.
 - **Installed Stable:**
-  `4bcf885a5e08a2340758e4b62326a486ce9ca537f1b8726992b15444c281352b`,
-  matching `285a69c`. Stable was fully closed before installation and then
-  restarted; data/settings/backup/Pins bytes were unchanged during the copy.
-  This includes corrected class recovery and cache warning IDs.
+  `236753e3a9cd98978ee9f81b7b1a26adf3e218cc102addc8fb41312cb0bbac59`,
+  matching the source at `a967367`. Stable was fully closed before installation
+  and then restarted. This includes the source-policy and cache-label repairs;
+  version remains `2.8.2.19` and schema remains 1.
 - **Preserved behavior:** modal/audio/image discovery repairs; scoped immutable
   eviction for Logger-owned presentation cleanup; media refresh only for actual
   ordinary evictions; native-thread branches, saved media fallback, selected-channel
@@ -120,7 +123,7 @@ compact roadmap.
   or whole-application provider wrapper was added. Supplying the native
   impression callback would enable tracking for this UI, so that separate
   warning is retained without changing telemetry or OpenAsar blocking.
-- **Current runtime audit:** the installed `285a69c` build's full audit at
+- **Earlier runtime audit:** the `285a69c` build's full audit at
   `2026-11-07T11:47:25.475Z` has **67 passes, 23 warnings and zero failures**
   across 90 contracts. All warning entries validate their selected contracts;
   actual message/selected classes, profile layer and theme resolver pass.
@@ -242,10 +245,16 @@ compact roadmap.
   the deleted fixture moved from Edited to Deleted, preserving its text, seven
   history entries and six removed attachments. Broader playback and thread/forum
   acceptance remain open.
-- **Fresh-launch edit-history mount — investigation open:** entering a channel
+- **Fresh-launch edit-history mount — explicitly deferred:** entering a channel
   before startup settles can leave inline edits absent until navigating away
-  and back. Capture the cold lifecycle and mounted gates before changing the
-  startup refresh path; this is separate from the accepted deletion-loop fix.
+  and back. Paired native captures showed saved/indexed history present while
+  the inline render gates were absent, then restored after navigation. A later
+  launch hydrated after plugins loaded and did not reproduce the failure.
+  On 2026-11-08, the user explicitly deferred this unresolved display-refresh
+  bug as an exception to the hotfix publication gate. Switching away and back
+  is the workaround. No speculative startup patch was applied; this is neither
+  a verified fix nor evidence of lost saved history. All other acceptance gates
+  remain required, and the deletion-loop repair remains separately verified.
 - **Cache-failure diagnostics — supported kinds retained:** terminal warnings
   identify an embed, image, video, audio or file request, with generic media for
   unknown content. Classification uses existing supported-type checks and known
@@ -409,12 +418,14 @@ Hotfix acceptance (does not complete any parked feature stage):
 
 ### Exact next action
 
-Resume the bounded compatibility hotfix from its current handoff. Deployment
-and startup verification are complete; inspect the fresh warmed audit and
-Logger-window trace, including actual instance state for unresolved cold-start
-lookups. Then verify native cleanup, Pins coexistence, media and thread
-behavior. Publication requires the user's instruction. The next feature stage remains R1 when the user separately
-resumes feature work; later features retain the roadmap order.
+Continue native media acceptance on the installed build: thread/forum attachment
+edits, historical controls and whole-message deletion, followed by the remaining
+source-policy/lifecycle checks and a fresh warmed compatibility audit. Keep the
+intermittent cold-start display bug explicitly deferred; do not restart its
+investigation or count it as fixed. Publication remains gated on all other agreed
+checks and the requested GitHub migration/CI. The next feature stage remains R1
+when the user separately resumes feature work; later features retain the roadmap
+order.
 
 ### Resume procedure
 
