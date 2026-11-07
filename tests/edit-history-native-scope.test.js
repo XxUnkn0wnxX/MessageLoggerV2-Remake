@@ -24,7 +24,7 @@ function renderEditHistory(filename = 'removed.pdf', options = {}) {
   });
   Object.assign(plugin.settings, options.settings || {});
   if (options.modifier) plugin.editModifiers = { m: options.modifier };
-  if (options.cacheMissing) plugin.imageCacheServerSimulator.get = () => null;
+  if (options.cacheMissing) { plugin.settings.onlyRenderCachedAttachments = true; plugin.imageCacheServerSimulator.get = () => null; }
   const realSegments = plugin.getEditHistoryContentSegments.bind(plugin);
   let planCalls = 0;
   plugin.getEditHistoryContentSegments = (...args) => {

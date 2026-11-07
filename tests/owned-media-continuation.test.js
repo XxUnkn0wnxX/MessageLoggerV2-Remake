@@ -8,7 +8,7 @@ const alternatePath = process.env.MLV2_OWNED_BASELINE;
 const RuntimePlugin = alternatePath ? require(alternatePath) : null;
 const createPlugin = overrides => RuntimePlugin ? Object.assign(new RuntimePlugin({ name: 'MessageLoggerV2', version: 'test' }), overrides) : standardPlugin(overrides);
 
-function fixture(kind, cached = true) {
+function fixture(kind, cached = true, localOnly = false) {
   const current = kind === 'audio'
     ? { id: 'current', filename: 'current.mp3', url: 'https://cdn.discordapp.com/attachments/c/current.mp3?sig=one', proxy_url: 'https://media.discordapp.net/attachments/c/current.mp3?sig=one' }
     : { id: 'current', filename: 'current.png', url: 'https://cdn.discordapp.com/attachments/c/current.png?sig=one#part', proxy_url: 'https://media.discordapp.net/attachments/c/current.png?sig=one#part' };
@@ -17,7 +17,7 @@ function fixture(kind, cached = true) {
   const message = { id: 'm', channel_id: 'c', attachments: [current], sticker_items: [sticker] };
   const record = { message, delete_data: null, edit_history: [], removed_attachments: [removed] };
   const plugin = createPlugin({
-    messageRecord: { m: record }, settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
+    messageRecord: { m: record }, settings: { cacheAllImages: true, onlyRenderCachedAttachments: localOnly },
     imageCacheServerSimulator: { _resolveImagePath: () => '/cache/file', get: () => cached ? 'blob://local/file' : null },
     dispatcher: { dispatch() { throw Error('unexpected dispatch'); } }, cacheChannelMessages() { throw Error('unexpected fetch'); }
   });
@@ -80,8 +80,8 @@ function fakeNode(tag) {
   Object.defineProperty(node, 'classList', { get: () => classes, set: value => { tokens.clear(); String(value).split(/\s+/).filter(Boolean).forEach(token => tokens.add(token)); } });
   return node;
 }
-function renderLogger(kind, cached = true) {
-  const data = fixture(kind, cached);
+function renderLogger(kind, cached = true, localOnly = false) {
+  const data = fixture(kind, cached, localOnly);
   const { plugin, record, entry } = data;
   record.edit_history = [];
   const root = fakeNode('div'), group = fakeNode('div'), markup = fakeNode('div');
@@ -90,7 +90,7 @@ function renderLogger(kind, cached = true) {
   const previousDocument = global.document;
   global.document = { createElement: fakeNode, createTextNode: value => ({ textContent: value }), getElementById: () => null };
   Object.assign(plugin, {
-    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false, renderCap: 0 },
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: localOnly, renderCap: 0 },
     style: { edited: 'edited' }, classes: { markup: 'markup' }, multiClasses: { markup: 'markup' },
     menu: { shownMessages: -1 }, getSavedMessage: () => record, createMessageGroup: () => group,
     getSingleDiscordClass: () => 'missing', formatMarkup: () => fakeNode('div')
@@ -351,7 +351,7 @@ test('owned inline callbacks after stop do not update fallback state even if pol
 });
 
 test('cached removed video renders its selected Blob and failed decode shows its filename', () => {
-  const rendered = renderLogger('removed');
+  const rendered = renderLogger('removed', true, true);
   try {
     assert.equal(rendered.entry.plan.action, 'blob');
     assert.equal(rendered.media.src, rendered.entry.plan.url);
@@ -365,7 +365,7 @@ test('cached removed video renders its selected Blob and failed decode shows its
 });
 
 test('cached inline removed video is bounded and viewer retains original dimensions', () => {
-  const { plugin, record, entry } = fixture('removed');
+  const { plugin, record, entry } = fixture('removed', true, true);
   entry.attachment.width = 1560;
   entry.attachment.height = 1376;
   let options;
@@ -397,7 +397,7 @@ test('Logger removes only markers for admitted previews and preserves source his
   let blobReads = 0;
   const plugin = createPlugin({
     messageRecord: { m: record },
-    settings: { cacheAllImages: true, onlyRenderCachedAttachments: false, renderCap: 0 },
+    settings: { cacheAllImages: true, onlyRenderCachedAttachments: true, renderCap: 0 },
     imageCacheServerSimulator: { _resolveImagePath: id => id === missingId ? null : '/cache/file', get: () => { blobReads++; return 'blob://local/selected'; } }
   });
   const root = fakeNode('div'), group = fakeNode('div'), markup = fakeNode('div');
@@ -442,7 +442,7 @@ test('Logger uses existing native audio and document hosts for cached removed up
       const attachment = { id: '200', filename, url: `https://cdn.discordapp.com/attachments/channel/200/${filename}` };
       const message = { id: 'm', channel_id: 'channel', content: 'body', attachments: [] };
       const record = { message, delete_data: deleted ? { time: 1 } : null, removed_attachments: [attachment] };
-      const plugin = createPlugin({ messageRecord: { m: record }, settings: { cacheAllImages: true, onlyRenderCachedAttachments: false, renderCap: 0 }, imageCacheServerSimulator: { _resolveImagePath: () => '/cache/file', get: () => 'blob://local/file' } });
+      const plugin = createPlugin({ messageRecord: { m: record }, settings: { cacheAllImages: true, onlyRenderCachedAttachments: true, renderCap: 0 }, imageCacheServerSimulator: { _resolveImagePath: () => '/cache/file', get: () => 'blob://local/file' } });
       const root = fakeNode('div'), group = fakeNode('div'), markup = fakeNode('div');
       group.appendChild(markup); group.getElementsByClassName = name => name === 'markup' ? [markup] : [];
       const previousDocument = global.document;
@@ -501,7 +501,7 @@ test('Logger retains empty-content rows with recognized removed markers when cac
     const original = structuredClone(record);
     const plugin = createPlugin({
       messageRecord: { m: record },
-      settings: { cacheAllImages: availability !== 'master-off', onlyRenderCachedAttachments: false, renderCap: 0 },
+      settings: { cacheAllImages: availability !== 'master-off', onlyRenderCachedAttachments: true, renderCap: 0 },
       imageCacheServerSimulator: { _resolveImagePath: () => availability === 'missing' ? null : '/cache/file', get: () => null }
     });
     const root = fakeNode('div'), group = fakeNode('div'), markup = fakeNode('div');
@@ -543,7 +543,7 @@ function createInlineNativeHarness(mediaType = 'audio', failureReports = new Set
   outer.appendChild = child => { originalRemove.call(outer, child); const remove = child.remove; child.remove = () => { remove.call(child); child.isConnected = false; }; return child; };
   Object.assign(plugin, {
     mountLoggerNativeAudio: (host, url, attachment, source, onError) => { mounts.push({ host, url, attachment, source, onError }); return { native: false }; },
-    mountLoggerNativeDocument: (host, display, attachment, source, onError) => { mounts.push({ host, display, attachment, source, onError }); return { native: false, pending: true }; },
+    mountLoggerNativeDocument: (host, display, attachment, source, onError, options) => { mounts.push({ host, display, attachment, source, onError, options }); return { native: false, pending: true }; },
     cleanupLoggerNativeAudioRoots: host => cleanups.push(host), cleanupLoggerNativeDocumentRoots: host => cleanups.push(host)
   });
   const state = [], refs = []; let stateIndex, refIndex, effectIndex, effects = [], pending = [], stateWrites = 0;
@@ -667,7 +667,7 @@ test('inline dispatch sends only cached audio and files to the stable native ada
     assert.equal(result.props.record, currentRecord);
     assert.equal(result.props.url, 'blob://selected');
     assert.equal(result.props.fallback, 'marker');
-    assert.equal(render(attachment, 'key', 'marker', { action: 'remote', mediaType, url: 'https://remote' }), null);
+    assert.equal(render(attachment, 'key', 'marker', { action: 'remote', mediaType, url: 'https://remote' }).type, Native);
   }
   assert.equal(render(attachment, 'key', 'marker', { action: 'blob', mediaType: 'image', url: 'blob://selected' }).type, Media);
 });
@@ -742,10 +742,10 @@ test('inline native failure diagnostics follow debug console and toast settings 
   run(true, true, 'messageAccessoriesUnavailable', reports);
   assert.equal(events.length, 2);
   assert.equal(notifications.length, 1);
-  assert.equal(events[1].message, 'Inline cached attachment fallback: messageAccessoriesUnavailable');
+  assert.equal(events[1].message, 'Inline attachment fallback: messageAccessoriesUnavailable');
   assert.equal(notifications[0].message, events[1].message);
   run(true, true, Error('secret id filename https://private.invalid'), reports);
-  assert.equal(events[2].message, 'Inline cached attachment fallback: renderFailure');
+  assert.equal(events[2].message, 'Inline attachment fallback: renderFailure');
   run(true, true, 'messageAccessoriesUnavailable', new Set());
   assert.equal(events.length, 4, 'a new patch session has a fresh deduplication set');
   assert.equal(notifications.length, 3);
@@ -758,6 +758,7 @@ test('delayed native inline effects never mount after their owner becomes invali
       h => { h.plugin.__started = false; },
       h => { h.plugin._startupGeneration++; },
       h => { h.plugin.settings.cacheAllImages = false; },
+      h => { h.plugin.settings.showEditedMessages = false; },
       h => { h.plugin.messageRecord.m = { ...h.record }; },
       h => { h.record.removed_attachments = []; },
       h => { h.record.edits_hidden = true; }
@@ -855,4 +856,278 @@ test('whole-deleted preview tint reconciliation settles its class observer after
     observer.callback([{ type: 'attributes', attributeName: 'class', target: preview }]);
     assert.equal(pending.length, 0, `${mode} repeated reconciliation must not mutate an absent marker`);
   }
+});
+
+test('inline removed audio advances CDN to proxy to Blob without touching the canonical record', () => {
+  const h = createInlineNativeHarness('audio');
+  try {
+    h.attachment.url += '?token=2';
+    h.attachment.proxy_url = 'https://media.discordapp.net/attachments/c/111111111111111111/file.mp3?token=2';
+    h.plugin.imageCacheServerSimulator = { _resolveImagePath: () => '/cache/file', get: () => 'blob://local/audio' };
+    const before = structuredClone(h.record);
+    const plan = h.plugin.getSavedAttachmentPresentationPlan(h.attachment, h.message, { allowRemote: true });
+    h.render({ url: plan.url, presentationPlan: plan });
+    assert.equal(h.mounts[0].url, plan.url);
+    h.mounts[0].onError({ target: { tagName: 'AUDIO' } }, plan.url);
+    h.render();
+    assert.equal(h.mounts[1].url, h.attachment.proxy_url);
+    h.mounts[0].onError({ target: { tagName: 'AUDIO' } }, plan.url);
+    h.mounts[1].onError({ target: { tagName: 'AUDIO' } }, h.attachment.proxy_url);
+    h.render();
+    assert.equal(h.mounts[2].url, 'blob://local/audio');
+    h.mounts[2].onError({ target: { tagName: 'AUDIO' } }, 'blob://local/audio');
+    assert.equal(h.render(), 'original marker');
+    assert.deepEqual(h.record, before);
+    assert.equal(h.plugin._failedNativeAttachmentMediaCandidateKeys?.size || 0, 0);
+  } finally { h.unmount(); h.flush(); h.restore(); }
+});
+
+test('inline removed audio without cached media falls back to marker after both remote sources', () => {
+  const h = createInlineNativeHarness('audio');
+  try {
+    h.attachment.proxy_url = 'https://media.discordapp.net/attachments/c/111111111111111111/file.mp3';
+    h.plugin.imageCacheServerSimulator = { _resolveImagePath: () => null, get: () => { throw Error('unexpected local read'); } };
+    const plan = h.plugin.getSavedAttachmentPresentationPlan(h.attachment, h.message, { allowRemote: true });
+    h.render({ url: plan.url, presentationPlan: plan });
+    h.mounts[0].onError({ target: { tagName: 'AUDIO' } }, plan.url);
+    h.render();
+    h.mounts[1].onError({ target: { tagName: 'AUDIO' } }, h.attachment.proxy_url);
+    assert.equal(h.render(), 'original marker');
+  } finally { h.unmount(); h.flush(); h.restore(); }
+});
+
+test('inline remote audio does not queue another remote candidate after local-only is enabled', () => {
+  const h = createInlineNativeHarness('audio');
+  try {
+    h.attachment.proxy_url = 'https://media.discordapp.net/attachments/c/111111111111111111/file.mp3';
+    const plan = h.plugin.getSavedAttachmentPresentationPlan(h.attachment, h.message, { allowRemote: true });
+    h.render({ url: plan.url, presentationPlan: plan });
+    h.plugin.settings.onlyRenderCachedAttachments = true;
+    h.mounts[0].onError({ target: { tagName: 'AUDIO' } }, plan.url);
+    assert.equal(h.render(), 'original marker');
+    assert.equal(h.mounts.length, 1);
+  } finally { h.unmount(); h.flush(); h.restore(); }
+});
+
+test('Logger removed video advances CDN to proxy then cached Blob using the live error callback', () => {
+  const rendered = renderLogger('removed');
+  try {
+    assert.equal(rendered.entry.plan.action, 'remote');
+    assert.equal(rendered.media.src, rendered.entry.plan.url);
+    rendered.media.onerror();
+    assert.equal(rendered.media.src, rendered.entry.plan.fallbackUrl);
+    rendered.media.onerror();
+    const nodes = [];
+    const walk = node => { nodes.push(node); node.children?.forEach(walk); };
+    walk(rendered.host);
+    assert.ok(nodes.some(node => node.id === 'removed' && node.src === 'blob://local/file'));
+  } finally { rendered.restore(); }
+});
+
+test('inline audio mount failure does not misclassify a remote source as failed', () => {
+  const h = createInlineNativeHarness('audio');
+  try {
+    h.attachment.proxy_url = 'https://media.discordapp.net/attachments/c/111111111111111111/file.mp3';
+    const plan = h.plugin.getSavedAttachmentPresentationPlan(h.attachment, h.message, { allowRemote: true });
+    h.plugin.mountLoggerNativeAudio = () => { throw Error('native component unavailable'); };
+    h.render({ url: plan.url, presentationPlan: plan });
+    assert.equal(h.render(), 'original marker');
+    assert.equal(h.plugin._failedNativeAttachmentMediaCandidateKeys?.size || 0, 0);
+    assert.equal(h.plugin.getSavedAttachmentPresentationPlan(h.attachment, h.message, { allowRemote: true }).url, plan.url);
+  } finally { h.unmount(); h.flush(); h.restore(); }
+});
+
+test('mounted inline removed text advances probe failures through proxy to Blob', async () => {
+  const h = createInlineNativeHarness('attachment');
+  const oldNet = global.BdApi.Net;
+  global.BdApi.Net = { fetch() {} };
+  try {
+    h.attachment.filename = 'file.txt';
+    h.attachment.url = 'https://cdn.discordapp.com/attachments/c/111111111111111111/file.txt?sig=1';
+    h.attachment.proxy_url = 'https://media.discordapp.net/attachments/c/111111111111111111/file.txt?sig=1';
+    h.plugin.imageCacheServerSimulator = { _resolveImagePath: () => '/cache/file', get: () => 'blob://local/file' };
+    const original = structuredClone(h.record), requests = [];
+    h.plugin.fetchMediaNetworkResponse = async url => { requests.push(url); return { ok: false, release() {} }; };
+    const plan = h.plugin.getSavedAttachmentPresentationPlan(h.attachment, h.message, { allowRemote: true });
+    h.render({ url: plan.url, presentationPlan: plan });
+    for (let i = 0; i < 2; i++) {
+      const context = h.mounts[i].options.ownedProbeContext;
+      assert.ok(context);
+      const release = h.plugin.acquireSavedInlineTextAttachmentProbe(context);
+      const entry = h.plugin._savedInlineTextAttachmentProbeInFlight.values().next().value;
+      await entry.promise;
+      release();
+      h.render();
+    }
+    assert.deepEqual(requests, [h.attachment.url, h.attachment.proxy_url]);
+    assert.equal(h.mounts[2].attachment.url, 'blob://local/file');
+    assert.equal(h.mounts[2].options.ownedProbeContext, null);
+    assert.deepEqual(h.record, original);
+    assert.equal(h.plugin._failedNativeAttachmentMediaCandidateKeys?.size || 0, 0);
+  } finally { h.unmount(); h.flush(); h.restore(); global.BdApi.Net = oldNet; }
+});
+
+test('Logger removed text mounts use the shared probe and retain proxy then cached fallback', async () => {
+  const previousDocument = global.document, oldNet = global.BdApi.Net;
+  global.BdApi.Net = { fetch() {} };
+  const attachment = { id: '111111111111111111', filename: 'file.txt', url: 'https://cdn.discordapp.com/attachments/c/111111111111111111/file.txt', proxy_url: 'https://media.discordapp.net/attachments/c/111111111111111111/file.txt' };
+  const message = { id: 'm', channel_id: 'c', content: 'text', attachments: [] };
+  const record = { message, edit_history: [], removed_attachments: [attachment] };
+  const plugin = createPlugin({ __started: true, _startupGeneration: 1, messageRecord: { m: record }, settings: { cacheAllImages: true, onlyRenderCachedAttachments: false, renderCap: 0 }, imageCacheServerSimulator: { _resolveImagePath: () => '/cache/file', get: () => 'blob://local/file' } });
+  const original = structuredClone(record), requests = [], mounts = [];
+  const root = fakeNode('div'), group = fakeNode('div'), markup = fakeNode('div');
+  group.appendChild(markup); group.getElementsByClassName = name => name === 'markup' ? [markup] : [];
+  global.document = { createElement: fakeNode, createTextNode: value => ({ textContent: value }), getElementById: () => null };
+  Object.assign(plugin, {
+    style: { edited: 'edited' }, classes: { markup: 'markup' }, multiClasses: { markup: 'markup' },
+    menu: { shownMessages: -1 }, getSavedMessage: () => record, createMessageGroup: () => group,
+    getSingleDiscordClass: () => 'missing', formatMarkup: () => fakeNode('div'),
+    mountLoggerNativeDocument: (host, renderMessage, display, source, onError, options) => mounts.push({ host, url: display.url, options }),
+    cleanupLoggerNativeDocumentRoots() {}, fetchMediaNetworkResponse: async url => { requests.push(url); return { ok: false, release() {} }; }
+  });
+  try {
+    plugin.populateParent(root, ['m']);
+    for (let i = 0; i < 2; i++) {
+      const context = mounts[i].options.ownedProbeContext;
+      assert.ok(context);
+      const release = plugin.acquireSavedInlineTextAttachmentProbe(context);
+      await plugin._savedInlineTextAttachmentProbeInFlight.values().next().value.promise;
+      assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(context), null, 'prior host source is no longer current');
+      release();
+    }
+    assert.deepEqual(requests, [attachment.url, attachment.proxy_url]);
+    assert.equal(mounts[2].url, 'blob://local/file');
+    assert.equal(mounts[2].options.ownedProbeContext, null);
+    assert.deepEqual(record, original);
+  } finally { global.document = previousDocument; global.BdApi.Net = oldNet; }
+});
+
+test('Logger hidden deleted record retains removed text CDN to proxy to Blob fallback', async () => {
+  const previousDocument = global.document, oldNet = global.BdApi.Net;
+  global.BdApi.Net = { fetch() {} };
+  const attachment = { id: '111111111111111111', filename: 'file.txt', url: 'https://cdn.discordapp.com/attachments/c/111111111111111111/file.txt', proxy_url: 'https://media.discordapp.net/attachments/c/111111111111111111/file.txt' };
+  const message = { id: 'm', channel_id: 'c', content: 'text', attachments: [] };
+  const record = { message, delete_data: { time: 1, hidden: true }, edit_history: [], removed_attachments: [attachment] };
+  const plugin = createPlugin({ __started: true, _startupGeneration: 1, messageRecord: { m: record }, settings: { cacheAllImages: true, onlyRenderCachedAttachments: false, renderCap: 0 }, imageCacheServerSimulator: { _resolveImagePath: () => '/cache/file', get: () => 'blob://local/file' } });
+  const original = structuredClone(record), requests = [], mounts = [];
+  const root = fakeNode('div'), group = fakeNode('div'), markup = fakeNode('div');
+  group.appendChild(markup); group.getElementsByClassName = name => name === 'markup' ? [markup] : [];
+  global.document = { createElement: fakeNode, createTextNode: value => ({ textContent: value }), getElementById: () => null };
+  Object.assign(plugin, {
+    style: { edited: 'edited' }, classes: { markup: 'markup' }, multiClasses: { markup: 'markup' },
+    menu: { shownMessages: -1 }, getSavedMessage: () => record, createMessageGroup: () => group,
+    getSingleDiscordClass: () => 'missing', formatMarkup: () => fakeNode('div'),
+    mountLoggerNativeDocument: (host, renderMessage, display, source, onError, options) => mounts.push({ host, url: display.url, options }),
+    cleanupLoggerNativeDocumentRoots() {}, fetchMediaNetworkResponse: async url => { requests.push(url); return { ok: false, release() {} }; }
+  });
+  try {
+    plugin.populateParent(root, ['m']);
+    for (let i = 0; i < 2; i++) {
+      const context = mounts[i].options.ownedProbeContext;
+      assert.ok(context);
+      const release = plugin.acquireSavedInlineTextAttachmentProbe(context);
+      await plugin._savedInlineTextAttachmentProbeInFlight.values().next().value.promise;
+      assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(context), null, 'prior host source is no longer current');
+      release();
+    }
+    assert.deepEqual(requests, [attachment.url, attachment.proxy_url]);
+    assert.equal(mounts[2].url, 'blob://local/file');
+    assert.equal(mounts[2].options.ownedProbeContext, null);
+    assert.deepEqual(record, original);
+  } finally { global.document = previousDocument; global.BdApi.Net = oldNet; }
+});
+
+test('mounted inline removed text with no Blob restores marker after proxy failure', async () => {
+  const h = createInlineNativeHarness('attachment'), oldNet = global.BdApi.Net;
+  global.BdApi.Net = { fetch() {} };
+  try {
+    h.attachment.filename = 'file.txt';
+    h.attachment.url = 'https://cdn.discordapp.com/attachments/c/111111111111111111/file.txt';
+    h.attachment.proxy_url = 'https://media.discordapp.net/attachments/c/111111111111111111/file.txt';
+    h.plugin.imageCacheServerSimulator = { _resolveImagePath: () => null, get: () => { throw Error('unexpected local read'); } };
+    h.plugin.fetchMediaNetworkResponse = async () => ({ ok: false, release() {} });
+    const plan = h.plugin.getSavedAttachmentPresentationPlan(h.attachment, h.message, { allowRemote: true });
+    h.render({ url: plan.url, presentationPlan: plan });
+    for (let i = 0; i < 2; i++) {
+      const release = h.plugin.acquireSavedInlineTextAttachmentProbe(h.mounts[i].options.ownedProbeContext);
+      await h.plugin._savedInlineTextAttachmentProbeInFlight.values().next().value.promise;
+      release();
+      const next = h.render();
+      if (i === 1) assert.equal(next, 'original marker');
+    }
+    assert.equal(h.mounts.length, 2);
+  } finally { h.unmount(); h.flush(); h.restore(); global.BdApi.Net = oldNet; }
+});
+
+test('inline removed text rebinds its probe when edited record becomes deleted', async () => {
+  const h = createInlineNativeHarness('attachment'), oldNet = global.BdApi.Net;
+  global.BdApi.Net = { fetch() {} };
+  try {
+    h.attachment.filename = 'file.txt';
+    h.attachment.url = 'https://cdn.discordapp.com/attachments/c/111111111111111111/file.txt';
+    h.attachment.proxy_url = 'https://media.discordapp.net/attachments/c/111111111111111111/file.txt';
+    h.plugin.fetchMediaNetworkResponse = async () => ({ ok: false, release() {} });
+    let coordinated = 0;
+    h.plugin.coordinateSavedAttachmentMediaFailure = () => { coordinated++; return { plan: { action: 'remote', url: h.attachment.proxy_url } }; };
+    const plan = h.plugin.getSavedAttachmentPresentationPlan(h.attachment, h.message, { allowRemote: true });
+    h.render({ url: plan.url, presentationPlan: plan });
+    const oldContext = h.mounts[0].options.ownedProbeContext;
+    h.record.delete_data = { time: 1 };
+    assert.equal(h.plugin.revalidateOwnedRemovedTextProbeContext(oldContext), null);
+    h.render();
+    const nextContext = h.mounts[1].options.ownedProbeContext;
+    assert.equal(nextContext.deleted, true);
+    const release = h.plugin.acquireSavedInlineTextAttachmentProbe(nextContext);
+    await h.plugin._savedInlineTextAttachmentProbeInFlight.values().next().value.promise;
+    h.render();
+    assert.equal(coordinated, 1);
+    assert.equal(h.mounts[2].attachment.url, h.attachment.proxy_url);
+    release();
+  } finally { h.unmount(); h.flush(); h.restore(); global.BdApi.Net = oldNet; }
+});
+
+test('inline audio continuation rebinds to the displayed proxy after canonical record replacement', () => {
+  const h = createInlineNativeHarness('audio');
+  try {
+    h.attachment.proxy_url = 'https://media.discordapp.net/attachments/c/111111111111111111/file.mp3';
+    h.plugin.imageCacheServerSimulator = { _resolveImagePath: () => '/cache/file', get: () => 'blob://local/audio' };
+    const plan = h.plugin.getSavedAttachmentPresentationPlan(h.attachment, h.message, { allowRemote: true });
+    h.render({ url: plan.url, presentationPlan: plan });
+    const event = { target: { tagName: 'AUDIO' } };
+    h.mounts[0].onError(event, plan.url);
+    h.render();
+    const oldProxyMount = h.mounts[1];
+    assert.equal(oldProxyMount.url, h.attachment.proxy_url);
+    const replacement = structuredClone(h.record);
+    h.plugin.messageRecord.m = replacement;
+    h.render({ record: replacement, attachment: replacement.removed_attachments[0] });
+    const newProxyMount = h.mounts[2];
+    assert.equal(newProxyMount.url, replacement.removed_attachments[0].proxy_url);
+    oldProxyMount.onError(event, oldProxyMount.url);
+    assert.equal(h.mounts.length, 3);
+    newProxyMount.onError(event, newProxyMount.url);
+    h.render();
+    assert.equal(h.mounts[3].url, 'blob://local/audio');
+  } finally { h.unmount(); h.flush(); h.restore(); }
+});
+
+test('inline audio continuation rebinds after startup generation changes at the proxy', () => {
+  const h = createInlineNativeHarness('audio');
+  try {
+    h.attachment.proxy_url = 'https://media.discordapp.net/attachments/c/111111111111111111/file.mp3';
+    h.plugin.imageCacheServerSimulator = { _resolveImagePath: () => '/cache/file', get: () => 'blob://local/audio' };
+    const plan = h.plugin.getSavedAttachmentPresentationPlan(h.attachment, h.message, { allowRemote: true });
+    const event = { target: { tagName: 'AUDIO' } };
+    h.render({ url: plan.url, presentationPlan: plan });
+    h.mounts[0].onError(event, plan.url);
+    h.render();
+    const old = h.mounts[1];
+    h.plugin._startupGeneration++;
+    h.render();
+    const current = h.mounts[2];
+    old.onError(event, old.url);
+    current.onError(event, current.url);
+    h.render();
+    assert.equal(h.mounts[3].url, 'blob://local/audio');
+  } finally { h.unmount(); h.flush(); h.restore(); }
 });

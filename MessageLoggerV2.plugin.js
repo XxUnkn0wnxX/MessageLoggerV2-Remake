@@ -6994,7 +6994,9 @@ module.exports = class MessageLoggerV2 {
     const segments = [];
     const cacheAllImages = this.settings?.cacheAllImages !== false;
     const presentationOptions = cacheAllImages
-      ? { allowBlob: true }
+      ? this.settings?.onlyRenderCachedAttachments
+        ? { allowBlob: true }
+        : { allowRemote: true }
       : {};
     let cursor = 0;
     let match;
@@ -11278,7 +11280,7 @@ module.exports = class MessageLoggerV2 {
       root = ReactDOM.createRoot(host);
       entry.root = root;
       this._loggerNativeDocumentRoots.set(host, entry);
-      const probeContext = this.getSavedInlineTextAttachmentProbeContext(
+      const probeContext = options.ownedProbeContext || this.getSavedInlineTextAttachmentProbeContext(
         attachment,
         sourceMessage || renderMessage
       );
@@ -11815,7 +11817,7 @@ module.exports = class MessageLoggerV2 {
     if (typeof Sentinel !== 'function') return renderedValue;
     const seenIdentityKeys = new Set();
     const eligibleContexts = contexts.filter(context => {
-      if (!context || context.sourceKind !== 'attachment' || context.action !== 'remote'
+      if (!context || (context.sourceKind !== 'attachment' && !context.ownedRemoved) || context.action !== 'remote'
         || typeof context.sourceUrl !== 'string' || !context.sourceUrl
         || typeof context.identityKey !== 'string' || !context.identityKey
         || seenIdentityKeys.has(context.identityKey)
@@ -12028,7 +12030,7 @@ module.exports = class MessageLoggerV2 {
       const plan = this.getSavedAttachmentPresentationPlan(
         attachment,
         renderMessage,
-        cacheAllImages ? { allowBlob: true } : {}
+        presentationOptions
       );
       if (!plan) continue;
       entries.push({ attachment, plan, removed: true });
@@ -12562,6 +12564,44 @@ module.exports = class MessageLoggerV2 {
     }
     return contexts;
   }
+  createOwnedRemovedTextProbeContext(record, attachment, sourceUrl, ownerToken, isActive, onFailure, surface) {
+    const message = record?.message;
+    const descriptor = this.getSavedAttachmentDescriptor(attachment, message);
+    const sourceKey = this.normalizeSavedAttachmentMediaUrl(sourceUrl);
+    if (!descriptor || !sourceKey || !this.isSavedInlineTextCodeAttachment(attachment)
+      || !descriptor.remote_urls?.includes(sourceUrl) || !ownerToken
+      || typeof isActive !== 'function' || typeof onFailure !== 'function') return null;
+    const identityKey = this.getSavedAttachmentMediaFailureKey(descriptor.channel_id, descriptor.message_id, descriptor.attachment_id);
+    if (!identityKey) return null;
+    return {
+      ownedRemoved: true, sourceKind: 'removedAttachment', action: 'remote', record, message, attachment,
+      descriptor, sourceUrl, sourceKey, identityKey, ownerToken, isActive, onFailure, surface,
+      deleted: !!record.delete_data, startupGeneration: this._startupGeneration,
+      remoteUrls: [...descriptor.remote_urls]
+    };
+  }
+  revalidateOwnedRemovedTextProbeContext(context, allowDetached = false) {
+    if (!context?.ownedRemoved || this.__started !== true || this._startupGeneration !== context.startupGeneration
+      || this.settings?.cacheAllImages === false || this.settings?.onlyRenderCachedAttachments === true
+      || !context.isActive(allowDetached) || this.messageRecord?.[context.descriptor.message_id] !== context.record
+      || context.record?.message !== context.message || !!context.record.delete_data !== context.deleted
+      || (context.surface === 'inline' && (context.record.delete_data?.hidden
+        || context.record.edits_hidden || !this.shouldPresentEditedMessages()))) return null;
+    if ((Array.isArray(context.message.attachments) ? context.message.attachments : [])
+      .some(item => this.getRemovedAttachmentIdentity(item) === context.descriptor.attachment_id)) return null;
+    const candidates = this.getRecordRemovedAttachments(context.record).filter(item => {
+      if (item.hidden || !this.isSavedInlineTextCodeAttachment(item)) return false;
+      const descriptor = this.getSavedAttachmentDescriptor(item, context.message);
+      return descriptor?.channel_id === context.descriptor.channel_id
+        && descriptor?.message_id === context.descriptor.message_id
+        && descriptor?.attachment_id === context.descriptor.attachment_id
+        && descriptor?.filename === context.descriptor.filename
+        && descriptor.remote_urls.length === context.remoteUrls.length
+        && descriptor.remote_urls.every((url, index) => url === context.remoteUrls[index])
+        && descriptor.remote_urls.includes(context.sourceUrl);
+    });
+    return candidates.length === 1 ? context : null;
+  }
   cancelSavedInlineTextAttachmentProbes() {
     this._savedInlineTextAttachmentProbeGeneration = (
       this._savedInlineTextAttachmentProbeGeneration || 0
@@ -12621,7 +12661,10 @@ module.exports = class MessageLoggerV2 {
     return JSON.stringify([context.identityKey, context.sourceKey]);
   }
   acquireSavedInlineTextAttachmentProbe(context) {
-    const current = this.revalidateSavedInlineTextAttachmentProbeContext(context);
+    const revalidate = (value, allowDetached = false) => value?.ownedRemoved
+      ? this.revalidateOwnedRemovedTextProbeContext(value, allowDetached)
+      : this.revalidateSavedInlineTextAttachmentProbeContext(value);
+    const current = revalidate(context, true);
     if (!current || !this._hasSavedInlineTextAttachmentProbeNativeFetch()) return null;
     const key = this._getSavedInlineTextAttachmentProbeKey(current);
     if (!key) return null;
@@ -12638,7 +12681,7 @@ module.exports = class MessageLoggerV2 {
     }
     if (entry) {
       const token = Symbol('saved-inline-text-attachment-probe');
-      entry.consumers.add(token);
+      entry.consumers.set(token, current);
       let released = false;
       const release = () => {
         if (released) return false;
@@ -12672,7 +12715,7 @@ module.exports = class MessageLoggerV2 {
         generation,
         context: current,
         controller,
-        consumers: new Set(),
+        consumers: new Map(),
         cancelled: false,
         settled: false,
         failureHandled: false,
@@ -12683,7 +12726,10 @@ module.exports = class MessageLoggerV2 {
       const run = async () => {
         let response = null;
         let failure = null;
-        const canStart = () => this.revalidateSavedInlineTextAttachmentProbeContext(current)
+        const activeConsumers = () => [...entry.consumers.entries()]
+          .map(([token, value]) => [token, revalidate(value)])
+          .filter(([, value]) => value);
+        const canStart = () => activeConsumers().length > 0
           && entry.generation === (this._savedInlineTextAttachmentProbeGeneration || 0)
           && inFlight.get(key) === entry
           && !entry.cancelled
@@ -12692,6 +12738,8 @@ module.exports = class MessageLoggerV2 {
           && this.__started !== false
           && this._hasSavedInlineTextAttachmentProbeNativeFetch();
         try {
+          // Logger can mount the sentinel just before its row is attached.
+          if (!canStart()) await Promise.resolve();
           if (!canStart()) return false;
           response = await Promise.resolve().then(() => {
             if (!canStart()) return null;
@@ -12720,20 +12768,35 @@ module.exports = class MessageLoggerV2 {
           || entry.consumers.size === 0
           || this.__started === false
           || !this._hasSavedInlineTextAttachmentProbeNativeFetch()) return false;
-        const latest = this.revalidateSavedInlineTextAttachmentProbeContext(current);
-        if (!latest || latest.sourceUrl !== current.sourceUrl
-          || latest.identityKey !== current.identityKey
-          || latest.sourceKey !== current.sourceKey) return false;
         entry.failureHandled = true;
-        try {
-          this.coordinateSavedAttachmentMediaFailure(latest, latest.sourceUrl);
-        } catch {}
+        entry.settled = true;
+        const consumers = activeConsumers();
+        let coordinated = false;
+        let coordinatedPlan = null;
+        for (const [token, latest] of consumers) {
+          if (!entry.consumers.has(token) || !revalidate(latest)) continue;
+          try {
+            if (latest.ownedRemoved && !latest.deleted) {
+              latest.onFailure(null, latest.sourceUrl);
+            } else {
+              if (!coordinated) {
+                const strictContext = latest.ownedRemoved
+                  ? this.resolveSavedAttachmentMediaFailureContext(latest.descriptor)
+                  : latest;
+                if (!strictContext) continue;
+                coordinatedPlan = this.coordinateSavedAttachmentMediaFailure(strictContext, latest.sourceUrl)?.plan || null;
+                coordinated = true;
+              }
+              if (latest.ownedRemoved) latest.onFailure(coordinatedPlan, latest.sourceUrl);
+            }
+          } catch {}
+        }
         return false;
       };
       entry.run = run;
     }
     const token = Symbol('saved-inline-text-attachment-probe');
-    entry.consumers.add(token);
+    entry.consumers.set(token, current);
     if (!entry.promise && typeof entry.run === 'function') {
       const run = entry.run;
       entry.run = null;
@@ -12785,7 +12848,8 @@ module.exports = class MessageLoggerV2 {
         this.acquireProbe(this.props?.context);
       }
       componentDidUpdate(previousProps) {
-        if (contextKey(previousProps?.context) === contextKey(this.props?.context)) return;
+        if (contextKey(previousProps?.context) === contextKey(this.props?.context)
+          && previousProps?.context?.ownerToken === this.props?.context?.ownerToken) return;
         this.acquireProbe(this.props?.context);
       }
       componentWillUnmount() {
@@ -21394,15 +21458,28 @@ module.exports = class MessageLoggerV2 {
     };
     SavedAttachmentPresentationContent.displayName = 'SavedAttachmentPresentationContent';
     const inlineNativeFailureReports = new Set();
-    const EditHistoryNativeAttachment = ({ plugin, record, attachment, mediaType, url, fallback }) => {
+    const EditHistoryNativeAttachment = ({ plugin, record, attachment, mediaType, url: initialUrl, presentationPlan, fallback }) => {
       const hostRef = React.useRef(null);
+      const [url, setUrl] = React.useState(initialUrl);
+      const continuationRef = React.useRef(null);
       const [failedFor, setFailedFor] = React.useState(null);
       const generation = plugin._startupGeneration;
       const sourceMessage = record?.message;
+      const deleted = !!record?.delete_data;
       const messageId = String(sourceMessage?.id || '');
       const attachmentId = plugin.getRemovedAttachmentIdentity(attachment);
       const attachmentUrl = attachment?.url || '';
       const attachmentProxyUrl = attachment?.proxy_url || attachment?.proxyUrl || attachment?.proxyURL || '';
+      if (!continuationRef.current || continuationRef.current.record !== record
+        || continuationRef.current.message !== sourceMessage || continuationRef.current.deleted !== deleted
+        || continuationRef.current.generation !== generation
+        || continuationRef.current.attachmentId !== attachmentId || continuationRef.current.attachmentUrl !== attachmentUrl
+        || continuationRef.current.attachmentProxyUrl !== attachmentProxyUrl) {
+        continuationRef.current = { record, message: sourceMessage, deleted, generation, attachmentId, attachmentUrl, attachmentProxyUrl,
+          next: plugin.createOwnedLoggerMediaContinuation(record, attachment, 'removedAttachment', presentationPlan
+            ? { ...presentationPlan, action: url.startsWith('blob:') ? 'blob' : 'remote', url }
+            : presentationPlan) };
+      }
       React.useEffect(() => {
         const outer = hostRef.current;
         if (!outer) return;
@@ -21422,7 +21499,8 @@ module.exports = class MessageLoggerV2 {
         };
         const isCurrent = () => active && outer.isConnected !== false && inner.isConnected !== false
           && plugin.__started === true && plugin._startupGeneration === generation
-          && plugin.settings?.cacheAllImages !== false && !record.edits_hidden && !record.delete_data?.hidden
+          && plugin.settings?.cacheAllImages !== false && plugin.shouldPresentEditedMessages()
+          && !record.edits_hidden && !record.delete_data?.hidden
           && plugin.messageRecord?.[messageId] === record && record.message === sourceMessage
           && plugin.getRecordRemovedAttachments(record).some(item =>
             !item.hidden && plugin.getRemovedAttachmentIdentity(item) === attachmentId
@@ -21430,19 +21508,40 @@ module.exports = class MessageLoggerV2 {
             && (item.proxy_url || item.proxyUrl || item.proxyURL || '') === attachmentProxyUrl);
         const onUnavailable = (event, failedSource) => {
           if (!isCurrent() || (typeof failedSource === 'string' && failedSource && failedSource !== url)) return;
+          const audioSourceError = mediaType === 'audio'
+            && ['AUDIO', 'SOURCE'].includes(String(event?.target?.tagName || '').toUpperCase())
+            && typeof failedSource === 'string' && !!failedSource;
+          if (audioSourceError && url.startsWith('http') && !plugin.settings?.onlyRenderCachedAttachments) {
+            let nextPlan;
+            try {
+              const descriptor = plugin.getSavedAttachmentDescriptor(attachment, sourceMessage);
+              const context = descriptor && plugin.resolveSavedAttachmentMediaFailureContext(descriptor);
+              nextPlan = context
+                ? plugin.coordinateSavedAttachmentMediaFailure(context, url)?.plan
+                : continuationRef.current?.next?.(url);
+            } catch {}
+            if (nextPlan?.action === 'ignore') return;
+            if ((nextPlan?.action === 'remote' || nextPlan?.action === 'blob')
+              && typeof nextPlan.url === 'string' && nextPlan.url !== url) {
+              dispose();
+              setUrl(nextPlan.url);
+              return;
+            }
+          }
           if (plugin.settings?.debugLogging) {
             const knownReasons = ['channelUnavailable', 'nativeDocumentMessageClassUnavailable',
               'messageAccessoriesUnavailable', 'reactCreateRootUnavailable', 'reactErrorBoundaryUnavailable'];
-            const reason = mediaType === 'audio' ? 'cachedPlaybackFailure'
+            const reason = mediaType === 'audio' ? (audioSourceError
+              ? (url.startsWith('blob:') ? 'cachedPlaybackFailure' : 'remotePlaybackFailure') : 'renderFailure')
               : knownReasons.includes(event) ? event : 'renderFailure';
             const reportKey = `${mediaType}:${reason}`;
             if (!inlineNativeFailureReports.has(reportKey)) {
               inlineNativeFailureReports.add(reportKey);
-              plugin.reportDebugEvent(`Inline cached ${mediaType} fallback: ${reason}`);
+              plugin.reportDebugEvent(`Inline ${mediaType} fallback: ${reason}`);
             }
           }
           dispose();
-          setFailedFor({ record, sourceMessage, generation, url });
+          setFailedFor({ record, sourceMessage, generation, url, deleted, attachmentUrl, attachmentProxyUrl });
         };
         if (!isCurrent()) {
           dispose();
@@ -21454,15 +21553,33 @@ module.exports = class MessageLoggerV2 {
           } else {
             const displayAttachment = { ...attachment, url, proxy_url: url };
             const displayMessage = { ...sourceMessage, attachments: [displayAttachment] };
-            plugin.mountLoggerNativeDocument(inner, displayMessage, displayAttachment, sourceMessage, onUnavailable);
+            const probeContext = plugin.createOwnedRemovedTextProbeContext(
+              record, attachment, url, {}, isCurrent,
+              (coordinatedPlan, failedUrl) => {
+                if (!isCurrent()) return;
+                const nextPlan = coordinatedPlan || continuationRef.current?.next?.(failedUrl);
+                if (nextPlan?.action === 'ignore') return;
+                if ((nextPlan?.action === 'remote' || nextPlan?.action === 'blob')
+                  && typeof nextPlan.url === 'string' && nextPlan.url !== failedUrl) {
+                  dispose();
+                  setUrl(nextPlan.url);
+                } else {
+                  dispose();
+                  setFailedFor({ record, sourceMessage, generation, url, deleted, attachmentUrl, attachmentProxyUrl });
+                }
+              }, 'inline'
+            );
+            plugin.mountLoggerNativeDocument(inner, displayMessage, displayAttachment, sourceMessage, onUnavailable,
+              { ownedProbeContext: probeContext });
           }
         } catch {
           onUnavailable();
         }
         return dispose;
-      }, [plugin, record, sourceMessage, messageId, attachmentId, attachmentUrl, attachmentProxyUrl, mediaType, url, generation]);
+      }, [plugin, record, sourceMessage, messageId, attachmentId, attachmentUrl, attachmentProxyUrl, mediaType, url, generation, deleted]);
       if (failedFor && failedFor.record === record && failedFor.sourceMessage === sourceMessage
-        && failedFor.generation === generation && failedFor.url === url) return fallback;
+        && failedFor.generation === generation && failedFor.url === url && failedFor.deleted === deleted
+        && failedFor.attachmentUrl === attachmentUrl && failedFor.attachmentProxyUrl === attachmentProxyUrl) return fallback;
       const previewClass = !record?.delete_data && !plugin.settings?.useAlternativeDeletedStyle
         ? plugin.style?.removedAttachmentPreview : '';
       return React.createElement('div', {
@@ -21696,10 +21813,11 @@ module.exports = class MessageLoggerV2 {
           return null;
         }
         const mediaKey = `${key}-${presentationPlan.action}-${presentationPlan.url}`;
-        if ((mediaType === 'audio' || mediaType === 'attachment') && presentationPlan.action === 'blob') {
+        if (mediaType === 'audio' || mediaType === 'attachment') {
           return React.createElement(EditHistoryNativeAttachment, {
-            key: mediaKey, plugin, record: currentRecord, attachment, mediaType,
-            url: presentationPlan.url, fallback
+            key: `${mediaKey}-${JSON.stringify(presentationPlan.sources || [])}`,
+            plugin, record: currentRecord, attachment, mediaType,
+            url: presentationPlan.url, presentationPlan, fallback
           });
         }
         if (mediaType !== 'image' && mediaType !== 'video') return null;
@@ -21806,7 +21924,7 @@ module.exports = class MessageLoggerV2 {
         const segments = plugin.getEditHistoryContentSegments(edit.content, removedAttachments, currentRecord.message);
         selectedEditSegments.set(editNum, segments);
         if (segments.some(segment => segment.kind === 'removedAttachment'
-          && segment.presentationPlan?.action === 'blob'
+          && ['remote', 'blob'].includes(segment.presentationPlan?.action)
           && ['audio', 'attachment'].includes(segment.presentationPlan?.mediaType))) hasNativeCard = true;
       }
       if (hasNativeCard) {
@@ -21828,7 +21946,7 @@ module.exports = class MessageLoggerV2 {
           };
           for (const [index, segment] of selectedEditSegments.get(editNum).entries()) {
             const native = segment.kind === 'removedAttachment'
-              && segment.presentationPlan?.action === 'blob'
+              && ['remote', 'blob'].includes(segment.presentationPlan?.action)
               && ['audio', 'attachment'].includes(segment.presentationPlan?.mediaType);
             if (native) {
               flushText();
@@ -24938,7 +25056,7 @@ module.exports = class MessageLoggerV2 {
           : [];
         const removedAttachments = record ? this.getRecordRemovedAttachments(record) : [];
         const admittedRemovedIds = new Set(loggerAttachmentPresentationEntries
-          .filter(entry => entry.removed && entry.plan?.action === 'blob' && !entry.attachment?.hidden)
+          .filter(entry => entry.removed && ['remote', 'blob'].includes(entry.plan?.action) && !entry.attachment?.hidden)
           .map(entry => this.getRemovedAttachmentIdentity(entry.attachment)).filter(Boolean));
         const markedRemovedIds = new Set();
         if (record?.edit_history) {
@@ -25485,13 +25603,32 @@ module.exports = class MessageLoggerV2 {
                   sourceAttachment || attachment
                 ));
               };
-              this.mountLoggerNativeDocument(
-                documentHost,
-                message,
-                attachment,
-                sourceMessage,
-                onDocumentUnavailable
-              );
+              const mountDocument = () => {
+                const mountedSource = attachment.url;
+                const probeContext = loggerAttachmentEntry?.removed
+                  ? this.createOwnedRemovedTextProbeContext(
+                    record, sourceAttachment, mountedSource, {},
+                    allowDetached => attachment.url === mountedSource && documentHost.parentElement === contentDiv
+                      && (allowDetached || documentHost.isConnected !== false),
+                    (coordinatedPlan, failedUrl) => {
+                      if (documentHost.isConnected === false || documentHost.parentElement !== contentDiv) return;
+                      const nextPlan = coordinatedPlan || ownedContinuation?.(failedUrl);
+                      if (nextPlan?.action === 'ignore') return;
+                      if ((nextPlan?.action === 'remote' || nextPlan?.action === 'blob')
+                        && typeof nextPlan.url === 'string' && nextPlan.url !== failedUrl) {
+                        attachment.url = nextPlan.url;
+                        attachment.proxy_url = nextPlan.url;
+                        attachment._ml2PresentationAction = nextPlan.action;
+                        mountDocument();
+                      } else onDocumentUnavailable();
+                    }, 'logger'
+                  ) : null;
+                this.mountLoggerNativeDocument(
+                  documentHost, message, attachment, sourceMessage, onDocumentUnavailable,
+                  { ownedProbeContext: probeContext }
+                );
+              };
+              mountDocument();
               return;
             }
             if (isAudioFile) {

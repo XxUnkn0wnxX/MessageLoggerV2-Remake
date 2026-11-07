@@ -182,6 +182,21 @@ compact roadmap.
   cached Blob selection and a 396.8 × 350 thumbnail for the same image. A
   follow-up makes colour restore on message-row hover; edit-history dimming
   remains. Broader media/category acceptance is still open. See AT-55 and RT-09.
+- **Removed-upload source preference — corrected; native acceptance pending:**
+  the user superseded the earlier cached-only presentation rule. Removed uploads
+  now use the existing source preference: CDN/direct and proxy candidates, then
+  local cache and text fallback, or local cache then text in local-only mode.
+  Both inline history and Logger honor that policy. Audio uses its real source
+  error callback; supported text/code previews reuse the bounded shared Range
+  probe with separate ownership checks. Generic/PDF cards retain their existing
+  selected-link behavior without additional preflight requests. Module/mount
+  failures do not mark a remote URL bad. Shared consumers remain independent;
+  record replacement, source changes, unmount and whole-deletion transitions
+  reject stale callbacks. Canonical history, aggressive cache acquisition, retry
+  policy, schema, tint and categories are unchanged. Single attachment-only
+  messages use whole-message deletion; removing one of several files without
+  text remains an edit. Deterministic checks pass; both-surface remote/local
+  fallback and broader media acceptance remain open under AT-55 and RT-09.
 - **Inline file parity follow-up — implemented; native acceptance pending:**
   the multi-file native check confirmed images/videos mount, while audio,
   TXT/PDF and generic cached files remained text despite working in Logger.

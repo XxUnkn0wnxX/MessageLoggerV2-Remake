@@ -2154,7 +2154,7 @@ test('saved inline text probe wiring is native-only, exact, and event-driven', (
   assert.match(probe, /this\._releaseSavedInlineTextAttachmentProbeResponse\(response\)/);
   assert.match(probe, /inFlight\.get\(key\) === entry/);
   assert.match(probe, /entry\.consumers\.size > 0/);
-  assert.match(probe, /coordinateSavedAttachmentMediaFailure\(latest, latest\.sourceUrl\)/);
+  assert.match(probe, /coordinateSavedAttachmentMediaFailure\(strictContext, latest\.sourceUrl\)/);
   assert.match(probe, /entry\.controller\?\.abort/);
   assert.match(probe, /if \(!current \|\| !this\._hasSavedInlineTextAttachmentProbeNativeFetch\(\)\) return null;/);
   assert.doesNotMatch(probe, /setTimeout|setInterval|requestAnimationFrame|MutationObserver/);

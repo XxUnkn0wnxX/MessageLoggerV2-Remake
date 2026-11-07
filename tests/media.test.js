@@ -2783,10 +2783,9 @@ test('edit-history inline segments keep text for non-media/unmatched and preserv
   const segments = plugin.getEditHistoryContentSegments(content, removedAttachments, message);
   const removedSegments = segments.filter(segment => segment.kind === 'removedAttachment');
 
-  assert.equal(removedSegments.length, 0);
-  for (const name of ['first.gif', 'second.webm', 'third.pdf', 'missing.mp4']) {
-    assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes(name)), true);
-  }
+  assert.deepEqual(removedSegments.map(segment => segment.presentationPlan.mediaType), ['image', 'video', 'attachment']);
+  assert.equal(removedSegments.every(segment => segment.presentationPlan.action === 'remote'), true);
+  assert.equal(segments.some(segment => segment.kind === 'text' && segment.value.includes('missing.mp4')), true);
   assert.deepEqual(removedAttachments, before.removedAttachments);
   assert.deepEqual(message, before.message);
 });
@@ -3664,7 +3663,7 @@ test('logger saved-attachment presentation entries keep canonical current order 
   assert.equal(entries.some(entry => entry.removed && entry.attachment.filename === 'removed-dupe-by-url'), false);
   assert.equal(entries.some(entry => entry.removed && entry.attachment.id === '300'), true);
   assert.equal(entries.filter(entry => entry.removed && entry.attachment.id === '301').length, 1);
-  assert.deepEqual(entries.map(entry => entry.plan.action), ['remote', 'remote', 'remote', 'omit', 'omit']);
+  assert.deepEqual(entries.map(entry => entry.plan.action), ['remote', 'remote', 'remote', 'remote', 'remote']);
 });
 
 test('removed ordinary attachment cache admission follows main and all-attachment gates', () => {
@@ -3878,10 +3877,10 @@ test('logger saved-attachment presentation entries prefer remote display and onl
   assert.equal(entries[1].plan.url, 'https://cdn.discordapp.com/attachments/channel/101/proxy-only.gif');
   assert.equal(entries[1].plan.fallbackUrl, 'https://media.discordapp.net/attachments/channel/101/proxy-only.gif');
   assert.equal(entries[2].plan.action, 'omit');
-  assert.equal(entries[3].plan.action, 'omit');
+  assert.equal(entries[3].plan.action, 'remote');
+  assert.equal(entries[3].plan.url, 'https://cdn.discordapp.com/attachments/channel/200/removed.png');
   assert.deepEqual(imageCacheGets, [
-    'http://localhost:7474/102.txt#channel,102,message',
-    'http://localhost:7474/200.png#channel,200,message'
+    'http://localhost:7474/102.txt#channel,102,message'
   ]);
 });
 
@@ -13065,7 +13064,7 @@ test('media failure queues only successful eviction and retains a pending refres
   } finally { global.requestAnimationFrame = originalFrame; }
 });
 
-test('removed uploads use cached previews even in remote-first mode while current uploads keep remote policy', () => {
+test('removed uploads follow remote-first policy and local-only selects cached previews', () => {
   const plugin = createPlugin({
     settings: { cacheAllImages: true, onlyRenderCachedAttachments: false },
     imageCacheServerSimulator: {
@@ -13081,11 +13080,12 @@ test('removed uploads use cached previews even in remote-first mode while curren
   const snapshot = structuredClone(record);
   const entries = plugin.getLoggerSavedAttachmentPresentationEntries(message, record);
   assert.equal(entries[0].plan.action, 'remote');
-  assert.equal(entries[1].plan.action, 'blob');
-  assert.equal(entries[1].plan.url, 'blob://local/removed');
+  assert.equal(entries[1].plan.action, 'remote');
   const marker = '`Attachment Deleted: `' + removed.url;
-  const segments = plugin.getEditHistoryContentSegments(marker, [removed], message);
-  assert.equal(segments[0].presentationPlan?.url, 'blob://local/removed');
+  assert.equal(plugin.getEditHistoryContentSegments(marker, [removed], message)[0].presentationPlan?.url, removed.url);
+  plugin.settings.onlyRenderCachedAttachments = true;
+  assert.equal(plugin.getLoggerSavedAttachmentPresentationEntries(message, record)[1].plan.url, 'blob://local/removed');
+  assert.equal(plugin.getEditHistoryContentSegments(marker, [removed], message)[0].presentationPlan?.url, 'blob://local/removed');
   assert.deepEqual(record, snapshot);
 });
 
@@ -13095,16 +13095,230 @@ test('removed cached plans admit supported files, preserve current policy and le
   const message = { id: 'm', channel_id: 'channel', content: 'body', attachments: [{ id: 'current', filename: 'current.png', url: 'https://cdn.discordapp.com/attachments/channel/current/current.png' }] };
   const record = { message, delete_data: { time: 1 }, removed_attachments: attachments };
   const plugin = createPlugin({ settings: { cacheAllImages: true, onlyRenderCachedAttachments: false }, imageCacheServerSimulator: { _resolveImagePath: () => '/cache/file', get: () => 'blob://local/file' } });
-  assert.deepEqual(plugin.getLoggerSavedAttachmentPresentationEntries(message, record).map(entry => entry.plan.action), ['remote', 'blob', 'blob', 'blob', 'blob']);
+  assert.deepEqual(plugin.getLoggerSavedAttachmentPresentationEntries(message, record).map(entry => entry.plan.action), ['remote', 'remote', 'remote', 'remote', 'remote']);
   const markers = attachments.map(a => '`Attachment Deleted: `' + a.url).join(' ');
   const segments = plugin.getEditHistoryContentSegments(markers, attachments, message);
   assert.deepEqual(segments.filter(s => s.kind === 'removedAttachment').map(s => s.presentationPlan.mediaType), ['image', 'video', 'audio', 'attachment']);
   assert.equal(segments.find(s => s.presentationPlan?.mediaType === 'audio').value, '`Attachment Deleted: `' + attachments[2].url);
   assert.equal(segments.find(s => s.presentationPlan?.mediaType === 'attachment').value, '`Attachment Deleted: `' + attachments[3].url);
+  plugin.settings.onlyRenderCachedAttachments = true;
+  assert.equal(plugin.getLoggerSavedAttachmentPresentationEntries(message, record).every(e => e.plan.action === 'blob'), true);
   plugin.imageCacheServerSimulator.get = () => 'data:image/error';
   assert.equal(plugin.getLoggerSavedAttachmentPresentationEntries(message, record).filter(e => e.removed).every(e => e.plan.action === 'omit'), true);
   assert.equal(plugin.getEditHistoryContentSegments(markers, attachments, message).filter(s => s.kind === 'removedAttachment').length, 0);
   attachments[0].hidden = true;
   plugin.imageCacheServerSimulator.get = () => 'blob://local/file';
   assert.equal(plugin.getEditHistoryContentSegments(markers, attachments, message).some(s => s.kind === 'removedAttachment' && s.attachment.id === attachments[0].id), false);
+});
+
+test('removed edit and deleted-record attachment plans follow the same source preference as current attachments', () => {
+  const attachment = { id: '111111111111111111', filename: 'file.png', url: 'https://cdn.discordapp.com/attachments/c/111111111111111111/file.png?sig=1', proxy_url: 'https://media.discordapp.net/attachments/c/111111111111111111/file.png?sig=1' };
+  const message = { id: 'm', channel_id: 'c', content: 'remaining text', attachments: [attachment] };
+  const record = { message, removed_attachments: [{ ...attachment, id: '222222222222222222', url: 'https://cdn.discordapp.com/attachments/c/222222222222222222/file.png?sig=1', proxy_url: 'https://media.discordapp.net/attachments/c/222222222222222222/file.png?sig=1' }] };
+  const plugin = createPlugin({ settings: { cacheAllImages: true, onlyRenderCachedAttachments: false }, imageCacheServerSimulator: { _resolveImagePath: () => '/cache/file', get: () => 'blob://local/file' } });
+  const before = structuredClone(record);
+  for (const deleteData of [null, { time: 1 }]) {
+    record.delete_data = deleteData;
+    const entries = plugin.getLoggerSavedAttachmentPresentationEntries(message, record);
+    assert.equal(entries[0].plan.action, 'remote');
+    assert.equal(entries[1].plan.action, 'remote');
+    const marker = '`Attachment Deleted: `' + record.removed_attachments[0].url;
+    assert.equal(plugin.getEditHistoryContentSegments(marker, record.removed_attachments, message)[0].presentationPlan.action, 'remote');
+    plugin.settings.onlyRenderCachedAttachments = true;
+    assert.equal(plugin.getLoggerSavedAttachmentPresentationEntries(message, record).every(entry => entry.plan.action === 'blob'), true);
+    assert.equal(plugin.getEditHistoryContentSegments(marker, record.removed_attachments, message)[0].presentationPlan.action, 'blob');
+    plugin.settings.onlyRenderCachedAttachments = false;
+  }
+  delete record.delete_data;
+  assert.deepEqual(record, before);
+});
+
+test('attachment-only edits keep surviving attachments and use removed source policy without changing classification', () => {
+  const remaining = { id: '101', filename: 'remaining.png', url: 'https://cdn.discordapp.com/attachments/c/101/remaining.png' };
+  const removed = { id: '102', filename: 'removed.png', url: 'https://cdn.discordapp.com/attachments/c/102/removed.png' };
+  const message = { id: 'm', channel_id: 'c', content: '', attachments: [remaining] };
+  const record = { message, delete_data: null, edit_history: [{ content: '`Attachment Deleted: `' + removed.url, time: 1 }], removed_attachments: [removed] };
+  const before = structuredClone(record);
+  const plugin = createPlugin({ settings: { cacheAllImages: true, onlyRenderCachedAttachments: false }, imageCacheServerSimulator: { _resolveImagePath: () => '/cache/file', get: () => 'blob://local/file' } });
+  const entries = plugin.getLoggerSavedAttachmentPresentationEntries(message, record);
+  assert.deepEqual(entries.map(entry => [entry.attachment.id, entry.removed, entry.plan.action]), [['101', false, 'remote'], ['102', true, 'remote']]);
+  assert.equal(record.delete_data, null);
+  assert.deepEqual(record, before);
+});
+
+test('owned removed text probes share one request and surviving mount advances on failure', async () => {
+  const oldNet = global.BdApi.Net;
+  global.BdApi.Net = { fetch() {} };
+  try {
+    const attachment = { id: 'a', filename: 'note.txt', url: 'https://cdn.discordapp.com/attachments/c/a/note.txt?sig=1', proxy_url: 'https://media.discordapp.net/attachments/c/a/note.txt?sig=1' };
+    const message = { id: 'm', channel_id: 'c', content: 'text', attachments: [] };
+    const record = { message, removed_attachments: [attachment] };
+    const plugin = createPlugin({ __started: true, _startupGeneration: 1, settings: { cacheAllImages: true, onlyRenderCachedAttachments: false }, messageRecord: { m: record } });
+    let resolve, requests = 0;
+    plugin.fetchMediaNetworkResponse = () => { requests++; return new Promise(done => { resolve = done; }); };
+    const calls = [];
+    const make = (surface, owner) => plugin.createOwnedRemovedTextProbeContext(record, attachment, attachment.url, owner, () => true, (...args) => calls.push([surface, ...args]), surface);
+    const first = plugin.acquireSavedInlineTextAttachmentProbe(make('inline', {}));
+    const second = plugin.acquireSavedInlineTextAttachmentProbe(make('logger', {}));
+    const entry = plugin._savedInlineTextAttachmentProbeInFlight.values().next().value;
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(requests, 1);
+    first();
+    resolve({ ok: false, release() {} });
+    await entry.promise;
+    assert.deepEqual(calls, [['logger', null, attachment.url]]);
+    assert.equal(plugin._failedNativeAttachmentMediaCandidateKeys?.size || 0, 0);
+    second();
+  } finally { global.BdApi.Net = oldNet; }
+});
+
+test('owned removed text probe rejects stale ownership, hidden surfaces, policy changes and non-text files', () => {
+  const attachment = { id: 'a', filename: 'note.txt', url: 'https://cdn.discordapp.com/attachments/c/a/note.txt', proxy_url: 'https://media.discordapp.net/attachments/c/a/note.txt' };
+  const message = { id: 'm', channel_id: 'c', content: '', attachments: [] };
+  const record = { message, removed_attachments: [attachment] };
+  const plugin = createPlugin({ __started: true, _startupGeneration: 1, settings: { cacheAllImages: true }, messageRecord: { m: record } });
+  let connected = true;
+  const create = (surface = 'inline') => plugin.createOwnedRemovedTextProbeContext(record, attachment, attachment.url, {}, () => connected, () => {}, surface);
+  let context = create();
+  assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(context), context);
+  connected = false; assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(context), null); connected = true;
+  message.attachments.push(attachment); assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(context), null);
+  message.attachments = [];
+  record.edits_hidden = true; assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(context), null);
+  context = create('logger'); assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(context), context);
+  record.edits_hidden = false;
+  plugin.settings.showEditedMessages = false;
+  assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(create('inline')), null);
+  assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(context), context);
+  plugin.settings.showEditedMessages = true;
+  plugin.settings.onlyRenderCachedAttachments = true;
+  assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(context), null);
+  plugin.settings.onlyRenderCachedAttachments = false; attachment.url += '?changed=1';
+  assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(context), null);
+  attachment.url = context.sourceUrl; record.delete_data = { time: 1 };
+  assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(context), null);
+  const newContext = create(); plugin._startupGeneration++;
+  assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(newContext), null);
+  attachment.filename = 'file.pdf'; assert.equal(create(), null);
+});
+
+test('owned removed text probes validate every consumer and coordinate deleted records once', async () => {
+  const oldNet = global.BdApi.Net; global.BdApi.Net = { fetch() {} };
+  try {
+    const attachment = { id: 'a', filename: 'note.txt', url: 'https://cdn.discordapp.com/attachments/c/a/note.txt', proxy_url: 'https://media.discordapp.net/attachments/c/a/note.txt' };
+    const message = { id: 'm', channel_id: 'c', content: '', attachments: [] };
+    const record = { message, delete_data: { time: 1 }, removed_attachments: [attachment] };
+    const plugin = createPlugin({ __started: true, _startupGeneration: 1, settings: { cacheAllImages: true }, messageRecord: { m: record } });
+    let firstActive = true, requests = 0, coordinated = 0;
+    const result = { action: 'remote', url: attachment.proxy_url }, delivered = [];
+    plugin.fetchMediaNetworkResponse = async () => { requests++; return { ok: false, release() {} }; };
+    plugin.coordinateSavedAttachmentMediaFailure = () => { coordinated++; return { plan: result }; };
+    const first = plugin.createOwnedRemovedTextProbeContext(record, attachment, attachment.url, {}, () => firstActive, plan => delivered.push(['first', plan]), 'inline');
+    const second = plugin.createOwnedRemovedTextProbeContext(record, attachment, attachment.url, {}, () => true, plan => delivered.push(['second', plan]), 'logger');
+    plugin.acquireSavedInlineTextAttachmentProbe(first);
+    plugin.acquireSavedInlineTextAttachmentProbe(second);
+    const entry = plugin._savedInlineTextAttachmentProbeInFlight.values().next().value;
+    firstActive = false;
+    await entry.promise;
+    assert.equal(requests, 1);
+    assert.equal(coordinated, 1);
+    assert.deepEqual(delivered, [['second', result]]);
+
+    firstActive = true; delivered.length = 0;
+    plugin.acquireSavedInlineTextAttachmentProbe(first);
+    plugin.acquireSavedInlineTextAttachmentProbe(second);
+    await plugin._savedInlineTextAttachmentProbeInFlight.values().next().value.promise;
+    assert.equal(coordinated, 2, 'each request coordinates once');
+    assert.deepEqual(delivered, [['first', result], ['second', result]]);
+  } finally { global.BdApi.Net = oldNet; }
+});
+
+test('owned probe may subscribe while Logger host is detached but fetches only after attachment', async () => {
+  const oldNet = global.BdApi.Net; global.BdApi.Net = { fetch() {} };
+  try {
+    const attachment = { id: 'a', filename: 'file.txt', url: 'https://cdn.discordapp.com/attachments/c/a/file.txt' };
+    const message = { id: 'm', channel_id: 'c', attachments: [] }, record = { message, removed_attachments: [attachment] };
+    const plugin = createPlugin({ __started: true, _startupGeneration: 1, settings: { cacheAllImages: true }, messageRecord: { m: record } });
+    let connected = false, requests = 0;
+    plugin.fetchMediaNetworkResponse = async () => { requests++; return { ok: true, release() {} }; };
+    const make = () => plugin.createOwnedRemovedTextProbeContext(record, attachment, attachment.url, {}, allowDetached => allowDetached || connected, () => {}, 'logger');
+    const release = plugin.acquireSavedInlineTextAttachmentProbe(make());
+    assert.equal(typeof release, 'function');
+    const entry = plugin._savedInlineTextAttachmentProbeInFlight.values().next().value;
+    connected = true;
+    await entry.promise;
+    assert.equal(requests, 1);
+    release();
+    connected = false;
+    const detached = plugin.acquireSavedInlineTextAttachmentProbe(make());
+    const detachedEntry = plugin._savedInlineTextAttachmentProbeInFlight.values().next().value;
+    await detachedEntry.promise;
+    assert.equal(requests, 1, 'a host that remains detached makes no request');
+    detached();
+  } finally { global.BdApi.Net = oldNet; }
+});
+
+test('owned removed text sentinel retains one mounted subscription and replaces a changed owner', () => {
+  const originalFragment = React.Fragment, OriginalComponent = React.Component;
+  React.Fragment = Symbol('Fragment');
+  React.Component = class { constructor(props) { this.props = props; } };
+  try {
+    const attachment = { id: 'a', filename: 'note.txt', url: 'https://cdn.discordapp.com/attachments/c/a/note.txt' };
+    const message = { id: 'm', channel_id: 'c', attachments: [] }, record = { message, removed_attachments: [attachment] };
+    const plugin = createPlugin({ __started: true, settings: { cacheAllImages: true }, messageRecord: { m: record } });
+    const acquisitions = [], releases = [];
+    plugin.acquireSavedInlineTextAttachmentProbe = context => { acquisitions.push(context); return () => releases.push(context); };
+    const make = owner => plugin.createOwnedRemovedTextProbeContext(record, attachment, attachment.url, owner, () => true, () => {}, 'inline');
+    const first = make({}), second = make({});
+    const wrapped = plugin.wrapSavedInlineTextAttachmentProbeRender({ kind: 'native' }, [first]);
+    assert.equal(wrapped.props.children.length, 2);
+    const element = wrapped.props.children[1], sentinel = new element.type(element.props);
+    sentinel.componentDidMount();
+    sentinel.props = { context: second };
+    sentinel.componentDidUpdate({ context: first });
+    assert.deepEqual(acquisitions, [first, second]);
+    assert.deepEqual(releases, [first]);
+    sentinel.componentWillUnmount();
+    assert.deepEqual(releases, [first, second]);
+  } finally { React.Fragment = originalFragment; React.Component = OriginalComponent; }
+});
+
+test('in-flight owned text probes ignore stop, policy, source, unmount and deletion transitions', async () => {
+  const oldNet = global.BdApi.Net; global.BdApi.Net = { fetch() {} };
+  try {
+    for (const kind of ['stop', 'policy', 'record', 'source', 'unmount', 'delete']) {
+      const attachment = { id: 'a', filename: 'note.txt', url: 'https://cdn.discordapp.com/attachments/c/a/note.txt' };
+      const message = { id: 'm', channel_id: 'c', attachments: [] }, record = { message, removed_attachments: [attachment] };
+      const plugin = createPlugin({ __started: true, _startupGeneration: 1, settings: { cacheAllImages: true }, messageRecord: { m: record } });
+      let active = true, resolve, callbacks = 0;
+      plugin.fetchMediaNetworkResponse = () => new Promise(done => { resolve = done; });
+      const context = plugin.createOwnedRemovedTextProbeContext(record, attachment, attachment.url, {}, () => active, () => callbacks++, 'inline');
+      const release = plugin.acquireSavedInlineTextAttachmentProbe(context);
+      const entry = plugin._savedInlineTextAttachmentProbeInFlight.values().next().value;
+      await Promise.resolve(); await Promise.resolve();
+      if (kind === 'stop') { plugin.__started = false; plugin._startupGeneration++; }
+      if (kind === 'policy') plugin.settings.onlyRenderCachedAttachments = true;
+      if (kind === 'record') plugin.messageRecord.m = { ...record };
+      if (kind === 'source') attachment.url += '?changed';
+      if (kind === 'unmount') active = false;
+      if (kind === 'delete') record.delete_data = { time: 1 };
+      resolve({ ok: false, release() {} });
+      await entry.promise;
+      assert.equal(callbacks, 0, kind);
+      release();
+    }
+  } finally { global.BdApi.Net = oldNet; }
+});
+
+test('owned removed text probes allow Logger hidden records but reject hidden inline and attachments', () => {
+  const attachment = { id: 'a', filename: 'note.txt', url: 'https://cdn.discordapp.com/attachments/c/a/note.txt' };
+  const message = { id: 'm', channel_id: 'c', attachments: [] };
+  const record = { message, delete_data: { time: 1, hidden: true }, removed_attachments: [attachment] };
+  const plugin = createPlugin({ __started: true, _startupGeneration: 1, settings: { cacheAllImages: true }, messageRecord: { m: record } });
+  const create = surface => plugin.createOwnedRemovedTextProbeContext(record, attachment, attachment.url, {}, () => true, () => {}, surface);
+  assert.ok(plugin.revalidateOwnedRemovedTextProbeContext(create('logger')));
+  assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(create('inline')), null);
+  attachment.hidden = true;
+  assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(create('logger')), null);
+  assert.equal(plugin.revalidateOwnedRemovedTextProbeContext(create('inline')), null);
 });
