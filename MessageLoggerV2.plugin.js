@@ -952,6 +952,13 @@ module.exports = class MessageLoggerV2 {
   stop() {
     this._startupGeneration = (this._startupGeneration || 0) + 1;
     this._viewportSession?.reset();
+    if (this._viewportHydrationActivityTimer !== null
+      && this._viewportHydrationActivityTimer !== undefined) {
+      clearTimeout(this._viewportHydrationActivityTimer);
+    }
+    this._viewportHydrationActivityTimer = null;
+    this._viewportHydrationActivityQueue = null;
+    this._viewportDebugBatchSerial = 0;
     this._viewportHydrationDebugIssueState?.clear();
     this._viewportHydrationDebugIssueState = null;
     this.cancelStartupMessageClassRecovery();
@@ -5492,6 +5499,126 @@ module.exports = class MessageLoggerV2 {
       }
     }
     return result;
+  }
+  _getViewportHydrationBuildActivityReason(priorBuildCount, dirtyReason, pendingWorkDirty = false) {
+    if (!priorBuildCount) return 'first-load';
+    if (pendingWorkDirty) return 'rebuild-pending-work';
+    const reasonGroups = {
+      'saved-media': 'rebuild-media-update',
+      'local-media-ready': 'rebuild-media-update',
+      'record-visibility': 'rebuild-record-update',
+      'native-record-update': 'rebuild-record-update',
+      'native-content-update': 'rebuild-record-update',
+      'native-history-update': 'rebuild-record-update',
+      'edit-selection': 'rebuild-record-update',
+      'stale-native-display': 'rebuild-stale-callback',
+      'stale-display-callback': 'rebuild-stale-callback'
+    };
+    return typeof dirtyReason === 'string'
+      && Object.prototype.hasOwnProperty.call(reasonGroups, dirtyReason)
+      ? reasonGroups[dirtyReason]
+      : 'rebuild-revision-change';
+  }
+  reportViewportDebugActivity(reason) {
+    if (!this.settings?.debugLogging) return false;
+    const reasonLabels = {
+      'first-load': 'first load',
+      'retained-reuse': 'retained reuse',
+      'rebuild-media-update': 'media update',
+      'rebuild-record-update': 'record update',
+      'rebuild-stale-callback': 'stale callback',
+      'rebuild-pending-work': 'pending work',
+      'rebuild-revision-change': 'revision change'
+    };
+    if (typeof reason !== 'string' || !Object.prototype.hasOwnProperty.call(reasonLabels, reason)) return false;
+
+    const queue = this._viewportHydrationActivityQueue ||= Object.fromEntries(
+      Object.keys(reasonLabels).map(key => [key, 0])
+    );
+    queue[reason] += 1;
+    if (this._viewportHydrationActivityTimer !== null
+      && this._viewportHydrationActivityTimer !== undefined) return true;
+    try {
+      this._viewportHydrationActivityTimer = setTimeout(() => this.flushViewportDebugActivity(queue), 1000);
+    } catch {
+      this._viewportHydrationActivityTimer = null;
+      this._viewportHydrationActivityQueue = null;
+      return false;
+    }
+    return true;
+  }
+  flushViewportDebugActivity(expectedQueue = null) {
+    if (expectedQueue && this._viewportHydrationActivityQueue !== expectedQueue) return false;
+    this._viewportHydrationActivityTimer = null;
+    const queue = this._viewportHydrationActivityQueue;
+    this._viewportHydrationActivityQueue = null;
+    if (!queue || !this.settings?.debugLogging) return false;
+    const labels = {
+      'first-load': 'first load',
+      'retained-reuse': 'retained reuse',
+      'rebuild-media-update': 'media update',
+      'rebuild-record-update': 'record update',
+      'rebuild-stale-callback': 'stale callback',
+      'rebuild-pending-work': 'pending work',
+      'rebuild-revision-change': 'revision change'
+    };
+    const activityCounts = Object.keys(labels)
+      .filter(reason => queue[reason] > 0)
+      .map(reason => ({ reason, count: queue[reason], label: labels[reason] }));
+    if (!activityCounts.length) return false;
+    const summary = activityCounts
+      .filter(item => item.reason === 'first-load' || item.reason === 'retained-reuse')
+      .map(item => `${item.count} ${item.label}${item.count === 1 ? '' : 's'}`);
+    const rebuilds = activityCounts.filter(item => item.reason.startsWith('rebuild-'));
+    if (rebuilds.length) {
+      const total = rebuilds.reduce((sum, item) => sum + item.count, 0);
+      const reasons = rebuilds.map(item => `${item.count} ${item.label}${item.count === 1 ? '' : 's'}`);
+      summary.push(`${total} rebuild${total === 1 ? '' : 's'} (${reasons.join(', ')})`);
+    }
+    const message = `Hydration succeeded: ${summary.join(', ')}.`;
+    try { this._logStyledConsoleEvent('DEBUG · HYDRATE', message); } catch {}
+    return true;
+  }
+  _nextViewportDebugBatchNumber() {
+    this._viewportDebugBatchSerial = (this._viewportDebugBatchSerial || 0) + 1;
+    return this._viewportDebugBatchSerial;
+  }
+  reportViewportDebugBatch(batchNumber, entries, remaining) {
+    if (!this.settings?.debugLogging || !Array.isArray(entries) || !entries.length) return false;
+    const surfaces = new Set(['logger', 'native', 'thread', 'preview', 'server card', 'other']);
+    const admissions = new Set(['visible/current', 'passed interval', 'server view', 'existing queue']);
+    const priorities = new Set(['current viewport', 'background']);
+    const outcomes = new Set(['succeeded', 'failed', 'pending', 'retained', 'stale/cancelled']);
+    const reasons = new Set(['first load', 'media update', 'record update', 'stale callback', 'pending work', 'revision change']);
+    const lines = [`Batch ${Number.isSafeInteger(batchNumber) && batchNumber > 0 ? batchNumber : 'unknown'}`];
+    for (const item of entries) {
+      if (!item || !Number.isSafeInteger(item.index) || item.index < 1) continue;
+      const surface = surfaces.has(item.surface) ? item.surface : 'other';
+      const admission = admissions.has(item.admission) ? item.admission : 'existing queue';
+      const priority = priorities.has(item.priority) ? item.priority : 'background';
+      const outcome = outcomes.has(item.outcome) ? item.outcome : 'pending';
+      const reason = reasons.has(item.reason) ? ` (${item.reason})` : '';
+      lines.push(`Entry #${item.index} · ${surface} · ${outcome}${reason} · ${priority} · admitted: ${admission}`);
+    }
+    if (lines.length === 1) return false;
+    lines.push(`Queue remaining: ${Number.isSafeInteger(remaining) && remaining > 0 ? remaining : 0}`);
+    try { this._logStyledConsoleEvent('DEBUG · HYDRATE', lines.join('\n')); } catch {}
+    return true;
+  }
+  reportViewportDebugBatchOutcome(context, outcome) {
+    if (!this.settings?.debugLogging || !context || !Number.isSafeInteger(context.batchNumber)
+      || !Number.isSafeInteger(context.index)) return false;
+    const outcomes = new Set(['succeeded', 'failed', 'stale/cancelled']);
+    const surfaces = new Set(['logger', 'native', 'thread', 'preview', 'server card', 'other']);
+    const priorities = new Set(['current viewport', 'background']);
+    if (!outcomes.has(outcome)) return false;
+    const surface = surfaces.has(context.surface) ? context.surface : 'other';
+    const priority = priorities.has(context.priority) ? context.priority : 'background';
+    try {
+      this._logStyledConsoleEvent('DEBUG · HYDRATE',
+        `Batch ${context.batchNumber} · Entry #${context.index} · ${surface} · ${outcome} · ${priority}`);
+    } catch {}
+    return true;
   }
   _nextMediaNetworkRequestId() {
     this._mediaCacheRequestSerial += 1;
@@ -12044,7 +12171,7 @@ module.exports = class MessageLoggerV2 {
         if (registry && !registry.has(messageId)) registry.set(messageId, new Set());
         const update = () => plugin.reconcileNativeViewportMessage(entry, 'native-record-update');
         registry?.get(messageId)?.add(update);
-        session.attach(entry, slot, token, { observeTarget: row });
+        session.attach(entry, slot, token, { observeTarget: row, crossing: true });
         return () => {
           if (registry) plugin._unregisterMessageCallback(messageId, update);
           session.release(entry, token);
@@ -23222,7 +23349,10 @@ module.exports = class MessageLoggerV2 {
       return {};
     };
     const retainedPreviewCards = new Map();
+    const retainedPreviewScopes = new WeakMap();
+    const retainedThreadBrowserHeaders = new Set();
     const parkRetainedPreviewCard = node => {
+      retainedThreadBrowserHeaders.delete(node);
       const session = this._viewportSession;
       const entry = session?.ownerOf(node);
       if (entry && retainedPreviewCards.has(entry)) {
@@ -23233,6 +23363,22 @@ module.exports = class MessageLoggerV2 {
       }
       node?.remove?.();
     };
+    const parkRetainedPreviewType = (type, keepParentId = null) => {
+      for (const [entry, session] of retainedPreviewCards) {
+        if (!entry.surfaceKey.startsWith(`preview:${type}:`) || session !== this._viewportSession || !entry.slot) continue;
+        if (keepParentId != null && entry.surfaceKey === `preview:${type}:${keepParentId}`) continue;
+        const slot = entry.slot;
+        session.park(entry, entry.leaseToken);
+        slot.remove?.();
+      }
+      if (type === 'thread-browser') {
+        for (const header of retainedThreadBrowserHeaders) {
+          if (keepParentId != null && header.getAttribute?.('data-ml2-restored-thread-browser-section') === String(keepParentId)) continue;
+          header.remove?.();
+          retainedThreadBrowserHeaders.delete(header);
+        }
+      }
+    };
     const sweepDetachedPreviewCards = () => {
       for (const [entry, session] of retainedPreviewCards) {
         if (session !== this._viewportSession || session.ownerOf(entry.host) !== entry) {
@@ -23242,7 +23388,7 @@ module.exports = class MessageLoggerV2 {
         }
       }
     };
-    const mountRetainedPreviewCard = (record, parent, type, parentId, builder, template = null) => {
+    const mountRetainedPreviewCard = (record, parent, type, parentId, builder, template = null, estimatedHeight = 0) => {
       if (typeof IntersectionObserver !== 'function' || typeof parent?.replaceChildren !== 'function') {
         const node = builder(record);
         if (node) parent.appendChild(node);
@@ -23264,7 +23410,8 @@ module.exports = class MessageLoggerV2 {
           } finally { this._viewportBuildingEntry = previous; }
         }
       });
-      const shell = document.createElement(type === 'forum' ? 'li' : 'div');
+      if (!entry.measuredHeight && estimatedHeight > 0) entry.measuredHeight = estimatedHeight;
+      const shell = document.createElement(type === 'forum' || type === 'sidebar' ? 'li' : 'div');
       if (typeof template?.className === 'string') shell.className = template.className;
       if (type === 'forum') {
         shell.setAttribute('data-item-role', 'item');
@@ -23273,10 +23420,19 @@ module.exports = class MessageLoggerV2 {
         shell.setAttribute('data-item-id', threadId);
         shell.setAttribute('data-list-item-id', `forum-channel-list-${parentId}___${threadId}`);
         shell.setAttribute('data-ml2-forum-list-item-id', `forum-channel-list-${parentId}___${threadId}`);
+      } else if (type === 'sidebar') {
+        shell.setAttribute('role', 'listitem');
+        shell.setAttribute('data-ml2-restored-thread-entry', threadId);
+        shell.setAttribute('data-list-item-id', `channels___${threadId}`);
       } else shell.setAttribute('data-ml2-restored-thread-browser-card', threadId);
       parent.appendChild(shell);
       retainedPreviewCards.set(entry, session);
-      session.attach(entry, shell, {}, { replaceSlot: true });
+      let scopes = retainedPreviewScopes.get(parent);
+      if (!scopes) { scopes = new Map(); retainedPreviewScopes.set(parent, scopes); }
+      const scopeKey = `${type}:${parentId}`;
+      if (!scopes.has(scopeKey)) scopes.set(scopeKey, {});
+      session.attach(entry, shell, {}, { replaceSlot: true, silentPending: true, admitOnAttach: true,
+        crossing: true, admissionScope: scopes.get(scopeKey) });
       return entry.slot;
     };
     const removeForumCardNode = (threadId) => {
@@ -23560,13 +23716,23 @@ module.exports = class MessageLoggerV2 {
       return createAnchoredRestoredForumCard(record, sourceCard, sourceLi, parentChannel);
     };
     const restoreDeletedForumCards = () => {
-      const parentChannel = this.selectedChannel || this.getSelectedTextChannel?.();
+      const guildId = this.getSelectedGuildId?.();
+      if (!guildId) { parkRetainedPreviewType('forum'); return; }
+      const selected = this.selectedChannel || this.getSelectedTextChannel?.();
+      const parentChannel = [10, 11, 12].includes(selected?.type) && selected.parent_id
+        ? this.tools.getChannel(selected.parent_id) || selected : selected;
+      if (String(parentChannel?.guild_id || '') !== String(guildId)) {
+        parkRetainedPreviewType('forum');
+        return;
+      }
       if (!canRestoreVisibleThreadRoots()) {
+        parkRetainedPreviewType('forum');
         if (parentChannel?.id) removeRestoredForumCardsForChannel(parentChannel.id);
         else document.querySelectorAll('[data-ml2-restored-forum-thread]').forEach(parkRetainedPreviewCard);
         return;
       }
-      if (!isForumListChannel(parentChannel) || !parentChannel?.guild_id) return;
+      if (!isForumListChannel(parentChannel) || !parentChannel?.guild_id) { parkRetainedPreviewType('forum'); return; }
+      parkRetainedPreviewType('forum', parentChannel.id);
       const { sourceCard, sourceLi, list: sourceList } = findForumCardSource(parentChannel);
       const list = sourceList;
       if (!sourceCard || !sourceLi || !list || list.id === 'channels') {
@@ -23592,6 +23758,7 @@ module.exports = class MessageLoggerV2 {
       const existingIds = new Set(Array.from(list.querySelectorAll('[data-item-id], [data-ml2-restored-forum-card]'))
         .map(card => card.getAttribute('data-item-id') || card.getAttribute('data-ml2-restored-forum-card'))
         .filter(Boolean));
+      const estimatedHeight = sourceLi.getBoundingClientRect?.().height || 0;
       for (const record of records) {
         const threadId = record.message.id;
         if (existingIds.has(threadId)) {
@@ -23599,7 +23766,7 @@ module.exports = class MessageLoggerV2 {
           continue;
         }
         const restored = mountRetainedPreviewCard(record, list, 'forum', parentChannel.id,
-          current => createRestoredForumCard(current, sourceCard, sourceLi, parentChannel), sourceLi);
+          current => createRestoredForumCard(current, sourceCard, sourceLi, parentChannel), sourceLi, estimatedHeight);
         if (!restored) continue;
         existingIds.add(threadId);
         tintForumCardByThreadId(threadId);
@@ -23681,6 +23848,17 @@ module.exports = class MessageLoggerV2 {
       return card;
     };
     const restoreDeletedSidebarThreads = () => {
+      const parkSidebar = () => parkRetainedPreviewType('sidebar');
+      const guildId = this.getSelectedGuildId?.();
+      if (!guildId) { parkSidebar(); return; }
+      const nativeSidebar = Array.from(document.querySelectorAll('[data-list-item-id^="channels___"]'))
+        .some(node => {
+          if (node.isConnected === false || node.closest?.('[data-ml2-restored-thread-entry]')) return false;
+          const id = node.getAttribute?.('data-list-item-id')?.slice('channels___'.length);
+          const channel = id && this.tools?.getChannel?.(id);
+          return !!channel && String(channel.guild_id) === String(guildId);
+        });
+      if (!nativeSidebar) { parkSidebar(); return; }
       const desiredIds = new Set();
       const parents = new Map();
       for (const record of Object.values(this.messageRecord || {})) {
@@ -23688,40 +23866,48 @@ module.exports = class MessageLoggerV2 {
         const parentId = record?.delete_data?.forum_parent_id || metadata.parentId;
         if (!record?.delete_data?.forum_thread_delete || !parentId) continue;
         const parent = this.tools.getChannel(parentId);
-        if (!parent) continue;
+        if (!parent || String(parent.guild_id) !== String(guildId)) continue;
         parents.set(parentId, parent);
       }
       for (const [parentId, parent] of parents) {
         const { group, sourceLi } = findSidebarThreadSource(parentId);
         if (!group || !sourceLi) continue;
+        const estimatedHeight = sourceLi.getBoundingClientRect?.().height || 0;
         const records = getRestorableCompactThreadRecords(parent);
         for (const record of records) {
           const threadId = record.message.id;
           desiredIds.add(threadId);
           const native = group.querySelector(`[data-list-item-id="channels___${threadId}"]`);
           if (native) continue;
-          const restored = createRestoredSidebarThread(record, sourceLi, parent);
-          if (restored) group.appendChild(restored);
+          mountRetainedPreviewCard(record, group, 'sidebar', parentId,
+            current => createRestoredSidebarThread(current, sourceLi, parent), sourceLi, estimatedHeight);
         }
       }
       document.querySelectorAll('[data-ml2-restored-thread-entry]').forEach(node => {
         const threadId = node.getAttribute('data-ml2-restored-thread-entry');
-        if (!desiredIds.has(threadId) || this.isSuppressedForumThreadId(threadId)) node.remove();
+        if (!desiredIds.has(threadId) || this.isSuppressedForumThreadId(threadId)) parkRetainedPreviewCard(node);
         else applyRestoredThreadTint(threadId);
       });
     };
     const restoreDeletedThreadBrowserCards = () => {
+      const guildId = this.getSelectedGuildId?.();
+      if (!guildId) { parkRetainedPreviewType('thread-browser'); return; }
+      const selected = this.selectedChannel || this.getSelectedTextChannel?.();
+      const parent = [10, 11, 12].includes(selected?.type) ? this.tools.getChannel(selected.parent_id) : selected;
+      if (String(parent?.guild_id || '') !== String(guildId)) {
+        parkRetainedPreviewType('thread-browser');
+        return;
+      }
+      parkRetainedPreviewType('thread-browser', parent.id);
       const { browser, input, content, sectionHeader, sourceCard, sourceCards } = findThreadBrowserSource();
-      if (!browser) return;
+      if (!browser) { parkRetainedPreviewType('thread-browser'); return; }
       if (!content || !sourceCard || !sourceCards?.length) {
         browser.querySelectorAll(
           '[data-ml2-restored-thread-browser-card], [data-ml2-restored-thread-browser-section]'
         ).forEach(parkRetainedPreviewCard);
         return;
       }
-      const selected = this.selectedChannel || this.getSelectedTextChannel?.();
-      const parent = [10, 11, 12].includes(selected?.type) ? this.tools.getChannel(selected.parent_id) : selected;
-      if (!parent || isForumListChannel(parent)) return;
+      if (!parent || isForumListChannel(parent)) { parkRetainedPreviewType('thread-browser'); return; }
       const records = getRestorableCompactThreadRecords(parent);
       const query = input?.value?.trim?.().toLowerCase() || '';
       const desiredIds = new Set(records.filter(record => !query || getForumRecordTitle(record).toLowerCase().includes(query))
@@ -23733,6 +23919,7 @@ module.exports = class MessageLoggerV2 {
       let deletedHeader = content.querySelector(`[data-ml2-restored-thread-browser-section="${parent.id}"]`);
       if (!records.length) {
         deletedHeader?.remove();
+        retainedThreadBrowserHeaders.delete(deletedHeader);
         const nativeHeight = sectionHeader.getBoundingClientRect().height
           + sourceCards.reduce((height, card) => height + card.getBoundingClientRect().height, 0);
         if (nativeHeight) content.style.height = `${nativeHeight}px`;
@@ -23744,14 +23931,16 @@ module.exports = class MessageLoggerV2 {
         deletedHeader.setAttribute('data-ml2-restored-thread-browser-section', parent.id);
         content.appendChild(deletedHeader);
       }
+      retainedThreadBrowserHeaders.add(deletedHeader);
       deletedHeader.textContent = `${records.length} deleted thread${records.length === 1 ? '' : 's'}`;
+      const estimatedHeight = sourceCard.getBoundingClientRect?.().height || 0;
       for (const record of records) {
         const threadId = record.message.id;
         if (!desiredIds.has(threadId)) continue;
         let card = content.querySelector(`[data-ml2-restored-thread-browser-card="${threadId}"]`);
         if (!card) {
           card = mountRetainedPreviewCard(record, content, 'thread-browser', parent.id,
-            current => createRestoredThreadBrowserCard(current, sourceCard), sourceCard);
+            current => createRestoredThreadBrowserCard(current, sourceCard), sourceCard, estimatedHeight);
         }
         if (card) {
           applyRestoredThreadTint(threadId);
@@ -23971,6 +24160,7 @@ module.exports = class MessageLoggerV2 {
     this.unpatches.push(() => {
       try { tintObserver.disconnect(); } catch {}
       retainedPreviewCards.clear();
+      retainedThreadBrowserHeaders.clear();
       this.cleanupCopiedNativeDeleteControls(null, true);
       this.cleanupLoggerNativeAudioRoots(null, true);
       this.cleanupLoggerNativeDocumentRoots(null, true);
@@ -25163,7 +25353,7 @@ module.exports = class MessageLoggerV2 {
     const element = isStart
       ? this.parseHTML(`<div class="${classes.extra[0]}">
                                       <div class="${classes.extra[12]}">
-                                        <img src="${getAvatarOf(message.author)}" class="${classes.extra[3]}" style="width: 40px; height: 40px;" alt=" "><h2 class="${classes.extra[2]}"><span class="${classes.extra[4]}" role="button">${escapeHTML(message.author.username)}</span>${botTagHtml}<span class="${classes.extra[5]}"><span data-ml2-log-details="true">${details}</span></span></h2>
+                                        <img src="${getAvatarOf(author || message.author)}" class="${classes.extra[3]}" style="width: 40px; height: 40px;" alt=" "><h2 class="${classes.extra[2]}"><span class="${classes.extra[4]}" role="button">${escapeHTML(message.author.username)}</span>${botTagHtml}<span class="${classes.extra[5]}"><span data-ml2-log-details="true">${details}</span></span></h2>
                                         <div class="${classes.extra[6]}"></div>
                                       </div>
                                       <div class="${classes.extra[7]}"></div>
@@ -25203,19 +25393,7 @@ module.exports = class MessageLoggerV2 {
       profImg.onerror = () => {
         profImg.src = '/assets/322c936a8c8be1b803cd94861bdfa868.png';
       };
-      const verifyProfilePicture = () => {
-        if (message.author.avatar != author.avatar && author.avatar) {
-          profImg.src = getAvatarOf(author);
-          if (record) {
-            record.message.author.avatar = author.avatar;
-          }
-        } else if (record) {
-          record.message.author.avatar = null;
-        }
-      };
-      if (author) {
-        verifyProfilePicture();
-      } else {
+      if (!author) {
         author = message.author;
         noUserInfo = true;
       }
@@ -25568,6 +25746,9 @@ module.exports = class MessageLoggerV2 {
     const entries = new Map();
     const slots = new Map();
     const observedTargets = new Map();
+    const scrollRoots = new Map();
+    const crossingRefresh = new Map();
+    const unboundCrossings = new Set();
     const nativeRows = new WeakMap();
     const nativeOccurrences = new Map();
     const queue = new Set();
@@ -25580,6 +25761,8 @@ module.exports = class MessageLoggerV2 {
     let buildCount = 0;
     let disposedCount = 0;
     let closed = false;
+    let crossingRefreshPending = false;
+    let bindingUnboundCrossings = false;
     let loadingStyle = null;
     const supported = typeof document !== 'undefined'
       && typeof document.createElement === 'function'
@@ -25625,7 +25808,14 @@ module.exports = class MessageLoggerV2 {
       if (entry.slot === node) return;
       const previous = entry.slot;
       if (!previous?.parentNode) return;
-      unobserve(entry);
+      const previousTarget = entry.observeTarget || previous;
+      const group = observedTargets.get(previousTarget);
+      const transfer = previousTarget === previous && group?.size === 1 && group.has(entry)
+        && !observedTargets.has(node);
+      if (transfer) {
+        observedTargets.delete(previousTarget);
+        observer?.unobserve(previousTarget);
+      } else unobserve(entry);
       slots.delete(previous);
       if (previous === entry.shell) unregisterNode(entry, previous);
       const jumpClass = plugin.style?.restoredForumJump;
@@ -25638,20 +25828,53 @@ module.exports = class MessageLoggerV2 {
       entry.observeTarget = node;
       slots.set(node, entry);
       if (node === entry.shell) registerNode(entry, node);
-      observe(entry);
+      if (transfer) {
+        observedTargets.set(node, group);
+        observer?.observe(node);
+        const scope = entry.admissionScope;
+        if (scope) {
+          scope.targets.delete(previousTarget);
+          scope.targets.add(node);
+          scope.lastVisible = scope.lastVisible.map(target => target === previousTarget ? node : target);
+          if (scope.pending) {
+            scope.pending.previous = scope.pending.previous.map(target => target === previousTarget ? node : target);
+            for (const item of scope.pending.snapshot) if (item.target === previousTarget) item.target = node;
+          }
+        }
+        const pending = crossingRefresh.get(entry);
+        if (pending?.target === previousTarget) pending.target = node;
+      } else {
+        observe(entry);
+        registerCrossing(entry, node, entry.crossingOptions || {});
+        scheduleCrossingRefresh(entry, node, entry.crossingOptions || {}, entry.leaseToken);
+      }
     };
     const present = entry => {
-      if (entry.replaceSlot) replaceSlot(entry, entry.host);
+      if (entry.replaceSlot && entry.silentPending && entry.failed) showSilentFailure(entry);
+      else if (entry.replaceSlot) replaceSlot(entry, entry.host);
       else entry.slot.replaceChildren(entry.host);
     };
     const showPending = (entry, visible = false) => {
+      if (entry.replaceSlot && entry.silentPending) {
+        if (entry.slot !== entry.shell) {
+          const height = entry.host.getBoundingClientRect?.().height;
+          if (height > 0) entry.measuredHeight = height;
+          replaceSlot(entry, entry.shell);
+        }
+        entry.shell.style.minHeight = `${entry.measuredHeight || 72}px`;
+        entry.shell.style.visibility = 'hidden';
+        entry.shell.inert = true;
+        entry.shell.setAttribute('aria-hidden', 'true');
+        entry.shell.replaceChildren();
+        return;
+      }
       if (!entry.placeholder) {
         const placeholder = document.createElement('div');
         placeholder.style.color = 'var(--text-warning, var(--status-warning))';
         const label = document.createElement('span');
-        label.textContent = 'Loading saved message';
+        label.textContent = 'MLV2: Loading saved message';
         const dots = document.createElement('span');
-        dots.textContent = '...';
+        dots.textContent = ' ...';
         dots.className = 'ml2-viewport-loading-dots';
         placeholder.append(label, dots);
         entry.placeholder = placeholder;
@@ -25671,6 +25894,15 @@ module.exports = class MessageLoggerV2 {
       }
       entry.slot.replaceChildren(entry.placeholder);
     };
+    const showSilentFailure = entry => {
+      if (!entry.replaceSlot || !entry.silentPending) return false;
+      if (entry.slot !== entry.shell) replaceSlot(entry, entry.shell);
+      entry.shell.style.visibility = '';
+      entry.shell.inert = false;
+      entry.shell.removeAttribute?.('aria-hidden');
+      entry.shell.textContent = 'Saved message could not be loaded.';
+      return true;
+    };
     const disposeResources = entry => {
       for (const resource of entry.resources.splice(0)) {
         unregisterNode(entry, resource.node);
@@ -25683,9 +25915,38 @@ module.exports = class MessageLoggerV2 {
         }
       }
     };
-    const enqueue = entry => {
+    const reportSuccessfulBuild = (entry, buildSerial, priorBuildCount, dirtyReason,
+      pendingWorkDirty, admissionEpoch, debugBatchContext = null) => {
+      if (entry.buildSerial !== buildSerial || entry.admissionEpoch !== admissionEpoch) return;
+      if (entry.dirtyReason === dirtyReason) entry.dirtyReason = null;
+      if (!plugin.settings?.debugLogging) return;
+      if (debugBatchContext) return;
+      const reason = plugin._getViewportHydrationBuildActivityReason(
+        priorBuildCount,
+        dirtyReason,
+        pendingWorkDirty
+      );
+      try { plugin.reportViewportDebugActivity(reason); } catch {}
+    };
+    const reportVisibleRetainedReuse = (entry, wasVisible, visible) => {
+      if (wasVisible || !visible || !entry.crossingOptions?.crossing || !plugin.settings?.debugLogging
+        || !entry.activated || entry.failed || entry.dirty || entry.pendingWorkDirty || entry.pendingBuild
+        || queue.has(entry)) return;
+      try {
+        if (revisionOf(entry) === entry.builtRevision) plugin.reportViewportDebugActivity('retained-reuse');
+      } catch {}
+    };
+    let queueAdmissionReasons = null;
+    const enqueue = (entry, admissionReason = 'visible/current') => {
       if (closed) return;
+      const wasQueued = queue.has(entry);
       queue.add(entry);
+      if (!wasQueued && plugin.settings?.debugLogging) {
+        queueAdmissionReasons ||= new WeakMap();
+        const safeReason = ['visible/current', 'passed interval', 'server view'].includes(admissionReason)
+          ? admissionReason : 'visible/current';
+        queueAdmissionReasons.set(entry, safeReason);
+      }
       if (framePending) return;
       framePending = true;
       const scheduledGeneration = generation;
@@ -25693,14 +25954,182 @@ module.exports = class MessageLoggerV2 {
         if (scheduledGeneration !== generation) return;
         framePending = false;
         let count = 0;
+        let batchNumber = null;
+        const batchItems = plugin.settings?.debugLogging ? [] : null;
         const now = () => typeof globalThis.performance?.now === 'function' ? globalThis.performance.now() : Date.now();
         const started = now();
-        for (const item of queue) {
+        while (queue.size) {
+          const item = [...queue].find(candidate => active(candidate) && candidate.visible)
+            || queue.values().next().value;
           queue.delete(item);
-          if (active(item)) activate(item, item.leaseToken);
+          const admission = queueAdmissionReasons?.get(item) || (item.admitOnAttach ? 'server view' : 'visible/current');
+          queueAdmissionReasons?.delete(item);
+          if (active(item)) {
+            const leaseToken = item.leaseToken;
+            const admissionEpoch = item.admissionEpoch;
+            let debugContext = null;
+            if (batchItems) {
+              batchNumber ||= plugin._nextViewportDebugBatchNumber();
+              let willBuild = !item.activated || item.dirty || item.pendingWorkDirty;
+              try { willBuild ||= revisionOf(item) !== item.builtRevision; } catch { willBuild = true; }
+              const reason = willBuild ? plugin._getViewportHydrationBuildActivityReason(
+                item.buildSerial, item.dirtyReason, item.pendingWorkDirty
+              ) : null;
+              const reasonLabels = {
+                'first-load': 'first load',
+                'rebuild-media-update': 'media update',
+                'rebuild-record-update': 'record update',
+                'rebuild-stale-callback': 'stale callback',
+                'rebuild-pending-work': 'pending work',
+                'rebuild-revision-change': 'revision change'
+              };
+              const surface = item.admitOnAttach ? 'server card'
+                : item.surfaceKey === 'logger' || item.surfaceKey === 'native' ? item.surfaceKey
+                  : typeof item.surfaceKey === 'string' && item.surfaceKey.startsWith('thread:') ? 'thread'
+                    : typeof item.surfaceKey === 'string' && item.surfaceKey.startsWith('preview:') ? 'preview' : 'other';
+              debugContext = {
+                batchNumber,
+                index: batchItems.length + 1,
+                surface,
+                admission,
+                priority: item.visible ? 'current viewport' : 'background',
+                reason: reasonLabels[reason] || null,
+                admissionEpoch,
+                generation: scheduledGeneration
+              };
+            }
+            const priorBuildSerial = item.buildSerial;
+            activate(item, leaseToken, debugContext);
+            if (debugContext) {
+              const outcome = item.pendingBuild ? 'pending'
+                : item.failed ? 'failed'
+                  : item.admissionEpoch !== admissionEpoch || !active(item, leaseToken) ? 'stale/cancelled'
+                    : item.buildSerial === priorBuildSerial ? 'retained' : 'succeeded';
+              batchItems.push({ ...debugContext, outcome });
+            }
+          }
           if (++count >= 4 || now() - started >= 8) break;
         }
+        if (batchNumber !== null) {
+          try { plugin.reportViewportDebugBatch(batchNumber, batchItems, queue.size); } catch {}
+        }
         if (queue.size) enqueue(queue.values().next().value);
+      });
+    };
+    const findScrollRoot = target => {
+      for (let node = target?.parentElement; node; node = node.parentElement) {
+        let overflow = '';
+        try { overflow = globalThis.getComputedStyle?.(node)?.overflowY || ''; } catch {}
+        if (/^(auto|scroll|overlay)$/.test(overflow)
+          && node.scrollHeight > node.clientHeight && typeof node.addEventListener === 'function') return node;
+      }
+      const fallback = typeof document !== 'undefined' ? document.scrollingElement : null;
+      return fallback && fallback.scrollHeight > fallback.clientHeight
+        && typeof fallback.addEventListener === 'function' ? fallback : null;
+    };
+    const orderedSnapshot = scope => [...scope.targets].filter(target => target.isConnected !== false
+      && (typeof scope.root.contains !== 'function' || scope.root.contains(target)))
+      .sort((a, b) => {
+        const position = a.compareDocumentPosition?.(b) || 0;
+        if (position & 1) return 0;
+        return position & 4 ? -1 : position & 2 ? 1 : 0;
+      }).map(target => ({ target, members: [...(observedTargets.get(target) || [])]
+        .filter(entry => entry.admissionScope === scope && active(entry))
+        .map(entry => ({ entry, token: entry.leaseToken, epoch: entry.admissionEpoch })) }));
+    const registerCrossing = (entry, target, options) => {
+      if (!options.crossing || !observer) return;
+      const root = options.scrollRoot || findScrollRoot(target);
+      const key = options.admissionScope || root;
+      if (entry.admissionScope?.root === root && entry.admissionScope?.key === key) return;
+      if (entry.admissionScope) unregisterCrossing(entry, target);
+      if (!root || typeof root.addEventListener !== 'function') { unboundCrossings.add(entry); return; }
+      unboundCrossings.delete(entry);
+      let state = scrollRoots.get(root);
+      if (!state) {
+        state = { scopes: new Map() };
+        state.onScroll = () => {
+          for (const scope of state.scopes.values()) {
+            scope.pending = { snapshot: orderedSnapshot(scope), previous: [...scope.lastVisible] };
+          }
+        };
+        root.addEventListener('scroll', state.onScroll, { passive: true });
+        scrollRoots.set(root, state);
+      }
+      let scope = state.scopes.get(key);
+      if (!scope) { scope = { root, key, targets: new Set(), lastVisible: [], pending: null }; state.scopes.set(key, scope); }
+      scope.targets.add(target);
+      entry.admissionScope = scope;
+      if (observedTargets.get(target)?.visible && !scope.lastVisible.includes(target)) scope.lastVisible.push(target);
+      if (!bindingUnboundCrossings && unboundCrossings.size) {
+        bindingUnboundCrossings = true;
+        try {
+          for (const pending of [...unboundCrossings]) {
+            if (active(pending) && pending.observeTarget) {
+              registerCrossing(pending, pending.observeTarget, pending.crossingOptions || {});
+            }
+          }
+        } finally { bindingUnboundCrossings = false; }
+      }
+    };
+    const unregisterCrossing = (entry, target) => {
+      unboundCrossings.delete(entry);
+      const scope = entry.admissionScope;
+      if (!scope) return;
+      entry.admissionScope = null;
+      const group = observedTargets.get(target);
+      if (![...(group || [])].some(other => other.admissionScope === scope)) scope.targets.delete(target);
+      if (scope.targets.size) return;
+      const state = scrollRoots.get(scope.root);
+      state?.scopes.delete(scope.key);
+      if (state && !state.scopes.size) {
+        scope.root.removeEventListener?.('scroll', state.onScroll);
+        scrollRoots.delete(scope.root);
+      }
+    };
+    const admitCrossed = scope => {
+      const current = [...scope.targets].filter(target => target.isConnected !== false
+        && (typeof scope.root.contains !== 'function' || scope.root.contains(target))
+        && observedTargets.get(target)?.visible);
+      if (!current.length) return;
+      const pending = scope.pending;
+      if (pending) {
+        const { snapshot, previous } = pending;
+        const indexes = targets => targets.map(target => snapshot.findIndex(item => item.target === target
+          && item.members.some(member => member.entry.admissionScope === scope
+            && member.entry.leaseToken === member.token && member.entry.admissionEpoch === member.epoch
+            && active(member.entry)))).filter(index => index >= 0);
+        const before = indexes(previous), after = indexes(current);
+        if (before.length && after.length) {
+          const low = Math.min(...before, ...after), high = Math.max(...before, ...after);
+          for (let i = low; i <= high; i++) {
+            for (const item of snapshot[i].members) {
+              if (item.entry.admissionScope === scope && item.entry.leaseToken === item.token
+                && item.entry.admissionEpoch === item.epoch && active(item.entry)
+                && (!item.entry.activated || item.entry.dirty || item.entry.pendingWorkDirty)) {
+                enqueue(item.entry, item.entry.admitOnAttach ? 'server view' : 'passed interval');
+              }
+            }
+          }
+        }
+        scope.pending = null;
+      }
+      scope.lastVisible = current;
+    };
+    const scheduleCrossingRefresh = (entry, target, options, token) => {
+      if (!options.crossing || options.scrollRoot || typeof globalThis.getComputedStyle !== 'function') return;
+      crossingRefresh.set(entry, { target, options, token });
+      if (crossingRefreshPending) return;
+      crossingRefreshPending = true;
+      const scheduledGeneration = generation;
+      frame(() => {
+        if (scheduledGeneration !== generation) return;
+        crossingRefreshPending = false;
+        for (const [item, registration] of crossingRefresh) {
+          crossingRefresh.delete(item);
+          if (active(item, registration.token) && item.observeTarget === registration.target) {
+            registerCrossing(item, registration.target, registration.options);
+          }
+        }
       });
     };
     const observe = entry => {
@@ -25709,29 +26138,48 @@ module.exports = class MessageLoggerV2 {
       let group = observedTargets.get(target);
       if (!group) { group = new Set(); group.visible = false; observedTargets.set(target, group); observer.observe(target); }
       group.add(entry);
+      const wasVisible = !!entry.visible;
       entry.visible = group.visible;
-      if (entry.visible && (!entry.activated || entry.dirty || entry.pendingWorkDirty)) enqueue(entry);
+      reportVisibleRetainedReuse(entry, wasVisible, entry.visible);
+      if (entry.visible && (!entry.activated || entry.dirty || entry.pendingWorkDirty)) {
+        enqueue(entry, entry.admitOnAttach ? 'server view' : 'visible/current');
+      }
     };
     const unobserve = entry => {
       const target = entry.observeTarget || entry.slot;
       const group = observedTargets.get(target);
       if (!group) return;
       group.delete(entry);
+      unregisterCrossing(entry, target);
       if (!group.size) { observedTargets.delete(target); observer?.unobserve(target); }
     };
     const scheduleReconcile = entry => {
       if (!active(entry)) return;
+      if (!entry.dirty) {
+        queue.delete(entry);
+        queueAdmissionReasons?.delete(entry);
+        entry.admissionEpoch++;
+      }
       entry.dirty = true;
       suspend(entry);
       showPending(entry);
-      if (entry.visible || !observer) enqueue(entry); else observe(entry);
+      if (entry.visible || entry.admitOnAttach || !observer) {
+        enqueue(entry, entry.admitOnAttach ? 'server view' : 'visible/current');
+      } else observe(entry);
     };
-    const activate = (entry, token) => {
+    const activate = (entry, token, debugBatchContext = null) => {
       if (!active(entry, token)) return false;
+      let buildContext = null;
       let nextRevision;
       try {
         nextRevision = revisionOf(entry);
         if (!entry.activated || entry.dirty || entry.pendingWorkDirty || nextRevision !== entry.builtRevision) {
+          buildContext = {
+            priorBuildCount: entry.buildSerial,
+            dirtyReason: entry.dirtyReason,
+            pendingWorkDirty: entry.pendingWorkDirty,
+            admissionEpoch: entry.admissionEpoch
+          };
           disposeResources(entry);
           entry.host.replaceChildren();
           entry.dirty = false;
@@ -25744,20 +26192,44 @@ module.exports = class MessageLoggerV2 {
           if (result && typeof result.then === 'function') {
             entry.pendingBuild = true;
             Promise.resolve(result).then(() => {
-              if (entries.get(entry.key) !== entry || entry.buildSerial !== serial) return;
+              if (entries.get(entry.key) !== entry || entry.buildSerial !== serial) {
+                if (debugBatchContext && debugBatchContext.generation === generation) {
+                  try { plugin.reportViewportDebugBatchOutcome(debugBatchContext, 'stale/cancelled'); } catch {}
+                }
+                return;
+              }
               entry.pendingBuild = false;
               if (!active(entry, token)) {
                 entry.pendingWorkDirty = true;
+                if (debugBatchContext && debugBatchContext.generation === generation) {
+                  try { plugin.reportViewportDebugBatchOutcome(debugBatchContext, 'stale/cancelled'); } catch {}
+                }
                 if (active(entry)) scheduleReconcile(entry);
               } else {
                 present(entry);
                 resume(entry);
+                reportSuccessfulBuild(entry, serial, buildContext.priorBuildCount,
+                  buildContext.dirtyReason, buildContext.pendingWorkDirty, buildContext.admissionEpoch,
+                  debugBatchContext);
+                if (debugBatchContext && debugBatchContext.generation === generation) {
+                  const outcome = entry.admissionEpoch === buildContext.admissionEpoch
+                    ? 'succeeded' : 'stale/cancelled';
+                  try { plugin.reportViewportDebugBatchOutcome(debugBatchContext, outcome); } catch {}
+                }
               }
             }, error => {
-              if (entries.get(entry.key) !== entry || entry.buildSerial !== serial) return;
+              if (entries.get(entry.key) !== entry || entry.buildSerial !== serial) {
+                if (debugBatchContext && debugBatchContext.generation === generation) {
+                  try { plugin.reportViewportDebugBatchOutcome(debugBatchContext, 'stale/cancelled'); } catch {}
+                }
+                return;
+              }
               entry.pendingBuild = false;
               if (!active(entry, token)) {
                 entry.pendingWorkDirty = true;
+                if (debugBatchContext && debugBatchContext.generation === generation) {
+                  try { plugin.reportViewportDebugBatchOutcome(debugBatchContext, 'stale/cancelled'); } catch {}
+                }
                 if (active(entry)) scheduleReconcile(entry);
                 return;
               }
@@ -25765,9 +26237,14 @@ module.exports = class MessageLoggerV2 {
               entry.host.replaceChildren();
               entry.host.textContent = 'Saved message could not be loaded.';
               entry.failed = true;
-              present(entry);
+              if (!showSilentFailure(entry)) present(entry);
               resume(entry);
               plugin.reportViewportDebugIssue('row-hydration-failure');
+              if (debugBatchContext && debugBatchContext.generation === generation) {
+                const outcome = entry.admissionEpoch === buildContext.admissionEpoch
+                  ? 'failed' : 'stale/cancelled';
+                try { plugin.reportViewportDebugBatchOutcome(debugBatchContext, outcome); } catch {}
+              }
               Logger.error('Could not load a saved message:', error);
             });
           }
@@ -25775,7 +26252,15 @@ module.exports = class MessageLoggerV2 {
           entry.activated = true;
         }
         if (entry.pendingBuild) { suspend(entry); showPending(entry, true); }
-        else { present(entry); resume(entry); }
+        else {
+          present(entry);
+          resume(entry);
+          if (buildContext) {
+            reportSuccessfulBuild(entry, entry.buildSerial, buildContext.priorBuildCount,
+              buildContext.dirtyReason, buildContext.pendingWorkDirty, buildContext.admissionEpoch,
+              debugBatchContext);
+          }
+        }
         return true;
       } catch (error) {
         disposeResources(entry);
@@ -25786,8 +26271,10 @@ module.exports = class MessageLoggerV2 {
         entry.builtRevision = nextRevision;
         entry.dirty = false;
         entry.pendingWorkDirty = false;
-        if (entry.replaceSlot && entry.slot === entry.shell) entry.shell.textContent = 'Saved message could not be loaded.';
-        else present(entry);
+        if (!showSilentFailure(entry)) {
+          if (entry.replaceSlot && entry.slot === entry.shell) entry.shell.textContent = 'Saved message could not be loaded.';
+          else present(entry);
+        }
         resume(entry);
         plugin.reportViewportDebugIssue('row-hydration-failure');
         Logger.error('Could not load a saved message:', error);
@@ -25796,17 +26283,26 @@ module.exports = class MessageLoggerV2 {
     };
     if (supported) {
       observer = new IntersectionObserver(changes => {
+        const affectedScopes = new Set();
         for (const change of changes) {
           const group = observedTargets.get(change.target);
           if (group) group.visible = !!change.isIntersecting;
           for (const entry of group || []) {
             if (!entry.slot) continue;
+            const wasVisible = !!entry.visible;
+            if (change.isIntersecting && entry.crossingOptions?.crossing) {
+              registerCrossing(entry, change.target, entry.crossingOptions);
+            }
             const visible = entry.visible = !!change.isIntersecting;
+            reportVisibleRetainedReuse(entry, wasVisible, visible);
+            if (entry.admissionScope) affectedScopes.add(entry.admissionScope);
             if (entry.placeholder?.dataset) entry.placeholder.dataset.pendingVisible = String(visible);
-            if (visible && (!entry.activated || entry.dirty || entry.pendingWorkDirty)) enqueue(entry);
-            else if (!visible) queue.delete(entry);
+            if (visible && (!entry.activated || entry.dirty || entry.pendingWorkDirty)) {
+              enqueue(entry, entry.admitOnAttach ? 'server view' : 'visible/current');
+            }
           }
         }
+        for (const scope of affectedScopes) admitCrossed(scope);
       });
     }
     const session = {
@@ -25819,7 +26315,7 @@ module.exports = class MessageLoggerV2 {
           entry = { key, surfaceKey, channelId, messageId, variant, revision, build,
             host: document.createElement('div'), resources: [], slot: null, leaseToken: null,
             activated: false, dirty: false, pendingWorkDirty: false, builtRevision: undefined,
-            measuredHeight: 0, placeholder: null, buildSerial: 0, pendingBuild: false, suspended: false };
+            measuredHeight: 0, placeholder: null, buildSerial: 0, pendingBuild: false, suspended: false, admissionEpoch: 0 };
           entry.host.dataset.ml2ViewportHost = 'true';
           entries.set(key, entry);
           registerNode(entry, entry.host);
@@ -25832,6 +26328,7 @@ module.exports = class MessageLoggerV2 {
       attach(entry, slot, leaseToken, options = {}) {
         if (closed || !entry || !slot || leaseToken == null || entries.get(entry.key) !== entry) return false;
         queue.delete(entry);
+        queueAdmissionReasons?.delete(entry);
         if (entry.slot) {
           unobserve(entry);
           slots.delete(entry.slot);
@@ -25840,7 +26337,10 @@ module.exports = class MessageLoggerV2 {
         const previous = slots.get(slot);
         if (previous && previous !== entry) session.release(previous, previous.leaseToken);
         entry.slot = slot;
+        entry.crossingOptions = options;
         entry.replaceSlot = options.replaceSlot === true;
+        entry.silentPending = options.silentPending === true;
+        entry.admitOnAttach = options.admitOnAttach === true;
         entry.shell = entry.replaceSlot ? slot : null;
         if (entry.replaceSlot) registerNode(entry, slot);
         entry.observeTarget = options.observeTarget || slot;
@@ -25848,6 +26348,8 @@ module.exports = class MessageLoggerV2 {
         entry.leaseToken = leaseToken;
         slots.set(slot, entry);
         observe(entry);
+        registerCrossing(entry, entry.observeTarget, options);
+        scheduleCrossingRefresh(entry, entry.observeTarget, options, leaseToken);
         if (entry.activated) {
           try {
             if (entry.dirty || entry.pendingWorkDirty || revisionOf(entry) !== entry.builtRevision) {
@@ -25863,6 +26365,7 @@ module.exports = class MessageLoggerV2 {
         } else {
           showPending(entry);
           observe(entry);
+          if (entry.admitOnAttach) enqueue(entry, 'server view');
         }
         return true;
       },
@@ -25911,6 +26414,8 @@ module.exports = class MessageLoggerV2 {
         slots.delete(slot);
         if (slot === entry.shell) unregisterNode(entry, slot);
         queue.delete(entry);
+        queueAdmissionReasons?.delete(entry);
+        crossingRefresh.delete(entry);
         const height = entry.host.getBoundingClientRect?.().height;
         if (height > 0) entry.measuredHeight = height;
         for (const media of entry.host.querySelectorAll?.('audio, video') || []) {
@@ -25957,9 +26462,15 @@ module.exports = class MessageLoggerV2 {
       invalidate(messageId, reason) {
         for (const entry of entries.values()) {
           if (String(entry.messageId) !== String(messageId)) continue;
+          queue.delete(entry);
+          queueAdmissionReasons?.delete(entry);
+          entry.admissionEpoch++;
           entry.dirty = true;
           entry.dirtyReason = reason;
           if (entry.activated && active(entry)) scheduleReconcile(entry);
+          else if (active(entry) && (entry.visible || entry.admitOnAttach)) {
+            enqueue(entry, entry.admitOnAttach ? 'server view' : 'visible/current');
+          }
         }
       },
       markPendingWorkDirty(entry, guard) {
@@ -25979,7 +26490,7 @@ module.exports = class MessageLoggerV2 {
             if (!entry.activated || !active(entry)) continue;
             try {
               if (entry.dirty || entry.pendingWorkDirty || revisionOf(entry) !== entry.builtRevision) scheduleReconcile(entry);
-            } catch (error) { if (!entry.failed) { entry.dirty = true; scheduleReconcile(entry); } }
+            } catch (error) { if (!entry.failed) scheduleReconcile(entry); }
           }
         });
       },
@@ -26023,8 +26534,14 @@ module.exports = class MessageLoggerV2 {
         framePending = false;
         reconcilePending = false;
         queue.clear();
+        queueAdmissionReasons = null;
+        crossingRefresh.clear();
+        unboundCrossings.clear();
+        crossingRefreshPending = false;
         for (const entry of [...entries.values()]) session.dispose(entry);
         observer?.disconnect();
+        for (const [root, state] of scrollRoots) root.removeEventListener?.('scroll', state.onScroll);
+        scrollRoots.clear();
         observedTargets.clear();
         nativeOccurrences.clear();
         loadingStyle?.remove();
@@ -27010,7 +27527,7 @@ module.exports = class MessageLoggerV2 {
       const token = {};
       parent.appendChild(slot);
       view.leases.set(entry, token);
-      session.attach(entry, slot, token);
+      session.attach(entry, slot, token, { crossing: true, admissionScope: view });
     };
     let i = 0;
     const getShown = () => view?.independent ? view.shownMessages : this.menu.shownMessages;

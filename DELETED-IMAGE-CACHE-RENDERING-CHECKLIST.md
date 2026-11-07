@@ -56,7 +56,7 @@ compact roadmap.
 - [ ] R6 — Integrated validation/release: full checks/live matrix; reconcile
       checklist/TODO; version/changelog only if explicitly requested; branch
       promotion/reconciliation only with explicit approval.
-- [ ] R7 — Viewport loading and session retention: planned rendering
+- [ ] R7 — Viewport loading and session retention: implemented rendering
       optimisation for the Logger window and Logger additions to native
       conversations/cards. Load text and attachments together near the viewport;
       retain activated content for session reuse. Resolve native ownership,
@@ -73,7 +73,7 @@ compact roadmap.
 
 ### R7 — Viewport loading and session retention
 
-**Status: implemented and locally verified; native acceptance pending.**
+**Status: implementation and scroll corrections require native acceptance.**
 Shared viewport scheduling, retained Logger/native roots, restored-card placement,
 probe suspension/resumption and classified diagnostics are integrated. The user
 requested one complete build before the authorised closed-client install and
@@ -81,20 +81,31 @@ consolidated acceptance run. This is additional rendering optimisation work,
 separate from the compatibility hotfixes already tested. See the
 [architecture notes](docs/architecture.md#r7--viewport-loading-and-session-retention).
 
-The combined automated suite passes 892 tests. Focused coverage includes retained
-node identity, targeted invalidation, parked requests and native capability
-upgrades, stale callbacks, root failure containment and normal/selected history
-anchor resets. The lifecycle review passed after those corrections. The checks
-below remain open until the corresponding Discord behavior is verified.
+The initial implementation passed 892 automated tests. Native scrolling then
+exposed render-time avatar mutation and prompted the refinement to retain
+passed-row admission and prioritize visible work. Regression coverage checks
+actual row-builder data preservation, retained node identity, crossed intervals,
+delayed scroll containers, split observer batches, visible-row invalidation,
+restored cards, parked requests, stale callbacks and classified debug activity.
+The combined source gate is required before installation; native checks below
+remain open until the corresponding Discord behavior is verified.
 
 - [ ] Cover the **main Logger window**, including available tabs, filters,
       sorting, existing Load More batches and close/reopen. Also cover saved
       forum/thread log windows and Logger-owned additions in native channels,
-      threads, forum conversations and restored cards. Preserve existing render
+      threads, forum conversations, restored cards and deleted sidebar entries. A cold boot
+      in DMs must defer server sidebar rendering until its server is viewed;
+      server entry must admit its eligible forum/thread cards and sidebar entries in
+      bounded batches without viewport gating once their native containers exist,
+      and returning must reuse unchanged loaded nodes. Forum,
+      thread and sidebar cards must appear without loading labels or dots. Preserve existing render
       caps, edit limits and visibility rules.
 - [ ] Treat text, edit history and supported attachments as one row lifecycle.
       Gate expensive parsing, preview preparation and mounting on approaching
-      that surface's viewport. Text need not wait for media to finish loading.
+      that surface's viewport (cards and sidebar entries use the server-entry trigger above). Keep passed rows queued during fast scrolling,
+      fill crossed intervals only among registered rows, and prioritize the
+      currently visible rows before background batches. Avoid loading an unseen
+      backlog merely because a view opens. Text need not wait for media to finish loading.
       Reserve layout space to preserve scrolling and navigation targets.
 - [ ] Retain already activated content across scrolling, navigation, tab changes
       and Logger close/reopen for the session. Do not silently substitute
@@ -112,12 +123,19 @@ below remain open until the corresponding Discord behavior is verified.
       edits, deletions, visibility or source-policy changes so retained views do
       not become stale. Dispose all owned text/media/control roots and observers
       on a real reset; distinguish suspension from disposal.
-- [ ] Use theme-aware loading text, such as **Loading saved message**, with
+- [ ] Use theme-aware loading text, such as **MLV2: Loading saved message**, with
       lightweight animated dots while visible work is pending. Text and dots
       reuse Logger's existing Discord warning accent,
       `var(--text-warning, var(--status-warning))`, rather than the fixed console
       badge colour. Respect reduced motion, avoid animated offscreen placeholders,
       and settle failures through the existing text/file fallback.
+- [ ] Emit numbered batches and per-entry success/failure/pending outcomes under
+      the same `DEBUG HYDRATE` class, identifying current-viewport priority and
+      queued background work. Keep retained reuse and queue progress visible in
+      the console under the master debug gate. Hydration toasts are failure-only, deduplicated and
+      honor the existing toast-child gate. Cancel pending summaries on stop.
+- [ ] Verify media-disabled and local-only cache-miss rows still lazily hydrate
+      text/history and retain their roots, without mounting disallowed previews.
 - [ ] Preserve source preference/fallback gates, canonical ownership, generation
       checks, aggressive acquisition, retry behaviour, saved history, schema and
       PersonalPins. Measure first-open and revisit work plus retained memory in
@@ -130,7 +148,7 @@ issue. Its acceptance is independent of the remaining hotfix/cache checks.
 
 ## Living handoff snapshot
 
-### Current compatibility checkpoint — 2026-11-08
+### Compatibility baseline before R7 — 2026-11-08
 
 - **Current session:** `01a1b4bc-271d-77a1-b213-6ab542bcd323`.
 - **Scope:** current Logger errors, module lookups and evidenced caching faults
@@ -151,8 +169,8 @@ issue. Its acceptance is independent of the remaining hotfix/cache checks.
   `a967367` (native menu evidence), then `b1655cb` (forum author contrast)
   and `3788746` (forum layout and expanded probe). The source checkpoint at
   `3788746` passed **828/828** tests with no skips in 4.727 seconds. None has
-  been pushed. R7 documentation does not add runtime behaviour.
-- **Installed Stable:**
+  been pushed. The separate R7 implementation follows this compatibility baseline.
+- **Installed at that compatibility baseline:**
   `b1ad98a8680349d6b0a02b32e52d75c36e1d44d85bae27c0d86ff540e022a5fd`,
   matching the source at `3788746`. Stable was fully closed before installation
   and then restarted. This includes the source-policy, cache-label and forum repairs;

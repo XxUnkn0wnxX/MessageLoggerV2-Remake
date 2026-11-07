@@ -16,6 +16,7 @@ class Node {
   remove() { if (!this.parentNode) return; const p = this.parentNode; p.children.splice(p.children.indexOf(this), 1); this.parentNode = null; }
   contains(node) { return this === node || this.children.some(child => child.contains(node)); }
   setAttribute(name, value) { this.attributes[name] = String(value); }
+  removeAttribute(name) { delete this.attributes[name]; }
   getAttribute(name) { return this.attributes[name] ?? null; }
   querySelectorAll() { return []; }
   getBoundingClientRect() { return { height: 120 }; }
@@ -40,7 +41,7 @@ function getHelper(plugin) {
   const start = source.indexOf('    const retainedPreviewCards = new Map();');
   const end = source.indexOf('    const removeForumCardNode =', start);
   assert.ok(start > 0 && end > start);
-  return Function(source.slice(start, end) + '\nreturn { mountRetainedPreviewCard, parkRetainedPreviewCard, sweepDetachedPreviewCards };').call(plugin);
+  return Function(source.slice(start, end) + '\nreturn { mountRetainedPreviewCard, parkRetainedPreviewCard, parkRetainedPreviewType, retainedThreadBrowserHeaders, sweepDetachedPreviewCards };').call(plugin);
 }
 function fixture() {
   const env = setup();
@@ -50,7 +51,7 @@ function fixture() {
   return { env, plugin, records, helper: getHelper(plugin), parent: new Node('ul', true) };
 }
 
-test('same-tag placeholder gates full card building; warm reattachment restores exact node and ancestry', () => {
+test('same-tag shell batches full card building; warm reattachment restores exact node and ancestry', () => {
   const f = fixture();
   try {
     let builds = 0;
@@ -59,7 +60,7 @@ test('same-tag placeholder gates full card building; warm reattachment restores 
     assert.equal(shell.tagName, 'LI');
     assert.equal(shell.getAttribute('data-item-id'), 'a');
     assert.equal(builds, 0);
-    f.env.observers[0].show(shell); f.env.tick();
+    f.env.tick();
     const li = f.parent.children[0], card = li.children[0];
     assert.equal(builds, 1);
     assert.equal(li.tagName, 'LI'); assert.equal(card.tagName, 'DIV');
@@ -88,10 +89,10 @@ test('dirty card uses measured shell and rebuilds only on admission without chan
     f.plugin.getViewportSession().invalidate('a', 'changed');
     const pending = f.parent.children[0];
     assert.equal(pending.tagName, 'LI'); assert.notEqual(pending, oldA);
-    assert.equal(pending.children[0].style.minHeight, '120px');
+    assert.equal(pending.style.minHeight, '120px');
     assert.equal(f.parent.children[1], oldB);
     f.env.observers[0].hide(pending); f.env.tick();
-    assert.deepEqual(built, ['a', 'b']);
+    assert.deepEqual(built, ['a', 'b', 'a']);
     f.env.observers[0].show(pending); f.env.tick();
     assert.deepEqual(built, ['a', 'b', 'a']);
     assert.equal(f.parent.children[1], oldB);
@@ -155,16 +156,18 @@ test('real thread-browser restoration mounts only matching cards and reuses filt
       if (sectionMatch) return content.children.find(n => n.getAttribute('data-ml2-restored-thread-browser-section') === sectionMatch[1]) || null;
       return null;
     };
-    f.plugin.selectedChannel = { id: 'parent', type: 0 };
+    f.plugin.selectedChannel = { id: 'parent', type: 0, guild_id: 'g1' };
+    let selectedGuild = 'g1';
+    f.plugin.getSelectedGuildId = () => selectedGuild;
     const records = [f.records.a, f.records.b];
     const builds = [];
     const restore = Function('findThreadBrowserSource', 'isForumListChannel', 'getRestorableCompactThreadRecords',
-      'getForumRecordTitle', 'parkRetainedPreviewCard', 'mountRetainedPreviewCard', 'createRestoredThreadBrowserCard',
+      'getForumRecordTitle', 'parkRetainedPreviewCard', 'parkRetainedPreviewType', 'retainedThreadBrowserHeaders', 'mountRetainedPreviewCard', 'createRestoredThreadBrowserCard',
       'applyRestoredThreadTint', 'scheduleRestoreDeletedCompactThreads',
       source.slice(start, end) + '\nreturn restoreDeletedThreadBrowserCards;').call(f.plugin,
         () => ({ browser: {}, input, content, sectionHeader: header, sourceCard: nativeCard, sourceCards: [nativeCard] }),
         () => false, () => records, record => record.message.content,
-        f.helper.parkRetainedPreviewCard, f.helper.mountRetainedPreviewCard,
+        f.helper.parkRetainedPreviewCard, f.helper.parkRetainedPreviewType, f.helper.retainedThreadBrowserHeaders, f.helper.mountRetainedPreviewCard,
         record => { builds.push(record.message.id); const card = new Node('div'); card.setAttribute('data-ml2-restored-thread-browser-card', record.message.id); return card; },
         () => {}, () => {});
     f.plugin.isSuppressedForumThreadId = () => false;
@@ -183,10 +186,14 @@ test('real thread-browser restoration mounts only matching cards and reuses filt
     input.value = 'one'; restore();
     assert.equal(content.querySelector('[data-ml2-restored-thread-browser-card="a"]'), cardA);
     assert.deepEqual(builds, ['a']);
+    selectedGuild = null;
+    restore();
+    assert.equal(content.querySelector('[data-ml2-restored-thread-browser-card="a"]'), null);
+    assert.equal(content.querySelector('[data-ml2-restored-thread-browser-section="parent"]'), null);
   } finally { f.env.restore(); }
 });
 
-test('real forum builder keeps its LI > card > left/body/footer ancestry after viewport admission', () => {
+test('real forum builder keeps its LI > card > left/body/footer ancestry after server admission', () => {
   const f = fixture();
   try {
     const source = fs.readFileSync(path.join(__dirname, '..', 'MessageLoggerV2.plugin.js'), 'utf8');
@@ -286,4 +293,319 @@ test('failed card build settles in its same-tag shell without attaching a generi
     assert.equal(shell.tagName, 'LI');
     assert.equal(shell.textContent, 'Saved message could not be loaded.');
   } finally { f.env.restore(); }
+});
+
+test('restored sidebar stays cold in DMs or without native sidebar, then reuses native-shaped entry', () => {
+  const f = fixture();
+  try {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'MessageLoggerV2.plugin.js'), 'utf8');
+    const helperStart = source.indexOf('    const retainedPreviewCards = new Map();');
+    const helperEnd = source.indexOf('    const removeForumCardNode =', helperStart);
+    const helper = Function(source.slice(helperStart, helperEnd)
+      + '\nreturn { retainedPreviewCards, mountRetainedPreviewCard, parkRetainedPreviewCard, parkRetainedPreviewType };').call(f.plugin);
+    const builderStart = source.indexOf('    const createRestoredSidebarThread =');
+    const builderEnd = source.indexOf('    const findThreadBrowserSource =', builderStart);
+    let clones = 0, wires = 0, titleUpdates = 0;
+    const sourceLi = new Node('li');
+    sourceLi.className = 'native-li';
+    sourceLi.getBoundingClientRect = () => ({ height: 28 });
+    sourceLi.cloneNode = () => {
+      clones++;
+      const li = new Node('li'), focus = new Node('div');
+      li.appendChild(focus);
+      li.querySelector = selector => selector === '[data-list-item-id^="channels___"]' ? focus : null;
+      return li;
+    };
+    const builder = Function('getForumRecordTitle', 'stripSelectedThreadClasses', 'isForumListChannel',
+      'replaceText', 'wireRestoredForumCard', source.slice(builderStart, builderEnd)
+      + '\nreturn createRestoredSidebarThread;').call(f.plugin,
+      record => record.message.content, () => {}, () => false,
+      () => { titleUpdates++; }, () => { wires++; });
+    const group = f.parent;
+    group.querySelector = selector => {
+      const id = selector.match(/channels___([^"\]]+)/)?.[1];
+      return group.children.find(node => node.getAttribute('data-list-item-id') === `channels___${id}`
+        || node.children.some(child => child.getAttribute?.('data-list-item-id') === `channels___${id}`)) || null;
+    };
+    let guild = null, sidebar = false, recordReads = 0, channelReads = 0, queries = 0;
+    const a = f.records.a;
+    a.delete_data = { forum_thread_delete: true, forum_parent_id: 'parent' };
+    a.message.guild_id = 'g1';
+    const other = { message: { id: 'b', channel_id: 'b', guild_id: 'g2', content: 'other' },
+      delete_data: { forum_thread_delete: true, forum_parent_id: 'other' } };
+    const records = { a, b: other };
+    f.plugin.messageRecord = new Proxy(records, { ownKeys(target) { recordReads++; return Reflect.ownKeys(target); } });
+    f.plugin.getSelectedGuildId = () => guild;
+    f.plugin.tools = { getChannel(id) { channelReads++; return { id, guild_id: id === 'parent' ? 'g1' : 'g2' }; } };
+    f.plugin.style = { restoredThreadEntry: 'restored', deleted: 'deleted' };
+    f.plugin.isSuppressedForumThreadId = () => false;
+    global.document.querySelectorAll = selector => {
+      queries++;
+      if (selector === '[data-list-item-id^="channels___"]') return sidebar ? [{ isConnected: true, closest: () => null,
+        getAttribute: () => sidebar === 'other' ? 'channels___other' : 'channels___parent' }] : [];
+      if (selector === '[data-ml2-restored-thread-entry]') return group.children.filter(node => node.getAttribute('data-ml2-restored-thread-entry'));
+      return [];
+    };
+    const start = source.indexOf('    const restoreDeletedSidebarThreads =');
+    const end = source.indexOf('    const restoreDeletedThreadBrowserCards =', start);
+    const restore = Function('parkRetainedPreviewType', 'findSidebarThreadSource', 'getRestorableCompactThreadRecords',
+      'mountRetainedPreviewCard', 'createRestoredSidebarThread', 'parkRetainedPreviewCard', 'applyRestoredThreadTint',
+      source.slice(start, end) + '\nreturn restoreDeletedSidebarThreads;').call(f.plugin,
+      helper.parkRetainedPreviewType, parentId => parentId === 'parent' ? { group, sourceLi } : {},
+      parent => Object.values(records).filter(record => record.delete_data.forum_parent_id === parent.id),
+      helper.mountRetainedPreviewCard, builder, helper.parkRetainedPreviewCard, () => {});
+    restore();
+    assert.equal(queries, 0); assert.equal(recordReads, 0); assert.equal(channelReads, 0);
+    guild = 'g1';
+    restore();
+    assert.equal(recordReads, 0); assert.equal(channelReads, 0); assert.equal(clones, 0);
+    sidebar = 'other';
+    restore();
+    assert.equal(recordReads, 0); assert.equal(clones, 0);
+    sidebar = true;
+    restore();
+    assert.equal(group.children.length, 1);
+    let shell = group.children[0];
+    assert.equal(shell.tagName, 'LI');
+    assert.equal(shell.getAttribute('role'), 'listitem');
+    assert.equal(shell.getAttribute('data-ml2-restored-thread-entry'), 'a');
+    assert.equal(shell.getAttribute('data-list-item-id'), 'channels___a');
+    assert.equal(shell.style.minHeight, '28px');
+    assert.equal(clones, 0);
+    guild = null;
+    restore();
+    f.env.tick();
+    assert.equal(group.children.length, 0); assert.equal(clones, 0);
+    guild = 'g1';
+    restore();
+    shell = group.children[0];
+    f.env.tick();
+    const li = group.children[0];
+    assert.equal(li.tagName, 'LI'); assert.equal(li.parentNode, group);
+    assert.equal(li.children[0].getAttribute('data-list-item-id'), 'channels___a');
+    assert.equal(clones, 1); assert.equal(titleUpdates, 1); assert.equal(wires, 1);
+    guild = null;
+    restore();
+    assert.equal(group.children.length, 0);
+    guild = 'g1';
+    restore();
+    assert.equal(group.children[0], li);
+    assert.equal(clones, 1); assert.equal(wires, 1);
+  } finally { f.env.restore(); }
+});
+
+test('all server card types keep a silent inert measured shell and retain jump markers', () => {
+  for (const type of ['forum', 'thread-browser', 'sidebar']) {
+    const f = fixture();
+    try {
+      let builds = 0, scrolled = 0;
+      const template = new Node(type === 'thread-browser' ? 'div' : 'li');
+      const shell = f.helper.mountRetainedPreviewCard(f.records.a, f.parent, type, 'parent', () => {
+        builds++; return new Node(type === 'thread-browser' ? 'div' : 'li');
+      }, template, 36);
+      shell.scrollIntoView = () => { scrolled++; };
+      assert.equal(shell.style.visibility, 'hidden', type);
+      assert.equal(shell.style.minHeight, '36px', type);
+      assert.equal(shell.inert, true, type);
+      assert.equal(shell.getAttribute('aria-hidden'), 'true', type);
+      assert.equal(shell.children.length, 0, type);
+      assert.equal(shell.textContent, undefined, type);
+      if (type === 'forum') assert.equal(shell.getAttribute('data-list-item-id'), 'forum-channel-list-parent___a');
+      if (type === 'sidebar') assert.equal(shell.getAttribute('data-list-item-id'), 'channels___a');
+      if (type === 'thread-browser') assert.equal(shell.getAttribute('data-ml2-restored-thread-browser-card'), 'a');
+      shell.scrollIntoView();
+      f.env.observers[0].show(shell); f.env.tick();
+      const host = f.parent.children[0];
+      assert.notEqual(host, shell, type);
+      assert.equal(host.parentNode, f.parent, type);
+      assert.notEqual(host.style.visibility, 'hidden', type);
+      assert.equal(builds, 1, type);
+      assert.equal(scrolled, 1, type);
+      f.helper.parkRetainedPreviewCard(host);
+      f.helper.mountRetainedPreviewCard(f.records.a, f.parent, type, 'parent', () => { builds++; return new Node(); }, template, 36);
+      assert.equal(f.parent.children[0], host, type);
+      assert.equal(builds, 1, type);
+    } finally { f.env.restore(); }
+  }
+});
+
+test('silent card failure becomes a readable non-inert terminal fallback', () => {
+  const f = fixture();
+  try {
+    const shell = f.helper.mountRetainedPreviewCard(f.records.a, f.parent, 'forum', 'parent', () => { throw Error('fail'); });
+    assert.equal(shell.style.visibility, 'hidden');
+    f.env.observers[0].show(shell); f.env.tick();
+    assert.equal(shell.style.visibility, '');
+    assert.equal(shell.inert, false);
+    assert.equal(shell.getAttribute('aria-hidden'), null);
+    assert.equal(shell.textContent, 'Saved message could not be loaded.');
+  } finally { f.env.restore(); }
+});
+
+test('ordinary message slots still show their loading label and animated dots', () => {
+  const f = fixture();
+  try {
+    const session = f.plugin.getViewportSession();
+    const entry = session.getEntry({ surfaceKey: 'logger', channelId: 'c', messageId: 'm', revision: 1, build() {} });
+    const slot = new Node('div'); f.parent.appendChild(slot);
+    session.attach(entry, slot, 'message');
+    assert.equal(slot.children[0].children[0].textContent, 'MLV2: Loading saved message');
+    assert.equal(slot.children[0].children[1].textContent, ' ...');
+    assert.notEqual(slot.children[0].style.visibility, 'hidden');
+  } finally { f.env.restore(); }
+});
+
+test('server preview restoration avoids source and record traversal in DMs and stale guilds', () => {
+  const f = fixture();
+  try {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'MessageLoggerV2.plugin.js'), 'utf8');
+    let guild = null, sourceLookups = 0, recordLookups = 0, channelLookups = 0;
+    f.plugin.getSelectedGuildId = () => guild;
+    f.plugin.selectedChannel = { id: 'thread', type: 11, parent_id: 'p', guild_id: 'old' };
+    f.plugin.tools = { getChannel() { channelLookups++; return { id: 'p', guild_id: 'old' }; } };
+    const forumStart = source.indexOf('    const restoreDeletedForumCards =');
+    const forumEnd = source.indexOf('    const findSidebarThreadSource =', forumStart);
+    const forum = Function('parkRetainedPreviewType', 'canRestoreVisibleThreadRoots', 'removeRestoredForumCardsForChannel',
+      'isForumListChannel', 'findForumCardSource', 'getRestorableForumRecordsForChannel',
+      source.slice(forumStart, forumEnd) + '\nreturn restoreDeletedForumCards;').call(f.plugin,
+        f.helper.parkRetainedPreviewType, () => true, () => {}, () => true,
+        () => { sourceLookups++; return {}; }, () => { recordLookups++; return []; });
+    const browserStart = source.indexOf('    const restoreDeletedThreadBrowserCards =');
+    const browserEnd = source.indexOf('    const restoreDeletedCompactThreads =', browserStart);
+    const browser = Function('parkRetainedPreviewType', 'findThreadBrowserSource',
+      source.slice(browserStart, browserEnd) + '\nreturn restoreDeletedThreadBrowserCards;').call(f.plugin,
+        f.helper.parkRetainedPreviewType, () => { sourceLookups++; return {}; });
+    forum(); browser();
+    assert.equal(sourceLookups, 0); assert.equal(recordLookups, 0); assert.equal(channelLookups, 0);
+    guild = 'new';
+    forum(); browser();
+    assert.equal(sourceLookups, 0); assert.equal(recordLookups, 0);
+    assert.equal(channelLookups, 2);
+  } finally { f.env.restore(); }
+});
+
+test('sidebar admissions batch without IO, prioritize visible messages, and cancel when parked', () => {
+  const f = fixture();
+  try {
+    const built = [];
+    f.plugin.messageRecord = Object.fromEntries(Array.from({ length: 6 }, (_, i) => [String(i),
+      { message: { id: String(i), channel_id: 'c', content: 'text' } }]));
+    const nodes = Object.values(f.plugin.messageRecord).map(record => f.helper.mountRetainedPreviewCard(
+      record, f.parent, 'sidebar', 'parent', current => { built.push(current.message.id); return new Node('li'); }));
+    assert.deepEqual(built, []);
+    assert.ok(nodes.every(node => node.style.visibility === 'hidden'));
+    const slot = new Node('div'); f.parent.appendChild(slot);
+    const session = f.plugin.getViewportSession();
+    const visible = session.getEntry({ surfaceKey: 'logger', channelId: 'c', messageId: 'visible', revision: 1,
+      build() { built.push('visible'); } });
+    session.attach(visible, slot, 'visible');
+    f.env.observers[0].show(slot);
+    f.env.tick();
+    assert.deepEqual(built, ['visible', '0', '1', '2']);
+    f.helper.parkRetainedPreviewType('sidebar');
+    f.env.tick();
+    assert.deepEqual(built, ['visible', '0', '1', '2']);
+    assert.equal(f.parent.children.length, 1);
+  } finally { f.env.restore(); }
+});
+
+test('active sidebar invalidation rehydrates without requiring a viewport event', () => {
+  const f = fixture();
+  try {
+    let builds = 0;
+    const builder = () => { builds++; return new Node('li'); };
+    f.helper.mountRetainedPreviewCard(f.records.a, f.parent, 'sidebar', 'parent', builder);
+    f.env.tick();
+    assert.equal(builds, 1);
+    f.records.a.message.content = 'changed';
+    f.plugin.getViewportSession().invalidate('a', 'changed');
+    f.env.tick();
+    assert.equal(builds, 2);
+  } finally { f.env.restore(); }
+});
+
+test('failed silent forum card keeps readable LI shell after a warm revisit without retry', () => {
+  const f = fixture();
+  try {
+    let attempts = 0;
+    const builder = () => { attempts++; throw Error('failed'); };
+    const shell = f.helper.mountRetainedPreviewCard(f.records.a, f.parent, 'forum', 'parent', builder);
+    f.env.tick();
+    assert.equal(attempts, 1);
+    assert.equal(shell.tagName, 'LI');
+    assert.equal(shell.style.visibility, '');
+    assert.equal(shell.textContent, 'Saved message could not be loaded.');
+    f.helper.parkRetainedPreviewCard(shell);
+    const replacement = f.helper.mountRetainedPreviewCard(f.records.a, f.parent, 'forum', 'parent', builder);
+    f.env.tick();
+    assert.equal(replacement.tagName, 'LI');
+    assert.equal(f.parent.children[0], replacement);
+    assert.equal(replacement.style.visibility, '');
+    assert.equal(replacement.inert, false);
+    assert.equal(replacement.textContent, 'Saved message could not be loaded.');
+    assert.equal(attempts, 1);
+  } finally { f.env.restore(); }
+});
+
+test('opening a forum post keeps its existing parent-list card while ordinary thread views park it', () => {
+  const f = fixture();
+  try {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'MessageLoggerV2.plugin.js'), 'utf8');
+    const start = source.indexOf('    const restoreDeletedForumCards =');
+    const end = source.indexOf('    const findSidebarThreadSource =', start);
+    assert.ok(start > 0 && end > start);
+    const forumParent = { id: 'forum', type: 15, guild_id: 'guild' };
+    const ordinaryParent = { id: 'text', type: 0, guild_id: 'guild' };
+    f.plugin.getSelectedGuildId = () => 'guild';
+    f.plugin.tools = { getChannel: id => id === 'forum' ? forumParent : ordinaryParent };
+    f.plugin.selectedChannel = { id: 'post', type: 11, parent_id: 'forum', guild_id: 'guild' };
+    const template = new Node('li'), sourceCard = new Node('div');
+    const record = f.records.a;
+    const builder = current => {
+      const li = new Node('li'), card = new Node('div');
+      li.setAttribute('data-ml2-restored-forum-thread', current.message.id);
+      card.setAttribute('data-ml2-restored-forum-card', current.message.id);
+      card.setAttribute('data-item-id', current.message.id);
+      card.closest = selector => selector.includes('data-ml2-restored-forum-thread') || selector === 'li' ? li : null;
+      li.appendChild(card);
+      return li;
+    };
+    f.helper.mountRetainedPreviewCard(record, f.parent, 'forum', 'forum', builder, template);
+    f.env.tick();
+    const existing = f.parent.children[0], card = existing.children[0];
+    f.parent.querySelectorAll = selector => selector.includes('data-ml2-restored-forum-card') ? [card] : [];
+    global.document.querySelectorAll = () => [];
+    const restoredParents = [];
+    const restore = Function('parkRetainedPreviewType', 'canRestoreVisibleThreadRoots', 'removeRestoredForumCardsForChannel',
+      'isForumListChannel', 'findForumCardSource', 'removeSuppressedForumCards', 'getRestorableForumRecordsForChannel',
+      'parkRetainedPreviewCard', 'tintForumCardByThreadId', 'mountRetainedPreviewCard', 'createRestoredForumCard',
+      source.slice(start, end) + '\nreturn restoreDeletedForumCards;').call(f.plugin,
+      f.helper.parkRetainedPreviewType, () => true, () => {}, channel => channel?.type === 15,
+      parent => { restoredParents.push(parent.id); return { sourceCard, sourceLi: template, list: f.parent }; },
+      () => {}, () => [record], f.helper.parkRetainedPreviewCard, () => {},
+      f.helper.mountRetainedPreviewCard, builder);
+    restore();
+    assert.deepEqual(restoredParents, ['forum']);
+    assert.equal(f.parent.children[0], existing);
+    f.plugin.selectedChannel = { id: 'ordinary-thread', type: 11, parent_id: 'text', guild_id: 'guild' };
+    restore();
+    assert.equal(f.parent.children.length, 0);
+  } finally { f.env.restore(); }
+});
+
+test('each restored server card type admits on attachment without a viewport event', () => {
+  for (const type of ['forum', 'thread-browser', 'sidebar']) {
+    const f = fixture();
+    try {
+      let builds = 0;
+      f.helper.mountRetainedPreviewCard(f.records.a, f.parent, type, 'parent', () => { builds++; return new Node(type === 'thread-browser' ? 'div' : 'li'); });
+      assert.equal(builds, 0, type);
+      f.env.tick();
+      assert.equal(builds, 1, type);
+      f.records.a.message.content = 'changed';
+      f.plugin.getViewportSession().invalidate('a', 'changed');
+      f.env.tick();
+      assert.equal(builds, 2, type);
+    } finally { f.env.restore(); }
+  }
 });

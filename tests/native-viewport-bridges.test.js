@@ -126,6 +126,33 @@ function setup() {
   };
 }
 
+test('native saved text keeps viewport admission and retention when media is disabled or misses local cache', () => {
+  for (const masterEnabled of [false, true]) {
+    const h = setup();
+    try {
+      Object.assign(h.plugin.settings, { cacheAllImages: masterEnabled, onlyRenderCachedAttachments: true });
+      h.plugin.imageCacheServerSimulator = { exists: () => false };
+      h.message.content = 'saved text';
+      h.message.attachments = [{ id: 'image', filename: 'photo.png', url: 'https://cdn.example/photo.png' }];
+      const before = structuredClone(h.message);
+      assert.equal(h.plugin.shouldRetainNativeSavedMessage(h.message), true);
+      const body = h.bridge({ nativeProps: { message: h.message },
+        render: (_entry, props) => h.plugin.getCacheOnlyMessage(props.message) });
+      assert.equal(h.roots.length, 0);
+      h.visible(body.row); h.tick();
+      assert.equal(h.roots.length, 1);
+      const rendered = h.roots[0].renders.at(-1).props.children[0];
+      assert.equal(rendered.content, 'saved text');
+      assert.deepEqual(rendered.attachments, []);
+      assert.deepEqual(h.message, before);
+      h.visible(body.row, false); h.visible(body.row); h.tick();
+      assert.equal(h.roots.length, 1);
+      assert.equal(h.roots[0].disposed, 0);
+      body.unmount();
+    } finally { h.restore(); }
+  }
+});
+
 test('native islands share the row viewport, including an island joining an already visible row', () => {
   const h = setup();
   try {

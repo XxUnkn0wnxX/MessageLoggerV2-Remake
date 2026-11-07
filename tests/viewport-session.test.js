@@ -82,7 +82,7 @@ test('gates factory calls and activates at most four entries per frame', () => {
       return slot;
     });
     assert.equal(builds, 0);
-    assert.equal(slots[0].children[0].children[0].textContent, 'Loading saved message');
+    assert.equal(slots[0].children[0].children[0].textContent, 'MLV2: Loading saved message');
     for (const slot of slots) env.observers[0].visible(slot);
     env.tick();
     assert.equal(builds, 4);
@@ -259,7 +259,7 @@ test('parked async completion cannot overwrite the next build', async () => {
   } finally { env.restore(); }
 });
 
-test('visibility withdrawal cancels a cold activation and shares one loading stylesheet', () => {
+test('visibility withdrawal preserves admitted activation and shares one loading stylesheet', () => {
   const env = setup();
   try {
     const session = createPlugin().getViewportSession();
@@ -275,7 +275,7 @@ test('visibility withdrawal cancels a cold activation and shares one loading sty
     env.observers[0].visible(slot);
     env.observers[0].hidden(slot);
     env.tick();
-    assert.equal(builds, 0);
+    assert.equal(builds, 1);
     assert.equal(first.placeholder.dataset.pendingVisible, 'false');
     env.observers[0].visible(slot);
     env.tick();
@@ -381,7 +381,7 @@ test('pending async work keeps a loading placeholder until completion', async ()
     env.observers[0].visible(slot);
     env.tick();
     assert.equal(slot.children[0], entry.placeholder);
-    assert.equal(entry.placeholder.children[0].textContent, 'Loading saved message');
+    assert.equal(entry.placeholder.children[0].textContent, 'MLV2: Loading saved message');
     complete();
     await Promise.resolve();
     assert.equal(slot.children[0], entry.host);
@@ -446,6 +446,39 @@ function loggerFixture() {
   return { env, plugin, parent, records, built, setFiltered(ids) { filtered = ids; } };
 }
 
+test('Logger text and history remain viewport-gated and warm with media disabled or unavailable locally', () => {
+  for (const masterEnabled of [false, true]) {
+    const f = loggerFixture();
+    try {
+      Object.assign(f.plugin.settings, { cacheAllImages: masterEnabled, onlyRenderCachedAttachments: true });
+      delete f.plugin.getCacheOnlyMessage;
+      delete f.plugin.getLoggerSavedAttachmentPresentationEntries;
+      f.plugin.imageCacheServerSimulator = { exists: () => false };
+      f.plugin.Tooltip = function Tooltip() {};
+      f.records.a.message.attachments = [{ id: 'image', filename: 'photo.png', url: 'https://cdn.example/photo.png' }];
+      f.records.a.edit_history = [{ content: 'earlier text', time: 'saved time' }];
+      const before = structuredClone(f.records.a);
+      f.plugin.refilterMessages();
+      const slot = f.parent.children[0];
+      assert.deepEqual(f.built, [], 'media gates must not bypass viewport admission');
+      f.env.observers[0].visible(slot); f.env.tick();
+      assert.deepEqual(f.built, ['a']);
+      const host = slot.children[0];
+      const nodes = [];
+      const visit = node => { nodes.push(node); node.children.forEach(visit); };
+      visit(host);
+      assert.ok(nodes.some(node => node.textContent === 'earlier text'));
+      assert.ok(nodes.some(node => node.textContent === 'text a'));
+      assert.ok(nodes.some(node => String(node.textContent || '').includes('photo.png')));
+      assert.equal(nodes.some(node => ['img', 'video', 'audio'].includes(node.tagName)), false);
+      assert.deepEqual(f.records.a, before, 'presentation must preserve the saved attachment and history');
+      f.env.observers[0].hidden(slot); f.env.observers[0].visible(slot); f.env.tick();
+      assert.equal(slot.children[0], host);
+      assert.deepEqual(f.built, ['a'], 'revisit must retain the gated text/history row');
+    } finally { f.plugin._viewportSession?.reset(); f.env.restore(); }
+  }
+});
+
 test('owned Logger admits cap batches, activates later visibility in either direction, and retains hosts across filters', () => {
   const f = loggerFixture();
   try {
@@ -459,7 +492,7 @@ test('owned Logger admits cap batches, activates later visibility in either dire
     f.env.observers[0].visible(slots[0]);
     f.env.observers[0].hidden(slots[0]);
     f.env.tick();
-    assert.deepEqual(f.built, ['b']);
+    assert.deepEqual(f.built, ['b', 'a']);
     f.env.observers[0].visible(slots[0]);
     f.env.tick();
     assert.deepEqual(f.built, ['b', 'a']);
@@ -668,6 +701,7 @@ test('pending native audio upgrade waits for the same parked row to resume', asy
 test('dirty parked row remains cold until revisited viewport, even if values toggle back', () => {
   const f = loggerFixture();
   try {
+    f.records.a.delete_data = { hidden: false };
     f.setFiltered(['a', 'b']);
     f.plugin.refilterMessages();
     f.env.observers[0].visible(f.parent.children[0]);
@@ -676,13 +710,14 @@ test('dirty parked row remains cold until revisited viewport, even if values tog
     const unchanged = f.parent.children[1].children[0];
     const unchangedGroup = unchanged.children[0];
     f.plugin.parkLoggerViewportView(f.plugin._loggerViewportView);
-    f.records.a.message.content = 'temporarily hidden';
-    f.plugin.getViewportSession().invalidate('a', 'visibility-change');
-    f.records.a.message.content = 'text a';
+    assert.equal(f.plugin.setSavedRecordHiddenState(f.records.a, true), true);
+    assert.equal(f.records.a.delete_data.hidden, true);
+    assert.equal(f.plugin.setSavedRecordHiddenState(f.records.a, false), true);
+    assert.equal(f.records.a.delete_data.hidden, false);
     f.plugin.refilterMessages();
     const slot = f.parent.children[0];
     f.env.tick();
-    assert.equal(slot.children[0].children[0].textContent, 'Loading saved message');
+    assert.equal(slot.children[0].children[0].textContent, 'MLV2: Loading saved message');
     assert.deepEqual(f.built, ['a', 'b']);
     assert.equal(f.parent.children[1].children[0], unchanged);
     assert.equal(unchanged.children[0], unchangedGroup);
