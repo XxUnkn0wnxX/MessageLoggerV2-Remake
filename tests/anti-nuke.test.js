@@ -1169,3 +1169,16 @@ test('Anti-Nuke ignored media never writes or queues while no-save is active', (
   assert.deepEqual(queuedRequests, []);
   assert.deepEqual(pluginState.plugin.messageRecord, {});
 });
+
+test('Anti-Nuke media-Off admission retains explicit provenance and still rejects optimistic and ephemeral events', () => {
+  const calls = [];
+  const { plugin } = createDispatchMessagePlugin({ settings: { antiNukeEnabled: true, cacheAllImages: false, ignoreSelf: true },
+    cacheMessageImages(message, options) { calls.push({ id: message.id, options }); } });
+  const message = { id: 'off-self', channel_id: 'channel', guild_id: 'guild', type: 0, content: 'hello',
+    attachments: [{ id: 'a', url: 'https://cdn.example/image.png' }], author: { id: 'local', username: 'Local' } };
+  plugin.onDispatchEvent([{ type: 'MESSAGE_CREATE', message, optimistic: true }], () => {});
+  plugin.onDispatchEvent([{ type: 'MESSAGE_CREATE', message: { ...message, id: 'ephemeral', flags: 64 } }], () => {});
+  plugin.onDispatchEvent([{ type: 'MESSAGE_CREATE', message }], () => {});
+  assert.deepEqual(calls, [{ id: 'off-self', options: { queueWhileNoSave: false, cacheState: 'precache', mediaOffOrigin: 'anti-nuke' } }]);
+  assert.deepEqual(plugin.messageRecord, {});
+});

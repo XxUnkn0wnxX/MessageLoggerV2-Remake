@@ -2456,7 +2456,7 @@ test('media routing converges through cacheImage and cacheMessageImages across e
   assert.match(imageCacheSlice, /let response;[\s\S]*response = await this\.fetchMediaCacheResponse\(url\);/);
   assert.match(deferredSlice, /Promise\.resolve\(this\.cacheImage\(/);
   assert.match(removedSlice, /this\.cacheImage\([\s\S]*?'confirmed',[\s\S]*?this\.getMediaCacheDiagnosticType\(url, 'file'\)\s*\);/);
-  assert.match(removedSlice, /if \(this\.settings\.cacheAllImages && \(this\.isImage\(url\) \|\| this\.settings\.newSaveAllFileTypes\)\) \{\s*this\.cacheImage\(/);
+  assert.match(removedSlice, /if \(this\.isImage\(url\) \|\| this\.settings\.newSaveAllFileTypes\) \{[\s\S]*?queuePendingMediaCacheRequest\([\s\S]*?else this\.cacheImage\(/);
   assert.match(updatePayloadSlice, /this\.cacheMessageImages\(current, \{[\s\S]*cacheState:[\s\S]*?\}\);/);
   assert.match(dispatchSlice, /this\.cacheMessageImages\(dispatch\.message, \{[\s\S]*cacheState: 'precache'[\s\S]*\}\);/);
   assert.match(antiNukeSlice, /this\.cacheMessageImages\(cacheMessage, \{[\s\S]*cacheState: 'precache'[\s\S]*\}\);/);

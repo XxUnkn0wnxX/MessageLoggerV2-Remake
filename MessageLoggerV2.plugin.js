@@ -978,6 +978,8 @@ module.exports = class MessageLoggerV2 {
     this.cancelPendingMediaCacheWrites?.();
     this._pendingMediaCacheRequests?.clear?.();
     this._activeDeferredMediaCacheRequests?.clear?.();
+    this._mediaCatchupReportedActive = false;
+    this._mediaCatchupOverflowReported = false;
     this._mediaCacheInFlightRequests?.clear?.();
     this._mediaCacheAbortControllers?.clear?.();
     this._mediaCacheNativeFetchCompatible = null;
@@ -1188,7 +1190,8 @@ module.exports = class MessageLoggerV2 {
         title: 'Removed attachments and media controls',
         type: 'fixed',
         items: [
-          'Removed attachments share the deleted-media source policy, sizing and tint across supported previews. Turning media off removes retained previews and generated placeholders while preserving message text and edit history.'
+          'Removed attachments share the deleted-media source policy, sizing and tint across supported previews. Turning media off removes retained previews and generated placeholders while preserving message text and edit history.',
+          'Eligible media seen while rendering is off can be cached later in the same session after media and saving are enabled.'
         ]
       },
       {
@@ -3148,7 +3151,7 @@ module.exports = class MessageLoggerV2 {
       || this._noSaveMergeInProgress
       || this._noSaveMergePromise
       || this._archiveLoadModeTransitionInProgress
-      || this._activeDeferredMediaCacheRequests?.size
+      || Array.from(this._activeDeferredMediaCacheRequests?.values?.() || []).some(entry => !entry.paused && !entry.cancelled && entry.request?.reason !== 'media-off')
     );
   }
   wrapTransitioningSettingControl(control, active) {
@@ -6181,7 +6184,7 @@ module.exports = class MessageLoggerV2 {
                 this.createSettingStateLabel(true),
                 ' transition.'
               ),
-              'When Off, saved media and embeds do not mount in chat or Logger and generated placeholders are hidden; saved data and child settings remain unchanged.',
+              'When Off, saved media and embeds do not mount in chat or Logger and generated placeholders are hidden; saved data and child settings remain unchanged. Eligible media seen while Off is cached later in this session when media is enabled and saving succeeds.',
               ' New downloads pause while ',
               React.createElement(
                 'span',
@@ -8877,6 +8880,8 @@ module.exports = class MessageLoggerV2 {
       this.cancelPendingMediaCacheWrites();
       this._pendingMediaCacheRequests?.clear?.();
       this._activeDeferredMediaCacheRequests?.clear?.();
+      this._mediaCatchupReportedActive = false;
+      this._mediaCatchupOverflowReported = false;
       this._flushMediaCacheAfterNextDataSave = false;
       const loaded = this.loadPersistedDataForNoSaveMerge();
       this.installDataPayload(loaded.data);
@@ -9409,6 +9414,7 @@ module.exports = class MessageLoggerV2 {
     }
     if (disabled) {
       const hadPendingBackup = !!this.saveBackupTimeout;
+      this.pauseDeferredMediaCacheRequests();
       this.cancelPendingMediaCacheWrites();
       this.cancelPendingDataWrites();
       if (this.settings.dontLoadArchivedData && !this.detachArchivedDataFromMemory()) {
@@ -10165,14 +10171,13 @@ module.exports = class MessageLoggerV2 {
     this.resetSavedAttachmentPresentationState();
     if (!enabled) {
       this.stopMediaCacheTrimmer?.({ preserveRunning: true });
+      this.pauseDeferredMediaCacheRequests();
       this.cancelPendingMediaCacheWrites();
-      this._pendingMediaCacheRequests?.clear?.();
-      this._activeDeferredMediaCacheRequests?.clear?.();
-      this._flushMediaCacheAfterNextDataSave = false;
       this.notifyDataSaveModeTransitionChange();
     } else {
       // Enabling the cache starts a full periodic countdown; it never performs a startup trim.
       this.startMediaCacheTrimmer?.();
+      this.flushPendingMediaCacheRequests();
     }
     this.refreshAttachmentRendering?.();
     this.reportMajorSettingChange('cacheAllImages', enabled);
@@ -10531,12 +10536,10 @@ module.exports = class MessageLoggerV2 {
     return false;
   }
   isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId) {
-    return !!this._activeDeferredMediaCacheRequests?.has?.(this.getMediaCacheRequestKey({
-      url,
-      attachmentIdx,
-      attachmentId,
-      messageId
+    const entry = this._activeDeferredMediaCacheRequests?.get?.(this.getMediaCacheRequestKey({
+      url, attachmentIdx, attachmentId, messageId
     }));
+    return !!entry && !entry.paused && !entry.cancelled;
   }
   reportDeferredMediaCacheFailure(attachmentId, reason, diagnosticId = attachmentId) {
     Logger.error(`Deferred media cache request ${diagnosticId} could not be completed.`, reason);
@@ -10563,62 +10566,125 @@ module.exports = class MessageLoggerV2 {
     return this.normalizeMediaCacheDiagnosticType(null, fallback);
   }
   queuePendingMediaCacheRequest(url, attachmentIdx, attachmentId, messageId, channelId, serverId, cacheState = null) {
-    if (!this.settings?.cacheAllImages || !url || !messageId) return false;
+    if (!url || !messageId) return false;
     const diagnosticType = this.normalizeMediaCacheDiagnosticType(arguments[7]);
-    const request = {
-      url: String(url),
-      attachmentIdx,
-      attachmentId,
-      messageId: String(messageId),
-      channelId,
-      serverId,
-      cacheState: cacheState === 'confirmed' || cacheState === 'precache'
-        ? cacheState
+    const metadata = arguments[8] || {};
+    const reason = metadata.reason === 'media-off' ? 'media-off' : 'no-save';
+    if (reason !== 'media-off' && !this.settings?.cacheAllImages) return false;
+    const request = { url: String(url), attachmentIdx, attachmentId, messageId: String(messageId), channelId, serverId,
+      cacheState: cacheState === 'confirmed' || cacheState === 'precache' ? cacheState
         : (this.messageRecord?.[messageId] ? 'confirmed' : 'precache'),
-      diagnosticType: this.normalizeMediaCacheDiagnosticType(diagnosticType)
-    };
+      diagnosticType, reason, sourceKind: metadata.sourceKind || null, size: Number(metadata.size) || 0,
+      livePrecache: reason === 'media-off' && metadata.livePrecache === true, origin: metadata.origin || null };
     const key = this.getMediaCacheRequestKey(request);
-    (this._pendingMediaCacheRequests ||= new Map()).set(key, request);
+    const pending = this._pendingMediaCacheRequests ||= new Map();
+    const active = this._activeDeferredMediaCacheRequests?.get?.(key);
+    if (active && !active.cancelled && !active.paused) {
+      if (request.cacheState === 'confirmed') active.request.cacheState = 'confirmed';
+      return true;
+    }
+    if (!pending.has(key) && reason === 'media-off'
+      && pending.size + (this._activeDeferredMediaCacheRequests?.size || 0) >= 1000
+      && new Set([...pending.entries()].filter(([, item]) => item.reason === 'media-off').map(([itemKey]) => itemKey)
+        .concat([...(this._activeDeferredMediaCacheRequests?.entries?.() || [])]
+          .filter(([, entry]) => !entry.cancelled && entry.request.reason === 'media-off').map(([itemKey]) => itemKey))).size >= 1000) {
+      if (!this._mediaCatchupOverflowReported) this.reportDebugEvent?.('Media catch-up queue full; additional media was skipped.', 0, { console: true, toast: false }, 'CACHE');
+      this._mediaCatchupOverflowReported = true;
+      return false;
+    }
+    const previous = pending.get(key);
+    if (previous?.cacheState === 'confirmed') request.cacheState = 'confirmed';
+    if (previous?.reason === 'no-save') request.reason = 'no-save';
+    pending.set(key, request);
     return true;
   }
+  removeDeferredMediaCacheRequests(predicate) {
+    for (const [key, request] of this._pendingMediaCacheRequests || []) {
+      if (predicate(request)) this._pendingMediaCacheRequests.delete(key);
+    }
+    for (const entry of this._activeDeferredMediaCacheRequests?.values?.() || []) {
+      if (predicate(entry.request)) entry.cancelled = true;
+    }
+  }
+  pauseDeferredMediaCacheRequests() {
+    const active = this._activeDeferredMediaCacheRequests;
+    if (!active?.size) return;
+    for (const [key, entry] of active) {
+      if (entry.cancelled) continue;
+      entry.paused = true;
+      if (!this._pendingMediaCacheRequests.has(key)) this._pendingMediaCacheRequests.set(key, entry.request);
+    }
+    this.reportDebugEvent?.('Media catch-up paused until media and saving are enabled.', 0, { console: true, toast: false }, 'CACHE');
+    this.notifyDataSaveModeTransitionChange();
+  }
+  isDeferredMediaCacheRequestEligible(request) {
+    const record = this.messageRecord?.[request.messageId];
+    if (request.reason !== 'media-off') return !!record;
+    if (!record && !request.livePrecache) return false;
+    const maxSize = Math.round(Number(this.settings.maxCacheFileSize) * MEDIA_CACHE_FILE_MB);
+    if (maxSize > 0 && request.size > maxSize) return false;
+    const message = record?.message || this.cachedMessagesMap?.get?.(request.messageId);
+    if (message && String(message.channel_id || '') !== String(request.channelId || '')) return false;
+    if (record && (!message || String(message.id || '') !== request.messageId)) return false;
+    const candidates = message ? this.collectMediaCacheCandidates(message) : [];
+    if (record) {
+      for (const attachment of this.getRecordRemovedAttachments(record)) {
+        if (!attachment?.url) continue;
+        const size = Number(attachment.size) || 0;
+        const limit = Math.round(Number(this.settings.maxCacheFileSize) * MEDIA_CACHE_FILE_MB);
+        if ((limit > 0 && size > limit) || (!this.isImage(attachment.url) && !this.settings.newSaveAllFileTypes)) continue;
+        candidates.push({ url: attachment.url, attachmentId: attachment.id, sourceKind: 'file' });
+      }
+    }
+    if (message) return candidates.some(item => String(item.url) === request.url
+      && String(item.attachmentId) === String(request.attachmentId)
+      && (!request.sourceKind || item.sourceKind === request.sourceKind)
+      && (!['indexed', 'component-file'].includes(request.sourceKind) || String(item.attachmentIdx) === String(request.attachmentIdx)));
+    const limit = Math.round(Number(this.settings.maxCacheFileSize) * MEDIA_CACHE_FILE_MB);
+    if (limit > 0 && request.size > limit) return false;
+    if (request.sourceKind === 'component-file') return !!this.settings.newSaveAllFileTypes;
+    return request.sourceKind !== 'file' || this.isImage(request.url) || !!this.settings.newSaveAllFileTypes;
+  }
   flushPendingMediaCacheRequests() {
-    if (!this.canCacheMediaLocally() || !this._pendingMediaCacheRequests?.size) return 0;
+    if (!this.canCacheMediaLocally() || this._flushMediaCacheAfterNextDataSave || !this._pendingMediaCacheRequests?.size) return 0;
     const writeEpoch = this._mediaCacheWriteEpoch || 0;
+    const active = this._activeDeferredMediaCacheRequests ||= new Map();
     let started = 0;
-    for (const [key, request] of Array.from(this._pendingMediaCacheRequests.entries())) {
+    for (const [key, request] of this._pendingMediaCacheRequests) {
+      if (active.size >= 2) break;
+      if (active.has(key)) continue;
       this._pendingMediaCacheRequests.delete(key);
-      // A session record removed before the successful primary commit must not leave an
-      // orphaned file behind. Every replayable queue entry belongs to a current logger record.
-      if (!this.messageRecord?.[request.messageId]) continue;
-      if (this._activeDeferredMediaCacheRequests?.has?.(key)) continue;
+      if (!this.isDeferredMediaCacheRequestEligible(request)) continue;
+      const entry = { request, writeEpoch };
+      active.set(key, entry);
       started++;
-      const activeRequest = { request, writeEpoch };
-      (this._activeDeferredMediaCacheRequests ||= new Map()).set(key, activeRequest);
-      const cacheState = this.messageRecord?.[request.messageId]
-        ? 'confirmed'
-        : request.cacheState;
-      Promise.resolve(this.cacheImage(
-        request.url,
-        request.attachmentIdx,
-        request.attachmentId,
-        request.messageId,
-        request.channelId,
-        request.serverId,
-        0,
-        writeEpoch,
-        cacheState,
-        null,
-        request.diagnosticType
-      )).catch(error => {
+      const state = this.messageRecord?.[request.messageId] ? 'confirmed' : request.cacheState;
+      Promise.resolve(this.cacheImage(request.url, request.attachmentIdx, request.attachmentId, request.messageId,
+        request.channelId, request.serverId, 0, writeEpoch, state, null, request.diagnosticType,
+        () => active.get(key) === entry && !entry.paused && !entry.cancelled)).catch(error => {
         Logger.error(`Deferred media cache request failed for ${request.attachmentId}:`, error);
       }).finally(() => {
-        if (this._activeDeferredMediaCacheRequests?.get?.(key) === activeRequest) {
-          this._activeDeferredMediaCacheRequests.delete(key);
-          this.notifyDataSaveModeTransitionChange();
+        if (active.get(key) !== entry) return;
+        active.delete(key);
+        if (!active.size && !this._pendingMediaCacheRequests?.size) {
+          this._mediaCatchupOverflowReported = false;
+          if (this._mediaCatchupReportedActive) this.reportDebugEvent?.('Media catch-up complete.', 0, { console: true, toast: false }, 'CACHE');
+          this._mediaCatchupReportedActive = false;
         }
+        this.notifyDataSaveModeTransitionChange();
+        setTimeout(() => this.flushPendingMediaCacheRequests(), 0);
       });
     }
-    if (started) this.notifyDataSaveModeTransitionChange();
+    if (!active.size && !this._pendingMediaCacheRequests.size) {
+      this._mediaCatchupOverflowReported = false;
+      if (this._mediaCatchupReportedActive) this.reportDebugEvent?.('Media catch-up complete.', 0, { console: true, toast: false }, 'CACHE');
+      this._mediaCatchupReportedActive = false;
+    }
+    if (started) {
+      if (!this._mediaCatchupReportedActive) this.reportDebugEvent?.('Media catch-up started.', 0, { console: true, toast: false }, 'CACHE');
+      this._mediaCatchupReportedActive = true;
+      this.notifyDataSaveModeTransitionChange();
+    }
     return started;
   }
   cleanUpStaleDataTempFiles() {
@@ -14091,7 +14157,7 @@ module.exports = class MessageLoggerV2 {
       record.message = structuredClone(current);
     }
     const hasNewMedia = Array.from(this.getMessageMediaCacheKeys(current)).some(key => !previousMediaKeys.has(key));
-    if (hasNewMedia && this.settings.cacheAllImages && !options.skipMediaCache) {
+    if (hasNewMedia && !options.skipMediaCache) {
       this.cacheMessageImages(current, {
         queueWhileNoSave: records.some(Boolean) || !!this.messageRecord?.[current.id],
         cacheState: records.some(Boolean) || !!this.messageRecord?.[current.id]
@@ -14886,8 +14952,11 @@ module.exports = class MessageLoggerV2 {
       const url = attachment?.url || changed[i]?.url;
       if (!attachmentId || !url || logged.includes(attachmentId)) continue;
       content += "`Attachment Deleted: `" + url + "\n";
-      if (this.settings.cacheAllImages && (this.isImage(url) || this.settings.newSaveAllFileTypes)) {
-        this.cacheImage(
+      if (this.isImage(url) || this.settings.newSaveAllFileTypes) {
+        if (this.settings.cacheAllImages === false) {
+          this.queuePendingMediaCacheRequest(url, i, attachmentId, messageId, channelId, guildId, 'confirmed',
+            this.getMediaCacheDiagnosticType(url, 'file'), { reason: 'media-off', sourceKind: 'file', size: changed[i]?.size });
+        } else this.cacheImage(
           url,
           i,
           attachmentId,
@@ -18751,9 +18820,7 @@ module.exports = class MessageLoggerV2 {
       }
       this.fixEmbeds(this.messageRecord[id].message);
     }
-    if (this.settings.cacheAllImages) {
-      this.cacheMessageImages(this.messageRecord[id].message, { cacheState: 'confirmed' });
-    }
+    this.cacheMessageImages(this.messageRecord[id].message, { cacheState: 'confirmed' });
     this.moveSavedRecordToCategoryIndex(id, targetMessageRecord);
     return true;
   }
@@ -19806,6 +19873,7 @@ module.exports = class MessageLoggerV2 {
       };
       const existing = this.getMediaCacheInFlightRequest(request, writeEpoch);
       if (existing) {
+        if (typeof arguments[11] === 'function') existing.deferredGuard = arguments[11];
         if (initialCacheState === 'confirmed' || this.messageRecord?.[messageId]) existing.cacheState = 'confirmed';
         for (const key of this.getMediaCacheRequestKeys(request)) {
           existing.keys.add(key);
@@ -19818,6 +19886,7 @@ module.exports = class MessageLoggerV2 {
         writeEpoch,
         cacheState: initialCacheState,
         diagnosticType,
+        deferredGuard: arguments[11] || null,
         keys: this.getMediaCacheRequestKeys(request),
         promise: null
       };
@@ -19864,7 +19933,7 @@ module.exports = class MessageLoggerV2 {
       }
       return;
     }
-    if (!this.canCacheMediaLocally(writeEpoch)) return;
+    if (!this.canCacheMediaLocally(writeEpoch) || (requestState.deferredGuard && !requestState.deferredGuard())) return;
     if (this.cacheDeletionMessageIds?.has?.(messageId)) return;
     const configuredAttempts = Number(this._mediaCacheMaxAttempts);
     const maxAttempts = Number.isInteger(configuredAttempts) && configuredAttempts > 0
@@ -19889,7 +19958,7 @@ module.exports = class MessageLoggerV2 {
         }
       }
       response = await this.fetchMediaCacheResponse(url);
-      if (!this.canCacheMediaLocally(writeEpoch)) return;
+      if (!this.canCacheMediaLocally(writeEpoch) || (requestState.deferredGuard && !requestState.deferredGuard())) return;
       if (!response.ok) {
         await (response?.release?.() ?? response?.releaseBody?.() ?? Promise.resolve());
         if (response.status === 404 || response.status === 403) {
@@ -19919,7 +19988,7 @@ module.exports = class MessageLoggerV2 {
         return this.cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts, writeEpoch, requestState.cacheState, requestState);
       }
       const arrayBuffer = await response.arrayBuffer();
-      if (!this.canCacheMediaLocally(writeEpoch)) return;
+      if (!this.canCacheMediaLocally(writeEpoch) || (requestState.deferredGuard && !requestState.deferredGuard())) return;
       requestState.cacheState = requestState.cacheState === 'confirmed' || this.messageRecord?.[messageId]
         ? 'confirmed'
         : 'precache';
@@ -19941,7 +20010,7 @@ module.exports = class MessageLoggerV2 {
         return;
       }
       if (this.cacheDeletionMessageIds?.has?.(messageId)) return;
-      if (!this.canCacheMediaLocally(writeEpoch)) return;
+      if (!this.canCacheMediaLocally(writeEpoch) || (requestState.deferredGuard && !requestState.deferredGuard())) return;
       const fileId = cacheFileId;
       const fs = this.nodeModules.fs;
       const path = this.nodeModules.path;
@@ -19951,11 +20020,11 @@ module.exports = class MessageLoggerV2 {
       if (!filePath) return;
       const authorId = this.messageRecord?.[messageId]?.message?.author?.id || this.cachedMessagesMap?.get?.(messageId)?.author?.id;
       const fileName = `${fileId} (${messageId}${(this.settings.addUserIdToSavedMediaFilename && authorId) ? (" by " + authorId) : ""})${fileExtension}`;
-      if (!this.canCacheMediaLocally(writeEpoch)) return;
+      if (!this.canCacheMediaLocally(writeEpoch) || (requestState.deferredGuard && !requestState.deferredGuard())) return;
       this.ensureMediaCacheDirectory(filePath);
-      if (!this.canCacheMediaLocally(writeEpoch)) return;
+      if (!this.canCacheMediaLocally(writeEpoch) || (requestState.deferredGuard && !requestState.deferredGuard())) return;
       fs.writeFileSync(path.join(filePath, fileName), finalData, { encoding: null });
-      if (!this.canCacheMediaLocally(writeEpoch)) return;
+      if (!this.canCacheMediaLocally(writeEpoch) || (requestState.deferredGuard && !requestState.deferredGuard())) return;
       if (requestState.cacheState === 'confirmed') {
         this._logStyledConsoleEvent('MEDIA CACHED', `Cached media for saved record: ${fileName}`);
         this.scheduleSavedAttachmentPresentationRefresh(messageId, attachmentId);
@@ -19963,7 +20032,7 @@ module.exports = class MessageLoggerV2 {
         this._logStyledConsoleEvent('DEBUG · PRE-CACHE', `Pre-cached media: ${fileName}`);
       }
     } catch (e) {
-      if (!this.canCacheMediaLocally(writeEpoch)) return;
+      if (!this.canCacheMediaLocally(writeEpoch) || (requestState.deferredGuard && !requestState.deferredGuard())) return;
       attempts++;
       if (attempts >= maxAttempts) {
         Logger.error(`Failed to cache ${diagnosticType} ${cacheFileId}:`, e.message);
@@ -19998,9 +20067,10 @@ module.exports = class MessageLoggerV2 {
     }
     return '';
   }
-  cacheMessageImages(message, options = {}) {
-    const writeEpoch = this._mediaCacheWriteEpoch || 0;
-    const processMedia = callback => {
+  collectMediaCacheCandidates(message) {
+    const result = [];
+    const callback = (url, attachmentIdx, attachmentId, diagnosticType, sourceKind, size = 0) => result.push({ url, attachmentIdx, attachmentId, diagnosticType, sourceKind, size });
+    {
       const attachments = message.attachments || [];
       const embeds = message.embeds || [];
       const componentMedia = this.getIndexedComponentMedia(message.components);
@@ -20013,13 +20083,13 @@ module.exports = class MessageLoggerV2 {
           continue;
         }
         if (this.isImage(attachment.url) || this.settings.newSaveAllFileTypes) {
-          callback(attachment.url, i, attachment.id, this.getMediaCacheDiagnosticType(attachment.url, 'file'));
+          callback(attachment.url, i, attachment.id, this.getMediaCacheDiagnosticType(attachment.url, 'file'), 'file', attachment.size);
         }
       }
       for (let i = 0; i < embeds.length; i++) {
         const embed = embeds[i];
         for (const { url, cacheIndex, sourceId } of this.getIndexedEmbedImageMedia(embed, i)) {
-          callback(url, cacheIndex, sourceId, 'embed');
+          callback(url, cacheIndex, sourceId, 'embed', 'indexed');
         }
       }
       for (const { url, cacheIndex, sourceId } of componentMedia) {
@@ -20029,17 +20099,23 @@ module.exports = class MessageLoggerV2 {
         if (cacheIndex.endsWith(':file') && !this.settings.newSaveAllFileTypes) continue;
         callback(url, cacheIndex, sourceId, cacheIndex.endsWith(':file')
           ? 'file'
-          : this.getMediaCacheDiagnosticType(url));
+          : this.getMediaCacheDiagnosticType(url), cacheIndex.endsWith(':file') ? 'component-file' : 'indexed');
       }
       for (let i = 0; i < stickers.length; i++) {
         const sticker = this.getStickerMedia(stickers[i]);
         if (!sticker) continue;
-        callback(sticker.url, i, sticker.id, this.getMediaCacheDiagnosticType(sticker.url, 'image'));
+        callback(sticker.url, i, sticker.id, this.getMediaCacheDiagnosticType(sticker.url, 'image'), 'sticker');
       }
-    };
-    if (this.settings?.dontSaveData) {
-      if (options.queueWhileNoSave === false || !this.settings.cacheAllImages) return;
-      processMedia((url, attachmentIdx, attachmentId, diagnosticType) => {
+    }
+    return result;
+  }
+  cacheMessageImages(message, options = {}) {
+    const writeEpoch = this._mediaCacheWriteEpoch || 0;
+    const processMedia = callback => this.collectMediaCacheCandidates(message).forEach(item => callback(item.url, item.attachmentIdx, item.attachmentId, item.diagnosticType, item.sourceKind, item.size));
+    if (this.settings?.cacheAllImages === false || this.settings?.dontSaveData) {
+      const mediaOff = this.settings?.cacheAllImages === false;
+      if (!mediaOff && options.queueWhileNoSave === false) return;
+      processMedia((url, attachmentIdx, attachmentId, diagnosticType, sourceKind, size) => {
         const requestArgs = [
           url,
           attachmentIdx,
@@ -20048,7 +20124,8 @@ module.exports = class MessageLoggerV2 {
           message.channel_id,
           message.guild_id,
           options.cacheState || null,
-          diagnosticType
+          diagnosticType,
+          { reason: mediaOff ? 'media-off' : 'no-save', sourceKind, size, origin: options.mediaOffOrigin || 'ordinary', livePrecache: mediaOff && options.cacheState === 'precache' && !this.messageRecord?.[message.id] }
         ];
         this.queuePendingMediaCacheRequest(...requestArgs);
       });
@@ -20088,6 +20165,7 @@ module.exports = class MessageLoggerV2 {
   }
   deleteForumThreadFromRecords(threadId, options = {}) {
     if (!threadId) return new Set();
+    this.removeDeferredMediaCacheRequests(request => String(request.channelId) === String(threadId));
     const ids = this.getForumThreadRecordIds(threadId);
     this.suppressForumThreadId(threadId);
     this.closeForumThreadLogModal(threadId);
@@ -21117,6 +21195,7 @@ module.exports = class MessageLoggerV2 {
   deleteMessageFromRecords(id, options = {}) {
     this._viewportSession?.disposeMessage(id);
     const record = this.messageRecord[id];
+    this.removeDeferredMediaCacheRequests(request => request.messageId === String(id));
     // The live plugin may be hot-swapped from a pre-Nuked build. Make local removal safe during
     // that short transition instead of assuming a full Discord restart initialized the index.
     this.nukedMessageRecord ||= {};
@@ -21323,7 +21402,6 @@ module.exports = class MessageLoggerV2 {
         if (
           preCachedMessageImages
           || !this.settings.antiNukeEnabled
-          || !this.settings.cacheAllImages
           || !channel.guild_id
           || !cacheMessage
           || !hasIncomingMedia
@@ -21336,7 +21414,8 @@ module.exports = class MessageLoggerV2 {
         ) return false;
         this.cacheMessageImages(cacheMessage, {
           queueWhileNoSave: false,
-          cacheState: 'precache'
+          cacheState: 'precache',
+          ...(this.settings.cacheAllImages === false ? { mediaOffOrigin: 'anti-nuke' } : {})
         });
         preCachedMessageImages = true;
         return true;
@@ -21741,7 +21820,7 @@ module.exports = class MessageLoggerV2 {
         return callDefault(...args);
       } else if (dispatch.type == 'MESSAGE_CREATE' && this.hasSupportedMessagePayload(dispatch.message) && dispatch.message.state != 'SENDING' && !dispatch.optimistic && (dispatch.message.type === 0 || dispatch.message.type === 19 || dispatch.message.type === 20)) {
         if (this._cacheIncomingMessage(dispatch.message)) return callDefault(...args);
-        if (this.settings.cacheAllImages && !preCachedMessageImages) {
+        if (!preCachedMessageImages) {
           this.cacheMessageImages(dispatch.message, {
             queueWhileNoSave: false,
             cacheState: 'precache'
@@ -28174,6 +28253,16 @@ module.exports = class MessageLoggerV2 {
         cancelText: 'Cancel',
         onConfirm: () => {
           if (this.menu.selectedTab == 'sent') {
+            const cachedIds = new Set([
+              ...this.cachedMessageRecord.map(message => message?.id),
+              ...this.cachedMessageIds,
+              ...this.cachedMessagesMap.keys()
+            ]);
+            const clearedIds = this.menu.filter.length
+              ? cachedIds
+              : new Set(this.menu.messages.filter(id => cachedIds.has(id)));
+            this.removeDeferredMediaCacheRequests(request => request.livePrecache
+              && clearedIds.has(request.messageId) && !this.messageRecord?.[request.messageId]);
             if (this.menu.filter.length) {
               this.cachedMessageRecord.length = 0;
               this.cachedMessageIds.clear();

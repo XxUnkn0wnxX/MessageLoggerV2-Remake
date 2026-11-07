@@ -11005,7 +11005,7 @@ test('cache-off and stop abort active deferred media without allowing a late res
       plugin.stop();
     }
     assert.equal(signal?.aborted, true, `${action} must abort the active fetch`);
-    assert.equal(plugin._activeDeferredMediaCacheRequests.size, 0, `${action} must clear active state`);
+    assert.equal(plugin._activeDeferredMediaCacheRequests.size, action === 'stop' ? 0 : 1, `${action} must ${action === 'stop' ? 'clear' : 'pause'} active state`);
 
     response.resolve(successfulMediaResponse());
     await waitForQueuedMediaTasks();
@@ -11114,7 +11114,7 @@ test('successful no-save primary recovery drains only queue entries whose sessio
   assert.equal(pendingMediaRequestCount(plugin), 0, 'a successful recovery must drain processed and stale entries');
 });
 
-test('stopping or disabling media caching discards deferred no-save media requests', async t => {
+test('stopping discards and disabling media pauses deferred no-save requests', async t => {
   const originalDocument = global.document;
   t.after(() => { global.document = originalDocument; });
   global.document = { querySelector: () => null, removeEventListener() {} };
@@ -11154,7 +11154,7 @@ test('stopping or disabling media caching discards deferred no-save media reques
       plugin.handleMediaCachingSetting(false);
     }
 
-    assert.equal(pendingMediaRequestCount(plugin), 0, `${action} must discard queued no-save media`);
+    assert.equal(pendingMediaRequestCount(plugin), action === 'stop' ? 0 : 1, `${action} must ${action === 'stop' ? 'discard' : 'retain'} queued no-save media`);
     assert.equal(fs.existsSync(cacheDir), false);
   }
 });
