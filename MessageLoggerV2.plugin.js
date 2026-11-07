@@ -12358,6 +12358,70 @@ module.exports = class MessageLoggerV2 {
     }
     return null;
   }
+  createOwnedLoggerMediaContinuation(record, attachment, sourceKind, initialPlan) {
+    const message = record?.message;
+    const messageId = String(message?.id ?? '');
+    const channelId = String(message?.channel_id ?? message?.channelId ?? '');
+    if (!messageId || !channelId || this.messageRecord?.[messageId] !== record
+      || !attachment || !initialPlan || (record.delete_data && sourceKind !== 'sticker')
+      || !['attachment', 'removedAttachment', 'sticker'].includes(sourceKind)) return null;
+    const initialDescriptor = this.getSavedAttachmentDescriptor(attachment, message);
+    if (!initialDescriptor?.attachment_id || !Array.isArray(initialDescriptor.remote_urls)) return null;
+    const originalUrls = [...initialDescriptor.remote_urls];
+    const sameDescriptor = candidate => {
+      const descriptor = this.getSavedAttachmentDescriptor(candidate, message);
+      return descriptor && descriptor.attachment_id === initialDescriptor.attachment_id
+        && descriptor.message_id === messageId && descriptor.channel_id === channelId
+        && descriptor.filename === initialDescriptor.filename
+        && descriptor.remote_urls.length === originalUrls.length
+        && descriptor.remote_urls.every((url, index) => url === originalUrls[index]);
+    };
+    const canonicalAttachment = () => {
+      if (this.messageRecord?.[messageId] !== record || record.message !== message
+        || (record.delete_data && sourceKind !== 'sticker')
+        || String(message.id ?? '') !== messageId
+        || String(message.channel_id ?? message.channelId ?? '') !== channelId) return null;
+      const candidates = sourceKind === 'attachment'
+        ? (Array.isArray(message.attachments) ? message.attachments : [])
+        : sourceKind === 'removedAttachment'
+          ? this.getRecordRemovedAttachments(record)
+          : this.getMessageStickerItems(message).map(sticker => this.getStickerMedia(sticker)).filter(Boolean);
+      const matches = candidates.filter(candidate => candidate && sameDescriptor(candidate));
+      return matches.length === 1 ? matches[0] : null;
+    };
+    if (!canonicalAttachment()) return null;
+    const initialUrl = typeof initialPlan.url === 'string' ? initialPlan.url : '';
+    if (initialPlan.action === 'remote' && !originalUrls.includes(initialUrl)) return null;
+    if (initialPlan.action === 'blob' && !initialUrl.startsWith('blob:')) return null;
+    if (initialPlan.action !== 'remote' && initialPlan.action !== 'blob') return null;
+    const tried = new Set(initialPlan.action === 'remote' ? originalUrls.slice(0, originalUrls.indexOf(initialUrl)) : originalUrls);
+    const startupGeneration = this._startupGeneration;
+    let currentUrl = initialUrl;
+    return failedUrl => {
+      if (this.__started === false || this._startupGeneration !== startupGeneration) return { action: 'ignore' };
+      const canonical = canonicalAttachment();
+      if (!canonical || typeof failedUrl !== 'string' || failedUrl !== currentUrl
+        || this.settings?.cacheAllImages === false) return { action: 'ignore' };
+      if (failedUrl.startsWith('blob:')) {
+        currentUrl = '';
+        return { ...initialPlan, action: 'omit', unavailableReason: 'local-failed', unavailableLabel: `[Deleted: ${initialDescriptor.filename}]` };
+      }
+      if (this.settings?.onlyRenderCachedAttachments || !originalUrls.includes(failedUrl)) return { action: 'ignore' };
+      tried.add(failedUrl);
+      const nextUrl = originalUrls.find(url => !tried.has(url));
+      if (nextUrl) {
+        currentUrl = nextUrl;
+        return { ...initialPlan, action: 'remote', url: nextUrl };
+      }
+      const local = this.getSavedAttachmentPresentationPlan(canonical, message, { allowBlob: true });
+      if (local?.action === 'blob' && typeof local.url === 'string' && local.url.startsWith('blob:')) {
+        currentUrl = local.url;
+        return local;
+      }
+      currentUrl = '';
+      return { ...initialPlan, action: 'omit', unavailableReason: 'remote-failed', unavailableLabel: `[Deleted: ${initialDescriptor.filename}]` };
+    };
+  }
   _getSavedInlineTextAttachmentPresentationOptions() {
     if (this.settings?.cacheAllImages === false) return {};
     return this.settings?.onlyRenderCachedAttachments
@@ -21317,6 +21381,18 @@ module.exports = class MessageLoggerV2 {
         presentationPlan,
         fallback
       }) => {
+        const ownedContinuation = React.useRef(null);
+        if (!ownedContinuation.current) {
+          ownedContinuation.current = {
+            active: true,
+            generation: plugin._startupGeneration,
+            next: plugin.createOwnedLoggerMediaContinuation(currentRecord, attachment, 'removedAttachment', presentationPlan)
+          };
+        }
+        React.useEffect(() => {
+          ownedContinuation.current.active = true;
+          return () => { ownedContinuation.current.active = false; };
+        }, []);
         const initialMediaType = presentationPlan?.mediaType;
         const initialLabel = typeof presentationPlan?.label === 'string' ? presentationPlan.label : null;
         const initialUnavailableLabel = typeof presentationPlan?.unavailableLabel === 'string'
@@ -21348,7 +21424,10 @@ module.exports = class MessageLoggerV2 {
         if (typeof displayPlan?.url !== 'string' || !displayPlan.url) return fallback;
         if (displayPlan?.mediaType !== 'image' && displayPlan?.mediaType !== 'video') return fallback;
         if (errored) return errorFallback || fallback;
-        const onError = () => {
+        const onError = event => {
+          if (ownedContinuation.current.next
+            && (!ownedContinuation.current.active || event?.currentTarget?.isConnected === false
+              || plugin.__started === false || plugin._startupGeneration !== ownedContinuation.current.generation)) return;
           if (errored) return;
           if (displayPlan?.action !== 'remote' && displayPlan?.action !== 'blob') {
             setErrorFallbackForPlan(displayPlan);
@@ -21374,7 +21453,13 @@ module.exports = class MessageLoggerV2 {
               ? plugin.coordinateSavedAttachmentMediaFailure(context, displayPlan.url)
               : null;
             nextPlan = coordinatedFailure?.plan;
+            if (!context && ownedContinuation.current.next) {
+              if (!ownedContinuation.current.active || event?.currentTarget?.isConnected === false) return;
+              const failedSource = event?.currentTarget?.currentSrc || event?.currentTarget?.src || displayPlan.url;
+              nextPlan = ownedContinuation.current.next(failedSource);
+            }
           } catch {}
+          if (nextPlan?.action === 'ignore') return;
           if (nextPlan && (nextPlan.action === 'remote' || nextPlan.action === 'blob')
             && typeof nextPlan.url === 'string'
             && nextPlan.url !== displayPlan.url) {
@@ -24869,7 +24954,7 @@ module.exports = class MessageLoggerV2 {
               return null;
             }
           };
-          const attemptToUseCachedImage = (attachmentId, attachmentIdx, hidden, filename, width, height, presentationLabel) => {
+          const attemptToUseCachedImage = (attachmentId, attachmentIdx, hidden, filename, width, height, presentationLabel, cachedUrl) => {
             const img = document.createElement('img');
             markLoggerAttachmentTarget(img, { id: attachmentId });
             img.classList = DiscordModules.ClickableClasses?.clickable || '';
@@ -24884,7 +24969,7 @@ module.exports = class MessageLoggerV2 {
               img.src = `https://i.clouds.tf/q2vy/r8q6.png#${record.message.channel_id},${img.id}`;
               img.width = 200;
             } else {
-              img.src = this.imageCacheServerSimulator.get('http://localhost:7474/' + attachmentId + filename.match(/\.[0-9a-z]+$/i)[0] + `#${record.message.channel_id},${img.id},${img.messageId}`);
+              img.src = cachedUrl || this.imageCacheServerSimulator.get('http://localhost:7474/' + attachmentId + filename.match(/\.[0-9a-z]+$/i)[0] + `#${record.message.channel_id},${img.id},${img.messageId}`);
               img.width = 256;
             }
             img.addEventListener('click', e => {
@@ -24964,14 +25049,14 @@ module.exports = class MessageLoggerV2 {
             container.appendChild(playButton);
             return { container, video };
           };
-          const attemptToUseCachedVideo = (attachmentId, attachmentIdx, hidden, filename, width, height, presentationLabel) => {
+          const attemptToUseCachedVideo = (attachmentId, attachmentIdx, hidden, filename, width, height, presentationLabel, cachedUrl) => {
             const existingElement = document.getElementById(attachmentId);
             if (existingElement) {
               existingElement.id = "og-" + attachmentId;
             }
             const { container, video } = createVideoContainer(attachmentId, attachmentIdx, 256);
             if (!hidden) {
-              video.src = this.imageCacheServerSimulator.get('http://localhost:7474/' + attachmentId + filename.match(/\.[0-9a-z]+$/i)[0] + `#${record.message.channel_id},${video.id},${video.messageId}`);
+              video.src = cachedUrl || this.imageCacheServerSimulator.get('http://localhost:7474/' + attachmentId + filename.match(/\.[0-9a-z]+$/i)[0] + `#${record.message.channel_id},${video.id},${video.messageId}`);
             }
             container.addEventListener('click', () => {
               if (this.menu.deleteKeyDown) {
@@ -25009,7 +25094,7 @@ module.exports = class MessageLoggerV2 {
             });
             video.onerror = () => {
               coordinateLoggerBlobFailure(
-                { id: videoId, filename },
+                { id: attachmentId, filename },
                 video.currentSrc || video.src
               );
               container.replaceWith(createUnavailableAttachmentPlaceholder(
@@ -25022,8 +25107,14 @@ module.exports = class MessageLoggerV2 {
           };
           const handleCreateImage = (attachment, idx) => {
             const presentationAction = attachment._ml2PresentationAction;
+            const ownedEntry = getLoggerAttachmentEntry(attachment);
+            const ownedContinuation = ownedEntry
+              ? this.createOwnedLoggerMediaContinuation(record, ownedEntry.attachment,
+                ownedEntry.sourceKind || (ownedEntry.removed ? 'removedAttachment' : 'attachment'), ownedEntry.plan)
+              : null;
             const fallbackToNextLoggerRemotePlan = (mediaElement, hostElement, mediaAttachment, useCachedRenderer, width, height) => {
               const fallbackHost = hostElement || mediaElement;
+              if (ownedContinuation && fallbackHost?.isConnected === false) return;
               const loggerAttachmentEntry = getLoggerAttachmentEntry(mediaAttachment);
               const sourceAttachment = loggerAttachmentEntry?.attachment;
               if (!sourceAttachment) {
@@ -25045,7 +25136,11 @@ module.exports = class MessageLoggerV2 {
                   ? this.coordinateSavedAttachmentMediaFailure(context, mediaAttachment.url)
                   : null;
                 nextPlan = coordinatedFailure?.plan;
+                if (!context && ownedContinuation) {
+                  nextPlan = ownedContinuation(mediaElement.currentSrc || mediaElement.src || mediaAttachment.url);
+                }
               } catch {}
+              if (nextPlan?.action === 'ignore') return;
               if (nextPlan?.action === 'remote' && typeof nextPlan.url === 'string') {
                 if (nextPlan.url === mediaAttachment.url) {
                   fallbackHost?.replaceWith(
@@ -25084,7 +25179,8 @@ module.exports = class MessageLoggerV2 {
                   mediaAttachment.filename,
                   width,
                   height,
-                  getPresentationFallbackLabel(nextPlan, mediaAttachment, sourceAttachment)
+                  getPresentationFallbackLabel(nextPlan, mediaAttachment, sourceAttachment),
+                  nextPlan.url
                 );
                 return;
               }
@@ -25147,30 +25243,36 @@ module.exports = class MessageLoggerV2 {
                 const failedSource = typeof currentSource === 'string' && currentSource
                   ? currentSource
                   : attachment.url;
-                const currentPresentationAction = attachment._ml2PresentationAction || presentationAction;
-                const blobFailure = coordinateLoggerBlobFailure(sourceAttachment, failedSource);
-                if (blobFailure) {
-                  replaceAudioWithPlaceholder(blobFailure.plan);
-                  return;
-                }
-                if (!sourceAttachment
-                  || currentPresentationAction !== 'remote'
-                  || this.settings.cacheAllImages === false
-                  || this.settings.onlyRenderCachedAttachments) {
-                  replaceAudioWithPlaceholder();
-                  return;
-                }
                 let nextPlan;
-                try {
-                  const descriptor = this.getSavedAttachmentDescriptor(sourceAttachment, sourceMessage);
-                  const context = descriptor
-                    ? this.resolveSavedAttachmentMediaFailureContext(descriptor)
-                    : null;
-                  const coordinatedFailure = context
-                    ? this.coordinateSavedAttachmentMediaFailure(context, failedSource)
-                    : null;
-                  nextPlan = coordinatedFailure?.plan;
-                } catch {}
+                if (ownedContinuation) {
+                  if (audioHost.isConnected === false) return;
+                  nextPlan = ownedContinuation(failedSource);
+                  if (nextPlan?.action === 'ignore') return;
+                } else {
+                  const currentPresentationAction = attachment._ml2PresentationAction || presentationAction;
+                  const blobFailure = coordinateLoggerBlobFailure(sourceAttachment, failedSource);
+                  if (blobFailure) {
+                    replaceAudioWithPlaceholder(blobFailure.plan);
+                    return;
+                  }
+                  if (!sourceAttachment
+                    || currentPresentationAction !== 'remote'
+                    || this.settings.cacheAllImages === false
+                    || this.settings.onlyRenderCachedAttachments) {
+                    replaceAudioWithPlaceholder();
+                    return;
+                  }
+                  try {
+                    const descriptor = this.getSavedAttachmentDescriptor(sourceAttachment, sourceMessage);
+                    const context = descriptor
+                      ? this.resolveSavedAttachmentMediaFailureContext(descriptor)
+                      : null;
+                    const coordinatedFailure = context
+                      ? this.coordinateSavedAttachmentMediaFailure(context, failedSource)
+                      : null;
+                    nextPlan = coordinatedFailure?.plan;
+                  } catch {}
+                }
                 const nextUrl = typeof nextPlan?.url === 'string' ? nextPlan.url : '';
                 const nextAction = nextPlan?.action;
                 if ((nextAction === 'remote' || nextAction === 'blob')

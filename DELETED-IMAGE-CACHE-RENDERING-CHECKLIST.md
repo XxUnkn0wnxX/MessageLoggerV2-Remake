@@ -140,6 +140,15 @@ compact roadmap.
   reopening it. The user now verifies this on `838a22a`, including retained
   tab, colours and dimensions and the following press closing the unfiltered
   Logger. Channel/server shortcuts and auxiliary dismissal retain their paths.
+- **Owned-media fallback follow-up:** source regressions reproduced edited-only
+  Logger and inline removed-media callbacks stopping after the first remote
+  failure. A separate mount-local continuation now advances existing image,
+  video, audio and supported-sticker sources through their advertised candidates
+  and existing Blob/filename fallback. Canonical membership, strict native
+  resolver restrictions, acquisition, retries, schema and saved records remain
+  unchanged. Focused checks pass; installation/native validation and the separate
+  changed-URL display-state follow-up are still pending. This does not resume
+  media admission or other parked feature work.
 - **Cache-warning scope:** the current `Image null unavailable (403)` warning
   was reproduced. A missing embed/component source ID does not imply a null URL.
   The misleading identity is repaired through the existing cache-file ID, with
