@@ -29,7 +29,7 @@ Default shortcuts, configurable under Misc settings:
   - `Ctrl+N` by default: toggle logs filtered to the channel selected when the shortcut is pressed.
   - `Ctrl+S` by default: toggle logs filtered to the server selected when the shortcut is pressed. It is unavailable in DMs and group DMs.
   - `Ctrl+M` and `Ctrl+N` remain available in DMs and group DMs; only the server shortcut is restricted there.
-  - A matching view closes, including one opened manually. A different logger view closes and reopens with the requested filter.
+  - A matching view closes, including one opened manually. With a filtered Logger open, `Ctrl+M` clears the filter in place and keeps the modal and selected tab; the next press closes it. Channel/server shortcuts close and reopen a different view with their requested filter.
   - A native media viewer closes first, even if it came from a normal Discord message. MessageLogger help, filter-help, tracked plugin panels, and logger user popouts then close top-down; other Discord panels remain open.
   - Custom printable/navigation shortcuts require modifiers and exactly one trigger key; `F1` through `F24` may be used alone. Overlapping bindings are rejected inline.
   - Clear any recorder to disable that shortcut.

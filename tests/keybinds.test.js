@@ -93,6 +93,30 @@ function createShortcutModalPlugin({
   };
 }
 
+function installShortcutMenuDocument(plugin, onRefilter = () => {}) {
+  const hadDocument = Object.prototype.hasOwnProperty.call(global, 'document');
+  const previousDocument = global.document;
+  const input = { value: plugin.menu.filter };
+  const messagesRoot = {};
+  plugin.style.filter = 'logger-filter-input';
+  plugin.style.menuMessages = 'logger-menu-messages';
+  plugin.refilterMessages = onRefilter;
+  global.document = {
+    getElementById(id) {
+      if (id === plugin.style.filter) return input;
+      if (id === plugin.style.menuMessages) return messagesRoot;
+      return null;
+    }
+  };
+  return {
+    input,
+    restore() {
+      if (hadDocument) global.document = previousDocument;
+      else delete global.document;
+    }
+  };
+}
+
 test.beforeEach(resetHarness);
 
 test('keybind normalization accepts native captures, aliases, order changes, and disabled bindings', () => {
@@ -244,7 +268,7 @@ test('global shortcut matching is exact, order independent, repeat safe, and con
   assert.deepEqual(actions, ['all', 'channel', 'server']);
 });
 
-test('shortcuts toggle matching manually opened all, channel, and server logger states closed', () => {
+test('shortcuts close matching manually opened all, channel, and server logger states', () => {
   const all = createShortcutModalPlugin({ openKeys: ['logger-modal'], filter: '' });
   assert.equal(all.plugin.openLogsFromShortcut('all'), true);
   assert.equal(all.opened, 0);
@@ -271,30 +295,84 @@ test('shortcuts toggle matching manually opened all, channel, and server logger 
   assert.equal(server.plugin.menu.open, false);
 });
 
-test('shortcuts close and reopen when switching all, channel, server, or custom manual states', async () => {
+test('shortcuts switch channel and server views while Ctrl+M clears an open filter in place', async () => {
   const state = createShortcutModalPlugin({ openKeys: ['logger-modal'], filter: '' });
+  let refilterCalls = 0;
+  const dom = installShortcutMenuDocument(state.plugin, () => { refilterCalls++; });
 
-  assert.equal(state.plugin.openLogsFromShortcut('channel'), true);
-  await waitForShortcutTransition();
-  assert.equal(state.opened, 1);
-  assert.equal(state.plugin.menu.filter, 'channel:live-channel');
-  assert.equal(state.modalKeys.has('logger-modal'), true);
+  try {
+    assert.equal(state.plugin.openLogsFromShortcut('channel'), true);
+    await waitForShortcutTransition();
+    assert.equal(state.opened, 1);
+    assert.equal(state.plugin.menu.filter, 'channel:live-channel');
+    assert.equal(state.modalKeys.has('logger-modal'), true);
 
-  assert.equal(state.plugin.openLogsFromShortcut('server'), true);
-  await waitForShortcutTransition();
-  assert.equal(state.opened, 2);
-  assert.equal(state.plugin.menu.filter, 'server:live-guild');
+    assert.equal(state.plugin.openLogsFromShortcut('server'), true);
+    await waitForShortcutTransition();
+    assert.equal(state.opened, 2);
+    assert.equal(state.plugin.menu.filter, 'server:live-guild');
 
-  assert.equal(state.plugin.openLogsFromShortcut('all'), true);
-  await waitForShortcutTransition();
-  assert.equal(state.opened, 3);
-  assert.equal(state.plugin.menu.filter, '');
+    state.plugin.menu.selectedTab = 'edited';
+    const closeCountBeforeClear = state.closeOrder.length;
+    assert.equal(state.plugin.openLogsFromShortcut('all'), true);
+    assert.equal(state.opened, 2, 'clearing an open filter does not reopen the main modal');
+    assert.equal(state.plugin.menu.open, true);
+    assert.equal(state.modalKeys.has('logger-modal'), true);
+    assert.equal(state.closeOrder.length, closeCountBeforeClear);
+    assert.equal(state.plugin.menu.filter, '');
+    assert.equal(dom.input.value, '');
+    assert.equal(refilterCalls, 1);
+    assert.equal(state.plugin.menu.shownMessages, -1);
+    assert.equal(state.plugin.menu.selectedTab, 'edited');
 
-  state.plugin.menu.filter = 'message:custom';
-  assert.equal(state.plugin.openLogsFromShortcut('channel'), true);
-  await waitForShortcutTransition();
-  assert.equal(state.opened, 4);
-  assert.equal(state.plugin.menu.filter, 'channel:live-channel');
+    state.plugin.menu.filter = 'message:custom';
+    assert.equal(state.plugin.openLogsFromShortcut('channel'), true);
+    await waitForShortcutTransition();
+    assert.equal(state.opened, 3);
+    assert.equal(state.plugin.menu.filter, 'channel:live-channel');
+  } finally {
+    dom.restore();
+  }
+});
+
+test('Ctrl+M clears channel, server, and custom filters in place and cancels stale callbacks', async () => {
+  for (const filter of ['channel:live-channel', 'server:live-guild', 'message:custom']) {
+    const state = createShortcutModalPlugin({ openKeys: ['logger-modal'], filter });
+    state.plugin.menu.selectedTab = 'edited';
+    let refilterCalls = 0;
+    let staleFilterRuns = 0;
+    let staleReopenRuns = 0;
+    const dom = installShortcutMenuDocument(state.plugin, () => { refilterCalls++; });
+    state.plugin.menu.filterSetTimeout = setTimeout(() => { staleFilterRuns++; }, 10);
+    state.plugin._loggerShortcutReopenTimeout = setTimeout(() => { staleReopenRuns++; }, 10);
+
+    try {
+      assert.equal(state.plugin.openLogsFromShortcut('all'), true);
+      assert.equal(state.plugin.menu.open, true);
+      assert.equal(state.modalKeys.has('logger-modal'), true);
+      assert.deepEqual(state.closeOrder, []);
+      assert.equal(state.popoutCloses, 0);
+      assert.equal(state.opened, 0);
+      assert.equal(state.plugin.menu.filter, '');
+      assert.equal(dom.input.value, '');
+      assert.equal(state.plugin.menu.filterSetTimeout, null);
+      assert.equal(state.plugin._loggerShortcutReopenTimeout, null);
+      assert.equal(state.plugin.menu.selectedTab, 'edited');
+      assert.equal(state.plugin.menu.scrollPosition, 0);
+      assert.equal(refilterCalls, 1);
+
+      await new Promise(resolve => setTimeout(resolve, 20));
+      assert.equal(staleFilterRuns, 0);
+      assert.equal(staleReopenRuns, 0);
+
+      assert.equal(state.plugin.openLogsFromShortcut('all'), true, 'the next Ctrl+M closes the now-unfiltered logger');
+      assert.equal(state.plugin.menu.open, false);
+      assert.equal(state.modalKeys.has('logger-modal'), false);
+      assert.deepEqual(state.closeOrder, ['logger-modal']);
+    } finally {
+      dom.restore();
+    }
+  }
 });
 
 test('stacked MessageLogger help pages close top-down before the matching logger reopens', async () => {
@@ -317,18 +395,21 @@ test('stacked MessageLogger help pages close top-down before the matching logger
 });
 
 test('a matching logger with an owned popout closes the popout and reopens the logger', async () => {
-  const state = createShortcutModalPlugin({
-    openKeys: ['logger-modal'],
-    filter: '',
-    popoutCount: 1
-  });
+  for (const filter of ['', 'channel:live-channel']) {
+    const state = createShortcutModalPlugin({
+      openKeys: ['logger-modal'],
+      filter,
+      popoutCount: 1
+    });
 
-  assert.equal(state.plugin.openLogsFromShortcut('all'), true);
-  await waitForShortcutTransition();
-  assert.equal(state.popoutCloses, 1);
-  assert.equal(state.opened, 1);
-  assert.equal(state.modalKeys.has('logger-modal'), true);
-  assert.equal(state.plugin.tools.popoutStack.length, 0, 'a live Map entry is authoritative even with an empty legacy stack');
+    assert.equal(state.plugin.openLogsFromShortcut('all'), true);
+    await waitForShortcutTransition();
+    assert.equal(state.popoutCloses, 1);
+    assert.equal(state.opened, 1);
+    assert.equal(state.plugin.menu.filter, '', 'an active popout keeps the existing dismiss-and-reopen transition');
+    assert.equal(state.modalKeys.has('logger-modal'), true);
+    assert.equal(state.plugin.tools.popoutStack.length, 0, 'a live Map entry is authoritative even with an empty legacy stack');
+  }
 });
 
 test('an empty popout Map ignores stale legacy stack entries when toggling the logger closed', async () => {
@@ -442,13 +523,19 @@ test('all-log and channel shortcuts remain available in DMs and group DMs', asyn
     selectedChannelId: 'dm-or-group-channel',
     selectedGuildId: null
   });
+  const dom = installShortcutMenuDocument(dm.plugin);
 
-  assert.equal(dm.plugin.openLogsFromShortcut('channel'), true);
-  await waitForShortcutTransition();
-  assert.equal(dm.plugin.menu.filter, 'channel:dm-or-group-channel');
+  try {
+    assert.equal(dm.plugin.openLogsFromShortcut('channel'), true);
+    await waitForShortcutTransition();
+    assert.equal(dm.plugin.menu.filter, 'channel:dm-or-group-channel');
 
-  assert.equal(dm.plugin.openLogsFromShortcut('all'), true);
-  await waitForShortcutTransition();
-  assert.equal(dm.plugin.menu.filter, '');
-  assert.equal(toastEvents.length, 0);
+    assert.equal(dm.plugin.openLogsFromShortcut('all'), true);
+    assert.equal(dm.plugin.menu.filter, '');
+    assert.equal(dm.opened, 1, 'Ctrl+M clears the channel filter without another open');
+    assert.equal(dm.modalKeys.has('logger-modal'), true);
+    assert.equal(toastEvents.length, 0);
+  } finally {
+    dom.restore();
+  }
 });

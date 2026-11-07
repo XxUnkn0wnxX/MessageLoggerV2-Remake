@@ -21,7 +21,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 - Logger shortcuts use BetterDiscord's native `KeybindInput` recorder in the normal settings row.
   - Validation rejects unsafe or overlapping all-log, channel, and server chords inline, then clears stale pressed state when capture finishes.
   - Capture-phase listeners compare normalized, order-independent key sets. The recorder's earlier window-capture listener suppresses these checks while recording.
-  - Toggling compares the requested filter with the actual logger state: matching views close; different views close then reopen.
+  - Toggling compares the requested filter with the actual logger state: matching views close. The all-log shortcut clears an open filtered Logger in place; channel/server switches retain their close-and-reopen transition.
   - Reopening waits for native media, tracked MessageLogger modals, and logger user popouts. This includes media opened from normal Discord messages, but no other Discord panel.
   - A transition token cancels stale rapid reopens; no global modal or layer clearing is used.
 - The standalone warning-colored Debug group keeps console and routed diagnostics linked by the console master switch. `reportDebugEvent` accepts automatic-backup lifecycle events plus edit-spam counters and cooldown events, and sends UI feedback through `notifyUser`.
@@ -143,7 +143,7 @@ The plugin remains a single-file BetterDiscord artifact. Use the method names an
 - Filters support server, channel, user, content/message, and media predicates.
 - The all-logs shortcut clears stale filters; channel and server shortcuts resolve their location at invocation time.
 - The server shortcut treats DMs and group DMs as having no server, even if Discord retains stale guild state.
-- Matching views close. Different or stale views close and reopen with the requested filter. Empty recorder arrays disable their shortcut.
+- Matching views close. With the Logger modal and menu open and no auxiliary surface, the all-log shortcut clears a nonempty filter and its input in place, cancels stale filter/reopen callbacks, and refreshes rows without replacing the modal or selected tab. Different channel/server views and stale or auxiliary states retain their close-and-reopen path. Empty recorder arrays disable their shortcut.
 - Hide/unhide changes visibility without deleting records; red Delete actions and Clear Log permanently update records, indexes, restored entries, and optional cached files.
 - Context-menu injections expose scope lists and record actions while preserving Discord and other plugins' native items.
 

@@ -4264,6 +4264,17 @@ module.exports = class MessageLoggerV2 {
     const alreadyInDesiredState = String(this.menu.filter ?? '') === desiredFilter;
     const hasAuxiliaryModal = this.hasAdditionalLoggerShortcutModal(loggerModalOpen);
     const transitionId = this.cancelPendingLoggerShortcutTransition();
+    if (scope === 'all' && loggerModalOpen && this.menu.open
+      && String(this.menu.filter ?? '').length > 0 && !hasAuxiliaryModal) {
+      if (this.menu.filterSetTimeout != null) clearTimeout(this.menu.filterSetTimeout);
+      this.menu.filterSetTimeout = null;
+      this.menu.filter = '';
+      const filterInput = document.getElementById(this.style.filter);
+      if (filterInput) filterInput.value = '';
+      this.menu.scrollPosition = 0;
+      this.refreshLoggerMenu();
+      return true;
+    }
     this.dismissLoggerShortcutSurfaces();
     this.resetLoggerMenuRenderState(alreadyInDesiredState && loggerModalOpen && !hasAuxiliaryModal ? '' : desiredFilter);
     this.menu.scrollPosition = 0;
@@ -17658,7 +17669,7 @@ module.exports = class MessageLoggerV2 {
                                 </div>
                                 <strong>Keyboard shortcuts:</strong></br>
                                 <div class="${this.style.textIndent}">
-                                    <strong>Ctrl+M</strong>: Toggle all logs.</br>
+                                    <strong>Ctrl+M</strong>: Toggle all logs: open all logs when the logger is closed, clear the filter in place when a filtered logger is open, or close the logger when it is open without a filter.</br>
                                     <strong>Ctrl+N</strong>: Toggle logs for the selected channel.</br>
                                     <strong>Ctrl+S</strong>: Toggle logs for the selected server; unavailable in DMs.</br>
                                     Change or clear these shortcuts under Misc settings.
@@ -25766,14 +25777,14 @@ module.exports = class MessageLoggerV2 {
                  </div>
                  <strong>Shortcut help:</strong></br>
                  <div class="${this.style.textIndent}">
-                   <strong>${this.formatLoggerKeybind(this.settings.openLogsKeybind)}</strong> - Toggle all message logs.</br>
+                   <strong>${this.formatLoggerKeybind(this.settings.openLogsKeybind)}</strong> - Open all logs when the logger is closed, clear the filter in place when filtered, or close the logger when it is open without a filter.</br>
                    <strong>${this.formatLoggerKeybind(this.settings.openFilteredLogsKeybind)}</strong> - Toggle logs filtered to the selected channel.</br>
                    <strong>${this.formatLoggerKeybind(this.settings.openServerLogsKeybind)}</strong> - Toggle logs filtered to the selected server.</br>
                    The server shortcut is unavailable in DMs and group DMs.
                  </div>
                  <strong>Window behavior:</strong></br>
                  <div class="${this.style.textIndent}">
-                   A matching logger view closes. A different view or stacked MessageLogger help page closes and reopens in the requested state.</br>
+                   A matching logger view closes. The all-log shortcut clears an open filter in place when the main logger view is active. Other view switches or stacked MessageLogger help pages close and reopen in the requested state.</br>
                    An open Discord media viewer closes first, including one opened from a normal live message; other Discord panels remain open.
                  </div>
                </div>`
