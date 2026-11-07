@@ -3719,7 +3719,9 @@ test('removed ordinary attachment cache admission follows main and all-attachmen
     guildId,
     0,
     plugin._mediaCacheWriteEpoch || 0,
-    'confirmed'
+    'confirmed',
+    null,
+    'image'
   ];
 
   plugin.settings.cacheAllImages = false;
@@ -3785,7 +3787,9 @@ test('removed ordinary attachment cache admission follows main and all-attachmen
       guildId,
       0,
       plugin._mediaCacheWriteEpoch || 0,
-      'confirmed'
+      'confirmed',
+      null,
+      plugin.getMediaCacheDiagnosticType(attachment.url, 'file')
     ])
   );
 });
@@ -9444,14 +9448,14 @@ test('media caching skips malformed embed images and uses valid URL or proxy med
   await waitForQueuedMediaTasks();
 
   assert.deepEqual(cached, [
-    ['https://cdn.example/valid-url/image.png', 'embed:1', 'valid-url', message.id, message.channel_id, message.guild_id, 0, 0],
-    ['https://cdn.example/valid-thumb/image.png', 'embed:2:thumbnail', 'valid-thumb', message.id, message.channel_id, message.guild_id, 0, 0],
-    ['https://cdn.example/author.icon.png', 'embed:2:author-icon', null, message.id, message.channel_id, message.guild_id, 0, 0],
-    ['https://cdn.example/footer-icon-proxy.png', 'embed:2:footer-icon', null, message.id, message.channel_id, message.guild_id, 0, 0],
-    ['https://cdn.example/valid-proxy/image.png', 'embed:3', 'valid-proxy', message.id, message.channel_id, message.guild_id, 0, 0],
-    ['https://cdn.example/gallery-proxy/image.png', 'embed:4:gallery:1', 'gallery-proxy', message.id, message.channel_id, message.guild_id, 0, 0],
-    ['https://cdn.example/gallery-url/image.png', 'embed:4:gallery:2', 'gallery-url', message.id, message.channel_id, message.guild_id, 0, 0],
-    ['https://cdn.example/component-thumbnail.png', 'component:0:accessory:thumbnail', '123456', message.id, message.channel_id, message.guild_id, 0, 0]
+    ['https://cdn.example/valid-url/image.png', 'embed:1', 'valid-url', message.id, message.channel_id, message.guild_id, 0, 0, null, null, 'embed'],
+    ['https://cdn.example/valid-thumb/image.png', 'embed:2:thumbnail', 'valid-thumb', message.id, message.channel_id, message.guild_id, 0, 0, null, null, 'embed'],
+    ['https://cdn.example/author.icon.png', 'embed:2:author-icon', null, message.id, message.channel_id, message.guild_id, 0, 0, null, null, 'embed'],
+    ['https://cdn.example/footer-icon-proxy.png', 'embed:2:footer-icon', null, message.id, message.channel_id, message.guild_id, 0, 0, null, null, 'embed'],
+    ['https://cdn.example/valid-proxy/image.png', 'embed:3', 'valid-proxy', message.id, message.channel_id, message.guild_id, 0, 0, null, null, 'embed'],
+    ['https://cdn.example/gallery-proxy/image.png', 'embed:4:gallery:1', 'gallery-proxy', message.id, message.channel_id, message.guild_id, 0, 0, null, null, 'embed'],
+    ['https://cdn.example/gallery-url/image.png', 'embed:4:gallery:2', 'gallery-url', message.id, message.channel_id, message.guild_id, 0, 0, null, null, 'embed'],
+    ['https://cdn.example/component-thumbnail.png', 'component:0:accessory:thumbnail', '123456', message.id, message.channel_id, message.guild_id, 0, 0, null, null, 'image']
   ]);
 });
 

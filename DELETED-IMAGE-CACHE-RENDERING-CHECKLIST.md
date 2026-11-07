@@ -223,6 +223,12 @@ compact roadmap.
   before startup settles can leave inline edits absent until navigating away
   and back. Capture the cold lifecycle and mounted gates before changing the
   startup refresh path; this is separate from the accepted deletion-loop fix.
+- **Cache-failure diagnostics — supported kinds retained:** terminal warnings
+  identify an embed, image, video, audio or file request, with generic media for
+  unknown content. Classification uses existing supported-type checks and known
+  admission metadata. The label survives retries and deferred/no-save replay;
+  HTTP 403/404 remain terminal. Cache identities, acquisition rules, retry budgets,
+  notification settings and persisted data are unchanged.
 - **Historical correction:** older claims that Pins errors were unrelated are
   superseded by the proven Logger synthetic-delete trigger. Historical notes
   saying ordinary-row synthetic deletes remain are also superseded. PersonalPins

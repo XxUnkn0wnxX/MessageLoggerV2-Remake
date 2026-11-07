@@ -10359,8 +10359,21 @@ module.exports = class MessageLoggerV2 {
       }
     );
   }
+  normalizeMediaCacheDiagnosticType(type, fallback = 'media') {
+    const allowed = new Set(['embed', 'image', 'video', 'audio', 'file', 'media']);
+    return allowed.has(type) ? type : (allowed.has(fallback) ? fallback : 'media');
+  }
+  getMediaCacheDiagnosticType(url, fallback = 'media') {
+    try {
+      if (this.isImage(url)) return 'image';
+      if (this.isVideo(url)) return 'video';
+      if (this.isAudio(url)) return 'audio';
+    } catch {}
+    return this.normalizeMediaCacheDiagnosticType(null, fallback);
+  }
   queuePendingMediaCacheRequest(url, attachmentIdx, attachmentId, messageId, channelId, serverId, cacheState = null) {
     if (!this.settings?.cacheAllImages || !url || !messageId) return false;
+    const diagnosticType = this.normalizeMediaCacheDiagnosticType(arguments[7]);
     const request = {
       url: String(url),
       attachmentIdx,
@@ -10370,7 +10383,8 @@ module.exports = class MessageLoggerV2 {
       serverId,
       cacheState: cacheState === 'confirmed' || cacheState === 'precache'
         ? cacheState
-        : (this.messageRecord?.[messageId] ? 'confirmed' : 'precache')
+        : (this.messageRecord?.[messageId] ? 'confirmed' : 'precache'),
+      diagnosticType: this.normalizeMediaCacheDiagnosticType(diagnosticType)
     };
     const key = this.getMediaCacheRequestKey(request);
     (this._pendingMediaCacheRequests ||= new Map()).set(key, request);
@@ -10401,7 +10415,9 @@ module.exports = class MessageLoggerV2 {
         request.serverId,
         0,
         writeEpoch,
-        cacheState
+        cacheState,
+        null,
+        request.diagnosticType
       )).catch(error => {
         Logger.error(`Deferred media cache request failed for ${request.attachmentId}:`, error);
       }).finally(() => {
@@ -14285,7 +14301,9 @@ module.exports = class MessageLoggerV2 {
           guildId,
           0,
           this._mediaCacheWriteEpoch || 0,
-          'confirmed'
+          'confirmed',
+          null,
+          this.getMediaCacheDiagnosticType(url, 'file')
         );
       }
       logged.push(attachmentId);
@@ -19171,6 +19189,11 @@ module.exports = class MessageLoggerV2 {
   }
   async cacheImage(url, attachmentIdx, attachmentId, messageId, channelId, serverId, attempts = 0, writeEpoch = this._mediaCacheWriteEpoch || 0, cacheState = null) {
     let requestState = arguments[9] || null;
+    const diagnosticType = this.normalizeMediaCacheDiagnosticType(
+      requestState?.diagnosticType || arguments[10],
+      this.getMediaCacheDiagnosticType(url)
+    );
+    const diagnosticLabel = diagnosticType.charAt(0).toUpperCase() + diagnosticType.slice(1);
     if (!requestState) {
       const initialCacheState = cacheState === 'confirmed' || cacheState === 'precache'
         ? cacheState
@@ -19196,6 +19219,7 @@ module.exports = class MessageLoggerV2 {
         ...request,
         writeEpoch,
         cacheState: initialCacheState,
+        diagnosticType,
         keys: this.getMediaCacheRequestKeys(request),
         promise: null
       };
@@ -19236,7 +19260,8 @@ module.exports = class MessageLoggerV2 {
           messageId,
           channelId,
           serverId,
-          resolvedCacheState
+          resolvedCacheState,
+          diagnosticType
         );
       }
       return;
@@ -19270,7 +19295,7 @@ module.exports = class MessageLoggerV2 {
       if (!response.ok) {
         await (response?.release?.() ?? response?.releaseBody?.() ?? Promise.resolve());
         if (response.status === 404 || response.status === 403) {
-          Logger.warn(`Image ${cacheFileId} unavailable (${response.status}), skipping cache`);
+          Logger.warn(`${diagnosticLabel} ${cacheFileId} unavailable (${response.status}), skipping cache`);
           if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
             this.reportDeferredMediaCacheFailure(
               attachmentId,
@@ -19282,7 +19307,7 @@ module.exports = class MessageLoggerV2 {
         }
         attempts++;
         if (attempts >= maxAttempts) {
-          Logger.warn(`Failed to get image ${cacheFileId} for caching, error code ${response.status}`);
+          Logger.warn(`Failed to get ${diagnosticType} ${cacheFileId} for caching, error code ${response.status}`);
           if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
             this.reportDeferredMediaCacheFailure(
               attachmentId,
@@ -19343,7 +19368,7 @@ module.exports = class MessageLoggerV2 {
       if (!this.canCacheMediaLocally(writeEpoch)) return;
       attempts++;
       if (attempts >= maxAttempts) {
-        Logger.error(`Failed to cache image ${cacheFileId}:`, e.message);
+        Logger.error(`Failed to cache ${diagnosticType} ${cacheFileId}:`, e.message);
         if (this.isDeferredMediaCacheRequestActive(url, attachmentIdx, attachmentId, messageId)) {
           this.reportDeferredMediaCacheFailure(attachmentId, e, cacheFileId);
         }
@@ -19390,13 +19415,13 @@ module.exports = class MessageLoggerV2 {
           continue;
         }
         if (this.isImage(attachment.url) || this.settings.newSaveAllFileTypes) {
-          callback(attachment.url, i, attachment.id);
+          callback(attachment.url, i, attachment.id, this.getMediaCacheDiagnosticType(attachment.url, 'file'));
         }
       }
       for (let i = 0; i < embeds.length; i++) {
         const embed = embeds[i];
         for (const { url, cacheIndex, sourceId } of this.getIndexedEmbedImageMedia(embed, i)) {
-          callback(url, cacheIndex, sourceId);
+          callback(url, cacheIndex, sourceId, 'embed');
         }
       }
       for (const { url, cacheIndex, sourceId } of componentMedia) {
@@ -19404,26 +19429,29 @@ module.exports = class MessageLoggerV2 {
         // ordinary non-image attachments so the existing all-file-types preference remains
         // authoritative; thumbnails and media galleries are visual media and always qualify.
         if (cacheIndex.endsWith(':file') && !this.settings.newSaveAllFileTypes) continue;
-        callback(url, cacheIndex, sourceId);
+        callback(url, cacheIndex, sourceId, cacheIndex.endsWith(':file')
+          ? 'file'
+          : this.getMediaCacheDiagnosticType(url));
       }
       for (let i = 0; i < stickers.length; i++) {
         const sticker = this.getStickerMedia(stickers[i]);
         if (!sticker) continue;
-        callback(sticker.url, i, sticker.id);
+        callback(sticker.url, i, sticker.id, this.getMediaCacheDiagnosticType(sticker.url, 'image'));
       }
     };
     if (this.settings?.dontSaveData) {
       if (options.queueWhileNoSave === false || !this.settings.cacheAllImages) return;
-      processMedia((url, attachmentIdx, attachmentId) => {
+      processMedia((url, attachmentIdx, attachmentId, diagnosticType) => {
         const requestArgs = [
           url,
           attachmentIdx,
           attachmentId,
           message.id,
           message.channel_id,
-          message.guild_id
+          message.guild_id,
+          options.cacheState || null,
+          diagnosticType
         ];
-        if (options.cacheState) requestArgs.push(options.cacheState);
         this.queuePendingMediaCacheRequest(...requestArgs);
       });
       return;
@@ -19431,7 +19459,7 @@ module.exports = class MessageLoggerV2 {
     if (!this.canCacheMediaLocally(writeEpoch)) return;
     setTimeout(() => {
       if (!this.canCacheMediaLocally(writeEpoch)) return;
-      processMedia((url, attachmentIdx, attachmentId) => {
+      processMedia((url, attachmentIdx, attachmentId, diagnosticType) => {
         const cacheArgs = [
           url,
           attachmentIdx,
@@ -19440,9 +19468,11 @@ module.exports = class MessageLoggerV2 {
           message.channel_id,
           message.guild_id,
           0,
-          writeEpoch
+          writeEpoch,
+          options.cacheState || null,
+          null,
+          diagnosticType
         ];
-        if (options.cacheState) cacheArgs.push(options.cacheState);
         this.cacheImage(...cacheArgs);
       });
     }, 0);
