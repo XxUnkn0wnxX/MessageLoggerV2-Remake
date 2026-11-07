@@ -496,6 +496,42 @@ class PopoutManager {
     }
     return this.container;
   }
+  findAppLayerBundle() {
+    if (typeof Webpack.getModules !== 'function') return null;
+    const names = { AppLayerProvider: 'Provider', AppLayerContainer: 'Container', AppLayer: 'Layer' };
+    const inspect = owner => {
+      if (!owner || (typeof owner !== 'object' && typeof owner !== 'function')) return null;
+      let keys;
+      try { keys = Reflect.ownKeys(owner); } catch { return null; }
+      const matches = { Provider: [], Container: [], Layer: [] };
+      for (const key of keys) {
+        try {
+          const value = owner[key];
+          if (typeof value !== 'function') continue;
+          const role = names[value.displayName];
+          if (role) matches[role].push(value);
+        } catch {}
+      }
+      return Object.values(matches).every(values => values.length === 1)
+        ? Object.fromEntries(Object.entries(matches).map(([role, values]) => [role, values[0]]))
+        : null;
+    };
+    const inspectRoot = owner => {
+      const direct = inspect(owner);
+      if (direct) return direct;
+      try {
+        const key = 'A' in owner ? 'A' : 'Ay' in owner ? 'Ay' : owner.__esModule && 'default' in owner ? 'default' : null;
+        return key ? inspect(owner[key]) : null;
+      } catch { return null; }
+    };
+    try {
+      const roots = Webpack.getModules(owner => !!inspectRoot(owner), { searchExports: false, searchDefault: false });
+      const unique = [...new Set(roots || [])];
+      return unique.length === 1 ? inspectRoot(unique[0]) : null;
+    } catch {
+      return null;
+    }
+  }
   showPopout(target, content, options = {}) {
     const {
       position = "right", align = "top"
@@ -507,12 +543,30 @@ class PopoutManager {
       target,
       position,
       align,
-      onClose: () => this.closePopout(id)
+      onClose: () => this.closePopout(id),
+      ownerContainer: container
     },
       content
     );
-    const root = ReactDOM.createRoot(container);
-    root.render(popoutElement);
+    const bundle = this.findAppLayerBundle();
+    if (!bundle) Logger.warn('Discord App layer is unavailable; the user profile may not open nested menus.');
+    const contents = bundle
+      ? React.createElement(bundle.Provider, null,
+        popoutElement,
+        React.createElement(bundle.Container, { className: 'mlv2-profile-layer-container' }))
+      : popoutElement;
+    let root;
+    try {
+      root = ReactDOM.createRoot(container);
+      root.render(contents);
+    } catch (error) {
+      try { root?.unmount?.(); } catch {}
+      if (!this.popouts.size && this.container === container) {
+        container.remove();
+        this.container = null;
+      }
+      throw error;
+    }
     this.popouts.set(id, {
       root,
       container: container
@@ -538,6 +592,7 @@ const PopoutComponent = ({
   position,
   align,
   onClose,
+  ownerContainer,
   children
 }) => {
   const [popoutStyle, setPopoutStyle] = React.useState({
@@ -595,13 +650,13 @@ const PopoutComponent = ({
   React.useEffect(() => {
     const handleClickOutside = (event) => {
       if (popoutRef.current && !popoutRef.current.contains(event.target) &&
-        !target.contains(event.target)) {
+        !ownerContainer?.contains(event.target) && !target.contains(event.target)) {
         onClose();
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [onClose, target]);
+  }, [onClose, target, ownerContainer]);
   return React.createElement(
     'div', {
     ref: popoutRef,
@@ -2050,6 +2105,11 @@ module.exports = class MessageLoggerV2 {
       DOM.addStyle(
         this.style.css,
         `
+                    #mlv2-popout-container .mlv2-profile-layer-container {
+                      position: fixed;
+                      inset: 0;
+                      pointer-events: none;
+                    }
                     .${this.style.deleted} .${this.classes.markup}:not([class*="markdownContainer"]),
                     .${this.style.deleted} .${this.classes.markup}:not([class*="markdownContainer"]) .hljs {
                         color: ${this.settings.deletedMessageColor || "#f04747"} !important;
