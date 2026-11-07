@@ -522,7 +522,6 @@ test('settings dependencies match the approved master controls', () => {
     ['mediaCacheTrimIntervalMinutes', 'cacheAllImages'],
     ['showMediaCacheTrimLifecycleToasts', 'cacheAllImages'],
     ['newCacheAllImagesPath', 'cacheAllImages'],
-    ['newCacheAllImages', 'cacheAllImages'],
     ['onlyRenderCachedAttachments', 'cacheAllImages'],
     ['deleteCachedFilesWithRecords', 'cacheAllImages'],
     ['forceLegacyMediaFetching', 'cacheAllImages'],
@@ -1389,8 +1388,21 @@ test('logger submenus prefer visible Copy ID rows and retain action fallbacks', 
 
 test('required legacy cache toggles stay visible, locked, and forced on', () => {
   assert.match(source, /if \(this\.ensureRequiredLegacySettings\(\)\) settingsChanged = true;/);
-  assert.match(source, /name: 'Aggresive message caching \(makes sure we have the data of any deleted or edited messages\)'[\s\S]*?Legacy control locked ',\s*this\.createSettingStateLabel\(true\),[\s\S]*?id: 'aggresiveMessageCaching'[\s\S]*?disabled: true/);
-  assert.match(source, /name: 'Use new cached images system'[\s\S]*?Legacy control locked ',\s*this\.createSettingStateLabel\(true\),[\s\S]*?id: 'newCacheAllImages'[\s\S]*?disabled: true/);
+  const settingIds = ['aggresiveMessageCaching', 'newCacheAllImages'];
+  const names = [
+    'Aggresive message caching (makes sure we have the data of any deleted or edited messages)',
+    'Use new cached images system'
+  ];
+  const settingSources = settingIds.map((settingId, index) => {
+    const idPosition = source.indexOf(`id: '${settingId}'`);
+    const settingStart = source.lastIndexOf('\n          {', idPosition);
+    const settingEnd = source.indexOf('\n          },', idPosition) + '\n          }'.length;
+    assert.ok(idPosition > 0 && settingStart >= 0 && settingEnd > settingStart, `${settingId} setting descriptor was not found`);
+    const settingSource = source.slice(settingStart, settingEnd).trim();
+    assert.ok(settingSource.includes(`name: '${names[index]}'`));
+    assert.match(settingSource, /Legacy control locked '[\s\S]*?createSettingStateLabel\(true\)/);
+    return settingSource;
+  });
 
   const plugin = createPlugin({
     settings: {
@@ -1407,6 +1419,37 @@ test('required legacy cache toggles stay visible, locked, and forced on', () => 
   assert.equal(plugin.ensureRequiredLegacySettings(), true);
   assert.equal(plugin.settings.aggresiveMessageCaching, true);
   assert.equal(plugin.settings.newCacheAllImages, true);
+
+  for (const cacheAllImages of [false, true]) {
+    for (const [index, settingId] of settingIds.entries()) {
+      const currentPlugin = createPlugin({
+        settings: {
+          cacheAllImages,
+          aggresiveMessageCaching: false,
+          newCacheAllImages: false
+        }
+      });
+      currentPlugin.ensureRequiredLegacySettings();
+      const descriptorContext = {
+        settings: currentPlugin.settings,
+        saveSettings() {},
+        createSettingStateLabel: enabled => enabled ? 'On' : 'Off',
+        React: {createElement: (type, props, ...children) => ({type, props, children})}
+      };
+      const descriptor = vm.runInNewContext(
+        `(function () { return ${settingSources[index]}; }).call(this)`,
+        descriptorContext
+      );
+      const setting = currentPlugin.createSetting(descriptor);
+      assert.equal(setting.disabled, true, `${settingId} stays disabled with cacheAllImages=${cacheAllImages}`);
+      assert.equal(setting.value, true, `${settingId} displays its forced-on value`);
+      assert.equal(Object.hasOwn(setting, 'enableWith'), false);
+      assert.equal(Object.hasOwn(setting, 'enableWithAll'), false);
+      assert.equal(Object.hasOwn(setting, 'disableWith'), false);
+      setting.onChange(false);
+      assert.equal(currentPlugin.settings[settingId], true, `${settingId} remains forced on`);
+    }
+  }
 });
 
 test('settings startup repairs existing configs without classifying them as first installs', () => {

@@ -1205,7 +1205,8 @@ module.exports = class MessageLoggerV2 {
         title: 'Scrolling and display hotfixes',
         type: 'fixed',
         items: [
-          'Fixed freezes during rapid scrolling and tab switching, unwanted scroll resets, inline file-preview styling, and restored forum-card layout. Clicking the active Logger tab returns to the top.'
+          'Fixed freezes during rapid scrolling and tab switching, unwanted scroll resets, inline file-preview styling, and restored forum-card layout. Clicking the active Logger tab returns to the top.',
+          'Deleting a message with hidden edits now removes its live row while preserving the hidden record. Required legacy cache controls stay locked on.'
         ]
       },
       {
@@ -6363,7 +6364,6 @@ module.exports = class MessageLoggerV2 {
               ' for organized forum and thread media storage.'
             ),
             id: 'newCacheAllImages',
-            enableWith: 'cacheAllImages',
             type: 'switch',
             disabled: true,
             onChange: () => {
@@ -21675,7 +21675,6 @@ module.exports = class MessageLoggerV2 {
       if (dispatch.type == 'THREAD_DELETE') {
         return this.handleForumThreadDelete(channel, guild, callDefault, args);
       } else if (dispatch.type == 'MESSAGE_DELETE') {
-        const shouldPresentDeleted = this.shouldPresentDeletedMessages();
         const deleted = this.getCachedMessage(dispatch.id, dispatch.channelId) || (this.isForumThreadChannel(channel) && dispatch.id === channel.id ? this.getForumThreadDeleteMessage(channel) : null);
         this._ensureChannelCached(channel.id);
         if (!deleted) return callDefault(...args);
@@ -21684,7 +21683,7 @@ module.exports = class MessageLoggerV2 {
         if (this.shouldIgnoreMessageAuthor(deleted, author)) return callDefault(...args);
         if (this.shouldIgnoreSelfMessage(deleted)) return callDefault(...args);
         if (this.deletedMessageSet.get(channel.id)?.has(deleted.id)) {
-          if (!shouldPresentDeleted) ret = callDefault(...args);
+          if (!this.shouldPresentSavedMessage(channel.id, deleted.id)) ret = callDefault(...args);
           return ret;
         }
         if (deleted.type !== 0 && deleted.type !== 19 && deleted.type !== 20) return callDefault(...args);
@@ -21701,6 +21700,9 @@ module.exports = class MessageLoggerV2 {
         }
         this.saveDeletedMessage(deleted, this.deletedMessageRecord);
         this.annotateSavedForumThreadMessage(deleted, channel);
+        // Hide Edits carries over to the deleted record. Let Discord remove that native row
+        // instead of retaining it solely because the global deleted-message switch is on.
+        const shouldPresentDeleted = this.shouldPresentSavedMessage(channel.id, deleted.id);
         if (shouldPresentDeleted) {
           this.refreshCacheOnlyMessage(deleted);
           this._scheduleTintForMessage?.(dispatch.channelId, dispatch.id);
@@ -21713,6 +21715,7 @@ module.exports = class MessageLoggerV2 {
         let failedMessage = false;
         let savedDeleteCount = 0;
         const savedDeleteIds = [];
+        const hiddenDeleteIds = [];
         const isLocalBulkDelete = this.isLocalDeleteEvent(dispatch.ids);
         // Discord defines the purge boundary for us: one MESSAGE_DELETE_BULK dispatch is one
         // batch. No time-window heuristic is used, and a second dispatch always gets a new ID.
@@ -21731,11 +21734,11 @@ module.exports = class MessageLoggerV2 {
           savedDeleteIds.push(dispatchId);
           this.saveDeletedMessage(purged, this.purgedMessageRecord, { captureBatch });
           this.annotateSavedForumThreadMessage(purged, channel);
-          if (shouldPresentPurged) {
+          if (this.shouldPresentSavedMessage(channel.id, purged.id)) {
             this.refreshCacheOnlyMessage(purged);
             this._scheduleTintForMessage?.(dispatch.channelId, purged.id);
             if (DiscordModules.SelectedChannelStore?.getChannelId() === dispatch.channelId) this.dispatcher.dispatch({ type: 'MLV2_FORCE_UPDATE_MESSAGE', id: purged.id });
-          }
+          } else if (shouldPresentPurged) hiddenDeleteIds.push(purged.id);
         }
         if (savedDeleteCount > 0 && (!this.selectedChannel || this.selectedChannel.id != channel.id)) {
           this._incrementMessageCount('deleted', channel, guild, savedDeleteCount);
@@ -21754,6 +21757,10 @@ module.exports = class MessageLoggerV2 {
           );
         }
         if (!shouldPresentPurged) ret = callDefault(...args);
+        else if (hiddenDeleteIds.length) {
+          // Preserve visible saved rows while releasing only the hidden subset of this purge.
+          ret = callDefault({ ...dispatch, ids: hiddenDeleteIds }, ...args.slice(1));
+        }
         this.saveData();
       } else if (dispatch.type == 'MESSAGE_UPDATE') {
         if (!dispatch.message.edited_timestamp) {

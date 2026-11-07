@@ -3974,3 +3974,12 @@ Empty-row follow-up: **implemented and installed**, native acceptance pending. L
 Validation: **987/987 local tests**, no failures/skips/cancellations (5.584s runner, 6.61s wall), plus **987/987 GitHub tests** at source commit `5ece437` ([CI run](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/runs/42411230832)). Coverage includes mixed and entirely suppressed batches, capped/uncapped paths, genuine current/history/component text, immutable records and off/on restoration. The former test requiring an empty media-off row was updated to the requested omission; its media-on unavailable-file checks remain.
 
 The installed source matches the tested commit. Settings, primary/backup data and the existing audit helper were preserved during the closed-client installation. Stable's fresh startup completes without Logger errors. **Row spacing is user-confirmed passed**; empty-row omission, per-snapshot media placement and the remaining native acceptance checks are still open. No other logging, cache-acquisition or persistence behavior changed in this follow-up.
+
+
+### Acceptance follow-up: hidden edits and locked controls
+
+The user confirms local checks 1 (spacing), 2 (media off/on and edit placement), 3 (source gates), 4 (same-session recovery) and 6 (menu/debug behavior) pass. Hydration success toasts remain intentionally disabled; only deduplicated failure toasts are eligible. Navigation check 5 is partial; final compatibility capture 7 has not run.
+
+A native capture shows an already-hidden edited record still in Discord’s message store after deletion, without tint. The delete handler retained it using the global display switch instead of the canonical record’s visibility. The correction applies the existing per-record gate to single deletes and releases only hidden IDs from mixed purges, preserving saved data and the original event. The new regression reproduces the failure before the fix.
+
+Both permanent legacy controls were audited. Aggressive message caching was already correctly locked. The new cached-images control had an `enableWith` dependency that overrides its explicit disabled flag in both supported BetterDiscord builders; that dependency is removed, preserving the forced-On normalization and callback. Ordinary dependent controls remain unchanged. Local validation passes **989/989**, with no failures or skips. The focused native sequence, locked-state confirmation and final warmed compatibility capture remain open; earlier checks need no repeat.

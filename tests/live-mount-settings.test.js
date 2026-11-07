@@ -1165,3 +1165,97 @@ test('media settings refresh fetches the selected channel once for absent or mou
     }
   } finally { global.requestAnimationFrame = originalFrame; }
 });
+
+function seedHiddenAttachmentEdit(harness, id) {
+  const { addMessage, channel, plugin } = harness;
+  const message = addMessage(id);
+  message.content = '';
+  message.attachments = [{ id: `${id}1`, filename: 'current.png', url: 'https://cdn.example/current.png' }];
+  const removed = { id: `${id}2`, filename: 'removed.png', url: 'https://cdn.example/removed.png' };
+  const record = {
+    message: structuredClone(message),
+    edit_history: [{ content: '`Attachment Deleted: `https://cdn.example/removed.png', time: 1 }],
+    removed_attachments: [removed],
+    logged_attachments: [removed.id]
+  };
+  plugin.messageRecord[id] = record;
+  plugin.messageRecordIds.add(id);
+  plugin.editedMessageRecord[channel.id] = [...(plugin.editedMessageRecord[channel.id] || []), id];
+  plugin.editedMessageSet.set(channel.id, new Set(plugin.editedMessageRecord[channel.id]));
+  plugin.notifyUser = () => {};
+  plugin.scheduleLoggerMenuRefresh = () => {};
+  plugin.refreshForumThreadLogModal = () => {};
+  assert.equal(plugin.hideSavedEdits(record), true);
+  return message;
+}
+
+test('deleting a hidden edit releases the native row and retains its hidden archive', () => {
+  const h = createLiveDeletePlugin({ restoreDeletedMessages: true });
+  const { plugin, calls, channel } = h;
+  delete plugin.saveDeletedMessage; // Exercise the canonical merge and category transition.
+  const message = seedHiddenAttachmentEdit(h, '901');
+  calls.dispatches.length = 0;
+  const event = { type: 'MESSAGE_DELETE', id: message.id, channelId: channel.id };
+  const extra = { nativeArgument: true };
+  const nativeCalls = [];
+  const result = { native: true };
+  const nativeDelete = (...args) => { nativeCalls.push(args); return result; };
+
+  assert.equal(plugin.onDispatchEvent([event, extra], nativeDelete), result);
+  assert.deepEqual(nativeCalls, [[event, extra]], 'the real deletion reaches Discord exactly once');
+  const saved = plugin.messageRecord[message.id];
+  assert.equal(saved.delete_data.hidden, true);
+  assert.equal(saved.edits_hidden, true);
+  assert.equal(saved.edit_history.length, 1);
+  assert.equal(saved.removed_attachments.length, 1);
+  assert.equal(saved.message.attachments.length, 1);
+  assert.deepEqual(plugin.deletedMessageRecord[channel.id], [message.id]);
+  assert.equal(plugin.editedMessageSet.get(channel.id)?.has(message.id) || false, false);
+  assert.equal(plugin.shouldPresentSavedMessage(channel.id, message.id), false);
+  assert.deepEqual(calls.cacheOnlyRefreshes, []);
+  assert.deepEqual(calls.tints, []);
+  assert.deepEqual(calls.dispatches, [], 'a hidden record must not request retained-row rendering');
+  assert.equal(calls.saves, 2, 'Hide and deletion both persist normally');
+
+  assert.equal(plugin.onDispatchEvent([event, extra], nativeDelete), result);
+  assert.deepEqual(nativeCalls, [[event, extra], [event, extra]], 'duplicate hidden deletes are not swallowed');
+  assert.equal(calls.saves, 2, 'duplicate dispatch does not capture another record');
+
+  const recached = [];
+  const retainedHistory = structuredClone(saved.edit_history);
+  const retainedMedia = structuredClone([saved.message.attachments, saved.removed_attachments]);
+  plugin._invalidateAndRecache = channelId => recached.push(channelId);
+  assert.equal(plugin.unhideSavedDeletedRecord(saved), true);
+  assert.equal(saved.delete_data.hidden, false);
+  assert.equal(saved.edits_hidden, false);
+  assert.equal(plugin.shouldPresentSavedMessage(channel.id, message.id), true, 'Unhide restores normal deletion presentation eligibility');
+  assert.deepEqual(recached, [channel.id]);
+  assert.deepEqual(saved.edit_history, retainedHistory);
+  assert.deepEqual([saved.message.attachments, saved.removed_attachments], retainedMedia);
+});
+
+test('mixed purges release hidden edits while retaining visible deleted rows', () => {
+  const h = createLiveDeletePlugin({ restoreDeletedMessages: true });
+  const { plugin, calls, channel } = h;
+  delete plugin.saveDeletedMessage;
+  const hidden = seedHiddenAttachmentEdit(h, '902');
+  const visible = h.addMessage('903');
+  const secondHidden = seedHiddenAttachmentEdit(h, '904');
+  calls.dispatches.length = 0;
+  const event = { type: 'MESSAGE_DELETE_BULK', ids: [hidden.id, visible.id, secondHidden.id], channelId: channel.id, guildId: 'guild' };
+  const before = structuredClone(event);
+  const extra = { nativeArgument: true };
+  const nativeCalls = [];
+  const result = { native: true };
+
+  assert.equal(plugin.onDispatchEvent([event, extra], (...args) => { nativeCalls.push(args); return result; }), result);
+  assert.deepEqual(nativeCalls, [[{ ...event, ids: [hidden.id, secondHidden.id] }, extra]]);
+  assert.deepEqual(event, before, 'subset forwarding must not mutate the original dispatch');
+  assert.deepEqual(plugin.purgedMessageRecord[channel.id], event.ids);
+  assert.equal(plugin.messageRecord[hidden.id].delete_data.hidden, true);
+  assert.equal(plugin.messageRecord[secondHidden.id].delete_data.hidden, true);
+  assert.equal(plugin.shouldPresentSavedMessage(channel.id, visible.id), true);
+  assert.deepEqual(calls.cacheOnlyRefreshes, [visible.id]);
+  assert.deepEqual(calls.tints, [[channel.id, visible.id]]);
+  assert.equal(calls.saves, 3, 'two Hide actions plus the single purge capture');
+});
