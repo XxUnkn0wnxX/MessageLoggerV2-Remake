@@ -74,11 +74,12 @@ compact roadmap.
   Local commits are authorized; pushing is
   gated on the user’s UI checks and resolution of the known runtime issues.
 - **Source checkpoints:** local commits `ccabb77` (runtime compatibility, safe
-  cleanup and cache warning identity) and `77da772` (native profile layer).
-  The latter passes **727/727** tests with no skips. Neither has been pushed.
+  cleanup and cache warning identity), `77da772` (native profile layer),
+  `4d58406` (installed-layer audit) and `323f437` (native dynamic theme).
+  The latest passes **738/738** tests with no skips. None has been pushed.
 - **Installed Stable:**
-  `f0c9e074030705e45ba73ac117d5e5201e77382024e27ea09c77a6bea3fbd6ae`,
-  matching `77da772`. Stable was fully closed before installation and then
+  `f45fe4648129a10127b5c8e183239dec7f1ac05be9ee4507091ef5adf8eb11dd`,
+  matching `323f437`. Stable was fully closed before installation and then
   restarted; data/settings/backup/Pins bytes were unchanged during the copy.
   This includes corrected class recovery and cache warning IDs.
 - **Preserved behavior:** modal/audio/image discovery repairs; scoped immutable
@@ -100,15 +101,26 @@ compact roadmap.
   but its Layer receives a null container. The installed repair gives the
   profile a locally owned native App layer and includes its menu in dismissal
   containment. The user and native trace confirm the menu now renders.
-  Actions, dismissal and theme parity still need final user verification.
+  The user also verifies theme parity after switching themes and reopening.
+  Actions, dismissal and final shortcut behavior remain under verification.
   The audit now checks the actual installed App layer and theme resolvers.
   The theme repair uses the native provider, class generator and reactive
   ThemeStore; no fixed theme, palette, selector hash or enum mapping is copied.
-  Its native rollout and dynamic-theme acceptance are pending. Profile
+  Settings closes the profile during theme changes, so continuously mounted
+  theme switching has deterministic coverage but no live acceptance. Profile
   impression/locale warnings are being attributed separately; no suppression
   or whole-application provider wrapper was added. Supplying the native
   impression callback would enable tracking for this UI, so that separate
   warning is retained without changing telemetry or OpenAsar blocking.
+- **Current runtime audit:** the installed build's full audit at
+  `2026-11-07T10:32:19.748Z` has **67 passes, 23 warnings and zero failures**
+  across 90 contracts. All warning entries validate their selected contracts;
+  actual message/selected classes, profile layer and theme resolver pass.
+  This does not replace the remaining interactive/lifecycle checks.
+- **Shortcut follow-up:** the user reproduced first-press close/reopen after
+  dismissing a Logger profile; a second press closes it. Source review identifies
+  a stale popout-stack ID overriding the empty actual manager. A bounded fix and
+  regression check are in progress; native retesting is still required.
 - **Cache-warning scope:** the current `Image null unavailable (403)` warning
   was reproduced. A missing embed/component source ID does not imply a null URL.
   The misleading identity is repaired through the existing cache-file ID, with
@@ -136,7 +148,8 @@ Hotfix acceptance (does not complete any parked feature stage):
       recovery now reaches the correct owners in generation 1; visual checks
       remain pending.
 - [ ] Repair and verify the Logger-profile More menu interaction. Source tests
-      and native dependency preflight pass; installed UI acceptance is pending.
+      and native dependencies pass; opening and theme changes after reopening
+      are user-verified. Actions, dismissal and shortcut behavior remain open.
 - [ ] Verify disable/re-enable cleanup, Pins preservation, saved history,
       relevant media and native-thread behavior on the final hotfix.
 - [x] Correct null cache-warning identity; deterministic tests verify unchanged

@@ -4123,8 +4123,10 @@ module.exports = class MessageLoggerV2 {
     return true;
   }
   hasAdditionalLoggerShortcutModal(loggerModalOpen) {
-    const hasOwnedPopout = (this.tools?.popoutManager?.popouts?.size || 0) > 0
-      || (this.tools?.popoutStack?.length || 0) > 0;
+    const popoutCount = this.tools?.popoutManager?.popouts?.size;
+    const hasOwnedPopout = typeof popoutCount === 'number'
+      ? popoutCount > 0
+      : (this.tools?.popoutStack?.length || 0) > 0;
     return Boolean(this.getOpenNativeMediaViewerModalKey())
       || hasOwnedPopout
       || this.getOpenLoggerOwnedModalKeys().some(key => !loggerModalOpen || key !== this.style.menu);

@@ -29,6 +29,8 @@ function createShortcutModalPlugin({
   filter = '',
   openKeys = [],
   popoutCount = 0,
+  popoutStack = [],
+  popoutMapAvailable = true,
   selectedChannelId = 'live-channel',
   selectedGuildId = 'live-guild',
   mediaViewerOpen = false
@@ -57,12 +59,14 @@ function createShortcutModalPlugin({
       getNativeMediaModal() {
         return { modalKey: 'discord-media-viewer' };
       },
-      popoutStack: [],
+      popoutStack,
       popoutManager: {
-        popouts: new Map(Array.from({ length: popoutCount }, (_, index) => [index, {}])),
+        popouts: popoutMapAvailable
+          ? new Map(Array.from({ length: popoutCount }, (_, index) => [index, {}]))
+          : {},
         closeAllPopouts() {
           popoutCloses++;
-          this.popouts.clear();
+          this.popouts?.clear?.();
         }
       }
     },
@@ -317,6 +321,37 @@ test('a matching logger with an owned popout closes the popout and reopens the l
     openKeys: ['logger-modal'],
     filter: '',
     popoutCount: 1
+  });
+
+  assert.equal(state.plugin.openLogsFromShortcut('all'), true);
+  await waitForShortcutTransition();
+  assert.equal(state.popoutCloses, 1);
+  assert.equal(state.opened, 1);
+  assert.equal(state.modalKeys.has('logger-modal'), true);
+  assert.equal(state.plugin.tools.popoutStack.length, 0, 'a live Map entry is authoritative even with an empty legacy stack');
+});
+
+test('an empty popout Map ignores stale legacy stack entries when toggling the logger closed', async () => {
+  const state = createShortcutModalPlugin({
+    openKeys: ['logger-modal'],
+    filter: '',
+    popoutStack: [{ stale: true }]
+  });
+  assert.equal(state.plugin.tools.popoutManager.popouts.size, 0);
+
+  assert.equal(state.plugin.openLogsFromShortcut('all'), true);
+  await waitForShortcutTransition();
+  assert.equal(state.opened, 0, 'stale stack entries must not trigger a redundant reopen');
+  assert.equal(state.modalKeys.has('logger-modal'), false);
+  assert.equal(state.plugin.tools.popoutStack.length, 1, 'the fix does not mutate legacy stack ownership');
+});
+
+test('legacy popout stacks remain a fallback when the manager has no numeric Map size', async () => {
+  const state = createShortcutModalPlugin({
+    openKeys: ['logger-modal'],
+    filter: '',
+    popoutStack: [{ legacy: true }],
+    popoutMapAvailable: false
   });
 
   assert.equal(state.plugin.openLogsFromShortcut('all'), true);
