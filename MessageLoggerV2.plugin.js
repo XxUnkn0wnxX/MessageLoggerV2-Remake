@@ -24026,7 +24026,7 @@ module.exports = class MessageLoggerV2 {
       const sourceCards = Array.from(browser.querySelectorAll('div[role="button"]'))
         .filter(node => !node.hasAttribute('data-ml2-restored-thread-browser-card')
           && node.querySelector('h2 [class*="threadName_"]')
-          && node.querySelector('[id^="message-content-"]'));
+          && node.querySelector('[class*="subtext_"]'));
       const sourceCard = sourceCards[0];
       const content = sourceCard?.parentElement;
       const sectionHeader = content

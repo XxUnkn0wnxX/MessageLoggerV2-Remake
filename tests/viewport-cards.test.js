@@ -17,6 +17,7 @@ class Node {
   contains(node) { return this === node || this.children.some(child => child.contains(node)); }
   setAttribute(name, value) { this.attributes[name] = String(value); }
   removeAttribute(name) { delete this.attributes[name]; }
+  hasAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name); }
   getAttribute(name) { return this.attributes[name] ?? null; }
   querySelectorAll() { return []; }
   getBoundingClientRect() { return { height: 120 }; }
@@ -142,9 +143,60 @@ test('real thread-browser restoration mounts only matching cards and reuses filt
     const start = source.indexOf('    const restoreDeletedThreadBrowserCards =');
     const end = source.indexOf('    const restoreDeletedCompactThreads =', start);
     assert.ok(start > 0 && end > start);
-    const content = f.parent, header = new Node('header'), nativeCard = new Node('div');
+    const content = f.parent, header = new Node('header');
     header.cloneNode = () => new Node('header');
-    const input = { value: 'one', dataset: {}, addEventListener() {} };
+    header.textContent = 'Joined Threads';
+    const makeNativeCard = ({heading = true, subtext = true, preview = false, restored = false} = {}) => {
+      const card = new Node('div');
+      card.setAttribute('role', 'button');
+      if (restored) card.setAttribute('data-ml2-restored-thread-browser-card', 'already-restored');
+      card.querySelector = selector => {
+        if (selector === 'h2 [class*="threadName_"]') {
+          const name = new Node('span');
+          name.className = 'threadName_native';
+          return heading ? name : null;
+        }
+        if (selector === '[class*="subtext_"]') {
+          const detail = new Node('div');
+          detail.className = 'subtext_native';
+          detail.textContent = preview ? 'Latest message preview' : 'No recent messages';
+          return subtext ? detail : null;
+        }
+        if (selector === '[id^="message-content-"]') return preview ? new Node('div') : null;
+        return null;
+      };
+      return card;
+    };
+    const noPreviewCard = makeNativeCard();
+    const populatedCard = makeNativeCard({preview: true});
+    const restoredNativeCard = makeNativeCard({restored: true, preview: true});
+    const unrelatedCard = makeNativeCard({heading: false});
+    content.appendChild(header);
+    content.appendChild(noPreviewCard);
+    content.appendChild(populatedCard);
+    content.appendChild(restoredNativeCard);
+    content.appendChild(unrelatedCard);
+    const browser = new Node('div');
+    browser.setAttribute('role', 'dialog');
+    const input = { value: 'one', dataset: {}, addEventListener() {}, closest: selector => selector === '[role="dialog"]' ? browser : null };
+    browser.querySelectorAll = selector => selector === 'div[role="button"]'
+      ? [noPreviewCard, populatedCard, restoredNativeCard, unrelatedCard] : [];
+    global.document.querySelector = selector => selector === 'input[placeholder="Search for Thread Name"]' ? input : null;
+    const finderStart = source.indexOf('    const findThreadBrowserSource =');
+    const finderEnd = source.indexOf('    const createRestoredThreadBrowserCard =', finderStart);
+    assert.ok(finderStart > 0 && finderEnd > finderStart);
+    const findThreadBrowserSource = Function('document',
+      source.slice(finderStart, finderEnd) + '\nreturn findThreadBrowserSource;')(global.document);
+    const discovered = findThreadBrowserSource();
+    assert.equal(discovered.browser, browser);
+    assert.equal(discovered.sourceCard, noPreviewCard, 'native cards remain eligible without a message preview');
+    assert.equal(noPreviewCard.querySelector('[class*="subtext_"]').textContent, 'No recent messages');
+    assert.deepEqual(discovered.sourceCards, [noPreviewCard, populatedCard], 'populated cards remain eligible while unrelated and restored cards stay excluded');
+    assert.equal(discovered.sectionHeader, header);
+    populatedCard.remove();
+    browser.querySelectorAll = selector => selector === 'div[role="button"]'
+      ? [noPreviewCard, restoredNativeCard, unrelatedCard] : [];
+    assert.deepEqual(findThreadBrowserSource().sourceCards, [noPreviewCard], 'restoration still has a native template when no recent-message cards remain');
     content.querySelectorAll = selector => {
       if (selector === '[data-ml2-restored-thread-browser-card]') return content.children.filter(n => n.getAttribute('data-ml2-restored-thread-browser-card'));
       return [];
@@ -165,7 +217,7 @@ test('real thread-browser restoration mounts only matching cards and reuses filt
       'getForumRecordTitle', 'parkRetainedPreviewCard', 'parkRetainedPreviewType', 'retainedThreadBrowserHeaders', 'mountRetainedPreviewCard', 'createRestoredThreadBrowserCard',
       'applyRestoredThreadTint', 'scheduleRestoreDeletedCompactThreads',
       source.slice(start, end) + '\nreturn restoreDeletedThreadBrowserCards;').call(f.plugin,
-        () => ({ browser: {}, input, content, sectionHeader: header, sourceCard: nativeCard, sourceCards: [nativeCard] }),
+        findThreadBrowserSource,
         () => false, () => records, record => record.message.content,
         f.helper.parkRetainedPreviewCard, f.helper.parkRetainedPreviewType, f.helper.retainedThreadBrowserHeaders, f.helper.mountRetainedPreviewCard,
         record => { builds.push(record.message.id); const card = new Node('div'); card.setAttribute('data-ml2-restored-thread-browser-card', record.message.id); return card; },

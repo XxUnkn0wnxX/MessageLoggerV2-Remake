@@ -73,7 +73,7 @@ compact roadmap.
 
 ### R7 — Viewport loading and session retention
 
-**Status: implemented; restored-history attachment tint follow-up open.**
+**Status: implemented; thread-browser empty-preview follow-up open.**
 The [2026-11-08 acceptance receipt](#2026-11-08--consolidated-local-acceptance)
 supersedes the pending statuses in the historical checkpoints below. Broader
 per-surface rows remain open where their full native coverage was not established.
@@ -4009,25 +4009,32 @@ The scanner visited 8,356 roots without errors; its truncation flag limits the
 reported module-ID list, not the scan. Earlier forum-layout evidence remains
 separate; this capture does not re-test that layout.
 
-Further testing reopened attachment tint acceptance: after hiding edits, deleting
-the remaining live message and unhiding it, only the first native file container
-receives greyscale. Later Markdown/code previews remain coloured, and Markdown
-body text inherits the red message tint on hover. The correction must cover all
-deleted attachment previews in live conversations, including removal history on
-still-live messages, and keep attachment content outside the message-text tint
-rule. Logger's viewer retains full-colour previews; alternative whole-row
-background tint remains available in live conversations. Prior TXT layout
-acceptance and the zero-failure compatibility audit remain valid; this new visual
-check is open. It does not establish every broader surface/performance row above.
+The later attachment-tint correction is accepted on source `4414690`. Every
+matching native accessories container receives its own marker, and attachment
+content is excluded from message-text tint selectors. The after capture at
+`2026-11-07T21:47:04.956Z` confirms **4/4 sampled accessories roots** are marked
+and greyscale, with native Markdown foreground preserved. The user confirms
+unhovered greyscale, native Markdown colours on hover, Hide/Unhide restoration
+and full-colour Logger previews, plus an additional forum-card spot check.
+This is not a full forum-format matrix or a repeat of the earlier compatibility
+audit. Genuine message text and alternative whole-row background tint retain
+their existing behavior.
 
-The focused correction reconciles every matching native accessories container
-within the live message row and excludes attachment content from the message-text
-tint selectors. Regression coverage fails on the original first-container behavior
-and passes with the fix, including later mounts, stale markers, no-op updates,
-no-tint/visibility/alternative-style transitions and the Logger-viewer boundary.
-Native greyscale and Markdown-hover confirmation remain pending installation.
+The correction passes JavaScript syntax validation and **991/991 local tests**,
+with zero failures, skips or cancellations. [Exact-source GitHub CI](https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/actions/runs/42417122478)
+also passes **991/991**. The installed plugin matches the tested source.
+
+A subsequent native capture identified a separate thread-browser template issue:
+when the remaining native thread says **No recent messages**, its card has the
+expected title and subtext layout but no message-preview element. Discovery
+previously required that optional element, so eligible deleted threads remained
+visible in the sidebar while their browser cards were missing. The correction
+uses the native title/subtext shell, with a composed discovery/restoration
+regression for the sole remaining empty-preview card. The focused native visual
+check is pending; prior tint, forum-card and other local passes remain accepted.
 
 The intermittent early cold-start display issue
 remains explicitly deferred, and the ordinary-thread full-format matrix remains
-waived rather than passed. No speedup claim is made. The user is performing
-additional exploratory checks; old-host rebase and site work remain parked.
+waived rather than passed. No speedup claim is made. GitHub publication is now public with `develop` as default. The authorized
+old-host README redirect/history migration awaits the thread-browser follow-up;
+site work remains outside this rework.
