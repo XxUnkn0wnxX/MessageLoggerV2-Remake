@@ -22,7 +22,7 @@ function readDefaultSettings() {
 
 test('plugin metadata and updater use the maintained GitHub develop branch', () => {
   const metadata = source.slice(0, source.indexOf('*/') + 2);
-  assert.match(metadata, /@version 2\.8\.2\.20/);
+  assert.match(metadata, /@version 2\.8\.2\.21/);
   assert.ok(metadata.includes('@source https://github.com/XxUnkn0wnxX/MessageLoggerV2-Remake/blob/develop/MessageLoggerV2.plugin.js'));
   assert.ok(metadata.includes('@updateUrl https://raw.githubusercontent.com/XxUnkn0wnxX/MessageLoggerV2-Remake/develop/MessageLoggerV2.plugin.js'));
   assert.equal(source.match(/^const REPO_MAIN_URL = "([^"]+)";/m)?.[1], 'https://raw.githubusercontent.com/XxUnkn0wnxX/MessageLoggerV2-Remake/develop/');
@@ -357,16 +357,12 @@ test('the BdApi notification setting omits the outdated basic qualifier', () => 
   assert.doesNotMatch(source, /BdApi basic notifications/i);
 });
 
-test('the current changelog covers media-Off, hydration and hotfixes for the development release', () => {
+test('the current changelog covers the shortcut and location-list scrollbar fixes', () => {
   const notes = createPlugin().getChanges().flatMap(change => change.items).join(' ');
-  assert.match(notes, /Logger keeps previews and fallbacks beside their matching edits/);
-  assert.match(notes, /Turning media off hides attachment-only rows, previews and placeholders while preserving saved text and history/);
-  assert.match(notes, /load in batches as you scroll/);
-  assert.match(notes, /keeping loaded content ready for reuse/);
-  assert.match(notes, /freezes during rapid scrolling and tab switching/);
-  assert.match(notes, /restored forum-card layout/);
-  assert.match(notes, /Debug logging reports hydration batches, successes and failures/);
-  assert.match(notes, /active development.*unfinished/);
+  assert.match(notes, /Channel\/server shortcuts change filters in place in the active Logger window/);
+  assert.match(notes, /Repeating them keeps it open/);
+  assert.match(notes, /stacked panels retain their close-and-reopen behavior/);
+  assert.match(notes, /Manage Location Lists shows its themed scrollbar when a list overflows/);
 });
 
 test('settings documentation retains audited group order and current UI labels', () => {

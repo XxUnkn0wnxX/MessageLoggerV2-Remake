@@ -37,8 +37,10 @@ function createShortcutModalPlugin({
 } = {}) {
   const modalKeys = new Set(openKeys);
   if (mediaViewerOpen) modalKeys.add('discord-media-viewer');
+  const modalOrder = [...openKeys, ...(mediaViewerOpen ? ['discord-media-viewer'] : [])];
   const closeOrder = [];
   let opened = 0;
+  let refreshed = 0;
   let popoutCloses = 0;
   const plugin = createPlugin({
     style: { menu: 'logger-modal' },
@@ -50,9 +52,17 @@ function createShortcutModalPlugin({
     _loggerShortcutReopenTimeout: null,
     ModalStack: {
       hasModalOpen(key) { return modalKeys.has(key); },
+      useModalsStore: {
+        getState() {
+          return { default: modalOrder.filter(key => modalKeys.has(key)).map(key => ({ key })), popout: [] };
+        }
+      },
       closeModal(key) {
         closeOrder.push(key);
         modalKeys.delete(key);
+        for (let index = modalOrder.length - 1; index >= 0; index--) {
+          if (modalOrder[index] === key) modalOrder.splice(index, 1);
+        }
       }
     },
     tools: {
@@ -80,15 +90,22 @@ function createShortcutModalPlugin({
       opened++;
       this.menu.open = true;
       modalKeys.add(this.style.menu);
+      modalOrder.push(this.style.menu);
       this.trackLoggerOwnedModalKey(this.style.menu);
     },
     notifyUser(...args) { toastEvents.push(args); }
   });
+  const refreshLoggerMenu = plugin.refreshLoggerMenu;
+  plugin.refreshLoggerMenu = function () {
+    refreshed++;
+    return refreshLoggerMenu.call(this);
+  };
   return {
     closeOrder,
     modalKeys,
     plugin,
     get opened() { return opened; },
+    get refreshed() { return refreshed; },
     get popoutCloses() { return popoutCloses; }
   };
 }
@@ -268,7 +285,7 @@ test('global shortcut matching is exact, order independent, repeat safe, and con
   assert.deepEqual(actions, ['all', 'channel', 'server']);
 });
 
-test('shortcuts close matching manually opened all, channel, and server logger states', () => {
+test('matching Ctrl+M closes all logs while matching channel/server shortcuts keep Logger open', () => {
   const all = createShortcutModalPlugin({ openKeys: ['logger-modal'], filter: '' });
   assert.equal(all.plugin.openLogsFromShortcut('all'), true);
   assert.equal(all.opened, 0);
@@ -280,56 +297,80 @@ test('shortcuts close matching manually opened all, channel, and server logger s
     openKeys: ['logger-modal'],
     filter: 'channel:live-channel'
   });
-  assert.equal(filtered.plugin.openLogsFromShortcut('channel'), true);
-  assert.equal(filtered.opened, 0);
-  assert.equal(filtered.modalKeys.has('logger-modal'), false);
-  assert.equal(filtered.plugin.menu.open, false);
+  const filteredDom = installShortcutMenuDocument(filtered.plugin);
+  try {
+    assert.equal(filtered.plugin.openLogsFromShortcut('channel'), true);
+    assert.equal(filtered.opened, 0);
+    assert.equal(filtered.modalKeys.has('logger-modal'), true);
+    assert.equal(filtered.plugin.menu.open, true);
+    assert.equal(filtered.plugin.menu.filter, 'channel:live-channel');
+  } finally {
+    filteredDom.restore();
+  }
 
   const server = createShortcutModalPlugin({
     openKeys: ['logger-modal'],
     filter: 'server:live-guild'
   });
-  assert.equal(server.plugin.openLogsFromShortcut('server'), true);
-  assert.equal(server.opened, 0);
-  assert.equal(server.modalKeys.has('logger-modal'), false);
-  assert.equal(server.plugin.menu.open, false);
+  const serverDom = installShortcutMenuDocument(server.plugin);
+  try {
+    assert.equal(server.plugin.openLogsFromShortcut('server'), true);
+    assert.equal(server.opened, 0);
+    assert.equal(server.modalKeys.has('logger-modal'), true);
+    assert.equal(server.plugin.menu.open, true);
+    assert.equal(server.plugin.menu.filter, 'server:live-guild');
+  } finally {
+    serverDom.restore();
+  }
 });
 
-test('shortcuts switch channel and server views while Ctrl+M clears an open filter in place', async () => {
+test('channel/server shortcuts switch an open Logger in place while Ctrl+M clears its filter', async () => {
   const state = createShortcutModalPlugin({ openKeys: ['logger-modal'], filter: '' });
+  state.plugin.menu.selectedTab = 'edited';
   let refilterCalls = 0;
   const dom = installShortcutMenuDocument(state.plugin, () => { refilterCalls++; });
 
   try {
+    assert.equal(state.plugin.isLoggerShortcutModalForeground(true), true);
     assert.equal(state.plugin.openLogsFromShortcut('channel'), true);
     await waitForShortcutTransition();
-    assert.equal(state.opened, 1);
+    assert.equal(state.opened, 0, 'switching an already-open Logger does not reopen it');
+    assert.equal(state.closeOrder.length, 0, 'the main modal remains mounted');
     assert.equal(state.plugin.menu.filter, 'channel:live-channel');
     assert.equal(state.modalKeys.has('logger-modal'), true);
+    assert.equal(state.plugin.menu.selectedTab, 'edited');
+    assert.equal(state.plugin.menu.scrollPosition, 0);
+    assert.equal(state.refreshed, 1);
+
+    assert.equal(state.plugin.openLogsFromShortcut('channel'), true);
+    assert.equal(state.refreshed, 1, 'repeating the matching channel shortcut is a no-op');
+    assert.equal(state.closeOrder.length, 0);
 
     assert.equal(state.plugin.openLogsFromShortcut('server'), true);
     await waitForShortcutTransition();
-    assert.equal(state.opened, 2);
+    assert.equal(state.opened, 0);
     assert.equal(state.plugin.menu.filter, 'server:live-guild');
+    assert.equal(state.refreshed, 2);
 
     state.plugin.menu.selectedTab = 'edited';
     const closeCountBeforeClear = state.closeOrder.length;
     assert.equal(state.plugin.openLogsFromShortcut('all'), true);
-    assert.equal(state.opened, 2, 'clearing an open filter does not reopen the main modal');
+    assert.equal(state.opened, 0, 'clearing an open filter does not reopen the main modal');
     assert.equal(state.plugin.menu.open, true);
     assert.equal(state.modalKeys.has('logger-modal'), true);
     assert.equal(state.closeOrder.length, closeCountBeforeClear);
     assert.equal(state.plugin.menu.filter, '');
     assert.equal(dom.input.value, '');
-    assert.equal(refilterCalls, 1);
+    assert.equal(refilterCalls, 3);
     assert.equal(state.plugin.menu.shownMessages, -1);
     assert.equal(state.plugin.menu.selectedTab, 'edited');
 
     state.plugin.menu.filter = 'message:custom';
     assert.equal(state.plugin.openLogsFromShortcut('channel'), true);
     await waitForShortcutTransition();
-    assert.equal(state.opened, 3);
+    assert.equal(state.opened, 0);
     assert.equal(state.plugin.menu.filter, 'channel:live-channel');
+    assert.equal(state.refreshed, 4);
   } finally {
     dom.restore();
   }
@@ -465,14 +506,163 @@ test('any native Discord media viewer closes before the requested logger state o
   assert.equal(loggerMedia.modalKeys.has('logger-modal'), true);
 });
 
-test('rapid shortcut switches cancel stale queued logger reopens', async () => {
+test('rapid channel/server switches cancel stale callbacks without rebuilding the open Logger', async () => {
   const state = createShortcutModalPlugin({ openKeys: ['logger-modal'], filter: '' });
+  const dom = installShortcutMenuDocument(state.plugin);
+  let staleInputRuns = 0;
+  state.plugin.menu.filterSetTimeout = setTimeout(() => { staleInputRuns++; }, 10);
+  let staleReopenRuns = 0;
+  state.plugin._loggerShortcutReopenTimeout = setTimeout(() => { staleReopenRuns++; }, 10);
   assert.equal(state.plugin.openLogsFromShortcut('channel'), true);
   assert.equal(state.plugin.openLogsFromShortcut('server'), true);
-  await waitForShortcutTransition();
-  assert.equal(state.opened, 1);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(staleInputRuns, 0);
+  assert.equal(staleReopenRuns, 0);
+  assert.equal(state.opened, 0);
+  assert.deepEqual(state.closeOrder, []);
   assert.equal(state.plugin.menu.filter, 'server:live-guild');
   assert.equal(state.modalKeys.has('logger-modal'), true);
+  dom.restore();
+});
+
+test('a covered Logger uses close/reopen while an unrelated modal remains open', async () => {
+  const state = createShortcutModalPlugin({
+    openKeys: ['logger-modal', 'unrelated-discord-modal'],
+    filter: 'message:custom'
+  });
+  state.plugin._loggerOwnedModalKeys.delete('unrelated-discord-modal');
+  const dom = installShortcutMenuDocument(state.plugin);
+  try {
+    assert.equal(state.plugin.isLoggerShortcutModalForeground(true), false);
+    assert.equal(state.plugin.openLogsFromShortcut('channel'), true);
+    await waitForShortcutTransition();
+    assert.deepEqual(state.closeOrder, ['logger-modal']);
+    assert.equal(state.modalKeys.has('logger-modal'), true);
+    assert.equal(state.modalKeys.has('unrelated-discord-modal'), true);
+    assert.equal(state.plugin.menu.filter, 'channel:live-channel');
+    assert.equal(state.opened, 1);
+  } finally {
+    dom.restore();
+  }
+
+  const coveredMatching = createShortcutModalPlugin({
+    openKeys: ['logger-modal', 'unrelated-discord-modal'],
+    filter: 'channel:live-channel'
+  });
+  coveredMatching.plugin._loggerOwnedModalKeys.delete('unrelated-discord-modal');
+  const coveredMatchingDom = installShortcutMenuDocument(coveredMatching.plugin);
+  try {
+    assert.equal(coveredMatching.plugin.openLogsFromShortcut('channel'), true);
+    await waitForShortcutTransition();
+    assert.deepEqual(coveredMatching.closeOrder, ['logger-modal']);
+    assert.equal(coveredMatching.modalKeys.has('logger-modal'), true);
+    assert.equal(coveredMatching.modalKeys.has('unrelated-discord-modal'), true);
+    assert.equal(coveredMatching.plugin.menu.filter, 'channel:live-channel');
+    assert.equal(coveredMatching.opened, 1, 'the matching non-all shortcut restores Logger above the unrelated modal');
+  } finally {
+    coveredMatchingDom.restore();
+  }
+
+  const unavailable = createShortcutModalPlugin({
+    openKeys: ['logger-modal'],
+    filter: 'message:custom'
+  });
+  unavailable.plugin.ModalStack.useModalsStore = undefined;
+  const unavailableDom = installShortcutMenuDocument(unavailable.plugin);
+  try {
+    assert.equal(unavailable.plugin.isLoggerShortcutModalForeground(true), false);
+    assert.equal(unavailable.plugin.openLogsFromShortcut('channel'), true);
+    await waitForShortcutTransition();
+    assert.deepEqual(unavailable.closeOrder, ['logger-modal']);
+    assert.equal(unavailable.opened, 1);
+    assert.equal(unavailable.plugin.menu.filter, 'channel:live-channel');
+  } finally {
+    unavailableDom.restore();
+  }
+});
+
+test('a matching shortcut applies a pending typed filter once, then repeats as a no-op', async () => {
+  const state = createShortcutModalPlugin({
+    openKeys: ['logger-modal'],
+    filter: 'channel:live-channel'
+  });
+  let staleFilterRuns = 0;
+  const dom = installShortcutMenuDocument(state.plugin);
+  dom.input.value = 'channel:live-channel';
+  state.plugin.menu.filterSetTimeout = setTimeout(() => { staleFilterRuns++; }, 10);
+  try {
+    assert.equal(state.plugin.openLogsFromShortcut('channel'), true);
+    assert.equal(state.plugin.menu.filterSetTimeout, null);
+    assert.equal(state.refreshed, 1, 'the pending typed filter is rendered before its timer is cancelled');
+    assert.equal(dom.input.value, 'channel:live-channel');
+
+    assert.equal(state.plugin.openLogsFromShortcut('channel'), true);
+    assert.equal(state.refreshed, 1, 'a repeated matching shortcut does not rebuild rows');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(staleFilterRuns, 0);
+  } finally {
+    dom.restore();
+  }
+});
+
+test('filter input ignores unchanged shortcut keyups and clears completed or cancelled pending work', () => {
+  const source = require('node:fs').readFileSync(require.resolve('../MessageLoggerV2.plugin.js'), 'utf8');
+  const start = source.indexOf('    const onUpdate = e => {');
+  const end = source.indexOf("    inputEl.addEventListener('keyup', onUpdate);", start);
+  assert.ok(start >= 0 && end > start, 'exercise the real filter input callback');
+  const input = { value: '' };
+  const queued = new Map();
+  let nextTimer = 0;
+  let refilters = 0;
+  const plugin = createPlugin({ menu: { filter: '', filterSetTimeout: null }, refilterMessages() { refilters++; } });
+  const onUpdate = new Function('inputEl', 'setTimeout', 'clearTimeout', `${source.slice(start, end)}; return onUpdate;`).call(
+    plugin, input, callback => { queued.set(++nextTimer, callback); return nextTimer; }, id => queued.delete(id)
+  );
+
+  onUpdate({ key: 'Control' });
+  assert.equal(queued.size, 0);
+  input.value = 'channel:live-channel';
+  onUpdate({ key: 'l' });
+  const timer = plugin.menu.filterSetTimeout;
+  onUpdate({ key: 'Control' });
+  assert.equal(queued.size, 1, 'modifier release keeps the original pending filter');
+  assert.equal(plugin.menu.filterSetTimeout, timer);
+  const finish = queued.get(timer);
+  queued.delete(timer);
+  finish();
+  assert.equal(plugin.menu.filterSetTimeout, null, 'a completed timer is no longer pending');
+  assert.equal(refilters, 1);
+
+  input.value = 'server:live-guild';
+  onUpdate({ key: 'd' });
+  input.value = '';
+  onUpdate({ key: 'Backspace' });
+  assert.equal(queued.size, 0);
+  assert.equal(plugin.menu.filterSetTimeout, null, 'clearing the filter cancels pending work');
+  assert.equal(refilters, 2);
+});
+
+test('channel/server switches close and reopen around MessageLogger auxiliary overlays and native media', async () => {
+  const state = createShortcutModalPlugin({
+    openKeys: ['logger-modal', 'filter-help', 'unrelated-discord-modal'],
+    filter: 'message:custom',
+    mediaViewerOpen: true,
+    popoutCount: 1
+  });
+  state.plugin._loggerOwnedModalKeys.delete('unrelated-discord-modal');
+  const dom = installShortcutMenuDocument(state.plugin);
+  try {
+    assert.equal(state.plugin.openLogsFromShortcut('server'), true);
+    await waitForShortcutTransition();
+    assert.deepEqual(state.closeOrder, ['discord-media-viewer', 'filter-help', 'logger-modal']);
+    assert.equal(state.modalKeys.has('logger-modal'), true);
+    assert.equal(state.modalKeys.has('unrelated-discord-modal'), true);
+    assert.equal(state.plugin.menu.filter, 'server:live-guild');
+    assert.equal(state.popoutCloses, 1);
+    assert.equal(state.opened, 1);
+  } finally {
+    dom.restore();
+  }
 });
 
 test('a stale menu flag after modal close reopens the requested actual state', async () => {

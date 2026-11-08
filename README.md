@@ -24,7 +24,7 @@ This fork also restores logged forum posts and channel threads, preserves their 
 - Newly captured embeds, message snapshots, and legacy/Components V2 trees retain their complete JSON-serializable payload for native restoration. Component-only records receive a concise Logger-view summary, and Components V2 thumbnail/gallery media participates in local caching while a full Logger-owned renderer remains future work.
 - Saved image/video/audio/TXT/PDF attachments use the remote-first CDN -> distinct proxy -> cached local Blob/file -> exact-filename placeholder policy. Local-only rendering uses cached local Blob/file -> exact-filename placeholder, and **Open Attachment** uses the exact clicked sibling through the OS default browser or application without externalizing Blob URLs.
 - Search filters, scoped log views, context-menu actions, double-click-to-jump logger rows, and cross-category Hidden records.
-- Captured toggle keybinds for all logs, the selected channel, and the selected server. Switching views closes any open native media viewer first.
+- Captured toggle keybinds for all logs, the selected channel, and the selected server. Channel/server shortcuts switch a foreground Logger filter in place when no auxiliary surface is open; `Ctrl+M` clears an open filter in place and closes an unfiltered Logger on repeat. Switching views closes any open native media viewer first.
 - One local-only permanent-delete flow across restored messages, logger rows, and forum/thread mounts.
   - Right-click **Delete** confirms removal.
   - Shift reveals Trash; Shift-click removes immediately, even when Discord hides server-delete controls.

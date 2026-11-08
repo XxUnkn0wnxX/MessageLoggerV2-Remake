@@ -1,6 +1,6 @@
 /**
  * @name MessageLoggerV2
- * @version 2.8.2.20
+ * @version 2.8.2.21
  * @author Lighty, Davilarek, NightBirde, XxUnkn0wnxX (AI)
  * @authorId 525522753609138206
  * @description Saves deleted, purged, and Anti-Nuke recovery records, as well as edit history and ghost pings. Includes configurable ignore options and restoration after Discord restarts.
@@ -1187,35 +1187,11 @@ module.exports = class MessageLoggerV2 {
   getChanges() {
     return [
       {
-        title: 'Removed attachments and media controls',
+        title: 'Shortcut and scrollbar fixes',
         type: 'fixed',
         items: [
-          'Removed attachments share the deleted-media source policy, sizing and tint. Logger keeps previews and fallbacks beside their matching edits. Turning media off hides attachment-only rows, previews and placeholders while preserving saved text and history.',
-          'Eligible media seen while rendering is off can be cached later in the same session after media and saving are enabled.'
-        ]
-      },
-      {
-        title: 'Lighter loading as you scroll',
-        type: 'improved',
-        items: [
-          'Saved text and media load in batches as you scroll, prioritizing the visible area and keeping loaded content ready for reuse. Logger loads further batches automatically.'
-        ]
-      },
-      {
-        title: 'Scrolling and display hotfixes',
-        type: 'fixed',
-        items: [
-          'Fixed freezes during rapid scrolling and tab switching, unwanted scroll resets, file-preview styling in edits and deleted restores, and restored forum-card layout. Clicking the active Logger tab returns to the top.',
-          'Deleting a message with hidden edits now removes its live row while preserving the hidden record. Required legacy cache controls stay locked on.',
-          'Deleted-message grayscale now covers every matching file history root, while Markdown attachments retain their native text colour on hover.'
-        ]
-      },
-      {
-        title: 'Clearer diagnostics',
-        type: 'improved',
-        items: [
-          'Cache errors identify the media type. Debug logging reports hydration batches, successes and failures; optional hydration failure toasts are deduplicated.',
-          'Logger remains in active development; some planned features are unfinished.'
+          'Channel/server shortcuts change filters in place in the active Logger window. Repeating them keeps it open; stacked panels retain their close-and-reopen behavior.',
+          'Manage Location Lists shows its themed scrollbar when a list overflows.'
         ]
       }
     ];
@@ -2617,7 +2593,8 @@ module.exports = class MessageLoggerV2 {
                       scrollbar-gutter: stable;
                       overflow-y: auto;
                       overflow-x: hidden;
-                      scrollbar-color: var(--scrollbar-thin-thumb) var(--scrollbar-thin-track);
+                      /* Keep the theme-aware WebKit scrollbar rules active on Chromium. */
+                      scrollbar-color: auto;
                     }
                     .${this.style.locationListScroller}::-webkit-scrollbar {
                       width: 8px;
@@ -4244,6 +4221,14 @@ module.exports = class MessageLoggerV2 {
       || hasOwnedPopout
       || this.getOpenLoggerOwnedModalKeys().some(key => !loggerModalOpen || key !== this.style.menu);
   }
+  isLoggerShortcutModalForeground(loggerModalOpen) {
+    if (!loggerModalOpen) return false;
+    let modalState;
+    try { modalState = this.ModalStack?.useModalsStore?.getState?.(); } catch {}
+    if (!Array.isArray(modalState?.default)) return false;
+    const loggerIndex = modalState.default.findIndex(modal => modal?.key === this.style.menu);
+    return loggerIndex >= 0 && loggerIndex === modalState.default.length - 1;
+  }
   dismissLoggerShortcutSurfaces() {
     // A native media viewer can sit above either MessageLogger or ordinary Discord content, so
     // close its scoped modal key before working down through the plugin-owned stack. No generic
@@ -4337,28 +4322,36 @@ module.exports = class MessageLoggerV2 {
       : this.menu.open;
     const alreadyInDesiredState = String(this.menu.filter ?? '') === desiredFilter;
     const hasAuxiliaryModal = this.hasAdditionalLoggerShortcutModal(loggerModalOpen);
+    const loggerModalForeground = this.isLoggerShortcutModalForeground(loggerModalOpen);
     const transitionId = this.cancelPendingLoggerShortcutTransition();
-    if (scope === 'all' && loggerModalOpen && this.menu.open
-      && String(this.menu.filter ?? '').length > 0 && !hasAuxiliaryModal) {
-      if (this.menu.filterSetTimeout != null) clearTimeout(this.menu.filterSetTimeout);
+    if (loggerModalOpen && this.menu.open && loggerModalForeground && !hasAuxiliaryModal
+      && (scope !== 'all' || !alreadyInDesiredState)) {
+      // Update a filtered view in place. This covers Ctrl+M clearing a filter and channel/server
+      // switches; an unfiltered all-log match falls through to the normal close behavior.
+      const filterApplicationPending = this.menu.filterSetTimeout != null;
+      if (filterApplicationPending) clearTimeout(this.menu.filterSetTimeout);
       this.menu.filterSetTimeout = null;
-      this.menu.filter = '';
+      const filterChanged = !alreadyInDesiredState;
+      this.menu.filter = desiredFilter;
       const filterInput = document.getElementById(this.style.filter);
-      if (filterInput) filterInput.value = '';
-      this.menu.scrollPosition = 0;
-      this.refreshLoggerMenu();
+      if (filterInput) filterInput.value = desiredFilter;
+      if (filterChanged || filterApplicationPending) {
+        this.resetLoggerScrollPosition();
+        this.refreshLoggerMenu();
+      }
       return true;
     }
     this.dismissLoggerShortcutSurfaces();
-    this.resetLoggerMenuRenderState(alreadyInDesiredState && loggerModalOpen && !hasAuxiliaryModal ? '' : desiredFilter);
+    const matchingAllShortcutCloses = scope === 'all' && alreadyInDesiredState
+      && loggerModalOpen && !hasAuxiliaryModal;
+    this.resetLoggerMenuRenderState(matchingAllShortcutCloses ? '' : desiredFilter);
     this.menu.scrollPosition = 0;
-    // A logger window already showing the requested actual filter behaves as a true toggle,
-    // regardless of whether it was opened by a shortcut, toolbar click, or context menu. If a
-    // help/confirmation modal is stacked above it, reopen the logger instead of closing both.
-    if (loggerModalOpen && alreadyInDesiredState && !hasAuxiliaryModal) {
+    // Only the all-log shortcut toggles an unfiltered logger closed. Stacked help/confirmation
+    // panels keep their existing dismiss-and-reopen transition, including matching filters.
+    if (matchingAllShortcutCloses) {
       return true;
     }
-    // Opening from an owned help/panel modal and switching between all/channel views use the same
+    // Opening from an owned help/panel modal or a covered/stale logger uses the same
     // guarded transition. A token prevents rapid A/B/A key presses from reopening stale views.
     this._loggerShortcutReopenTimeout = setTimeout(
       () => this.scheduleLoggerShortcutReopen(desiredFilter, transitionId),
@@ -28440,11 +28433,14 @@ module.exports = class MessageLoggerV2 {
       DOMTokenList.prototype.add.apply(e.target.parentElement.parentElement.classList, classes.focused);
     });
     const onUpdate = e => {
+      if (inputEl.value === this.menu.filter) return;
       if (this.menu.filterSetTimeout) clearTimeout(this.menu.filterSetTimeout);
+      this.menu.filterSetTimeout = null;
       this.menu.filter = inputEl.value;
       const filters = this.menu.filter.split(',');
       if (!filters[0].length) return this.refilterMessages();
       this.menu.filterSetTimeout = setTimeout(() => {
+        this.menu.filterSetTimeout = null;
         if (filters[0].length) {
           for (const filter of filters) {
             const split = filter.split(':');
